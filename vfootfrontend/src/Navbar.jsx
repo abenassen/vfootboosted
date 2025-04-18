@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useState } from "react";
 
 
@@ -6,7 +7,7 @@ function Logo() {
     <img
       src="/logo.png" // attenzione allo slash iniziale!
       alt="Logo"
-      className="h-14 w-auto" // oppure dimensioni a tua scelta
+      className="h-14 w-auto bg-custom-gray-600 rounded-2xl" // oppure dimensioni a tua scelta
     />
   );
 }
@@ -15,12 +16,12 @@ function Logo() {
 export default function HaderReact() {
   const NavbarList = [
     {
-      name: "Components",
-      link: "/components",
+      name: "Home",
+      link: "/home",
     },
     {
-      name: "Templates",
-      link: "/templates",
+      name: "Standings",
+      link: "/standings",
     },
     {
       name: "Contact Us",
@@ -29,7 +30,6 @@ export default function HaderReact() {
   ];
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [toggle, setToggle] = useState(false);
-  const [selected, setSelected] = useState("Components");
   const toggleClass = () => {
     setIsNavOpen(!isNavOpen);
     const closeAfterClick = document.querySelector("#nav-icon4");
@@ -46,23 +46,23 @@ export default function HaderReact() {
           </div>
           <div className="flex items-center sm:gap-3 md:gap-8">
             {NavbarList.map((data, index) => (
-              <div
-                className="group"
-                data-testid={`${data.name}-navlink`}
-                key={index}
-                onClick={() => setSelected(data.name)}
+            <div className="group" key={index}>
+              <Link
+                to={data.link}
+                className={`font-nunito text-lg text-center font-semibold text-white opacity-80 cursor-pointer md:flex md:items-center hidden ${
+                  location.pathname === data.link ? "opacity-100 font-bold" : ""
+                }`}
               >
-                <span className="font-nunito text-lg text-center font-semibold text-white opacity-80 cursor-pointer md:flex md:items-center hidden">
-                  {data.name}
-                </span>
-                <div
-                  className={`w-full h-0.5 ${
-                    selected == data?.name
-                      ? "bg-white opacity-80"
-                      : "group-hover:bg-white group-hover:opacity-80"
-                  }`}
-                ></div>
-              </div>
+                {data.name}
+              </Link>
+              <div
+                className={`w-full h-0.5 ${
+                  location.pathname === data.link
+                    ? "bg-white opacity-80"
+                    : "group-hover:bg-white group-hover:opacity-80"
+                }`}
+              ></div>
+            </div>
             ))}
             <button
               className="w-12 h-12 relative focus:outline-none md:hidden"
