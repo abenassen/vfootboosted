@@ -1,0 +1,4 @@
+vfootfrontend/node_modules/
+vfootfrontend/dist/
+vfootfrontend/.vite/
+vfootfrontend/.env
