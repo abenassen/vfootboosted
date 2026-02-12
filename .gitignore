@@ -8,6 +8,7 @@
 **/node_modules/
 **/dist/
 **/.vite/
+vfoot-frontend/test-results/
 
 # Environment files
 .env
