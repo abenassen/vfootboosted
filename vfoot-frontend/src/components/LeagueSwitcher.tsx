@@ -1,26 +1,32 @@
-import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Badge } from './ui';
-
-const leagues = [
-  { id: 'L1', name: 'Lega Friends', matchday: 'G24' },
-  { id: 'L2', name: 'Lega Office', matchday: 'G18' }
-];
+import { useLeagueContext } from '../league/LeagueContext';
 
 export default function LeagueSwitcher({ compact }: { compact?: boolean }) {
-  const [activeId, setActiveId] = useState(leagues[0].id);
-  const active = leagues.find((l) => l.id === activeId) ?? leagues[0];
+  const { leagues, selectedLeagueId, selectedLeague, setSelectedLeagueId, loading } = useLeagueContext();
+
+  if (!leagues.length) {
+    if (compact) {
+      return (
+        <Link to="/league-admin" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
+          Nessuna lega
+        </Link>
+      );
+    }
+    return <Badge tone="amber">{loading ? 'Caricamento leghe...' : 'Nessuna lega'}</Badge>;
+  }
 
   return (
     <div className="flex items-center gap-2">
-      {!compact && <Badge tone="slate">{active.matchday}</Badge>}
+      {!compact && selectedLeague ? <Badge tone="slate">{selectedLeague.role}</Badge> : null}
       <select
-        value={activeId}
-        onChange={(e) => setActiveId(e.target.value)}
+        value={selectedLeagueId ?? ''}
+        onChange={(e) => setSelectedLeagueId(e.target.value ? Number(e.target.value) : null)}
         className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm"
         aria-label="Selettore lega"
       >
         {leagues.map((l) => (
-          <option key={l.id} value={l.id}>
+          <option key={l.league_id} value={l.league_id}>
             {l.name}
           </option>
         ))}

@@ -7,11 +7,17 @@ import type {
 } from '../types/contracts';
 import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
 import type {
+  AuctionState,
+  CompetitionItem,
+  CompetitionUpdateRequest,
   CompetitionTemplateRequest,
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueDetail,
+  LeagueFixtureItem,
   LeagueSummary,
+  PlayerSearchItem,
+  QualificationRuleCreateRequest,
   TeamRoster,
 } from '../types/league';
 
@@ -47,18 +53,26 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Token ${token}` };
 }
 
-async function parseJsonOrThrow(res: Response) {
-  if (!res.ok) {
-    let details = '';
+async function parseJsonOrThrow(res: Response): Promise<any> {
+  const raw = await res.text();
+  let parsed: unknown = null;
+  if (raw) {
     try {
-      const data = await res.json();
-      details = typeof data === 'string' ? data : JSON.stringify(data);
+      parsed = JSON.parse(raw);
     } catch {
-      details = await res.text();
+      parsed = null;
     }
+  }
+
+  if (!res.ok) {
+    const details =
+      parsed !== null ? (typeof parsed === 'string' ? parsed : JSON.stringify(parsed)) : raw;
     throw new Error(`API ${res.status}: ${details || res.statusText}`);
   }
-  return res.json();
+
+  if (!raw) return {};
+  if (parsed !== null) return parsed;
+  return raw;
 }
 
 export function hasStoredSession(): boolean {
@@ -239,20 +253,38 @@ export async function removeRosterPlayer(leagueId: number, teamId: number, playe
   return parseJsonOrThrow(res);
 }
 
-export async function bulkAssignRoster(leagueId: number, playerIds: number[], purchasePrice = 1, randomSeed = 42) {
+export async function bulkAssignRoster(
+  leagueId: number,
+  payload:
+    | { player_ids: number[]; purchase_price?: number; random_seed?: number }
+    | { assignments: Array<{ team_name?: string; manager_username?: string; player_id: number; price?: number; purchase_price?: number }>; purchase_price?: number; random_seed?: number }
+) {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/roster/bulk-assign`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ player_ids: playerIds, purchase_price: purchasePrice, random_seed: randomSeed }),
+    body: JSON.stringify(payload),
   });
   return parseJsonOrThrow(res);
 }
 
-export async function importRosterCsv(leagueId: number, csvText: string) {
-  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/roster/import-csv`, {
+export async function importRosterCsv(leagueId: number, csvText?: string, file?: File | null) {
+  const url = `${baseUrl()}/leagues/${leagueId}/roster/import-csv`;
+
+  if (file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Accept: 'application/json', ...authHeaders() },
+      body: formData,
+    });
+    return parseJsonOrThrow(res);
+  }
+
+  const res = await fetch(url, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ csv_text: csvText }),
+    body: JSON.stringify({ csv_text: csvText ?? '' }),
   });
   return parseJsonOrThrow(res);
 }
@@ -262,6 +294,40 @@ export async function createCompetitionTemplate(leagueId: number, req: Competiti
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getCompetitions(leagueId: number): Promise<CompetitionItem[]> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/competitions`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function updateCompetition(competitionId: number, req: CompetitionUpdateRequest): Promise<CompetitionItem> {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}`, {
+    method: 'PATCH',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function addCompetitionRule(competitionId: number, req: QualificationRuleCreateRequest) {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}/rules`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function resolveCompetitionDependencies(competitionId: number) {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}/resolve`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({}),
   });
   return parseJsonOrThrow(res);
 }
@@ -298,6 +364,35 @@ export async function closeNomination(nominationId: number) {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({}),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getLeagueFixtures(leagueId: number, competitionId?: number): Promise<LeagueFixtureItem[]> {
+  const params = new URLSearchParams();
+  if (competitionId) params.set('competition_id', String(competitionId));
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/fixtures${suffix}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function searchPlayers(q: string, leagueId?: number, limit = 20): Promise<PlayerSearchItem[]> {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  params.set('limit', String(limit));
+  if (leagueId) params.set('league_id', String(leagueId));
+
+  const res = await fetch(`${baseUrl()}/players/search?${params.toString()}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getAuctionState(auctionId: number): Promise<AuctionState> {
+  const res = await fetch(`${baseUrl()}/auctions/${auctionId}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
 }

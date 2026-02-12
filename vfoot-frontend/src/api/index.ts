@@ -2,9 +2,15 @@ import * as backendApi from './backend';
 import * as mockApi from '../mock/api';
 import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
 import type {
+  AuctionState,
+  CompetitionItem,
+  CompetitionUpdateRequest,
   CompetitionTemplateRequest,
   CreateLeagueRequest,
   JoinLeagueRequest,
+  LeagueFixtureItem,
+  PlayerSearchItem,
+  QualificationRuleCreateRequest,
 } from '../types/league';
 
 export type ApiProvider = 'mock' | 'backend';
@@ -48,10 +54,17 @@ type ApiImpl = {
   bulkAssignRoster: typeof backendApi.bulkAssignRoster;
   importRosterCsv: typeof backendApi.importRosterCsv;
   createCompetitionTemplate: (leagueId: number, req: CompetitionTemplateRequest) => ReturnType<typeof backendApi.createCompetitionTemplate>;
+  getCompetitions: (leagueId: number) => Promise<CompetitionItem[]>;
+  updateCompetition: (competitionId: number, req: CompetitionUpdateRequest) => Promise<CompetitionItem>;
+  addCompetitionRule: (competitionId: number, req: QualificationRuleCreateRequest) => Promise<unknown>;
+  resolveCompetitionDependencies: (competitionId: number) => Promise<unknown>;
   createAuction: typeof backendApi.createAuction;
   nominateNext: typeof backendApi.nominateNext;
   placeBid: typeof backendApi.placeBid;
   closeNomination: typeof backendApi.closeNomination;
+  searchPlayers: (q: string, leagueId?: number, limit?: number) => Promise<PlayerSearchItem[]>;
+  getAuctionState: (auctionId: number) => Promise<AuctionState>;
+  getLeagueFixtures: (leagueId: number, competitionId?: number) => Promise<LeagueFixtureItem[]>;
 };
 
 const typedImpl = impl as ApiImpl;
@@ -78,7 +91,14 @@ export const removeRosterPlayer = typedImpl.removeRosterPlayer;
 export const bulkAssignRoster = typedImpl.bulkAssignRoster;
 export const importRosterCsv = typedImpl.importRosterCsv;
 export const createCompetitionTemplate = typedImpl.createCompetitionTemplate;
+export const getCompetitions = typedImpl.getCompetitions;
+export const updateCompetition = typedImpl.updateCompetition;
+export const addCompetitionRule = typedImpl.addCompetitionRule;
+export const resolveCompetitionDependencies = typedImpl.resolveCompetitionDependencies;
 export const createAuction = typedImpl.createAuction;
 export const nominateNext = typedImpl.nominateNext;
 export const placeBid = typedImpl.placeBid;
 export const closeNomination = typedImpl.closeNomination;
+export const searchPlayers = typedImpl.searchPlayers;
+export const getAuctionState = typedImpl.getAuctionState;
+export const getLeagueFixtures = typedImpl.getLeagueFixtures;

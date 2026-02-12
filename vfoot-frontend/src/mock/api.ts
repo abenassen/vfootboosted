@@ -1,11 +1,17 @@
 import type { LineupContextResponse, MatchDetailResponse, MatchListItem, SaveLineupRequest, SaveLineupResponse } from '../types/contracts';
 import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
 import type {
+  AuctionState,
+  CompetitionItem,
+  CompetitionUpdateRequest,
   CompetitionTemplateRequest,
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueDetail,
+  LeagueFixtureItem,
   LeagueSummary,
+  PlayerSearchItem,
+  QualificationRuleCreateRequest,
   TeamRoster,
 } from '../types/league';
 import { mockLineupContext, mockMatches, mockMatchDetail } from './data';
@@ -147,6 +153,38 @@ export async function getMatchDetail(matchId: string): Promise<MatchDetailRespon
   return structuredClone({ ...mockMatchDetail, match: { ...mockMatchDetail.match, match_id: matchId } });
 }
 
+export async function getLeagueFixtures(_leagueId: number, _competitionId?: number): Promise<LeagueFixtureItem[]> {
+  await sleep(120);
+  return [
+    {
+      fixture_id: 1,
+      competition_id: 1,
+      competition_name: 'Campionato Mock',
+      round_no: 1,
+      leg_no: 1,
+      kickoff: null,
+      status: 'scheduled',
+      home_team: { team_id: 11, name: 'Mock Team' },
+      away_team: { team_id: 12, name: 'Mock Team 2' },
+      score: null,
+      is_user_involved: true,
+    },
+    {
+      fixture_id: 2,
+      competition_id: 1,
+      competition_name: 'Campionato Mock',
+      round_no: 2,
+      leg_no: 1,
+      kickoff: null,
+      status: 'finished',
+      home_team: { team_id: 12, name: 'Mock Team 2' },
+      away_team: { team_id: 11, name: 'Mock Team' },
+      score: { home_total: 67.5, away_total: 69.2 },
+      is_user_involved: true,
+    },
+  ];
+}
+
 // Admin/league mock endpoints (minimal local in-memory compatibility)
 const mockLeagues: LeagueDetail[] = [];
 let mockLeagueSeq = 1;
@@ -228,20 +266,70 @@ export async function removeRosterPlayer(_leagueId: number, _teamId: number, _pl
   return { ok: true };
 }
 
-export async function bulkAssignRoster(_leagueId: number, playerIds: number[]) {
+export async function bulkAssignRoster(
+  _leagueId: number,
+  payload:
+    | { player_ids: number[]; purchase_price?: number; random_seed?: number }
+    | { assignments: Array<{ team_name?: string; manager_username?: string; player_id: number; price?: number; purchase_price?: number }>; purchase_price?: number; random_seed?: number }
+) {
   await sleep(100);
-  return { assigned_players: playerIds.length };
+  if ('assignments' in payload) return { assigned_players: payload.assignments.length, mode: 'explicit' };
+  return { assigned_players: payload.player_ids.length, mode: 'random' };
 }
 
-export async function importRosterCsv(_leagueId: number, csvText: string) {
+export async function importRosterCsv(_leagueId: number, csvText?: string, _file?: File | null) {
   await sleep(100);
-  const rows = csvText.trim().split('\n').slice(1).filter(Boolean).length;
+  const rows = (csvText ?? '').trim().split('\n').slice(1).filter(Boolean).length;
   return { imported: rows };
 }
 
 export async function createCompetitionTemplate(_leagueId: number, req: CompetitionTemplateRequest) {
   await sleep(100);
   return { competition_id: 1, name: req.name, competition_type: req.competition_type, participants: req.team_ids?.length ?? 0, fixtures_created: 1 };
+}
+
+export async function getCompetitions(_leagueId: number): Promise<CompetitionItem[]> {
+  await sleep(100);
+  return [
+    {
+      competition_id: 1,
+      name: 'Campionato Mock',
+      competition_type: 'round_robin',
+      status: 'active',
+      points: { win: 3, draw: 1, loss: 0 },
+      participants: [],
+      qualification_rules: [],
+      fixtures: { total: 6, finished: 2 },
+    },
+  ];
+}
+
+export async function updateCompetition(competitionId: number, req: CompetitionUpdateRequest): Promise<CompetitionItem> {
+  await sleep(90);
+  return {
+    competition_id: competitionId,
+    name: req.name ?? 'Campionato Mock',
+    competition_type: 'round_robin',
+    status: req.status ?? 'active',
+    points: {
+      win: req.points_win ?? 3,
+      draw: req.points_draw ?? 1,
+      loss: req.points_loss ?? 0,
+    },
+    participants: [],
+    qualification_rules: [],
+    fixtures: { total: 6, finished: 2 },
+  };
+}
+
+export async function addCompetitionRule(_competitionId: number, req: QualificationRuleCreateRequest) {
+  await sleep(90);
+  return { rule_id: 1, ...req };
+}
+
+export async function resolveCompetitionDependencies(competitionId: number) {
+  await sleep(90);
+  return { competition_id: competitionId, resolved_rule_participants: 1, unresolved_rules: 0, fixtures_created: 4 };
 }
 
 export async function createAuction(_leagueId: number, playerIds: number[]) {
@@ -262,4 +350,53 @@ export async function placeBid(_nominationId: number, amount: number) {
 export async function closeNomination(_nominationId: number) {
   await sleep(80);
   return { nomination_id: 1, winner_team_id: 1 };
+}
+
+export async function searchPlayers(q: string): Promise<PlayerSearchItem[]> {
+  await sleep(80);
+  if (q.trim().length < 2) return [];
+  return [
+    { player_id: 101, name: 'L. Martinez', full_name: 'Lautaro Martinez' },
+    { player_id: 102, name: 'R. Leao', full_name: 'Rafael Leao' },
+    { player_id: 103, name: 'N. Barella', full_name: 'Nicolo Barella' },
+  ].filter((p) => p.full_name.toLowerCase().includes(q.toLowerCase()) || p.name.toLowerCase().includes(q.toLowerCase()));
+}
+
+export async function getAuctionState(auctionId: number): Promise<AuctionState> {
+  await sleep(90);
+  return {
+    auction_id: auctionId,
+    name: 'Mock Auction',
+    status: 'active',
+    nomination_index: 3,
+    nomination_total: 60,
+    next_player: { player_id: 104, name: 'M. Thuram' },
+    open_nomination: { nomination_id: 7, player_id: 103, player_name: 'N. Barella', nominator: 'mock-admin' },
+    recent_nominations: [
+      {
+        nomination_id: 7,
+        status: 'open',
+        player_id: 103,
+        player_name: 'N. Barella',
+        nominator: 'mock-admin',
+        top_bid: 18,
+        winner_team_id: null,
+        winner_team_name: null,
+      },
+      {
+        nomination_id: 6,
+        status: 'closed',
+        player_id: 102,
+        player_name: 'R. Leao',
+        nominator: 'mock-user',
+        top_bid: 42,
+        winner_team_id: 11,
+        winner_team_name: 'Mock Team',
+      },
+    ],
+    team_budgets: [
+      { team_id: 11, team_name: 'Mock Team', manager_username: 'mock-admin', initial_budget: 500, spent_budget: 42, available_budget: 458 },
+      { team_id: 12, team_name: 'Mock Team 2', manager_username: 'mock-user', initial_budget: 500, spent_budget: 18, available_budget: 482 },
+    ],
+  };
 }

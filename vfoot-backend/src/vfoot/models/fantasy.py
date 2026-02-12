@@ -119,11 +119,16 @@ class CompetitionQualificationRule(models.Model):
 
     MODE_TABLE_RANGE = "table_range"
     MODE_WINNER = "winner"
+    MODE_LOSER = "loser"
 
     competition = models.ForeignKey(FantasyCompetition, on_delete=models.CASCADE, related_name="qualification_rules")
     source_competition = models.ForeignKey(FantasyCompetition, on_delete=models.CASCADE, related_name="targeted_by_rules")
     source_stage = models.CharField(max_length=12, choices=[(STAGE_HALF, "Halfway"), (STAGE_FINAL, "Final")], default=STAGE_FINAL)
-    mode = models.CharField(max_length=16, choices=[(MODE_TABLE_RANGE, "Table Range"), (MODE_WINNER, "Winner")], default=MODE_TABLE_RANGE)
+    mode = models.CharField(
+        max_length=16,
+        choices=[(MODE_TABLE_RANGE, "Table Range"), (MODE_WINNER, "Winner"), (MODE_LOSER, "Loser")],
+        default=MODE_TABLE_RANGE,
+    )
 
     rank_from = models.IntegerField(null=True, blank=True)
     rank_to = models.IntegerField(null=True, blank=True)

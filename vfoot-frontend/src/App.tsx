@@ -7,11 +7,13 @@ import SquadPage from './pages/SquadPage';
 import FormationPage from './pages/FormationPage';
 import MatchesPage from './pages/MatchesPage';
 import MatchDetailPage from './pages/MatchDetailPage';
+import CompetitionPage from './pages/CompetitionPage';
 import MarketPage from './pages/MarketPage';
 import LeagueAdminPage from './pages/LeagueAdminPage';
 import NotFoundPage from './pages/NotFoundPage';
 import LandingPage from './pages/LandingPage';
 import { useAuth } from './auth/AuthContext';
+import { LeagueProvider } from './league/LeagueContext';
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -27,7 +29,9 @@ export default function App() {
       <Route
         element={
           <RequireAuth>
-            <AppShell />
+            <LeagueProvider>
+              <AppShell />
+            </LeagueProvider>
           </RequireAuth>
         }
       >
@@ -37,6 +41,7 @@ export default function App() {
         <Route path="squad/formation" element={<FormationPage />} />
         <Route path="matches" element={<MatchesPage />} />
         <Route path="matches/:matchId" element={<MatchDetailPage />} />
+        <Route path="competitions/:competitionId" element={<CompetitionPage />} />
         <Route path="market" element={<MarketPage />} />
         <Route path="league-admin" element={<LeagueAdminPage />} />
       </Route>
