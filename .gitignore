@@ -1,4 +1,20 @@
-vfootfrontend/node_modules/
-vfootfrontend/dist/
-vfootfrontend/.vite/
-vfootfrontend/.env
+# Python
+**/__pycache__/
+*.py[cod]
+*.sqlite3
+.venv/
+
+# Node / frontend
+**/node_modules/
+**/dist/
+**/.vite/
+
+# Environment files
+.env
+*.env
+
+# Notebooks
+**/.ipynb_checkpoints/
+
+# Standalone legacy repo
+legacy-fanta/

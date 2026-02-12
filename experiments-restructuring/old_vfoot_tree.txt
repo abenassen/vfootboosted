@@ -1,0 +1,130 @@
+├── asta
+│   ├── admin.py
+│   ├── admin.pyc
+│   ├── consumers.py
+│   ├── googleinteraction.py
+│   ├── __init__.py
+│   ├── __init__.pyc
+│   ├── models.py
+│   ├── models.py~
+│   ├── models.pyc
+│   ├── organizations.txt
+│   ├── __pycache__
+│   ├── routing.py
+│   ├── static
+│   ├── templates
+│   ├── tests.py
+│   ├── urls.py
+│   ├── urls.py~
+│   ├── urls.pyc
+│   ├── views.py
+│   ├── views.py~
+│   └── views.pyc
+├── auxfun.py
+├── chat
+│   ├── admin.py
+│   ├── apps.py
+│   ├── consumers_basic.py
+│   ├── consumers.py
+│   ├── __init__.py
+│   ├── migrations
+│   ├── models.py
+│   ├── __pycache__
+│   ├── routing.py
+│   ├── templates
+│   ├── tests.py
+│   ├── urls.py
+│   └── views.py
+├── db.sqlite3
+├── fanta
+│   ├── asgi.py
+│   ├── __init__.py
+│   ├── __pycache__
+│   ├── routing.py
+│   ├── settings.py
+│   ├── settings.py.old
+│   ├── urls.py
+│   ├── urls.py.old
+│   └── wsgi.py
+├── fantaapp
+│   ├── admin.py
+│   ├── admin.pyc
+│   ├── auxfun.py
+│   ├── fantafun.pyc
+│   ├── forms.py
+│   ├── __init__.py
+│   ├── __init__.pyc
+│   ├── models
+│   ├── __pycache__
+│   ├── signals.pyc
+│   ├── static
+│   ├── templates
+│   ├── tests.py
+│   ├── urls.py
+│   ├── urls.py~
+│   ├── urls.pyc
+│   ├── views.py
+│   ├── views.py~
+│   └── views.pyc
+├── geckodriver.log
+├── manage.py
+├── media
+│   ├── test.png
+│   └── test.txt
+├── __pycache__
+│   ├── auxfun.cpython-38.pyc
+│   └── roundrobin.cpython-38.pyc
+├── requirements.txt
+├── roundrobin.py
+├── static
+│   └── admin
+├── test
+├── test.py
+├── tmp
+│   └── django_cache
+├── tools
+│   ├── aggiornamento_voti_effettuati.log
+│   ├── aggiorna_quotazioni
+│   ├── completa_quotazioni.py
+│   ├── downloadvotilive.bak.py
+│   ├── downloadvotilive.py
+│   ├── geckodriver.log
+│   ├── htmlparser.py
+│   ├── lib.py
+│   ├── __pycache__
+│   ├── quot2022A.txt
+│   ├── quot2022C.txt
+│   ├── quot2022D.txt
+│   ├── quot2022P.txt
+│   ├── Quotazioni
+│   ├── quotdata.txt
+│   ├── readme.txt
+│   ├── schedule_aggiornamento_voti.log
+│   ├── schedule_voti1.py
+│   ├── schedule_voti.py
+│   ├── test_voti.py
+│   ├── update_calendario_football_data.py
+│   ├── update_calendario.py
+│   ├── updatevoti.log
+│   ├── votecontainer.py
+│   └── votereader.py
+├── updatevoti.log
+├── UserProfile
+│   ├── admin.py
+│   ├── admin.pyc
+│   ├── __init__.py
+│   ├── __init__.pyc
+│   ├── models (Copia in conflitto di Francesca Sconfienza 2015-08-09).pyc
+│   ├── models.py
+│   ├── models.pyc
+│   ├── __pycache__
+│   ├── test.pyc
+│   ├── tests.py
+│   └── views.py
+├── uwsgi.ini
+├── uwsgi_params
+└── www
+    ├── log
+    └── static
+
+
