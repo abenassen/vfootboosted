@@ -179,3 +179,60 @@ Agents must NEVER:
     -   Formalized heatmap-driven positional model.
     -   Clarified separation between legacy role-based engine and new
         Vfoot engine.
+
+------------------------------------------------------------------------
+
+## Current Implementation Snapshot (2026-02-12)
+
+### Repository Layout (current)
+
+-   `legacy-fanta/`: old Django legacy project (separate legacy repo).
+-   `vfoot-backend/`: new backend (Django + DRF), active development.
+-   `vfoot-frontend/`: new frontend (Vite + React), active development.
+-   `experiments-vfootfrontend/`, `experiments-scrape-sofascore/`,
+    `experiments-restructuring/`: non-core experimental material.
+
+### Backend Status
+
+-   Core Vfoot modules are split as:
+    -   `vfoot/models/{zones.py,heatmap.py,presence.py,lineup.py}`
+    -   `vfoot/services/{zone_engine.py,duel_engine.py,scoring_engine.py}`
+    -   `vfoot/api/{views.py,serializers.py,urls.py,data_builders.py}`
+-   Contract-oriented endpoints implemented:
+    -   `GET /api/v1/lineup/context`
+    -   `POST /api/v1/lineup/save`
+    -   `GET /api/v1/matches`
+    -   `GET /api/v1/matches/<match_id>`
+-   Auth endpoints implemented and active:
+    -   `POST /api/v1/auth/register`
+    -   `POST /api/v1/auth/login`
+    -   `GET /api/v1/auth/me`
+    -   `POST /api/v1/auth/logout`
+-   Protected endpoints require token auth (`TokenAuthentication`).
+-   Overcrowding rule and ±10% duel modifier are enforced in backend
+    duel logic.
+-   Current backend data is contract-compatible but still synthetic
+    placeholder data until real ingestion is wired.
+
+### Frontend Status
+
+-   API provider switch is implemented:
+    -   `mock` or `backend` via `VITE_API_PROVIDER` in env.
+    -   Runtime override with query param: `?api=mock|backend`.
+-   Shared API adapter is in `src/api/` and pages no longer call mock
+    API directly.
+-   New public landing page with product narrative + auth forms:
+    -   `src/pages/LandingPage.tsx`
+-   Auth state/guarding:
+    -   `src/auth/AuthContext.tsx`
+    -   `/home`, `/league`, `/squad`, `/matches`, `/market` require
+        authenticated session.
+
+### Dev Notes
+
+-   Preferred local hosts for integration: use `localhost` for both
+    backend and frontend to match CORS defaults.
+-   Backend run command:
+    -   `cd vfoot-backend/src && ../.venv/bin/python manage.py runserver localhost:8000 --noreload`
+-   Frontend run command:
+    -   `cd vfoot-frontend && npm run dev -- --host localhost --port 5173`
