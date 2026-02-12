@@ -44,6 +44,7 @@ INSTALLED_APPS = [
 
     # Third-party
     "rest_framework",
+    "rest_framework.authtoken",
     "corsheaders",
 
 ]
@@ -61,8 +62,18 @@ MIDDLEWARE = [
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",   # Vite
+    "http://127.0.0.1:5173",   # Vite (alt host)
     "http://localhost:3000",   # CRA
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.AllowAny",
+    ],
+}
 
 ROOT_URLCONF = 'config.urls'
 

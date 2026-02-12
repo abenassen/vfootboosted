@@ -14,12 +14,16 @@ export function Button({
   onClick,
   variant = 'primary',
   size = 'md',
-  disabled
+  disabled,
+  type = 'button',
+  className,
 }: PropsWithChildren<{
   onClick?: () => void;
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   size?: 'sm' | 'md';
   disabled?: boolean;
+  type?: 'button' | 'submit' | 'reset';
+  className?: string;
 }>) {
   const base =
     'inline-flex items-center justify-center rounded-xl font-semibold transition active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100';
@@ -31,7 +35,7 @@ export function Button({
     danger: 'bg-red-600 text-white hover:bg-red-500'
   };
   return (
-    <button onClick={onClick} disabled={disabled} className={clsx(base, sizes, variants[variant])}>
+    <button type={type} onClick={onClick} disabled={disabled} className={clsx(base, sizes, variants[variant], className)}>
       {children}
     </button>
   );

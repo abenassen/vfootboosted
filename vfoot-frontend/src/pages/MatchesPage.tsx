@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Card, SectionTitle, Badge, Button } from '../components/ui';
-import { getMatches } from '../mock/api';
+import { getMatches } from '../api';
+import { apiProvider } from '../api';
 import { useAsync } from '../utils/useAsync';
 
 export default function MatchesPage() {
@@ -30,7 +31,7 @@ export default function MatchesPage() {
         </div>
       </Card>
 
-      <div className="text-xs text-slate-500">Nota: dati mock (in futuro arrivano dal backend).</div>
+      <div className="text-xs text-slate-500">Provider API: {apiProvider}</div>
     </div>
   );
 }

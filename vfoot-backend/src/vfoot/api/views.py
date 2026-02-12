@@ -3,22 +3,87 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from django.db import transaction
+from django.contrib.auth import authenticate
+from django.contrib.auth.models import User
 from rest_framework import status
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.authtoken.models import Token
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from vfoot.api.data_builders import build_lineup_context
 from vfoot.api.serializers import (
     LineupContextQuerySerializer,
+    LoginSerializer,
     MatchesQuerySerializer,
+    RegisterSerializer,
     SaveLineupRequestSerializer,
+    UserSerializer,
 )
 from vfoot.models import SavedLineupSnapshot
 from vfoot.services.duel_engine import compute_match_zone_duels
-from vfoot.services.zone_engine import compute_coverage_preview
+
+
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = User.objects.create_user(
+            username=data["username"],
+            email=data.get("email", ""),
+            password=data["password"],
+        )
+        token, _ = Token.objects.get_or_create(user=user)
+
+        return Response(
+            {"token": token.key, "user": UserSerializer(user).data},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = authenticate(username=data["username"], password=data["password"])
+        if not user:
+            return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({"token": token.key, "user": UserSerializer(user).data}, status=status.HTTP_200_OK)
+
+
+class MeView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response({"user": UserSerializer(request.user).data}, status=status.HTTP_200_OK)
+
+
+class LogoutView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        Token.objects.filter(user=request.user).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class LineupContextView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         qs = LineupContextQuerySerializer(data=request.query_params)
         qs.is_valid(raise_exception=True)
@@ -30,6 +95,9 @@ class LineupContextView(APIView):
 
 
 class SaveLineupView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
     @transaction.atomic
     def post(self, request):
         s = SaveLineupRequestSerializer(data=request.data)
@@ -77,6 +145,9 @@ class SaveLineupView(APIView):
 
 
 class MatchListView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         qs = MatchesQuerySerializer(data=request.query_params)
         qs.is_valid(raise_exception=True)
@@ -105,6 +176,9 @@ class MatchListView(APIView):
 
 
 class MatchDetailView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, match_id: str):
         qs = MatchesQuerySerializer(data=request.query_params)
         qs.is_valid(raise_exception=True)

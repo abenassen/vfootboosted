@@ -1,11 +1,92 @@
 import type { LineupContextResponse, MatchDetailResponse, MatchListItem, SaveLineupRequest, SaveLineupResponse } from '../types/contracts';
+import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
 import { mockLineupContext, mockMatches, mockMatchDetail } from './data';
 import { computeCoveragePreview } from '../utils/coverage';
 
 let inMemoryLineup = structuredClone(mockLineupContext.saved_lineup);
+const MOCK_USERS_KEY = 'vfoot_mock_users';
+const MOCK_SESSION_KEY = 'vfoot_mock_session';
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readUsers(): Array<{ username: string; email: string; password: string }> {
+  if (typeof window === 'undefined') return [];
+  const raw = window.localStorage.getItem(MOCK_USERS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as Array<{ username: string; email: string; password: string }>;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeUsers(users: Array<{ username: string; email: string; password: string }>) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(MOCK_USERS_KEY, JSON.stringify(users));
+}
+
+function toAuthUser(username: string, email: string): AuthUser {
+  return { id: Math.abs(hash(username)) + 1, username, email };
+}
+
+function hash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return h;
+}
+
+function setSession(user: AuthUser) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(MOCK_SESSION_KEY, JSON.stringify(user));
+}
+
+function clearSession() {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(MOCK_SESSION_KEY);
+}
+
+export function hasStoredSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !!window.localStorage.getItem(MOCK_SESSION_KEY);
+}
+
+export async function register(req: RegisterRequest): Promise<AuthResponse> {
+  await sleep(250);
+  const users = readUsers();
+  if (users.some((u) => u.username === req.username)) {
+    throw new Error('Username already exists.');
+  }
+  users.push({ username: req.username, email: req.email ?? '', password: req.password });
+  writeUsers(users);
+  const user = toAuthUser(req.username, req.email ?? '');
+  setSession(user);
+  return { token: `mock-token-${req.username}`, user };
+}
+
+export async function login(req: LoginRequest): Promise<AuthResponse> {
+  await sleep(200);
+  const users = readUsers();
+  const found = users.find((u) => u.username === req.username && u.password === req.password);
+  if (!found) throw new Error('Invalid credentials.');
+  const user = toAuthUser(found.username, found.email);
+  setSession(user);
+  return { token: `mock-token-${found.username}`, user };
+}
+
+export async function getCurrentUser(): Promise<AuthUser> {
+  await sleep(100);
+  if (typeof window === 'undefined') throw new Error('No active session.');
+  const raw = window.localStorage.getItem(MOCK_SESSION_KEY);
+  if (!raw) throw new Error('No active session.');
+  return JSON.parse(raw) as AuthUser;
+}
+
+export async function logout(): Promise<void> {
+  await sleep(100);
+  clearSession();
 }
 
 export async function getLineupContext(): Promise<LineupContextResponse> {

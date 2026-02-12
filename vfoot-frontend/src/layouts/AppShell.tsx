@@ -2,6 +2,8 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
 import { useMemo } from 'react';
 import LeagueSwitcher from '../components/LeagueSwitcher';
+import { useAuth } from '../auth/AuthContext';
+import { Button } from '../components/ui';
 
 const navItems = [
   { to: '/home', label: 'Home', icon: '🏠' },
@@ -27,6 +29,7 @@ function usePageTitle(pathname: string) {
 export default function AppShell() {
   const location = useLocation();
   const title = usePageTitle(location.pathname);
+  const { user, logout } = useAuth();
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -40,6 +43,10 @@ export default function AppShell() {
           </div>
           <div className="flex items-center gap-3">
             <LeagueSwitcher />
+            <div className="text-xs text-slate-500">{user?.username}</div>
+            <Button size="sm" variant="secondary" onClick={() => void logout()}>
+              Logout
+            </Button>
           </div>
         </div>
       </div>
@@ -80,7 +87,12 @@ export default function AppShell() {
               <div className="text-xs text-slate-500">Vfoot Boosted</div>
               <div className="font-bold text-lg leading-tight">{title}</div>
             </div>
-            <LeagueSwitcher compact />
+            <div className="flex items-center gap-2">
+              <LeagueSwitcher compact />
+              <Button size="sm" variant="secondary" onClick={() => void logout()}>
+                Logout
+              </Button>
+            </div>
           </div>
 
           <Outlet />

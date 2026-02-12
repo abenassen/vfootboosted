@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import PitchZoneMap from '../components/PitchZoneMap';
 import Toast from '../components/Toast';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
-import { getLineupContext, saveLineup } from '../mock/api';
+import { getLineupContext, saveLineup } from '../api';
 import type { LineupContextResponse, RosterPlayer, SaveLineupRequest } from '../types/contracts';
 import { useAsync } from '../utils/useAsync';
 

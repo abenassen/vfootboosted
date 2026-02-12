@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import PitchZoneMap from '../components/PitchZoneMap';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
-import { getMatchDetail } from '../mock/api';
+import { getMatchDetail } from '../api';
 import type { MatchDetailResponse, TeamSide } from '../types/contracts';
 import { useAsync } from '../utils/useAsync';
 
@@ -229,7 +229,7 @@ function ZonePanel({ data, zone }: { data: MatchDetailResponse; zone: MatchDetai
           ) : null}
 
           <div className="text-xs text-slate-500">
-            Nota: questa è una prima UI con dati mock. Nel backend reale, i macro-score possono aggregare molte statistiche (Sofascore).
+            Nota: i macro-score sono un primo layer Vfoot e possono essere raffinati con ingestion real-data (es. Sofascore).
           </div>
         </div>
       )}

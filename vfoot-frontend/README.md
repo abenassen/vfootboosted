@@ -9,7 +9,7 @@ Questa è una prima versione completa del frontend, con **dati mock** basati sui
   - **Formazione**: selezione 11 titolari, scelta portiere (slot dedicato), panchina, **riserve per-titolare**, campo a zone con copertura/qualità.
   - **Match detail**: mappa zone con vincitore/punti/margine/fattore chiave, pannello dettagli zona con macro-metriche e top contributori.
 
-> Nota: i dati sono **mock** (simulati) e vengono serviti da `src/mock/api.ts`.
+> Nota: puoi usare sia **mock** sia **backend reale** tramite switch API.
 
 ---
 
@@ -41,17 +41,32 @@ npm run preview
 
 ---
 
-## Dove cambiare i dati
-- Mock contratti: `src/mock/data.ts`
-- Mock “API”: `src/mock/api.ts`
+## Switch API (mock/backend)
+Il frontend usa un adapter unico in `src/api/index.ts`.
 
-Quando collegherai il backend:
-- sostituisci `src/mock/api.ts` con chiamate HTTP reali (fetch/axios)
-- mantieni i tipi TS in `src/types/contracts.ts` come contratto condiviso
+Configura `.env.local` (puoi partire da `.env.example`):
+
+```bash
+cp .env.example .env.local
+```
+
+Opzioni:
+
+```env
+VITE_API_PROVIDER=mock
+VITE_API_BASE_URL=http://localhost:8000/api/v1
+```
+
+- `VITE_API_PROVIDER=mock` usa `src/mock/api.ts`
+- `VITE_API_PROVIDER=backend` usa `src/api/backend.ts` (fetch verso Django)
+
+Override rapido per singola sessione browser:
+- aggiungi `?api=mock` oppure `?api=backend` all'URL.
+
+I tipi in `src/types/contracts.ts` restano il contratto condiviso frontend/backend.
 
 ---
 
 ## Note UX
 - Mobile: selettore tab dentro la pagina **Formazione** (Titolari / Rosa / Panchina)
 - Desktop: layout a 3 colonne (Rosa / Campo / Panchina e riserve)
-

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Card, SectionTitle, Button, Badge } from '../components/ui';
 import { useAsync } from '../utils/useAsync';
-import { getLineupContext } from '../mock/api';
+import { getLineupContext } from '../api';
 
 export default function SquadPage() {
   const { data, loading, error } = useAsync(getLineupContext, []);
