@@ -236,3 +236,56 @@ Agents must NEVER:
     -   `cd vfoot-backend/src && ../.venv/bin/python manage.py runserver localhost:8000 --noreload`
 -   Frontend run command:
     -   `cd vfoot-frontend && npm run dev -- --host localhost --port 5173`
+
+------------------------------------------------------------------------
+
+## Vfoot Scoring Schema Summary (Working Baseline)
+
+The Vfoot schema currently being implemented should follow this
+two-stage logic:
+
+1.  Compare home/away teams area-by-area by considering only players
+    effectively active in each area.
+2.  Convert these local comparisons into zone points and aggregate to
+    the final match score.
+
+### 1) Area and Zone Comparison Layer
+
+-   For each real match, ingest player-level performance data with
+    spatial information (heatmaps/events).
+-   Compute normalized zone presence:
+    -   `presence(player, zone)` in `[0,1]`
+    -   sum across zones = 1 for each player.
+-   For each tactical area/zone group (defense, midfield, attack,
+    flanks, etc.), include only players with meaningful presence in
+    those zones.
+-   Build home/away comparative metrics per zone from:
+    -   spatial presence,
+    -   performance quality indicators (e.g. pure vote / derived quality
+        features),
+    -   optional contextual factors as needed.
+-   Determine a local result (`home`, `away`, `draw`) for each zone.
+
+### 2) Zone-to-Score Aggregation Layer
+
+-   Assign zone points from each local duel.
+-   Enforce anti-exploit overcrowding rule:
+    -   if total presence in a zone exceeds 1, renormalize and discard
+        excess efficiency.
+-   Sum all zone outputs into overall home/away totals.
+-   Expose both:
+    -   final total score,
+    -   per-zone breakdown (decisive zones, swings, story/explainability
+        output).
+-   Optionally map totals to legacy-style goals if needed.
+
+### Calibration Note
+
+This schema is intentionally a baseline. Detailed weighting and scoring
+constants must be tuned on real historical data (hybrid strategy) so the
+system is:
+
+-   realistic in football terms,
+-   tactically meaningful for users,
+-   robust against exploits,
+-   fun to play.

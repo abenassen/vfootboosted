@@ -8,6 +8,7 @@ import FormationPage from './pages/FormationPage';
 import MatchesPage from './pages/MatchesPage';
 import MatchDetailPage from './pages/MatchDetailPage';
 import MarketPage from './pages/MarketPage';
+import LeagueAdminPage from './pages/LeagueAdminPage';
 import NotFoundPage from './pages/NotFoundPage';
 import LandingPage from './pages/LandingPage';
 import { useAuth } from './auth/AuthContext';
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="matches" element={<MatchesPage />} />
         <Route path="matches/:matchId" element={<MatchDetailPage />} />
         <Route path="market" element={<MarketPage />} />
+        <Route path="league-admin" element={<LeagueAdminPage />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

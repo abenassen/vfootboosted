@@ -4,10 +4,12 @@ import { useMemo } from 'react';
 import LeagueSwitcher from '../components/LeagueSwitcher';
 import { useAuth } from '../auth/AuthContext';
 import { Button } from '../components/ui';
+import logo from '../assets/logo.png';
 
 const navItems = [
   { to: '/home', label: 'Home', icon: '🏠' },
   { to: '/league', label: 'Lega', icon: '🏆' },
+  { to: '/league-admin', label: 'Admin', icon: '🛠️' },
   { to: '/squad', label: 'Squadra', icon: '👥' },
   { to: '/matches', label: 'Partite', icon: '🎯' },
   { to: '/market', label: 'Mercato', icon: '💱' }
@@ -16,6 +18,7 @@ const navItems = [
 function usePageTitle(pathname: string) {
   return useMemo(() => {
     if (pathname.startsWith('/home')) return 'Dashboard';
+    if (pathname.startsWith('/league-admin')) return 'League Admin';
     if (pathname.startsWith('/league')) return 'Lega';
     if (pathname.startsWith('/squad/formation')) return 'Formazione';
     if (pathname.startsWith('/squad')) return 'Squadra';
@@ -37,6 +40,7 @@ export default function AppShell() {
       <div className="hidden md:block border-b bg-white">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <img src={logo} alt="Vfoot logo" className="h-8 w-8 rounded-lg object-cover" />
             <div className="font-black tracking-tight text-lg">Vfoot Boosted</div>
             <div className="text-slate-400">/</div>
             <div className="font-semibold">{title}</div>
@@ -83,9 +87,12 @@ export default function AppShell() {
         <main className="pb-20 md:pb-8 px-4 py-4 md:py-6">
           {/* Mobile header */}
           <div className="md:hidden mb-3 flex items-center justify-between">
-            <div>
-              <div className="text-xs text-slate-500">Vfoot Boosted</div>
-              <div className="font-bold text-lg leading-tight">{title}</div>
+            <div className="flex items-center gap-2">
+              <img src={logo} alt="Vfoot logo" className="h-8 w-8 rounded-lg object-cover" />
+              <div>
+                <div className="text-xs text-slate-500">Vfoot Boosted</div>
+                <div className="font-bold text-lg leading-tight">{title}</div>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <LeagueSwitcher compact />
@@ -101,7 +108,7 @@ export default function AppShell() {
 
       {/* Mobile tab bar */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-white">
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-6">
           {navItems.map((it) => (
             <NavLink
               key={it.to}

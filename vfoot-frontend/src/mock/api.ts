@@ -1,5 +1,13 @@
 import type { LineupContextResponse, MatchDetailResponse, MatchListItem, SaveLineupRequest, SaveLineupResponse } from '../types/contracts';
 import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
+import type {
+  CompetitionTemplateRequest,
+  CreateLeagueRequest,
+  JoinLeagueRequest,
+  LeagueDetail,
+  LeagueSummary,
+  TeamRoster,
+} from '../types/league';
 import { mockLineupContext, mockMatches, mockMatchDetail } from './data';
 import { computeCoveragePreview } from '../utils/coverage';
 
@@ -137,4 +145,121 @@ export async function getMatchDetail(matchId: string): Promise<MatchDetailRespon
   await sleep(280);
   // Single mock; in futuro: usare matchId
   return structuredClone({ ...mockMatchDetail, match: { ...mockMatchDetail.match, match_id: matchId } });
+}
+
+// Admin/league mock endpoints (minimal local in-memory compatibility)
+const mockLeagues: LeagueDetail[] = [];
+let mockLeagueSeq = 1;
+
+export async function getLeagues(): Promise<LeagueSummary[]> {
+  await sleep(120);
+  return mockLeagues.map((l) => ({
+    league_id: l.league_id,
+    name: l.name,
+    role: 'admin',
+    invite_code: l.invite_code,
+    market_open: l.market_open
+  }));
+}
+
+export async function createLeague(req: CreateLeagueRequest) {
+  await sleep(150);
+  const id = mockLeagueSeq++;
+  const league: LeagueDetail = {
+    league_id: id,
+    name: req.name,
+    market_open: true,
+    invite_code: `MOCK${id}`,
+    invite_link: `/join/MOCK${id}`,
+    members: [{ membership_id: id * 10 + 1, user_id: 1, username: 'mock-admin', role: 'admin' }],
+    teams: [{ team_id: id * 10 + 1, name: req.team_name, manager_user_id: 1, manager_username: 'mock-admin' }]
+  };
+  mockLeagues.push(league);
+  return { league_id: id, invite_code: league.invite_code };
+}
+
+export async function joinLeague(req: JoinLeagueRequest) {
+  await sleep(120);
+  const l = mockLeagues.find((x) => x.invite_code === req.invite_code);
+  if (!l) throw new Error('League not found.');
+  const teamId = l.teams.length + l.league_id * 10 + 1;
+  l.teams.push({ team_id: teamId, name: req.team_name, manager_user_id: 2, manager_username: 'mock-user' });
+  l.members.push({ membership_id: teamId, user_id: 2, username: 'mock-user', role: 'manager' });
+  return { league_id: l.league_id, team_id: teamId };
+}
+
+export async function getLeagueDetail(leagueId: number): Promise<LeagueDetail> {
+  await sleep(100);
+  const l = mockLeagues.find((x) => x.league_id === leagueId);
+  if (!l) throw new Error('League not found.');
+  return structuredClone(l);
+}
+
+export async function updateMemberRole(leagueId: number, membershipId: number, role: 'admin' | 'manager') {
+  await sleep(80);
+  const l = mockLeagues.find((x) => x.league_id === leagueId);
+  if (!l) throw new Error('League not found.');
+  const m = l.members.find((x) => x.membership_id === membershipId);
+  if (!m) throw new Error('Member not found.');
+  m.role = role;
+  return { membership_id: m.membership_id, role: m.role };
+}
+
+export async function setMarketStatus(leagueId: number, isOpen: boolean) {
+  await sleep(80);
+  const l = mockLeagues.find((x) => x.league_id === leagueId);
+  if (!l) throw new Error('League not found.');
+  l.market_open = isOpen;
+  return { league_id: leagueId, market_open: isOpen };
+}
+
+export async function getTeamRoster(_leagueId: number, teamId: number): Promise<TeamRoster> {
+  await sleep(80);
+  return { team_id: teamId, team_name: `Team ${teamId}`, players: [] };
+}
+
+export async function addRosterPlayer(_leagueId: number, _teamId: number, playerId: number, _purchasePrice = 1) {
+  await sleep(80);
+  return { player_id: playerId };
+}
+
+export async function removeRosterPlayer(_leagueId: number, _teamId: number, _playerId: number) {
+  await sleep(80);
+  return { ok: true };
+}
+
+export async function bulkAssignRoster(_leagueId: number, playerIds: number[]) {
+  await sleep(100);
+  return { assigned_players: playerIds.length };
+}
+
+export async function importRosterCsv(_leagueId: number, csvText: string) {
+  await sleep(100);
+  const rows = csvText.trim().split('\n').slice(1).filter(Boolean).length;
+  return { imported: rows };
+}
+
+export async function createCompetitionTemplate(_leagueId: number, req: CompetitionTemplateRequest) {
+  await sleep(100);
+  return { competition_id: 1, name: req.name, competition_type: req.competition_type, participants: req.team_ids?.length ?? 0, fixtures_created: 1 };
+}
+
+export async function createAuction(_leagueId: number, playerIds: number[]) {
+  await sleep(100);
+  return { auction_id: 1, players: playerIds.length };
+}
+
+export async function nominateNext(_auctionId: number) {
+  await sleep(80);
+  return { nomination_id: 1, player_id: 1, player_name: 'Mock Player' };
+}
+
+export async function placeBid(_nominationId: number, amount: number) {
+  await sleep(60);
+  return { bid_id: 1, amount };
+}
+
+export async function closeNomination(_nominationId: number) {
+  await sleep(80);
+  return { nomination_id: 1, winner_team_id: 1 };
 }

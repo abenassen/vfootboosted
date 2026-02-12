@@ -21,3 +21,8 @@ legacy-fanta/
 
 # Archive artifacts
 *.zip
+
+# Historical datasets (keep only documentation files)
+historical-data/**
+!historical-data/**/
+!historical-data/**/README.md

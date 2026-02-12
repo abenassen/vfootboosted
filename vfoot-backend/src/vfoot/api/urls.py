@@ -1,5 +1,22 @@
 from django.urls import path
 
+from vfoot.api.league_views import (
+    AuctionCloseNominationView,
+    AuctionCreateView,
+    AuctionNominateNextView,
+    AuctionPlaceBidView,
+    CompetitionTemplateCreateView,
+    LeagueDetailView,
+    LeagueJoinView,
+    LeagueListCreateView,
+    LeagueRosterBulkAssignView,
+    LeagueRosterImportCSVView,
+    MarketToggleView,
+    MemberRoleUpdateView,
+    TeamRosterAddView,
+    TeamRosterRemoveView,
+    TeamRosterView,
+)
 from vfoot.api.views import (
     LineupContextView,
     LoginView,
@@ -12,6 +29,41 @@ from vfoot.api.views import (
 )
 
 urlpatterns = [
+    path("leagues", LeagueListCreateView.as_view(), name="league-list-create"),
+    path("leagues/join", LeagueJoinView.as_view(), name="league-join"),
+    path("leagues/<int:league_id>", LeagueDetailView.as_view(), name="league-detail"),
+    path(
+        "leagues/<int:league_id>/members/<int:membership_id>/role",
+        MemberRoleUpdateView.as_view(),
+        name="league-member-role",
+    ),
+    path("leagues/<int:league_id>/market", MarketToggleView.as_view(), name="league-market-toggle"),
+    path("leagues/<int:league_id>/teams/<int:team_id>/roster", TeamRosterView.as_view(), name="team-roster"),
+    path("leagues/<int:league_id>/teams/<int:team_id>/roster/add", TeamRosterAddView.as_view(), name="team-roster-add"),
+    path(
+        "leagues/<int:league_id>/teams/<int:team_id>/roster/remove",
+        TeamRosterRemoveView.as_view(),
+        name="team-roster-remove",
+    ),
+    path(
+        "leagues/<int:league_id>/roster/bulk-assign",
+        LeagueRosterBulkAssignView.as_view(),
+        name="league-roster-bulk-assign",
+    ),
+    path(
+        "leagues/<int:league_id>/roster/import-csv",
+        LeagueRosterImportCSVView.as_view(),
+        name="league-roster-import-csv",
+    ),
+    path(
+        "leagues/<int:league_id>/competitions/template",
+        CompetitionTemplateCreateView.as_view(),
+        name="competition-template-create",
+    ),
+    path("leagues/<int:league_id>/auctions", AuctionCreateView.as_view(), name="auction-create"),
+    path("auctions/<int:auction_id>/nominate-next", AuctionNominateNextView.as_view(), name="auction-nominate-next"),
+    path("nominations/<int:nomination_id>/bid", AuctionPlaceBidView.as_view(), name="auction-place-bid"),
+    path("nominations/<int:nomination_id>/close", AuctionCloseNominationView.as_view(), name="auction-close-nomination"),
     path("auth/register", RegisterView.as_view(), name="auth-register"),
     path("auth/login", LoginView.as_view(), name="auth-login"),
     path("auth/me", MeView.as_view(), name="auth-me"),

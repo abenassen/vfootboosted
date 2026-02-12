@@ -1,6 +1,11 @@
 import * as backendApi from './backend';
 import * as mockApi from '../mock/api';
 import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
+import type {
+  CompetitionTemplateRequest,
+  CreateLeagueRequest,
+  JoinLeagueRequest,
+} from '../types/league';
 
 export type ApiProvider = 'mock' | 'backend';
 
@@ -31,6 +36,22 @@ type ApiImpl = {
   saveLineup: typeof backendApi.saveLineup;
   getMatches: typeof backendApi.getMatches;
   getMatchDetail: typeof backendApi.getMatchDetail;
+  getLeagues: typeof backendApi.getLeagues;
+  createLeague: (req: CreateLeagueRequest) => ReturnType<typeof backendApi.createLeague>;
+  joinLeague: (req: JoinLeagueRequest) => ReturnType<typeof backendApi.joinLeague>;
+  getLeagueDetail: typeof backendApi.getLeagueDetail;
+  updateMemberRole: typeof backendApi.updateMemberRole;
+  setMarketStatus: typeof backendApi.setMarketStatus;
+  getTeamRoster: typeof backendApi.getTeamRoster;
+  addRosterPlayer: typeof backendApi.addRosterPlayer;
+  removeRosterPlayer: typeof backendApi.removeRosterPlayer;
+  bulkAssignRoster: typeof backendApi.bulkAssignRoster;
+  importRosterCsv: typeof backendApi.importRosterCsv;
+  createCompetitionTemplate: (leagueId: number, req: CompetitionTemplateRequest) => ReturnType<typeof backendApi.createCompetitionTemplate>;
+  createAuction: typeof backendApi.createAuction;
+  nominateNext: typeof backendApi.nominateNext;
+  placeBid: typeof backendApi.placeBid;
+  closeNomination: typeof backendApi.closeNomination;
 };
 
 const typedImpl = impl as ApiImpl;
@@ -45,3 +66,19 @@ export const getLineupContext = typedImpl.getLineupContext;
 export const saveLineup = typedImpl.saveLineup;
 export const getMatches = typedImpl.getMatches;
 export const getMatchDetail = typedImpl.getMatchDetail;
+export const getLeagues = typedImpl.getLeagues;
+export const createLeague = typedImpl.createLeague;
+export const joinLeague = typedImpl.joinLeague;
+export const getLeagueDetail = typedImpl.getLeagueDetail;
+export const updateMemberRole = typedImpl.updateMemberRole;
+export const setMarketStatus = typedImpl.setMarketStatus;
+export const getTeamRoster = typedImpl.getTeamRoster;
+export const addRosterPlayer = typedImpl.addRosterPlayer;
+export const removeRosterPlayer = typedImpl.removeRosterPlayer;
+export const bulkAssignRoster = typedImpl.bulkAssignRoster;
+export const importRosterCsv = typedImpl.importRosterCsv;
+export const createCompetitionTemplate = typedImpl.createCompetitionTemplate;
+export const createAuction = typedImpl.createAuction;
+export const nominateNext = typedImpl.nominateNext;
+export const placeBid = typedImpl.placeBid;
+export const closeNomination = typedImpl.closeNomination;

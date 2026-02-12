@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { Badge, Button, Card } from '../components/ui';
 import { apiProvider } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import logo from '../assets/logo.png';
 
 type Mode = 'login' | 'register';
 
@@ -49,6 +50,14 @@ export default function LandingPage() {
             <div className="absolute -bottom-16 -left-16 h-56 w-56 rounded-full bg-indigo-100 blur-2xl" />
 
             <div className="relative space-y-5">
+              <div className="flex items-center gap-3">
+                <img src={logo} alt="Vfoot logo" className="h-12 w-12 rounded-xl object-cover shadow-card" />
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vfoot Boosted</div>
+                  <div className="text-lg font-black">Spatial Fantasy Football</div>
+                </div>
+              </div>
+
               <div className="flex items-center gap-2">
                 <Badge tone="green">Vfoot Engine</Badge>
                 <Badge tone="slate">Provider: {apiProvider}</Badge>

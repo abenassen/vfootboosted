@@ -1,4 +1,5 @@
 import { Card, SectionTitle, Badge } from '../components/ui';
+import { Link } from 'react-router-dom';
 
 export default function LeaguePage() {
   return (
@@ -33,6 +34,16 @@ export default function LeaguePage() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
+        <Card className="p-4">
+          <SectionTitle>Gestione Lega</SectionTitle>
+          <div className="mt-2 text-sm text-slate-600">
+            Configura membri admin, mercato, roster, competizioni e asta.
+          </div>
+          <Link to="/league-admin" className="mt-3 inline-flex rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">
+            Apri League Admin
+          </Link>
+        </Card>
+
         <Card className="p-4">
           <SectionTitle>Calendario</SectionTitle>
           <div className="mt-2 text-sm text-slate-600">
