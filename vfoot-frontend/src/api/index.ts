@@ -4,11 +4,21 @@ import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../t
 import type {
   AuctionState,
   CompetitionItem,
+  CompetitionPrizeCreateRequest,
+  CompetitionPrizeItem,
+  CompetitionScheduleApplyResult,
+  CompetitionSchedulePreview,
+  CompetitionStageCreateRequest,
+  CompetitionStageRuleCreateResult,
+  CompetitionStageUpdateRequest,
+  CompetitionStageRuleCreateRequest,
+  CompetitionStageItem,
   CompetitionUpdateRequest,
   CompetitionTemplateRequest,
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueFixtureItem,
+  LeagueMatchdayItem,
   PlayerSearchItem,
   QualificationRuleCreateRequest,
 } from '../types/league';
@@ -56,8 +66,25 @@ type ApiImpl = {
   createCompetitionTemplate: (leagueId: number, req: CompetitionTemplateRequest) => ReturnType<typeof backendApi.createCompetitionTemplate>;
   getCompetitions: (leagueId: number) => Promise<CompetitionItem[]>;
   updateCompetition: (competitionId: number, req: CompetitionUpdateRequest) => Promise<CompetitionItem>;
+  scheduleCompetition: (
+    competitionId: number,
+    payload?: { starts_at?: string | null; ends_at?: string | null; round_mapping?: Record<string, number> }
+  ) => Promise<CompetitionScheduleApplyResult>;
+  previewCompetitionSchedule: (
+    competitionId: number,
+    payload?: { starts_at?: string | null; ends_at?: string | null }
+  ) => Promise<CompetitionSchedulePreview>;
   addCompetitionRule: (competitionId: number, req: QualificationRuleCreateRequest) => Promise<unknown>;
   resolveCompetitionDependencies: (competitionId: number) => Promise<unknown>;
+  getCompetitionStages: (competitionId: number) => Promise<CompetitionStageItem[]>;
+  createCompetitionStage: (competitionId: number, req: CompetitionStageCreateRequest) => Promise<CompetitionStageItem>;
+  updateCompetitionStage: (stageId: number, req: CompetitionStageUpdateRequest) => Promise<CompetitionStageItem>;
+  addCompetitionStageRule: (stageId: number, req: CompetitionStageRuleCreateRequest) => Promise<CompetitionStageRuleCreateResult>;
+  getCompetitionPrizes: (competitionId: number) => Promise<CompetitionPrizeItem[]>;
+  createCompetitionPrize: (competitionId: number, req: CompetitionPrizeCreateRequest) => Promise<CompetitionPrizeItem>;
+  deleteCompetitionPrize: (prizeId: number) => Promise<void>;
+  buildDefaultCompetitionStages: (competitionId: number, allowRepechage?: boolean, randomSeed?: number) => Promise<unknown>;
+  resolveCompetitionStage: (stageId: number, randomSeed?: number) => Promise<unknown>;
   createAuction: typeof backendApi.createAuction;
   nominateNext: typeof backendApi.nominateNext;
   placeBid: typeof backendApi.placeBid;
@@ -65,6 +92,9 @@ type ApiImpl = {
   searchPlayers: (q: string, leagueId?: number, limit?: number) => Promise<PlayerSearchItem[]>;
   getAuctionState: (auctionId: number) => Promise<AuctionState>;
   getLeagueFixtures: (leagueId: number, competitionId?: number) => Promise<LeagueFixtureItem[]>;
+  syncLeagueMatchdays: (leagueId: number) => Promise<{ fixtures_linked: number; matchdays_touched: number }>;
+  getLeagueMatchdays: (leagueId: number) => Promise<LeagueMatchdayItem[]>;
+  concludeLeagueMatchday: (leagueId: number, fantasyMatchdayId: number, force?: boolean) => Promise<unknown>;
 };
 
 const typedImpl = impl as ApiImpl;
@@ -93,8 +123,19 @@ export const importRosterCsv = typedImpl.importRosterCsv;
 export const createCompetitionTemplate = typedImpl.createCompetitionTemplate;
 export const getCompetitions = typedImpl.getCompetitions;
 export const updateCompetition = typedImpl.updateCompetition;
+export const scheduleCompetition = typedImpl.scheduleCompetition;
+export const previewCompetitionSchedule = typedImpl.previewCompetitionSchedule;
 export const addCompetitionRule = typedImpl.addCompetitionRule;
 export const resolveCompetitionDependencies = typedImpl.resolveCompetitionDependencies;
+export const getCompetitionStages = typedImpl.getCompetitionStages;
+export const createCompetitionStage = typedImpl.createCompetitionStage;
+export const updateCompetitionStage = typedImpl.updateCompetitionStage;
+export const addCompetitionStageRule = typedImpl.addCompetitionStageRule;
+export const getCompetitionPrizes = typedImpl.getCompetitionPrizes;
+export const createCompetitionPrize = typedImpl.createCompetitionPrize;
+export const deleteCompetitionPrize = typedImpl.deleteCompetitionPrize;
+export const buildDefaultCompetitionStages = typedImpl.buildDefaultCompetitionStages;
+export const resolveCompetitionStage = typedImpl.resolveCompetitionStage;
 export const createAuction = typedImpl.createAuction;
 export const nominateNext = typedImpl.nominateNext;
 export const placeBid = typedImpl.placeBid;
@@ -102,3 +143,6 @@ export const closeNomination = typedImpl.closeNomination;
 export const searchPlayers = typedImpl.searchPlayers;
 export const getAuctionState = typedImpl.getAuctionState;
 export const getLeagueFixtures = typedImpl.getLeagueFixtures;
+export const syncLeagueMatchdays = typedImpl.syncLeagueMatchdays;
+export const getLeagueMatchdays = typedImpl.getLeagueMatchdays;
+export const concludeLeagueMatchday = typedImpl.concludeLeagueMatchday;

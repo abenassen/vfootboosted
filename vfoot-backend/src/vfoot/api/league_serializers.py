@@ -39,6 +39,9 @@ class CompetitionTemplateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120)
     competition_type = serializers.ChoiceField(choices=["round_robin", "knockout"])
     team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+    starts_at = serializers.DateField(required=False, allow_null=True)
+    ends_at = serializers.DateField(required=False, allow_null=True)
+    container_only = serializers.BooleanField(required=False, default=False)
 
 
 class CompetitionUpdateSerializer(serializers.Serializer):
@@ -47,6 +50,19 @@ class CompetitionUpdateSerializer(serializers.Serializer):
     points_win = serializers.IntegerField(required=False)
     points_draw = serializers.IntegerField(required=False)
     points_loss = serializers.IntegerField(required=False)
+    starts_at = serializers.DateField(required=False, allow_null=True)
+    ends_at = serializers.DateField(required=False, allow_null=True)
+
+
+class CompetitionScheduleSerializer(serializers.Serializer):
+    starts_at = serializers.DateField(required=False, allow_null=True)
+    ends_at = serializers.DateField(required=False, allow_null=True)
+    round_mapping = serializers.DictField(required=False)
+
+
+class CompetitionSchedulePreviewSerializer(serializers.Serializer):
+    starts_at = serializers.DateField(required=False, allow_null=True)
+    ends_at = serializers.DateField(required=False, allow_null=True)
 
 
 class QualificationRuleCreateSerializer(serializers.Serializer):
@@ -55,6 +71,48 @@ class QualificationRuleCreateSerializer(serializers.Serializer):
     mode = serializers.ChoiceField(choices=["table_range", "winner", "loser"])
     rank_from = serializers.IntegerField(required=False, allow_null=True)
     rank_to = serializers.IntegerField(required=False, allow_null=True)
+
+
+class CompetitionStageBuildSerializer(serializers.Serializer):
+    allow_repechage = serializers.BooleanField(required=False, default=False)
+    random_seed = serializers.IntegerField(required=False, default=42)
+
+
+class CompetitionStageCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120)
+    stage_type = serializers.ChoiceField(choices=["round_robin", "knockout"])
+    order_index = serializers.IntegerField(required=False, default=1)
+    team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+
+
+class CompetitionStageUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120, required=False)
+    stage_type = serializers.ChoiceField(choices=["round_robin", "knockout"], required=False)
+    order_index = serializers.IntegerField(required=False)
+    team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+    random_seed = serializers.IntegerField(required=False, default=42)
+
+
+class CompetitionStageRuleCreateSerializer(serializers.Serializer):
+    source_stage_id = serializers.IntegerField()
+    mode = serializers.ChoiceField(choices=["table_range", "winners", "losers"])
+    rank_from = serializers.IntegerField(required=False, allow_null=True)
+    rank_to = serializers.IntegerField(required=False, allow_null=True)
+    random_seed = serializers.IntegerField(required=False, default=42)
+
+
+class CompetitionPrizeCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120)
+    condition_type = serializers.ChoiceField(
+        choices=["final_table_range", "stage_table_range", "stage_winner", "stage_loser"]
+    )
+    source_stage_id = serializers.IntegerField(required=False, allow_null=True)
+    rank_from = serializers.IntegerField(required=False, allow_null=True)
+    rank_to = serializers.IntegerField(required=False, allow_null=True)
+
+
+class MatchdayConcludeSerializer(serializers.Serializer):
+    force = serializers.BooleanField(required=False, default=False)
 
 
 class ImportRosterCSVSerializer(serializers.Serializer):

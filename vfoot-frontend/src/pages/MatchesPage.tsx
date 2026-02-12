@@ -76,7 +76,11 @@ function FixtureRow({ f }: { f: LeagueFixtureItem }) {
       <div className="flex items-start justify-between gap-2">
         <div className="font-semibold">
           {f.home_team.name} <span className="text-slate-400">vs</span> {f.away_team.name}
-          <div className="mt-1 text-xs text-slate-500">Round {f.round_no} · {f.kickoff ? new Date(f.kickoff).toLocaleString() : 'Data da definire'}</div>
+          <div className="mt-1 text-xs text-slate-500">
+            {f.round_label ?? `Round ${f.round_no}`} ·
+            {typeof f.real_matchday === 'number' ? ` MD ${f.real_matchday} · ` : ' '}
+            {f.kickoff ? new Date(f.kickoff).toLocaleString() : 'Data da definire'}
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1">
           <Badge tone={f.status === 'finished' ? 'green' : f.status === 'live' ? 'amber' : 'slate'}>{f.status}</Badge>

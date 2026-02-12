@@ -3,12 +3,21 @@ import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../t
 import type {
   AuctionState,
   CompetitionItem,
+  CompetitionPrizeCreateRequest,
+  CompetitionPrizeItem,
+  CompetitionScheduleApplyResult,
+  CompetitionSchedulePreview,
+  CompetitionStageCreateRequest,
+  CompetitionStageUpdateRequest,
+  CompetitionStageRuleCreateRequest,
+  CompetitionStageItem,
   CompetitionUpdateRequest,
   CompetitionTemplateRequest,
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueDetail,
   LeagueFixtureItem,
+  LeagueMatchdayItem,
   LeagueSummary,
   PlayerSearchItem,
   QualificationRuleCreateRequest,
@@ -297,8 +306,11 @@ export async function getCompetitions(_leagueId: number): Promise<CompetitionIte
       competition_type: 'round_robin',
       status: 'active',
       points: { win: 3, draw: 1, loss: 0 },
+      starts_at: null,
+      ends_at: null,
       participants: [],
       qualification_rules: [],
+      prizes: [],
       fixtures: { total: 6, finished: 2 },
     },
   ];
@@ -316,9 +328,45 @@ export async function updateCompetition(competitionId: number, req: CompetitionU
       draw: req.points_draw ?? 1,
       loss: req.points_loss ?? 0,
     },
+    starts_at: req.starts_at ?? null,
+    ends_at: req.ends_at ?? null,
     participants: [],
     qualification_rules: [],
+    prizes: [],
     fixtures: { total: 6, finished: 2 },
+  };
+}
+
+export async function scheduleCompetition(
+  competitionId: number,
+  payload: { starts_at?: string | null; ends_at?: string | null; round_mapping?: Record<string, number> } = {}
+): Promise<CompetitionScheduleApplyResult> {
+  await sleep(90);
+  const mapped = payload.round_mapping ?? { 1: 24, 2: 25, 3: 26 };
+  return {
+    competition_id: competitionId,
+    scheduled_fixtures: 6,
+    rounds: 3,
+    real_matchdays: [24, 25, 26],
+    mapped_rounds: mapped,
+  };
+}
+
+export async function previewCompetitionSchedule(
+  competitionId: number,
+  payload: { starts_at?: string | null; ends_at?: string | null } = {}
+): Promise<CompetitionSchedulePreview> {
+  await sleep(90);
+  return {
+    competition_id: competitionId,
+    competition_name: 'Campionato Mock',
+    starts_at: payload.starts_at ?? null,
+    ends_at: payload.ends_at ?? null,
+    rounds: [1, 2, 3],
+    available_real_matchdays: [24, 25, 26, 27],
+    real_competition_season_id: 1,
+    proposed_mapping: { 1: 24, 2: 25, 3: 26 },
+    current_mapping: { 1: 24, 2: 25, 3: 26 },
   };
 }
 
@@ -330,6 +378,102 @@ export async function addCompetitionRule(_competitionId: number, req: Qualificat
 export async function resolveCompetitionDependencies(competitionId: number) {
   await sleep(90);
   return { competition_id: competitionId, resolved_rule_participants: 1, unresolved_rules: 0, fixtures_created: 4 };
+}
+
+export async function getCompetitionStages(_competitionId: number): Promise<CompetitionStageItem[]> {
+  await sleep(90);
+  return [
+    {
+      stage_id: 1,
+      competition_id: 1,
+      name: 'Regular season',
+      stage_type: 'round_robin',
+      status: 'active',
+      order_index: 1,
+      participants: [],
+      rules_in: [],
+      fixtures: { total: 6, finished: 2 },
+    },
+  ];
+}
+
+export async function createCompetitionStage(
+  competitionId: number,
+  req: CompetitionStageCreateRequest
+): Promise<CompetitionStageItem> {
+  await sleep(90);
+  return {
+    stage_id: Date.now(),
+    competition_id: competitionId,
+    name: req.name,
+    stage_type: req.stage_type,
+    status: 'draft',
+    order_index: req.order_index ?? 1,
+    participants: [],
+    rules_in: [],
+    fixtures: { total: 0, finished: 0 },
+  };
+}
+
+export async function updateCompetitionStage(
+  stageId: number,
+  req: CompetitionStageUpdateRequest
+): Promise<CompetitionStageItem> {
+  await sleep(90);
+  return {
+    stage_id: stageId,
+    competition_id: 1,
+    name: req.name ?? 'Stage',
+    stage_type: req.stage_type ?? 'round_robin',
+    status: 'draft',
+    order_index: req.order_index ?? 1,
+    participants: [],
+    rules_in: [],
+    fixtures: { total: 0, finished: 0 },
+  };
+}
+
+export async function addCompetitionStageRule(
+  stageId: number,
+  req: CompetitionStageRuleCreateRequest
+): Promise<unknown> {
+  await sleep(90);
+  return { stage_id: stageId, ...req };
+}
+
+export async function getCompetitionPrizes(_competitionId: number): Promise<CompetitionPrizeItem[]> {
+  await sleep(80);
+  return [];
+}
+
+export async function createCompetitionPrize(
+  _competitionId: number,
+  req: CompetitionPrizeCreateRequest
+): Promise<CompetitionPrizeItem> {
+  await sleep(80);
+  return {
+    prize_id: Date.now(),
+    name: req.name,
+    condition_type: req.condition_type,
+    source_stage_id: req.source_stage_id ?? null,
+    source_stage_name: null,
+    rank_from: req.rank_from ?? null,
+    rank_to: req.rank_to ?? null,
+  };
+}
+
+export async function deleteCompetitionPrize(_prizeId: number): Promise<void> {
+  await sleep(60);
+}
+
+export async function buildDefaultCompetitionStages(competitionId: number, _allowRepechage = false, _randomSeed = 42) {
+  await sleep(90);
+  return { competition_id: competitionId, stages_created: 3, fixtures_created: 8 };
+}
+
+export async function resolveCompetitionStage(stageId: number, _randomSeed = 42) {
+  await sleep(90);
+  return { stage_id: stageId, resolved_rule_participants: 2, unresolved_rules: 0, fixtures_created: 1 };
 }
 
 export async function createAuction(_leagueId: number, playerIds: number[]) {
@@ -398,5 +542,49 @@ export async function getAuctionState(auctionId: number): Promise<AuctionState> 
       { team_id: 11, team_name: 'Mock Team', manager_username: 'mock-admin', initial_budget: 500, spent_budget: 42, available_budget: 458 },
       { team_id: 12, team_name: 'Mock Team 2', manager_username: 'mock-user', initial_budget: 500, spent_budget: 18, available_budget: 482 },
     ],
+  };
+}
+
+export async function syncLeagueMatchdays(_leagueId: number): Promise<{ fixtures_linked: number; matchdays_touched: number }> {
+  await sleep(80);
+  return { fixtures_linked: 2, matchdays_touched: 1 };
+}
+
+export async function getLeagueMatchdays(_leagueId: number): Promise<LeagueMatchdayItem[]> {
+  await sleep(90);
+  return [
+    {
+      fantasy_matchday_id: 1,
+      league_id: 1,
+      status: 'planned',
+      real_competition_season: {
+        id: 1,
+        name: 'Serie A 2025-2026',
+        competition: 'Serie A',
+        season: '2025-2026',
+      },
+      real_matchday: 24,
+      real_completion: { total: 10, completed: 10, is_completed: true },
+      fixtures: { total: 4, finished: 2 },
+      concluded_at: null,
+      concluded_by: null,
+    },
+  ];
+}
+
+export async function concludeLeagueMatchday(
+  _leagueId: number,
+  fantasyMatchdayId: number,
+  _force = false
+): Promise<{
+  fantasy_matchday_id: number;
+  status: 'concluded';
+  fixtures_scored: number;
+}> {
+  await sleep(100);
+  return {
+    fantasy_matchday_id: fantasyMatchdayId,
+    status: 'concluded',
+    fixtures_scored: 4,
   };
 }

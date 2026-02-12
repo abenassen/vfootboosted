@@ -9,12 +9,22 @@ import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../t
 import type {
   AuctionState,
   CompetitionItem,
+  CompetitionScheduleApplyResult,
+  CompetitionSchedulePreview,
+  CompetitionPrizeCreateRequest,
+  CompetitionPrizeItem,
+  CompetitionStageCreateRequest,
+  CompetitionStageUpdateRequest,
+  CompetitionStageRuleCreateRequest,
+  CompetitionStageRuleCreateResult,
+  CompetitionStageItem,
   CompetitionUpdateRequest,
   CompetitionTemplateRequest,
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueDetail,
   LeagueFixtureItem,
+  LeagueMatchdayItem,
   LeagueSummary,
   PlayerSearchItem,
   QualificationRuleCreateRequest,
@@ -314,6 +324,30 @@ export async function updateCompetition(competitionId: number, req: CompetitionU
   return parseJsonOrThrow(res);
 }
 
+export async function scheduleCompetition(
+  competitionId: number,
+  payload: { starts_at?: string | null; ends_at?: string | null; round_mapping?: Record<string, number> } = {}
+): Promise<CompetitionScheduleApplyResult> {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}/schedule`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function previewCompetitionSchedule(
+  competitionId: number,
+  payload: { starts_at?: string | null; ends_at?: string | null } = {}
+): Promise<CompetitionSchedulePreview> {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}/schedule/preview`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function addCompetitionRule(competitionId: number, req: QualificationRuleCreateRequest) {
   const res = await fetch(`${baseUrl()}/competitions/${competitionId}/rules`, {
     method: 'POST',
@@ -328,6 +362,95 @@ export async function resolveCompetitionDependencies(competitionId: number) {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({}),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getCompetitionStages(competitionId: number): Promise<CompetitionStageItem[]> {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}/stages`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function createCompetitionStage(
+  competitionId: number,
+  req: CompetitionStageCreateRequest
+): Promise<CompetitionStageItem> {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}/stages/create`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function updateCompetitionStage(
+  stageId: number,
+  req: CompetitionStageUpdateRequest
+): Promise<CompetitionStageItem> {
+  const res = await fetch(`${baseUrl()}/stages/${stageId}`, {
+    method: 'PATCH',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function addCompetitionStageRule(
+  stageId: number,
+  req: CompetitionStageRuleCreateRequest
+): Promise<CompetitionStageRuleCreateResult> {
+  const res = await fetch(`${baseUrl()}/stages/${stageId}/rules`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getCompetitionPrizes(competitionId: number): Promise<CompetitionPrizeItem[]> {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}/prizes`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function createCompetitionPrize(
+  competitionId: number,
+  req: CompetitionPrizeCreateRequest
+): Promise<CompetitionPrizeItem> {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}/prizes`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function deleteCompetitionPrize(prizeId: number): Promise<void> {
+  const res = await fetch(`${baseUrl()}/prizes/${prizeId}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  if (res.status === 204) return;
+  await parseJsonOrThrow(res);
+}
+
+export async function buildDefaultCompetitionStages(competitionId: number, allowRepechage = false, randomSeed = 42) {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}/stages/default-build`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ allow_repechage: allowRepechage, random_seed: randomSeed }),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function resolveCompetitionStage(stageId: number, randomSeed = 42) {
+  const res = await fetch(`${baseUrl()}/stages/${stageId}/resolve`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ random_seed: randomSeed }),
   });
   return parseJsonOrThrow(res);
 }
@@ -374,6 +497,31 @@ export async function getLeagueFixtures(leagueId: number, competitionId?: number
   const suffix = params.toString() ? `?${params.toString()}` : '';
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/fixtures${suffix}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function syncLeagueMatchdays(leagueId: number): Promise<{ fixtures_linked: number; matchdays_touched: number }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/matchdays/sync`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({}),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getLeagueMatchdays(leagueId: number): Promise<LeagueMatchdayItem[]> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/matchdays`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function concludeLeagueMatchday(leagueId: number, fantasyMatchdayId: number, force = false) {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/matchdays/${fantasyMatchdayId}/conclude`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ force }),
   });
   return parseJsonOrThrow(res);
 }

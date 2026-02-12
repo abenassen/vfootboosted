@@ -23,8 +23,32 @@ export default function CompetitionPage() {
   }, [competitionId, selectedLeagueId]);
 
   const title = useMemo(() => fixtures[0]?.competition_name ?? `Competition ${competitionId ?? ''}`, [fixtures, competitionId]);
-  const upcoming = fixtures.filter((f) => f.status !== 'finished');
-  const past = fixtures.filter((f) => f.status === 'finished');
+  const groupedByRound = useMemo(() => {
+    const buckets = new Map<
+      string,
+      { roundNo: number; roundLabel: string; realMatchday: number | null; fixtures: LeagueFixtureItem[] }
+    >();
+    for (const f of fixtures) {
+      const roundLabel = f.round_label ?? `Round ${f.round_no}`;
+      const realMd = typeof f.real_matchday === 'number' ? f.real_matchday : null;
+      const key = `${roundLabel}|${f.round_no}|${realMd ?? 'na'}`;
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          roundNo: f.round_no,
+          roundLabel,
+          realMatchday: realMd,
+          fixtures: [],
+        });
+      }
+      buckets.get(key)!.fixtures.push(f);
+    }
+    return [...buckets.values()].sort((a, b) => {
+      const am = a.realMatchday ?? 9999;
+      const bm = b.realMatchday ?? 9999;
+      if (am !== bm) return am - bm;
+      return a.roundNo - b.roundNo;
+    });
+  }, [fixtures]);
 
   if (!selectedLeagueId) {
     return (
@@ -44,7 +68,7 @@ export default function CompetitionPage() {
         <SectionTitle>Competition</SectionTitle>
         <div className="mt-2 text-2xl font-black">{title}</div>
         <div className="mt-2 text-sm text-slate-600">
-          Fixture totali: {fixtures.length} · Future/Live: {upcoming.length} · Concluse: {past.length}
+          Fixture totali: {fixtures.length} · Round/Stage: {groupedByRound.length}
         </div>
         <Link to="/league" className="mt-3 inline-flex rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">
           Torna alla Lega
@@ -52,23 +76,23 @@ export default function CompetitionPage() {
       </Card>
 
       <Card className="p-4">
-        <SectionTitle>Prossime Partite</SectionTitle>
-        <div className="mt-3 space-y-2">
-          {upcoming.length ? (
-            upcoming.map((f) => <FixtureRow key={f.fixture_id} f={f} />)
+        <SectionTitle>Calendario per Round / Matchday</SectionTitle>
+        <div className="mt-3 space-y-3">
+          {groupedByRound.length ? (
+            groupedByRound.map((g) => (
+              <div key={`${g.roundLabel}-${g.roundNo}-${g.realMatchday ?? 'na'}`} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-semibold">{g.roundLabel}</span>
+                  <Badge tone="slate">Round {g.roundNo}</Badge>
+                  {g.realMatchday !== null ? <Badge tone="amber">Real MD {g.realMatchday}</Badge> : <Badge tone="red">Non schedulato</Badge>}
+                </div>
+                <div className="mt-2 space-y-2">
+                  {g.fixtures.map((f) => <FixtureRow key={f.fixture_id} f={f} />)}
+                </div>
+              </div>
+            ))
           ) : (
-            <div className="text-sm text-slate-500">Nessuna partita futura.</div>
-          )}
-        </div>
-      </Card>
-
-      <Card className="p-4">
-        <SectionTitle>Partite Recenti</SectionTitle>
-        <div className="mt-3 space-y-2">
-          {past.length ? (
-            past.map((f) => <FixtureRow key={f.fixture_id} f={f} />)
-          ) : (
-            <div className="text-sm text-slate-500">Nessuna partita conclusa.</div>
+            <div className="text-sm text-slate-500">Nessuna partita disponibile.</div>
           )}
         </div>
       </Card>
@@ -83,7 +107,9 @@ function FixtureRow({ f }: { f: LeagueFixtureItem }) {
         <div className="font-semibold">
           {f.home_team.name} <span className="text-slate-400">vs</span> {f.away_team.name}
           <div className="mt-1 text-xs text-slate-500">
-            Round {f.round_no} · Leg {f.leg_no} {f.kickoff ? `· ${new Date(f.kickoff).toLocaleString()}` : ''}
+            Round {f.round_no} · Leg {f.leg_no}
+            {typeof f.real_matchday === 'number' ? ` · Real MD ${f.real_matchday}` : ''}
+            {f.kickoff ? ` · ${new Date(f.kickoff).toLocaleString()}` : ''}
           </div>
           {f.score ? (
             <div className="mt-1 text-sm font-semibold">

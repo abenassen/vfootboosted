@@ -3,7 +3,7 @@ from django.db import models
 from django.utils import timezone
 import secrets
 
-from realdata.models import Match, Player
+from realdata.models import CompetitionSeason, Match, Player
 
 
 class FantasyLeague(models.Model):
@@ -93,6 +93,96 @@ class FantasyCompetition(models.Model):
         unique_together = [("league", "name")]
 
 
+class CompetitionStage(models.Model):
+    TYPE_ROUND_ROBIN = "round_robin"
+    TYPE_KNOCKOUT = "knockout"
+
+    STATUS_DRAFT = "draft"
+    STATUS_ACTIVE = "active"
+    STATUS_DONE = "done"
+
+    competition = models.ForeignKey(FantasyCompetition, on_delete=models.CASCADE, related_name="stages")
+    name = models.CharField(max_length=120)
+    stage_type = models.CharField(
+        max_length=24,
+        choices=[(TYPE_ROUND_ROBIN, "Round Robin"), (TYPE_KNOCKOUT, "Knockout")],
+        default=TYPE_ROUND_ROBIN,
+    )
+    order_index = models.IntegerField(default=1)
+    status = models.CharField(
+        max_length=16,
+        choices=[(STATUS_DRAFT, "Draft"), (STATUS_ACTIVE, "Active"), (STATUS_DONE, "Done")],
+        default=STATUS_DRAFT,
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = [("competition", "name")]
+        ordering = ["order_index", "id"]
+
+
+class CompetitionStageParticipant(models.Model):
+    SOURCE_MANUAL = "manual"
+    SOURCE_RULE = "rule"
+
+    stage = models.ForeignKey(CompetitionStage, on_delete=models.CASCADE, related_name="participants")
+    team = models.ForeignKey(FantasyTeam, on_delete=models.CASCADE, related_name="stage_entries")
+    source = models.CharField(max_length=12, choices=[(SOURCE_MANUAL, "Manual"), (SOURCE_RULE, "Rule")], default=SOURCE_MANUAL)
+    seed = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        unique_together = [("stage", "team")]
+
+
+class CompetitionStageRule(models.Model):
+    MODE_TABLE_RANGE = "table_range"
+    MODE_WINNERS = "winners"
+    MODE_LOSERS = "losers"
+
+    target_stage = models.ForeignKey(CompetitionStage, on_delete=models.CASCADE, related_name="rules_in")
+    source_stage = models.ForeignKey(CompetitionStage, on_delete=models.CASCADE, related_name="rules_out")
+    mode = models.CharField(
+        max_length=16,
+        choices=[(MODE_TABLE_RANGE, "Table Range"), (MODE_WINNERS, "Winners"), (MODE_LOSERS, "Losers")],
+        default=MODE_WINNERS,
+    )
+    rank_from = models.IntegerField(null=True, blank=True)
+    rank_to = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+
+class FantasyMatchday(models.Model):
+    STATUS_PLANNED = "planned"
+    STATUS_CONCLUDED = "concluded"
+
+    league = models.ForeignKey(FantasyLeague, on_delete=models.CASCADE, related_name="fantasy_matchdays")
+    real_competition_season = models.ForeignKey(
+        CompetitionSeason,
+        on_delete=models.PROTECT,
+        related_name="fantasy_matchdays",
+    )
+    real_matchday = models.IntegerField()
+    status = models.CharField(
+        max_length=16,
+        choices=[(STATUS_PLANNED, "Planned"), (STATUS_CONCLUDED, "Concluded")],
+        default=STATUS_PLANNED,
+    )
+    concluded_at = models.DateTimeField(null=True, blank=True)
+    concluded_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="concluded_fantasy_matchdays",
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = [("league", "real_competition_season", "real_matchday")]
+        indexes = [models.Index(fields=["league", "status"]), models.Index(fields=["real_competition_season", "real_matchday"])]
+        ordering = ["real_matchday", "id"]
+
+
 class CompetitionTeam(models.Model):
     """Direct participants of a competition (manual or from qualification rules)."""
 
@@ -134,12 +224,47 @@ class CompetitionQualificationRule(models.Model):
     rank_to = models.IntegerField(null=True, blank=True)
 
 
+class CompetitionPrize(models.Model):
+    CONDITION_FINAL_TABLE_RANGE = "final_table_range"
+    CONDITION_STAGE_TABLE_RANGE = "stage_table_range"
+    CONDITION_STAGE_WINNER = "stage_winner"
+    CONDITION_STAGE_LOSER = "stage_loser"
+
+    competition = models.ForeignKey(FantasyCompetition, on_delete=models.CASCADE, related_name="prizes")
+    name = models.CharField(max_length=120)
+    condition_type = models.CharField(
+        max_length=24,
+        choices=[
+            (CONDITION_FINAL_TABLE_RANGE, "Final table range"),
+            (CONDITION_STAGE_TABLE_RANGE, "Stage table range"),
+            (CONDITION_STAGE_WINNER, "Stage winner"),
+            (CONDITION_STAGE_LOSER, "Stage loser"),
+        ],
+        default=CONDITION_FINAL_TABLE_RANGE,
+    )
+    source_stage = models.ForeignKey(
+        CompetitionStage,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="awarded_prizes",
+    )
+    rank_from = models.IntegerField(null=True, blank=True)
+    rank_to = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["id"]
+
+
 class FantasyFixture(models.Model):
     STATUS_SCHEDULED = "scheduled"
     STATUS_LIVE = "live"
     STATUS_FINISHED = "finished"
 
     competition = models.ForeignKey(FantasyCompetition, on_delete=models.CASCADE, related_name="fixtures")
+    stage = models.ForeignKey(CompetitionStage, on_delete=models.CASCADE, related_name="fixtures", null=True, blank=True)
+    fantasy_matchday = models.ForeignKey(FantasyMatchday, on_delete=models.SET_NULL, related_name="fixtures", null=True, blank=True)
     round_no = models.IntegerField(default=1)
     leg_no = models.IntegerField(default=1)
 

@@ -126,3 +126,67 @@ test('backend provider GUI comprehensive @backend', async ({ page }) => {
   await page.getByRole('button', { name: 'Nominate next' }).click();
   await snapBackend(page, '07-auction-tab-state');
 });
+
+test('backend provider league admin extended (6+ participants) @backend', async ({ page }) => {
+  test.skip(process.env.VFOOT_RUN_BACKEND_E2E !== '1', 'Set VFOOT_RUN_BACKEND_E2E=1 and run backend on http://127.0.0.1:8000.');
+
+  const username = process.env.VFOOT_E2E_ADMIN_USERNAME || 'smoke_b';
+  const password = process.env.VFOOT_E2E_ADMIN_PASSWORD || 'pass12345';
+  const stamp = Date.now();
+  const roundRobinName = `Extended RR ${stamp}`;
+  const knockoutName = `Extended KO ${stamp}`;
+
+  await page.goto('/?api=backend');
+  await page.getByPlaceholder('nomeutente').fill(username);
+  await page.locator('input[type="password"]').first().fill(password);
+  await page.getByRole('button', { name: 'Accedi' }).click();
+  await expect(page).toHaveURL(/\/home/);
+
+  await page.getByRole('link', { name: /Admin/ }).click();
+  await expect(page).toHaveURL(/\/league-admin/);
+  await page.getByRole('button', { name: 'League Admin', exact: true }).click();
+
+  // Ensure we are operating in the 6-team smoke league.
+  const leagueSelect = page.locator('select').first();
+  await leagueSelect.selectOption('5');
+  await expect(leagueSelect).toHaveValue('5');
+  await snapBackend(page, '10-extended-overview-smoke-league');
+
+  const openMarketButton = page.getByRole('button', { name: 'Apri mercato' });
+  if (await openMarketButton.count()) {
+    await openMarketButton.click();
+  }
+
+  await page.getByRole('button', { name: 'Competizioni' }).click();
+  await expect(page.getByRole('button', { name: 'Crea competizione' })).toBeVisible();
+  await expect(page.locator('input[type="checkbox"]').first()).toBeVisible();
+  expect(await page.locator('input[type="checkbox"]').count()).toBeGreaterThanOrEqual(6);
+  await snapBackend(page, '11-extended-competitions-with-6-teams');
+
+  await page.getByPlaceholder('Nome competizione').fill(roundRobinName);
+  await page.locator('select').filter({ hasText: 'Round robin' }).first().selectOption('round_robin');
+  await page.getByRole('button', { name: 'Crea competizione' }).click();
+  await expect(page.getByText('Competizione creata')).toBeVisible();
+
+  await page.getByPlaceholder('Nome competizione').fill(knockoutName);
+  await page.locator('select').filter({ hasText: 'Round robin' }).first().selectOption('knockout');
+  await page.getByRole('button', { name: 'Crea competizione' }).click();
+  await expect(page.getByText('Competizione creata')).toBeVisible();
+  await snapBackend(page, '12-extended-competitions-created');
+
+  // Open the created round robin competition and verify key stats render.
+  const compSelect = page.locator('select').filter({ hasText: 'Seleziona competizione' }).first();
+  await compSelect.selectOption({ label: `${roundRobinName} (round_robin)` });
+  await page.getByPlaceholder('Nome stage (es. Girone A, Semifinale)').fill('Regular season');
+  await page.getByRole('button', { name: 'Crea stage' }).click();
+  await expect(page.getByText('Stage Graph')).toBeVisible();
+  await expect(page.locator('span').filter({ hasText: '#1 Regular season' }).first()).toBeVisible();
+  await snapBackend(page, '13-stage-graph-after-default-build');
+  await expect(page.getByText('Stage:', { exact: false })).toBeVisible();
+  await expect(page.getByText('Fixture:', { exact: false })).toBeVisible();
+  await snapBackend(page, '14-extended-selected-competition-stats');
+
+  await page.getByRole('button', { name: 'Matchdays' }).click();
+  await expect(page.getByText('Conclusione Giornate')).toBeVisible();
+  await snapBackend(page, '15-extended-matchdays-tab');
+});

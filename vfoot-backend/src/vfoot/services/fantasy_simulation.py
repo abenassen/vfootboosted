@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from itertools import combinations
 from random import Random
 
 from django.db import transaction
@@ -18,8 +17,37 @@ from vfoot.models import (
 )
 
 
-def _round_robin_pairs(team_ids: list[int]) -> list[tuple[int, int]]:
-    return list(combinations(team_ids, 2))
+def _round_robin_rounds(team_ids: list[int], seed: int = 42) -> list[list[tuple[int, int]]]:
+    """
+    Circle-method schedule:
+    - even teams: n-1 rounds
+    - odd teams: adds a BYE pivot and still returns fair rounds
+    """
+    rng = Random(seed)
+    work = list(team_ids)
+    rng.shuffle(work)
+
+    if len(work) % 2 == 1:
+        work.append(-1)  # BYE
+
+    n = len(work)
+    rounds: list[list[tuple[int, int]]] = []
+    for r in range(n - 1):
+        pairs: list[tuple[int, int]] = []
+        for i in range(n // 2):
+            a = work[i]
+            b = work[n - 1 - i]
+            if a == -1 or b == -1:
+                continue
+            # Alternate home/away for basic balance.
+            if r % 2 == 0:
+                pairs.append((a, b))
+            else:
+                pairs.append((b, a))
+        rounds.append(pairs)
+        # rotate all except first pivot
+        work = [work[0], work[-1], *work[1:-1]]
+    return rounds
 
 
 @transaction.atomic
@@ -32,25 +60,22 @@ def generate_round_robin_fixtures(competition: FantasyCompetition, seed: int = 4
     if len(team_ids) < 2:
         raise ValueError("At least 2 teams are required.")
 
-    rng = Random(seed)
-    pairs = _round_robin_pairs(team_ids)
-    rng.shuffle(pairs)
+    rounds = _round_robin_rounds(team_ids, seed=seed)
 
     FantasyFixture.objects.filter(competition=competition).delete()
 
     fixtures: list[FantasyFixture] = []
-    round_no = 1
-    for home_id, away_id in pairs:
-        fixtures.append(
-            FantasyFixture(
-                competition=competition,
-                round_no=round_no,
-                leg_no=1,
-                home_team_id=home_id,
-                away_team_id=away_id,
+    for round_no, pairs in enumerate(rounds, start=1):
+        for home_id, away_id in pairs:
+            fixtures.append(
+                FantasyFixture(
+                    competition=competition,
+                    round_no=round_no,
+                    leg_no=1,
+                    home_team_id=home_id,
+                    away_team_id=away_id,
+                )
             )
-        )
-        round_no += 1
 
     FantasyFixture.objects.bulk_create(fixtures, batch_size=500)
     return len(fixtures)
