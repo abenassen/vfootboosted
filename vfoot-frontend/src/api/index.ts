@@ -66,6 +66,7 @@ type ApiImpl = {
   createCompetitionTemplate: (leagueId: number, req: CompetitionTemplateRequest) => ReturnType<typeof backendApi.createCompetitionTemplate>;
   getCompetitions: (leagueId: number) => Promise<CompetitionItem[]>;
   updateCompetition: (competitionId: number, req: CompetitionUpdateRequest) => Promise<CompetitionItem>;
+  deleteCompetition: (competitionId: number) => Promise<void>;
   scheduleCompetition: (
     competitionId: number,
     payload?: { starts_at?: string | null; ends_at?: string | null; round_mapping?: Record<string, number> }
@@ -79,6 +80,7 @@ type ApiImpl = {
   getCompetitionStages: (competitionId: number) => Promise<CompetitionStageItem[]>;
   createCompetitionStage: (competitionId: number, req: CompetitionStageCreateRequest) => Promise<CompetitionStageItem>;
   updateCompetitionStage: (stageId: number, req: CompetitionStageUpdateRequest) => Promise<CompetitionStageItem>;
+  deleteCompetitionStage: (stageId: number) => Promise<void>;
   addCompetitionStageRule: (stageId: number, req: CompetitionStageRuleCreateRequest) => Promise<CompetitionStageRuleCreateResult>;
   getCompetitionPrizes: (competitionId: number) => Promise<CompetitionPrizeItem[]>;
   createCompetitionPrize: (competitionId: number, req: CompetitionPrizeCreateRequest) => Promise<CompetitionPrizeItem>;
@@ -123,6 +125,7 @@ export const importRosterCsv = typedImpl.importRosterCsv;
 export const createCompetitionTemplate = typedImpl.createCompetitionTemplate;
 export const getCompetitions = typedImpl.getCompetitions;
 export const updateCompetition = typedImpl.updateCompetition;
+export const deleteCompetition = typedImpl.deleteCompetition;
 export const scheduleCompetition = typedImpl.scheduleCompetition;
 export const previewCompetitionSchedule = typedImpl.previewCompetitionSchedule;
 export const addCompetitionRule = typedImpl.addCompetitionRule;
@@ -130,6 +133,7 @@ export const resolveCompetitionDependencies = typedImpl.resolveCompetitionDepend
 export const getCompetitionStages = typedImpl.getCompetitionStages;
 export const createCompetitionStage = typedImpl.createCompetitionStage;
 export const updateCompetitionStage = typedImpl.updateCompetitionStage;
+export const deleteCompetitionStage = typedImpl.deleteCompetitionStage;
 export const addCompetitionStageRule = typedImpl.addCompetitionStageRule;
 export const getCompetitionPrizes = typedImpl.getCompetitionPrizes;
 export const createCompetitionPrize = typedImpl.createCompetitionPrize;

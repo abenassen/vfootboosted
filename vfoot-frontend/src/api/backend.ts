@@ -324,6 +324,15 @@ export async function updateCompetition(competitionId: number, req: CompetitionU
   return parseJsonOrThrow(res);
 }
 
+export async function deleteCompetition(competitionId: number): Promise<void> {
+  const res = await fetch(`${baseUrl()}/competitions/${competitionId}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  if (res.status === 204) return;
+  await parseJsonOrThrow(res);
+}
+
 export async function scheduleCompetition(
   competitionId: number,
   payload: { starts_at?: string | null; ends_at?: string | null; round_mapping?: Record<string, number> } = {}
@@ -395,6 +404,15 @@ export async function updateCompetitionStage(
     body: JSON.stringify(req),
   });
   return parseJsonOrThrow(res);
+}
+
+export async function deleteCompetitionStage(stageId: number): Promise<void> {
+  const res = await fetch(`${baseUrl()}/stages/${stageId}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  if (res.status === 204) return;
+  await parseJsonOrThrow(res);
 }
 
 export async function addCompetitionStageRule(

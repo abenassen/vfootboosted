@@ -337,6 +337,10 @@ export async function updateCompetition(competitionId: number, req: CompetitionU
   };
 }
 
+export async function deleteCompetition(_competitionId: number): Promise<void> {
+  await sleep(80);
+}
+
 export async function scheduleCompetition(
   competitionId: number,
   payload: { starts_at?: string | null; ends_at?: string | null; round_mapping?: Record<string, number> } = {}
@@ -431,6 +435,10 @@ export async function updateCompetitionStage(
     rules_in: [],
     fixtures: { total: 0, finished: 0 },
   };
+}
+
+export async function deleteCompetitionStage(_stageId: number): Promise<void> {
+  await sleep(80);
 }
 
 export async function addCompetitionStageRule(

@@ -770,6 +770,61 @@ class CompetitionStageDetailUpdateView(APIView):
 
         return Response(_serialize_stage(stage))
 
+    @transaction.atomic
+    def delete(self, request, stage_id: int):
+        stage = get_object_or_404(CompetitionStage, id=stage_id)
+        _ensure_admin(stage.competition.league, request.user.id)
+
+        dependent_rules = list(
+            CompetitionStageRule.objects.filter(source_stage=stage)
+            .select_related("target_stage", "target_stage__competition")
+            .order_by("target_stage__competition_id", "target_stage__order_index", "target_stage_id")
+        )
+        if dependent_rules:
+            return Response(
+                {
+                    "detail": "Cannot delete stage: it is used to derive participants for other stages.",
+                    "dependent_targets": [
+                        {
+                            "target_stage_id": r.target_stage_id,
+                            "target_stage_name": r.target_stage.name,
+                            "target_competition_id": r.target_stage.competition_id,
+                            "target_competition_name": r.target_stage.competition.name,
+                            "mode": r.mode,
+                            "rank_from": r.rank_from,
+                            "rank_to": r.rank_to,
+                        }
+                        for r in dependent_rules
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        external_prizes = list(
+            CompetitionPrize.objects.filter(source_stage=stage)
+            .exclude(competition=stage.competition)
+            .select_related("competition")
+        )
+        if external_prizes:
+            return Response(
+                {
+                    "detail": "Cannot delete stage: it is referenced by prizes in other competitions.",
+                    "dependent_prizes": [
+                        {
+                            "prize_id": p.id,
+                            "prize_name": p.name,
+                            "competition_id": p.competition_id,
+                            "competition_name": p.competition.name,
+                        }
+                        for p in external_prizes
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        stage.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class CompetitionStageAddRuleView(APIView):
     authentication_classes = [TokenAuthentication]
@@ -1429,6 +1484,90 @@ class CompetitionDetailUpdateView(APIView):
             for dep in dependents:
                 _resolve_rule_participants_and_regenerate(dep)
         return Response(_serialize_competition(comp))
+
+    @transaction.atomic
+    def delete(self, request, competition_id: int):
+        comp = get_object_or_404(FantasyCompetition, id=competition_id)
+        _ensure_admin(comp.league, request.user.id)
+
+        ext_stage_rules = list(
+            CompetitionStageRule.objects.filter(source_stage__competition=comp)
+            .exclude(target_stage__competition=comp)
+            .select_related("source_stage", "target_stage", "target_stage__competition")
+            .order_by("target_stage__competition_id", "target_stage__order_index", "target_stage_id")
+        )
+        if ext_stage_rules:
+            return Response(
+                {
+                    "detail": "Cannot delete competition: some stages are used as qualification sources by other competitions.",
+                    "dependent_targets": [
+                        {
+                            "source_stage_id": r.source_stage_id,
+                            "source_stage_name": r.source_stage.name,
+                            "target_stage_id": r.target_stage_id,
+                            "target_stage_name": r.target_stage.name,
+                            "target_competition_id": r.target_stage.competition_id,
+                            "target_competition_name": r.target_stage.competition.name,
+                            "mode": r.mode,
+                            "rank_from": r.rank_from,
+                            "rank_to": r.rank_to,
+                        }
+                        for r in ext_stage_rules
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ext_qual_rules = list(
+            CompetitionQualificationRule.objects.filter(source_competition=comp)
+            .exclude(competition=comp)
+            .select_related("competition")
+        )
+        if ext_qual_rules:
+            return Response(
+                {
+                    "detail": "Cannot delete competition: it is referenced by competition-level qualification rules.",
+                    "dependent_competitions": [
+                        {
+                            "competition_id": r.competition_id,
+                            "competition_name": r.competition.name,
+                            "mode": r.mode,
+                            "source_stage": r.source_stage,
+                            "rank_from": r.rank_from,
+                            "rank_to": r.rank_to,
+                        }
+                        for r in ext_qual_rules
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ext_prizes = list(
+            CompetitionPrize.objects.filter(source_stage__competition=comp)
+            .exclude(competition=comp)
+            .select_related("competition", "source_stage")
+        )
+        if ext_prizes:
+            return Response(
+                {
+                    "detail": "Cannot delete competition: some of its stages are referenced by prizes in other competitions.",
+                    "dependent_prizes": [
+                        {
+                            "prize_id": p.id,
+                            "prize_name": p.name,
+                            "competition_id": p.competition_id,
+                            "competition_name": p.competition.name,
+                            "source_stage_id": p.source_stage_id,
+                            "source_stage_name": p.source_stage.name if p.source_stage_id else None,
+                        }
+                        for p in ext_prizes
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        comp.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CompetitionScheduleView(APIView):

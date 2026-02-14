@@ -11,7 +11,9 @@ import {
   createAuction,
   addCompetitionStageRule,
   createCompetitionTemplate,
+  deleteCompetition,
   deleteCompetitionPrize,
+  deleteCompetitionStage,
   createLeague,
   getCompetitionStages,
   getAuctionState,
@@ -419,6 +421,78 @@ export default function LeagueAdminPage() {
     let i = 2;
     while (used.has(`${base} ${i}`.toLowerCase())) i += 1;
     return `${base} ${i}`;
+  }
+
+  function formatDeletionDependencyError(err: unknown): Error {
+    if (!(err instanceof Error)) return new Error(String(err));
+    const msg = err.message ?? '';
+    const marker = 'API 400:';
+    const idx = msg.indexOf(marker);
+    if (idx < 0) return err;
+
+    const raw = msg.slice(idx + marker.length).trim();
+    try {
+      const payload = JSON.parse(raw) as {
+        detail?: string;
+        dependent_targets?: Array<{
+          target_competition_name?: string;
+          target_stage_name?: string;
+          mode?: string;
+          rank_from?: number | null;
+          rank_to?: number | null;
+        }>;
+        dependent_competitions?: Array<{
+          competition_name?: string;
+          mode?: string;
+          source_stage?: string;
+          rank_from?: number | null;
+          rank_to?: number | null;
+        }>;
+        dependent_prizes?: Array<{
+          competition_name?: string;
+          prize_name?: string;
+          source_stage_name?: string | null;
+        }>;
+      };
+
+      const chunks: string[] = [];
+
+      if (payload.dependent_targets?.length) {
+        const shown = payload.dependent_targets.slice(0, 3).map((d) => {
+          const mode = d.mode ?? 'rule';
+          const suffix =
+            mode === 'table_range' && d.rank_from
+              ? ` (${d.rank_from}${d.rank_to && d.rank_to !== d.rank_from ? `-${d.rank_to}` : ''})`
+              : '';
+          return `${d.target_competition_name ?? 'Comp'} / ${d.target_stage_name ?? 'Stage'} via ${mode}${suffix}`;
+        });
+        const more = payload.dependent_targets.length > 3 ? ` (+${payload.dependent_targets.length - 3} altre)` : '';
+        chunks.push(`Dipendenze stage: ${shown.join('; ')}${more}`);
+      }
+
+      if (payload.dependent_competitions?.length) {
+        const shown = payload.dependent_competitions.slice(0, 3).map((d) => {
+          const mode = d.mode ?? 'rule';
+          return `${d.competition_name ?? 'Comp'} via ${mode}/${d.source_stage ?? 'final'}`;
+        });
+        const more = payload.dependent_competitions.length > 3 ? ` (+${payload.dependent_competitions.length - 3} altre)` : '';
+        chunks.push(`Dipendenze competizione: ${shown.join('; ')}${more}`);
+      }
+
+      if (payload.dependent_prizes?.length) {
+        const shown = payload.dependent_prizes.slice(0, 3).map((d) => `${d.competition_name ?? 'Comp'}: ${d.prize_name ?? 'Premio'}`);
+        const more = payload.dependent_prizes.length > 3 ? ` (+${payload.dependent_prizes.length - 3} altri)` : '';
+        chunks.push(`Premi collegati: ${shown.join('; ')}${more}`);
+      }
+
+      if (chunks.length) {
+        return new Error(`${payload.detail ?? 'Eliminazione bloccata.'} ${chunks.join(' | ')}`);
+      }
+      if (payload.detail) return new Error(payload.detail);
+      return err;
+    } catch {
+      return err;
+    }
   }
 
   async function reloadSchedulePreview(competitionId: number) {
@@ -936,6 +1010,32 @@ export default function LeagueAdminPage() {
                           <div><span className="font-semibold">Stato:</span> {selectedCompetition.status}</div>
                           <div><span className="font-semibold">Fixture:</span> {selectedCompetition.fixtures.finished}/{selectedCompetition.fixtures.total}</div>
                           <div><span className="font-semibold">Stage:</span> {competitionStages.length}</div>
+                          <div className="mt-2">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() =>
+                                void run(async () => {
+                                  if (!selectedCompetition) return;
+                                  const ok = window.confirm(
+                                    `Eliminare la competizione "${selectedCompetition.name}"? Operazione irreversibile.`
+                                  );
+                                  if (!ok) return;
+                                  try {
+                                    await deleteCompetition(selectedCompetition.competition_id);
+                                  } catch (e) {
+                                    throw formatDeletionDependencyError(e);
+                                  }
+                                  setSelectedCompetitionId(null);
+                                  setSelectedEditStageId(null);
+                                  if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
+                                  setMsg('Competizione eliminata');
+                                })
+                              }
+                            >
+                              Elimina competizione
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </Card>
@@ -1041,37 +1141,6 @@ export default function LeagueAdminPage() {
                                   <div className="mt-2 text-xs text-slate-500">Tutti i team della lega sono gia presenti nello stage.</div>
                                 ) : null}
                               </div>
-                              <div className="flex flex-wrap gap-2">
-                                <Button
-                                  size="sm"
-                                  onClick={() =>
-                                    void run(async () => {
-                                      if (!selectedCompetition) return;
-                                      if (selectedEditStageId) {
-                                        await updateCompetitionStage(selectedEditStageId, {
-                                          name: newStageName,
-                                          stage_type: newStageType,
-                                          order_index: Number(newStageOrder || 1),
-                                          team_ids: newStageTeamIds,
-                                        });
-                                        setMsg('Stage aggiornato');
-                                      } else {
-                                        await createCompetitionStage(selectedCompetition.competition_id, {
-                                          name: newStageName,
-                                          stage_type: newStageType,
-                                          order_index: Number(newStageOrder || 1),
-                                          team_ids: newStageTeamIds,
-                                        });
-                                        setMsg('Stage creato');
-                                      }
-                                      await loadCompetitionStages(selectedCompetition.competition_id);
-                                      if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                                    })
-                                  }
-                                >
-                                  {selectedEditStageId ? 'Salva modifiche stage' : 'Crea nuovo stage'}
-                                </Button>
-                              </div>
                             </>
                           ) : (
                             <>
@@ -1163,6 +1232,65 @@ export default function LeagueAdminPage() {
                               </div>
                             </>
                           )}
+
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                void run(async () => {
+                                  if (!selectedCompetition) return;
+                                  if (selectedEditStageId) {
+                                    await updateCompetitionStage(selectedEditStageId, {
+                                      name: newStageName,
+                                      stage_type: newStageType,
+                                      order_index: Number(newStageOrder || 1),
+                                      team_ids: newStageTeamIds,
+                                    });
+                                    setMsg('Stage aggiornato');
+                                  } else {
+                                    await createCompetitionStage(selectedCompetition.competition_id, {
+                                      name: newStageName,
+                                      stage_type: newStageType,
+                                      order_index: Number(newStageOrder || 1),
+                                      team_ids: newStageTeamIds,
+                                    });
+                                    setMsg('Stage creato');
+                                  }
+                                  await loadCompetitionStages(selectedCompetition.competition_id);
+                                  if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
+                                })
+                              }
+                            >
+                              {selectedEditStageId ? 'Salva modifiche stage' : 'Crea nuovo stage'}
+                            </Button>
+                            {selectedEditStageId ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  void run(async () => {
+                                    if (!selectedEditStageId || !selectedCompetition) return;
+                                    const stageToDelete = competitionStages.find((s) => s.stage_id === selectedEditStageId);
+                                    const ok = window.confirm(
+                                      `Eliminare lo stage "${stageToDelete?.name ?? `#${selectedEditStageId}`}"? Operazione irreversibile.`
+                                    );
+                                    if (!ok) return;
+                                    try {
+                                      await deleteCompetitionStage(selectedEditStageId);
+                                    } catch (e) {
+                                      throw formatDeletionDependencyError(e);
+                                    }
+                                    setSelectedEditStageId(null);
+                                    await loadCompetitionStages(selectedCompetition.competition_id);
+                                    if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
+                                    setMsg('Stage eliminato');
+                                  })
+                                }
+                              >
+                                Elimina stage
+                              </Button>
+                            ) : null}
+                          </div>
                         </div>
                       </Card>
 
