@@ -84,7 +84,7 @@ class LeagueListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        memberships = LeagueMembership.objects.filter(user=request.user).select_related("league")
+        memberships = LeagueMembership.objects.filter(user=request.user).select_related("league", "team")
         data = []
         for m in memberships:
             data.append(
@@ -94,6 +94,7 @@ class LeagueListCreateView(APIView):
                     "role": m.role,
                     "invite_code": m.league.invite_code,
                     "market_open": m.league.market_open,
+                    "team_name": m.team.name if hasattr(m, "team") else None,
                 }
             )
         return Response(data)

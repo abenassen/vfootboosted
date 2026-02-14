@@ -205,7 +205,8 @@ export async function getLeagues(): Promise<LeagueSummary[]> {
     name: l.name,
     role: 'admin',
     invite_code: l.invite_code,
-    market_open: l.market_open
+    market_open: l.market_open,
+    team_name: l.teams[0]?.name ?? null,
   }));
 }
 

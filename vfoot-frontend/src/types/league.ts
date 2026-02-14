@@ -4,6 +4,7 @@ export interface LeagueSummary {
   role: 'admin' | 'manager';
   invite_code: string;
   market_open: boolean;
+  team_name?: string | null;
 }
 
 export interface LeagueMember {

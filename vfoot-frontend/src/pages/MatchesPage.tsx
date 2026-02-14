@@ -21,16 +21,45 @@ export default function MatchesPage() {
       .finally(() => setLoading(false));
   }, [selectedLeagueId]);
 
+  const filteredFixtures = useMemo(() => {
+    const involved = fixtures.filter((f) => f.is_user_involved);
+    if (!involved.length) return [];
+
+    const withRealMatchday = involved.filter((f) => typeof f.real_matchday === 'number');
+    if (withRealMatchday.length) {
+      const unique = [...new Set(withRealMatchday.map((f) => Number(f.real_matchday)))].sort((a, b) => a - b);
+      const pending = [
+        ...new Set(
+          withRealMatchday
+            .filter((f) => f.status !== 'finished')
+            .map((f) => Number(f.real_matchday))
+        ),
+      ].sort((a, b) => a - b);
+      const current = pending.length ? pending[0] : unique[unique.length - 1];
+      const next = current + 1;
+      return withRealMatchday.filter((f) => {
+        const md = Number(f.real_matchday);
+        return md === current || md === next;
+      });
+    }
+
+    const uniqueRounds = [...new Set(involved.map((f) => f.round_no))].sort((a, b) => a - b);
+    const pendingRounds = [...new Set(involved.filter((f) => f.status !== 'finished').map((f) => f.round_no))].sort((a, b) => a - b);
+    const currentRound = pendingRounds.length ? pendingRounds[0] : uniqueRounds[uniqueRounds.length - 1];
+    const nextRound = currentRound + 1;
+    return involved.filter((f) => f.round_no === currentRound || f.round_no === nextRound);
+  }, [fixtures]);
+
   const grouped = useMemo(() => {
     const map = new Map<string, LeagueFixtureItem[]>();
-    for (const f of fixtures) {
+    for (const f of filteredFixtures) {
       const key = `${f.competition_id}:${f.competition_name}`;
       const curr = map.get(key) ?? [];
       curr.push(f);
       map.set(key, curr);
     }
     return [...map.entries()].map(([k, v]) => ({ key: k, competitionName: v[0].competition_name, fixtures: v }));
-  }, [fixtures]);
+  }, [filteredFixtures]);
 
   if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per vedere le partite.</div>;
   if (loading) return <div className="text-sm text-slate-500">Caricamento partite…</div>;
@@ -40,8 +69,14 @@ export default function MatchesPage() {
     <div className="space-y-4">
       <Card className="p-4">
         <SectionTitle>Partite</SectionTitle>
-        <div className="mt-2 text-sm text-slate-600">Partite recenti e prossime per tutte le competizioni della lega selezionata.</div>
+        <div className="mt-2 text-sm text-slate-600">
+          Mostrate solo le partite della tua squadra, limitate al matchday corrente e al successivo.
+        </div>
       </Card>
+
+      {!grouped.length ? (
+        <Card className="p-4 text-sm text-slate-500">Nessuna partita trovata per la tua squadra nella finestra corrente/prossima.</Card>
+      ) : null}
 
       {grouped.map((g) => {
         const next = g.fixtures.filter((f) => f.status !== 'finished');

@@ -38,6 +38,7 @@ export default function AppShell() {
   const { user, logout } = useAuth();
   const { selectedLeague, selectedLeagueId, leagues, setSelectedLeagueId } = useLeagueContext();
   const [quickCompetitions, setQuickCompetitions] = useState<CompetitionItem[]>([]);
+  const activeTeamName = selectedLeague?.team_name?.trim() || null;
 
   useEffect(() => {
     if (!selectedLeagueId) {
@@ -62,7 +63,12 @@ export default function AppShell() {
           </div>
           <div className="flex items-center gap-3">
             <LeagueSwitcher />
-            <div className="text-xs text-slate-500">{user?.username}</div>
+            <div className="text-right text-xs leading-tight">
+              <div className="text-slate-500">{user?.username ?? 'Utente'}</div>
+              <div className="font-semibold text-slate-700">
+                Squadra: {activeTeamName ?? 'non impostata'}
+              </div>
+            </div>
             <Button size="sm" variant="secondary" onClick={() => void logout()}>
               Logout
             </Button>
@@ -141,6 +147,11 @@ export default function AppShell() {
               <div>
                 <div className="text-xs text-slate-500">Vfoot Boosted</div>
                 <div className="font-bold text-lg leading-tight">{title}</div>
+                {selectedLeague ? (
+                  <div className="text-[11px] text-slate-500 leading-tight">
+                    {selectedLeague.name} · Squadra: {activeTeamName ?? 'non impostata'}
+                  </div>
+                ) : null}
               </div>
             </div>
             <div className="flex items-center gap-2">
