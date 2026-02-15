@@ -179,10 +179,26 @@ Agents must NEVER:
     -   Formalized heatmap-driven positional model.
     -   Clarified separation between legacy role-based engine and new
         Vfoot engine.
+-   2026-02-15:
+    -   Added StatsBomb feature ingestion pipeline in backend
+        (`realdata/services/statsbomb_adapter.py`) with management
+        command `import_statsbomb`.
+    -   Imported full Serie A StatsBomb season (380 matches) into
+        feature tables (`PlayerZoneFeature`, `TeamZoneFeature`).
+    -   Adopted feature-only DB strategy for SQLite: raw event data kept
+        outside main DB; added ingestion provenance table
+        `DataIngestionManifest`.
+    -   Added SQLite pre-import lock check in `import_statsbomb`
+        command.
+    -   Frontend context/UX refinements:
+        - top bar now surfaces active team context (with explicit
+          `Squadra:` label),
+        - `Matches` page now shows only user-involved fixtures for
+          current + next matchday window.
 
 ------------------------------------------------------------------------
 
-## Current Implementation Snapshot (2026-02-12)
+## Current Implementation Snapshot (2026-02-15)
 
 ### Repository Layout (current)
 
@@ -211,8 +227,19 @@ Agents must NEVER:
 -   Protected endpoints require token auth (`TokenAuthentication`).
 -   Overcrowding rule and ±10% duel modifier are enforced in backend
     duel logic.
--   Current backend data is contract-compatible but still synthetic
-    placeholder data until real ingestion is wired.
+-   `realdata` now supports feature-first ingestion with:
+    -   `PlayerZoneFeature`
+    -   `TeamZoneFeature`
+    -   `DataIngestionManifest`
+-   StatsBomb ingestion command available:
+    -   `cd vfoot-backend/src && ../.venv/bin/python manage.py import_statsbomb --limit-matches <N>`
+-   Full-season StatsBomb load completed in local SQLite (dev baseline):
+    -   `Match`: 380
+    -   `MatchAppearance`: 16,750
+    -   `PlayerZoneFeature`: 608,647
+    -   `TeamZoneFeature`: 175,961
+-   Match-detail contract is still being progressively aligned from
+    synthetic macro placeholders to provider-derived macro metrics.
 
 ### Frontend Status
 
@@ -227,6 +254,14 @@ Agents must NEVER:
     -   `src/auth/AuthContext.tsx`
     -   `/home`, `/league`, `/squad`, `/matches`, `/market` require
         authenticated session.
+-   Top bar context improvements are implemented in
+    `src/layouts/AppShell.tsx`:
+    -   explicit current team label (`Squadra: ...`),
+    -   league/team context visible also on mobile header.
+-   `Matches` page filtering updated in `src/pages/MatchesPage.tsx`:
+    -   only fixtures where user team is involved,
+    -   only current and next matchday window (with fallback on round
+        number when real matchday mapping is missing).
 
 ### Dev Notes
 
@@ -236,6 +271,12 @@ Agents must NEVER:
     -   `cd vfoot-backend/src && ../.venv/bin/python manage.py runserver localhost:8000 --noreload`
 -   Frontend run command:
     -   `cd vfoot-frontend && npm run dev -- --host localhost --port 5173`
+-   For heavy imports on SQLite, avoid running Django server in parallel
+    with importer commands to reduce lock contention.
+-   StatsBomb import lock check can be bypassed only when needed:
+    -   `--skip-lock-check`
+-   Conservative write mode for problematic local environments:
+    -   `--safe-writes`
 
 ------------------------------------------------------------------------
 

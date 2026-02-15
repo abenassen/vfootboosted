@@ -1,6 +1,24 @@
 from django.db import models
 from django.utils import timezone
 
+PROVIDER_STATSBOMB = "statsbomb"
+PROVIDER_WYSCOUT = "wyscout"
+PROVIDER_SOFASCORE = "sofascore"
+PROVIDER_CHOICES = [
+    (PROVIDER_STATSBOMB, "StatsBomb"),
+    (PROVIDER_WYSCOUT, "Wyscout"),
+    (PROVIDER_SOFASCORE, "SofaScore"),
+]
+
+SIDE_HOME = "home"
+SIDE_AWAY = "away"
+SIDE_UNKNOWN = "unknown"
+SIDE_CHOICES = [
+    (SIDE_HOME, "Home"),
+    (SIDE_AWAY, "Away"),
+    (SIDE_UNKNOWN, "Unknown"),
+]
+
 
 class Competition(models.Model):
     name = models.CharField(max_length=80)          # "Serie A"
@@ -179,3 +197,72 @@ class PlayerTeamStint(models.Model):
         indexes = [models.Index(fields=["player", "team_season"]),
                    models.Index(fields=["team_season", "start_date"])]
 
+
+class DataIngestionManifest(models.Model):
+    """
+    Tracks external dataset versions used to generate DB features.
+    """
+
+    provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES, default=PROVIDER_STATSBOMB)
+    dataset_key = models.CharField(max_length=80, default="default")
+    data_version = models.CharField(max_length=80, default="unknown")
+    formula_version = models.CharField(max_length=80, default="features_v1")
+    source_path = models.CharField(max_length=500, blank=True, default="")
+    notes = models.CharField(max_length=300, blank=True, default="")
+    imported_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = [("provider", "dataset_key", "data_version", "formula_version")]
+        indexes = [
+            models.Index(fields=["provider", "data_version"]),
+            models.Index(fields=["imported_at"]),
+        ]
+
+
+class PlayerZoneFeature(models.Model):
+    """
+    Aggregated feature values by player and zone for one match.
+    One row per feature key.
+    """
+
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="player_zone_features")
+    player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="zone_features")
+    team_side = models.CharField(max_length=12, choices=SIDE_CHOICES, default=SIDE_UNKNOWN)
+    zone_key = models.CharField(max_length=24)
+    feature_key = models.CharField(max_length=64)
+    value = models.FloatField(default=0.0)
+    provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES, default=PROVIDER_STATSBOMB)
+    source_method = models.CharField(max_length=40, default="event_spatial_exact")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = [("match", "player", "team_side", "zone_key", "feature_key", "provider")]
+        indexes = [
+            models.Index(fields=["match", "player"]),
+            models.Index(fields=["match", "zone_key"]),
+            models.Index(fields=["feature_key"]),
+        ]
+
+
+class TeamZoneFeature(models.Model):
+    """
+    Aggregated feature values by team side and zone for one match.
+    One row per feature key.
+    """
+
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="team_zone_features")
+    team_side = models.CharField(max_length=12, choices=SIDE_CHOICES, default=SIDE_UNKNOWN)
+    zone_key = models.CharField(max_length=24)
+    feature_key = models.CharField(max_length=64)
+    value = models.FloatField(default=0.0)
+    provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES, default=PROVIDER_STATSBOMB)
+    source_method = models.CharField(max_length=40, default="event_spatial_exact")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = [("match", "team_side", "zone_key", "feature_key", "provider")]
+        indexes = [
+            models.Index(fields=["match", "team_side"]),
+            models.Index(fields=["match", "zone_key"]),
+            models.Index(fields=["feature_key"]),
+        ]
