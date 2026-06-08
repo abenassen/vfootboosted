@@ -1607,34 +1607,35 @@ fantasy tables.
   can mis-pick). A picked starter who doesn't appear is `absent` and the engine
   tries to cover them from the bench. This removes the systematic upward bias of
   conditioning selection on same-match outcomes.
-  - **Roles** are coarse (GK/DEF/MID/ATT) derived from each player's dominant
-    StatsBomb position (`_player_roles`), stored per lineup entry. Avg lineup ≈
-    1 GK / 4.6 DEF / 3.0 MID / 2.4 ATT.
+  - **Roles inferred spatially** (NOT from StatsBomb position labels): role
+    GK/DEF/MID/ATT comes from the player's column centre of gravity + own-box
+    touch share (`_role_from_footprint`; GK touch ~96% in their own box).
+    Thresholds set from the data. Avg lineup ≈ 1 GK / 3.5 DEF / 3.6 MID / 2.9 ATT.
   - **Exactly one goalkeeper STARTS** (never two in the XI). The bench keeps a
     backup keeper, and a **goalkeeper may only be substituted by a goalkeeper**
-    (and vice versa) in the engine. The one-GK rule will gate user lineups later.
+    (and vice versa). The one-GK rule will gate user lineups later.
   - **Favours regulars**: selection weights value by season start rate and the
-    pool `min_appearances` default is 15, so the fixed XI is built from players
-    who take the field on most matchdays.
+    pool `min_appearances` default is 15.
   - **Overcrowding-aware**: outfield slots filled greedily by value minus a
-    penalty for crowding zones already covered (season touch footprint), so
-    strength spreads across the pitch. No explicit "uncovered zone" reward — only
-    the overcrowding disincentive, as intended.
-  - **Known limit**: the heuristic fields the SAME XI every matchday (no
-    per-matchday adaptation, no hindsight), so ~9.7/11 of the picked XI actually
-    play that round and ~8% of gaps stay uncovered (the bench reserve also
-    rested). Real-football rotation makes this expected; closing it needs the
-    per-matchday predictive model (next step #2), not a heuristic tweak.
-- **Substitute coverage (engine, "Mode 1")**: for each starter's on-pitch gaps,
-  pick the best-overlapping unused bench player; bench contribution scaled by
-  overlap. Gaps are classified by **exit category**, not duration:
-  `pre_entry` (came on late), `post_exit` via `substitution_off`, disciplinary
-  (red/second-yellow, not coverable), `absent` (never played). A player who
-  steps off and returns (injury) is NOT a substitution and is ignored.
+    penalty for crowding zones already covered (season touch footprint). No
+    explicit "uncovered zone" reward — only the overcrowding disincentive.
+- **Substitute coverage (engine)**: bench = the whole remaining squad (ordered
+  reserves, not a fixed 7). For each starter gap the engine picks the reserve
+  that most **improves the team** (calibration-weighted contribution × gap
+  overlap), GK↔GK only. Uncovered gaps are now ~0.9% (was ~8%). Gaps are
+  classified by **exit category**, not duration: `pre_entry` (came on late),
+  `post_exit` via `substitution_off`, disciplinary (red/second-yellow, not
+  coverable), `absent` (never played). A player who steps off and returns
+  (injury) is NOT a substitution and is ignored.
+- **Known limit**: the heuristic fields the SAME XI every matchday (no
+  per-matchday adaptation, no hindsight), so ~9.7/11 of the picked XI actually
+  play that round — real rotation. Closing this fully needs the per-matchday
+  predictive model (next step #2).
 - Artifact per fixture stores: scores/goals, `home_lineup`/`away_lineup`
-  (starters/bench, substitution_report), and `vector_report` = {total_margin,
-  boosted_margin, score_build, zones[20] (margin/winner/macros/top features),
-  home_player_totals/away_player_totals (per-zone contributions, own frame)}.
+  (starters/bench with `role`, substitution_report), and `vector_report` =
+  {total_margin, boosted_margin, score_build, zones[20] (margin/winner/macros/
+  top features + per-zone top-6 home/away players, specular), home_player_totals/
+  away_player_totals}.
 
 ## Backend API (read-only simulation)
 
