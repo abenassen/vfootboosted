@@ -92,6 +92,7 @@ export interface SimPlayerLine {
   player_id: number;
   event_score: number;
   is_goalkeeper?: boolean;
+  role?: string; // GK | DEF | MID | ATT (from StatsBomb position)
 }
 
 export interface SimSubstitution {

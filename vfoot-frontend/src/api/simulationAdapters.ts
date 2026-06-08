@@ -161,41 +161,55 @@ export function lineupBoardVMs(
   }
 
   // A lineup SLOT = the starter + the bench player(s) who covered their gaps.
-  // Influence bar, tendency and order are computed on the COMBINED footprint, so
-  // a substituted/absent starter still shows the contribution and role of who
-  // actually played that slot.
-  const subTotalsByStarter = new Map<number, SimPlayerTotal[]>();
+  // Influence bar, role and order are computed on the COMBINED slot, so a
+  // substituted/absent starter shows the contribution and role of who actually
+  // played that slot (the dominant contributor by |contribution|).
+  const roleById = new Map<number, string>();
+  for (const p of [...lineup.starters, ...lineup.bench]) {
+    if (p.role) roleById.set(p.player_id, p.role);
+  }
+  // starter_id -> bench player ids that covered them
+  const subIdsByStarter = new Map<number, number[]>();
   for (const s of lineup.substitution_report.substitutions) {
     if (s.covered && s.bench_id != null) {
-      const t = totalById.get(s.bench_id);
-      if (t) {
-        const arr = subTotalsByStarter.get(s.starter_id) ?? [];
-        arr.push(t);
-        subTotalsByStarter.set(s.starter_id, arr);
-      }
+      const arr = subIdsByStarter.get(s.starter_id) ?? [];
+      arr.push(s.bench_id);
+      subIdsByStarter.set(s.starter_id, arr);
     }
   }
 
   const rows = lineup.starters.map((p) => {
-    const own = totalById.get(p.player_id);
-    const subs = subTotalsByStarter.get(p.player_id) ?? [];
+    const subIds = subIdsByStarter.get(p.player_id) ?? [];
+    const memberIds = [p.player_id, ...subIds];
     const combinedZones: Record<string, number> = {};
     const addZones = (zones: Record<string, number>) => {
       for (const [zoneKey, value] of Object.entries(zones)) {
         combinedZones[zoneKey] = (combinedZones[zoneKey] ?? 0) + value;
       }
     };
-    if (own) addZones(own.zones);
-    for (const t of subs) addZones(t.zones);
-    const combinedTotal = (own?.total ?? 0) + subs.reduce((s, t) => s + t.total, 0);
+    let combinedTotal = 0;
+    let dominantId = p.player_id;
+    let dominantAbs = -1;
+    for (const id of memberIds) {
+      const t = totalById.get(id);
+      if (!t) continue;
+      addZones(t.zones);
+      combinedTotal += t.total;
+      if (Math.abs(t.total) > dominantAbs) {
+        dominantAbs = Math.abs(t.total);
+        dominantId = id;
+      }
+    }
+    // Role of the slot = role of the dominant contributor (who actually played
+    // it most), falling back to the nominal starter's role.
+    const role = roleById.get(dominantId) ?? roleById.get(p.player_id) ?? null;
     // Footprint zones go on the shared (home-perspective) map, so away players
-    // are mirrored. avgCol (tendency) stays in the OWN frame so an attacker
-    // reads as ATT for either team.
+    // are mirrored. avgCol stays in the OWN frame, used only for fine ordering.
     const ownZoneKeys = Object.keys(combinedZones);
     return {
       id: p.player_id,
       name: p.name,
-      isGoalkeeper: Boolean(p.is_goalkeeper),
+      role,
       zones: mirror ? ownZoneKeys.map(mirrorZoneKey) : ownZoneKeys,
       absTotal: Math.abs(combinedTotal),
       avgCol: averageColumn(combinedZones),
@@ -206,7 +220,7 @@ export function lineupBoardVMs(
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
-    isGoalkeeper: r.isGoalkeeper,
+    role: r.role,
     zones: r.zones,
     share: r.absTotal / sum,
     avgCol: r.avgCol,

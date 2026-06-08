@@ -19,21 +19,23 @@ export interface LineupSubEvent {
 export interface LineupPlayerVM {
   id: string | number;
   name: string;
-  isGoalkeeper: boolean;
+  role: string | null; // GK | DEF | MID | ATT (slot's dominant contributor)
   zones: string[]; // zone keys to light up on the pitch map (combined slot)
   share: number; // 0..1 relative influence within the team (starter + subs)
-  avgCol: number | null; // spatial tendency: 0 = defense ... 4 = attack
+  avgCol: number | null; // spatial centre of gravity, for fine ordering
   events: LineupSubEvent[];
 }
 
-// Spatial tendency band. The goalkeeper has its own identity; outfield bands are
-// inferred from where the slot acted (no fixed roles).
-function tendencyBand(avgCol: number | null, isGoalkeeper: boolean): { label: string; chip: string } {
-  if (isGoalkeeper) return { label: 'POR', chip: 'bg-amber-500' };
-  if (avgCol == null) return { label: '—', chip: 'bg-slate-300' };
-  if (avgCol < 1.0) return { label: 'DIF', chip: 'bg-blue-500' };
-  if (avgCol < 2.5) return { label: 'CEN', chip: 'bg-emerald-500' };
-  return { label: 'ATT', chip: 'bg-orange-500' };
+const ROLE_BAND: Record<string, { label: string; chip: string }> = {
+  GK: { label: 'POR', chip: 'bg-amber-500' },
+  DEF: { label: 'DIF', chip: 'bg-blue-500' },
+  MID: { label: 'CEN', chip: 'bg-emerald-500' },
+  ATT: { label: 'ATT', chip: 'bg-orange-500' },
+};
+const ROLE_RANK: Record<string, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 };
+
+function tendencyBand(role: string | null): { label: string; chip: string } {
+  return (role && ROLE_BAND[role]) || { label: '—', chip: 'bg-slate-300' };
 }
 
 // Full lineup list. Clicking a player lights up their zones on the pitch map
@@ -56,10 +58,12 @@ export function LineupColumn({
   const max = Math.max(0.0001, ...players.map((p) => p.share));
   const bar = side === 'home' ? 'bg-green-500' : 'bg-sky-500';
   const accent = side === 'home' ? 'text-green-700' : 'text-sky-700';
-  // Goalkeeper first, then most defensive to most advanced (no fixed roles:
-  // inferred from where the slot acted). Slots with no action go last.
+  // Goalkeeper → defenders → midfielders → attackers; within a role, by spatial
+  // centre of gravity. Slots with no role/action go last.
   const ordered = [...players].sort((a, b) => {
-    if (a.isGoalkeeper !== b.isGoalkeeper) return a.isGoalkeeper ? -1 : 1;
+    const ra = a.role ? ROLE_RANK[a.role] ?? 9 : 9;
+    const rb = b.role ? ROLE_RANK[b.role] ?? 9 : 9;
+    if (ra !== rb) return ra - rb;
     return (a.avgCol ?? 99) - (b.avgCol ?? 99);
   });
 
@@ -79,7 +83,7 @@ export function LineupColumn({
           const isOpen = expanded.has(p.id);
           const hasGaps = p.events.length > 0;
           const sentOff = p.events.some((e) => e.kind === 'disciplinary');
-          const band = tendencyBand(p.avgCol, p.isGoalkeeper);
+          const band = tendencyBand(p.role);
           return (
             <div
               key={p.id}

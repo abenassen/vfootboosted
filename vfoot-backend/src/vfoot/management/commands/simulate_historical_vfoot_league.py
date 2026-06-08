@@ -103,7 +103,7 @@ class Command(BaseCommand):
         parser.add_argument("--starters", type=int, default=11)
         parser.add_argument("--bench-size", type=int, default=7)
         parser.add_argument("--matchdays", type=int, default=0, help="0 means all available real matchdays.")
-        parser.add_argument("--min-appearances", type=int, default=8)
+        parser.add_argument("--min-appearances", type=int, default=15)
         parser.add_argument("--score-base", type=float, default=58.0)
         parser.add_argument("--score-scale", type=float, default=8.0)
         parser.add_argument("--scoring-mode", choices=["vector", "event"], default="vector")
@@ -146,7 +146,8 @@ class Command(BaseCommand):
         matchday_player_scores = self._matchday_player_scores()
         matchday_player_zone_features = self._matchday_player_zone_features() if scoring_mode == "vector" else {}
         matchday_player_intervals = self._matchday_player_intervals()
-        goalkeepers = self._goalkeepers()
+        player_roles = self._player_roles()
+        goalkeepers = {pid for pid, role in player_roles.items() if role == "GK"}
         season_footprints = self._player_season_footprints()
         vector_calibration = self._load_vector_calibration(str(options["vector_calibration"])) if scoring_mode == "vector" else None
         schedule = round_robin_rounds([team.id for team in teams], seed=seed)
@@ -173,6 +174,7 @@ class Command(BaseCommand):
                     temporal_substitutions=not bool(options["disable_temporal_substitutions"]),
                     goalkeepers=goalkeepers,
                     season_footprints=season_footprints,
+                    player_roles=player_roles,
                 )
                 away_result = self._lineup_and_score(
                     away,
@@ -189,6 +191,7 @@ class Command(BaseCommand):
                     temporal_substitutions=not bool(options["disable_temporal_substitutions"]),
                     goalkeepers=goalkeepers,
                     season_footprints=season_footprints,
+                    player_roles=player_roles,
                 )
                 vector_report = None
                 if scoring_mode == "vector":
@@ -350,14 +353,30 @@ class Command(BaseCommand):
         pool.sort(key=lambda player: (player.value, player.minutes), reverse=True)
         return pool
 
-    def _goalkeepers(self) -> set[int]:
-        # A player is a goalkeeper if their dominant lineup position is Goalkeeper.
+    @staticmethod
+    def _role_from_position(position: str) -> str:
+        # Coarse, intelligible role from a StatsBomb position label. Vfoot is
+        # role-free for scoring; this is only for display/lineup structure.
+        if "Goalkeeper" in position:
+            return "GK"
+        if "Back" in position:  # Center/Left/Right Back, Wing Back
+            return "DEF"
+        if "Midfield" in position:  # incl. Defensive/Attacking Midfield
+            return "MID"
+        if "Wing" in position:  # Left/Right Wing (winger, not Wing Back)
+            return "ATT"
+        if "Forward" in position or "Striker" in position:
+            return "ATT"
+        return "MID"
+
+    def _player_roles(self) -> dict[int, str]:
+        # Player -> coarse role from their dominant lineup position.
         counts: dict[int, Counter] = defaultdict(Counter)
         for player_id, source_position in (
             PlayerOnPitchInterval.objects.exclude(source_position="").values_list("player_id", "source_position")
         ):
             counts[int(player_id)][str(source_position)] += 1
-        return {pid for pid, c in counts.items() if c.most_common(1)[0][0] == "Goalkeeper"}
+        return {pid: self._role_from_position(c.most_common(1)[0][0]) for pid, c in counts.items()}
 
     def _player_season_footprints(self) -> dict[int, dict[str, float]]:
         # Normalized presence over zones (sum=1) from season touches; used as the
@@ -387,9 +406,16 @@ class Command(BaseCommand):
         """User-emulating pick: best players by value, but penalizing crowding the
         same pitch zones (encourages even coverage), with at most one goalkeeper.
         """
+        # A user fields players they expect to PLAY: weight value by season
+        # regularity (start rate), so the lineup is built from regulars and
+        # actually takes the field on most matchdays.
+        def pick_value(player: PoolPlayer) -> float:
+            regularity = min(1.0, player.starts / 30.0)
+            return player.value * (0.25 + 0.75 * regularity)
+
         gks = [p for p in roster if p.player_id in goalkeepers]
         outfield = [p for p in roster if p.player_id not in goalkeepers]
-        max_value = max((p.value for p in roster), default=1.0) or 1.0
+        max_value = max((pick_value(p) for p in roster), default=1.0) or 1.0
 
         starters: list[PoolPlayer] = []
         load: dict[str, float] = defaultdict(float)
@@ -399,9 +425,9 @@ class Command(BaseCommand):
             for zone, presence in footprints.get(player.player_id, {}).items():
                 load[zone] += presence
 
-        # Exactly one goalkeeper (the best available) — never two.
+        # Exactly one goalkeeper (the best regular keeper) — never two.
         if gks and starters_count > 0:
-            add(max(gks, key=lambda p: p.value))
+            add(max(gks, key=pick_value))
 
         remaining = list(outfield)
         while len(starters) < starters_count and remaining:
@@ -411,20 +437,20 @@ class Command(BaseCommand):
             for player in remaining:
                 fp = footprints.get(player.player_id, {})
                 crowd = sum(presence * load.get(zone, 0.0) for zone, presence in fp.items()) / selected_so_far
-                score = player.value / max_value - overcrowd_weight * crowd
+                score = pick_value(player) / max_value - overcrowd_weight * crowd
                 if best_score is None or score > best_score:
                     best_score = score
                     best = player
             add(best)
             remaining.remove(best)
 
-        # Bench = ordered reserves: best remaining players by value, INCLUDING a
-        # backup goalkeeper so the engine can cover the starting keeper if absent.
+        # Bench = ordered reserves: best remaining regulars, INCLUDING a backup
+        # goalkeeper so the engine can cover the starting keeper if absent.
         # (Only one GK ever STARTS; the reserve enters only to replace the keeper.)
         selected_ids = {p.player_id for p in starters}
         reserves = sorted(
             (p for p in roster if p.player_id not in selected_ids),
-            key=lambda p: p.value,
+            key=pick_value,
             reverse=True,
         )
         bench = reserves[:bench_size]
@@ -550,6 +576,7 @@ class Command(BaseCommand):
         temporal_substitutions: bool,
         goalkeepers: set[int],
         season_footprints: dict[int, dict[str, float]],
+        player_roles: dict[int, str],
     ) -> dict:
         scores = player_scores.get(real_matchday, {})
         # Emulate a user picking their lineup BEFORE the match: best players by
@@ -577,6 +604,7 @@ class Command(BaseCommand):
                 player_intervals=player_intervals,
                 player_final_seconds=player_final_seconds,
                 matchday_final_seconds=matchday_final_seconds,
+                goalkeepers=goalkeepers,
             )
         else:
             zone_vectors, player_vectors = self._team_zone_vectors(
@@ -602,6 +630,7 @@ class Command(BaseCommand):
                     "name": player.name,
                     "event_score": round(player_score, 3),
                     "is_goalkeeper": player.player_id in goalkeepers,
+                    "role": player_roles.get(player.player_id, "MID"),
                 }
                 for player, player_score in starters
             ],
@@ -611,6 +640,7 @@ class Command(BaseCommand):
                     "name": player.name,
                     "event_score": round(player_score, 3),
                     "is_goalkeeper": player.player_id in goalkeepers,
+                    "role": player_roles.get(player.player_id, "MID"),
                 }
                 for player, player_score in bench
             ],
@@ -651,6 +681,7 @@ class Command(BaseCommand):
         player_intervals: dict[int, list[dict]],
         player_final_seconds: dict[int, int],
         matchday_final_seconds: int,
+        goalkeepers: set[int],
     ) -> tuple[dict[str, dict[str, float]], dict, list[dict]]:
         vectors: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         player_vectors_map: dict[int, dict] = {}
@@ -699,6 +730,8 @@ class Command(BaseCommand):
                     gap_start=gap_start,
                     gap_end=gap_end,
                     player_intervals=player_intervals,
+                    goalkeepers=goalkeepers,
+                    require_goalkeeper=starter.player_id in goalkeepers,
                 )
                 if candidate is None:
                     uncovered_gap_seconds += gap_seconds
@@ -825,11 +858,16 @@ class Command(BaseCommand):
         gap_start: int,
         gap_end: int,
         player_intervals: dict[int, list[dict]],
+        goalkeepers: set[int],
+        require_goalkeeper: bool,
     ) -> tuple[PoolPlayer, int, int] | None:
         best = None
         best_key = None
         for candidate in bench:
             if candidate.player_id in used_bench:
+                continue
+            # A goalkeeper can only replace a goalkeeper, and vice versa.
+            if (candidate.player_id in goalkeepers) != require_goalkeeper:
                 continue
             intervals = player_intervals.get(candidate.player_id, [])
             active = self._active_seconds(intervals)
