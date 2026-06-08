@@ -34,6 +34,7 @@ export default function SimulationMatchDetailPage() {
       scoreBuild: scoreBuildVM(data),
       cells: zonesToCells(vr.zones),
       zones: vr.zones,
+      maxMargin: Math.max(0.0001, ...vr.zones.map((z) => Math.abs(z.margin))),
       defaultZone: decisive?.zone_key ?? null,
       homeBoard: lineupBoardVMs(data.home_lineup, vr.home_player_totals),
       awayBoard: lineupBoardVMs(data.away_lineup, vr.away_player_totals, true),
@@ -57,7 +58,9 @@ export default function SimulationMatchDetailPage() {
 
   const activeZoneKey = selectedZone ?? vm.defaultZone;
   const activeZone = vm.zones.find((z) => z.zone_key === activeZoneKey) ?? null;
-  const inspector = activeZone ? buildZoneInspector(activeZone, data.home_team, data.away_team) : null;
+  const inspector = activeZone
+    ? buildZoneInspector(activeZone, data.home_team, data.away_team, vm.maxMargin)
+    : null;
 
   const selectPlayer = (pid: string | number | null) => {
     setSelectedPlayer(pid);

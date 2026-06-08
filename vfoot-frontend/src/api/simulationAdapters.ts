@@ -77,13 +77,19 @@ function zonePlayersVM(players: SimZonePlayer[]): ZonePlayerVM[] {
   }));
 }
 
-export function buildZoneInspector(zone: SimZone, homeName: string, awayName: string): ZoneInspectorVM {
+export function buildZoneInspector(
+  zone: SimZone,
+  homeName: string,
+  awayName: string,
+  maxMargin = 1,
+): ZoneInspectorVM {
   return {
     zoneKey: zone.zone_key,
     name: zoneName(zone.zone_key),
     winner: zone.winner,
     winnerLabel: zone.winner === 'home' ? homeName : zone.winner === 'away' ? awayName : 'Pari',
     margin: zone.margin,
+    marginShare: Math.min(1, Math.abs(zone.margin) / Math.max(0.0001, maxMargin)),
     homeName,
     awayName,
     macros: zone.macros.map((m) => ({ label: m.label, homeShare: m.home_share })),

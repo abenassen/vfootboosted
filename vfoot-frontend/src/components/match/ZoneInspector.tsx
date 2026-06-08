@@ -23,6 +23,7 @@ export interface ZoneInspectorVM {
   winner: MatchResult;
   winnerLabel: string;
   margin: number;
+  marginShare: number; // |margin| / match max |margin| (0..1), for the dominance bar
   homeName: string;
   awayName: string;
   macros: RadarAxis[];
@@ -35,20 +36,48 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
   const tone = zone.winner === 'home' ? 'green' : zone.winner === 'away' ? 'slate' : 'amber';
+  const winnerColor = zone.winner === 'home' ? 'text-green-600' : zone.winner === 'away' ? 'text-sky-600' : 'text-slate-500';
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3">
       <div className="flex items-center justify-between">
-        <div>
-          <div className="text-sm font-bold text-slate-900">{zone.name}</div>
-          <div className="text-[11px] text-slate-400">
-            Vince <span className="font-semibold">{zone.winnerLabel}</span>
-          </div>
+        <div className="text-sm font-bold text-slate-900">{zone.name}</div>
+        <Badge tone={tone}>{zone.winner === 'draw' ? 'Pari' : 'Vince ' + zone.winnerLabel}</Badge>
+      </div>
+
+      {/* Headline: who won and by how much (dominance tug-of-war). */}
+      <div className="mt-2">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className={zone.winner === 'home' ? 'font-semibold text-green-700' : 'text-slate-500'}>{zone.homeName}</span>
+          <span className="text-slate-500">
+            {zone.winner === 'draw' ? (
+              'equilibrio'
+            ) : (
+              <>
+                <span className={`font-semibold ${winnerColor}`}>{zone.winnerLabel}</span> vince · margine{' '}
+                <b className="font-mono">{Math.abs(zone.margin).toFixed(2)}</b>
+              </>
+            )}
+          </span>
+          <span className={zone.winner === 'away' ? 'font-semibold text-sky-700' : 'text-slate-500'}>{zone.awayName}</span>
         </div>
-        <Badge tone={tone}>{zone.winnerLabel}</Badge>
+        <div className="relative mt-1 h-3 overflow-hidden rounded-full bg-slate-100">
+          {/* centre line */}
+          <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-slate-300" />
+          {zone.winner !== 'draw' ? (
+            <div
+              className={`absolute top-0 h-full ${zone.winner === 'home' ? 'bg-green-500' : 'bg-sky-500'}`}
+              style={
+                zone.winner === 'home'
+                  ? { right: '50%', width: `${zone.marginShare * 50}%` }
+                  : { left: '50%', width: `${zone.marginShare * 50}%` }
+              }
+            />
+          ) : null}
+        </div>
       </div>
 
       {zone.macros.length ? (
-        <div className="mt-2">
+        <div className="mt-3">
           <ZoneRadar axes={zone.macros} homeName={zone.homeName} awayName={zone.awayName} />
         </div>
       ) : null}
