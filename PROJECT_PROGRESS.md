@@ -1771,9 +1771,15 @@ data:
    recent-form "expected contribution" per player (calibration-weighted net value
    over the last ~6 matchdays; in `player_profiles.player_form`). It defaults to a
    mid-season matchday, shows the data cutoff, and offers a form-based "Suggerisci
-   XI". Next refinements: position/availability prediction (not just descriptive
-   form), opponent-aware expectation, and surfacing expected coverage vs the
-   opponent.
+   XI". The lineup is **referred to a competition** (SavedLineupSnapshot keyed per
+   team+competition; matchdays from that competition's fixtures), with an "invia a
+   tutte le competizioni" option; access is from the Calendar ("Imposta
+   formazione" on your fixture) / Home, not the Squad page. GK rule: just
+   Titolare/Panchina with exactly one goalkeeper among the 11 starters.
+   Next refinements: position/availability prediction (not just descriptive
+   form), opponent-aware expectation, expected coverage vs the opponent, and the
+   competition-organisation rework (build competitions as sets of league fixtures
+   mapped to real matchdays).
 3. ~~Materialize a simulation into the persistent league tables~~ — DONE
    (Phase 2): see "Materialized league" below.
 4. Optional model tuning: nudge base so pred goals/team ≈ real (1.21→1.29);
