@@ -37,6 +37,11 @@ from vfoot.api.league_views import (
     TeamRosterRemoveView,
     TeamRosterView,
 )
+from vfoot.api.simulation_views import (
+    SimulationFixtureDetailView,
+    SimulationFixturesView,
+    SimulationOverviewView,
+)
 from vfoot.api.views import (
     LineupContextView,
     LoginView,
@@ -132,4 +137,19 @@ urlpatterns = [
     path("lineup/save", SaveLineupView.as_view(), name="lineup-save"),
     path("matches", MatchListView.as_view(), name="matches-list"),
     path("matches/<str:match_id>", MatchDetailView.as_view(), name="match-detail"),
+    path(
+        "simulations/historical-vfoot/latest",
+        SimulationOverviewView.as_view(),
+        name="simulation-overview",
+    ),
+    path(
+        "simulations/historical-vfoot/latest/fixtures",
+        SimulationFixturesView.as_view(),
+        name="simulation-fixtures",
+    ),
+    path(
+        "simulations/historical-vfoot/latest/fixtures/<int:fixture_id>",
+        SimulationFixtureDetailView.as_view(),
+        name="simulation-fixture-detail",
+    ),
 ]
