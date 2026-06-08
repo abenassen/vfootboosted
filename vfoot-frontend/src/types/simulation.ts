@@ -91,6 +91,7 @@ export interface SimPlayerLine {
   name: string;
   player_id: number;
   event_score: number;
+  is_goalkeeper?: boolean;
 }
 
 export interface SimSubstitution {

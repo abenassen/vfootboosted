@@ -19,14 +19,17 @@ export interface LineupSubEvent {
 export interface LineupPlayerVM {
   id: string | number;
   name: string;
-  zones: string[]; // zone keys to light up on the pitch map
-  share: number; // 0..1 relative influence within the team
+  isGoalkeeper: boolean;
+  zones: string[]; // zone keys to light up on the pitch map (combined slot)
+  share: number; // 0..1 relative influence within the team (starter + subs)
   avgCol: number | null; // spatial tendency: 0 = defense ... 4 = attack
   events: LineupSubEvent[];
 }
 
-// Spatial tendency band inferred from where the player acted (no fixed roles).
-function tendencyBand(avgCol: number | null): { label: string; chip: string } {
+// Spatial tendency band. The goalkeeper has its own identity; outfield bands are
+// inferred from where the slot acted (no fixed roles).
+function tendencyBand(avgCol: number | null, isGoalkeeper: boolean): { label: string; chip: string } {
+  if (isGoalkeeper) return { label: 'POR', chip: 'bg-amber-500' };
   if (avgCol == null) return { label: '—', chip: 'bg-slate-300' };
   if (avgCol < 1.0) return { label: 'DIF', chip: 'bg-blue-500' };
   if (avgCol < 2.5) return { label: 'CEN', chip: 'bg-emerald-500' };
@@ -53,9 +56,12 @@ export function LineupColumn({
   const max = Math.max(0.0001, ...players.map((p) => p.share));
   const bar = side === 'home' ? 'bg-green-500' : 'bg-sky-500';
   const accent = side === 'home' ? 'text-green-700' : 'text-sky-700';
-  // Order from most defensive to most advanced (no fixed roles: inferred from
-  // where each player acted). Players who didn't act go last.
-  const ordered = [...players].sort((a, b) => (a.avgCol ?? 99) - (b.avgCol ?? 99));
+  // Goalkeeper first, then most defensive to most advanced (no fixed roles:
+  // inferred from where the slot acted). Slots with no action go last.
+  const ordered = [...players].sort((a, b) => {
+    if (a.isGoalkeeper !== b.isGoalkeeper) return a.isGoalkeeper ? -1 : 1;
+    return (a.avgCol ?? 99) - (b.avgCol ?? 99);
+  });
 
   const toggle = (id: string | number) =>
     setExpanded((cur) => {
@@ -73,7 +79,7 @@ export function LineupColumn({
           const isOpen = expanded.has(p.id);
           const hasGaps = p.events.length > 0;
           const sentOff = p.events.some((e) => e.kind === 'disciplinary');
-          const band = tendencyBand(p.avgCol);
+          const band = tendencyBand(p.avgCol, p.isGoalkeeper);
           return (
             <div
               key={p.id}

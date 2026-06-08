@@ -160,18 +160,45 @@ export function lineupBoardVMs(
     subsByStarter.set(s.starter_id, arr);
   }
 
+  // A lineup SLOT = the starter + the bench player(s) who covered their gaps.
+  // Influence bar, tendency and order are computed on the COMBINED footprint, so
+  // a substituted/absent starter still shows the contribution and role of who
+  // actually played that slot.
+  const subTotalsByStarter = new Map<number, SimPlayerTotal[]>();
+  for (const s of lineup.substitution_report.substitutions) {
+    if (s.covered && s.bench_id != null) {
+      const t = totalById.get(s.bench_id);
+      if (t) {
+        const arr = subTotalsByStarter.get(s.starter_id) ?? [];
+        arr.push(t);
+        subTotalsByStarter.set(s.starter_id, arr);
+      }
+    }
+  }
+
   const rows = lineup.starters.map((p) => {
-    const t = totalById.get(p.player_id);
-    // Footprint zones are placed on the shared (home-perspective) map, so away
-    // players are mirrored. avgCol (the tendency) stays in the player's OWN
-    // frame so an attacker reads as ATT for either team.
-    const ownZoneKeys = t ? Object.keys(t.zones) : [];
+    const own = totalById.get(p.player_id);
+    const subs = subTotalsByStarter.get(p.player_id) ?? [];
+    const combinedZones: Record<string, number> = {};
+    const addZones = (zones: Record<string, number>) => {
+      for (const [zoneKey, value] of Object.entries(zones)) {
+        combinedZones[zoneKey] = (combinedZones[zoneKey] ?? 0) + value;
+      }
+    };
+    if (own) addZones(own.zones);
+    for (const t of subs) addZones(t.zones);
+    const combinedTotal = (own?.total ?? 0) + subs.reduce((s, t) => s + t.total, 0);
+    // Footprint zones go on the shared (home-perspective) map, so away players
+    // are mirrored. avgCol (tendency) stays in the OWN frame so an attacker
+    // reads as ATT for either team.
+    const ownZoneKeys = Object.keys(combinedZones);
     return {
       id: p.player_id,
       name: p.name,
+      isGoalkeeper: Boolean(p.is_goalkeeper),
       zones: mirror ? ownZoneKeys.map(mirrorZoneKey) : ownZoneKeys,
-      absTotal: t ? Math.abs(t.total) : 0,
-      avgCol: t ? averageColumn(t.zones) : null,
+      absTotal: Math.abs(combinedTotal),
+      avgCol: averageColumn(combinedZones),
       events: subsByStarter.get(p.player_id) ?? [],
     };
   });
@@ -179,6 +206,7 @@ export function lineupBoardVMs(
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
+    isGoalkeeper: r.isGoalkeeper,
     zones: r.zones,
     share: r.absTotal / sum,
     avgCol: r.avgCol,

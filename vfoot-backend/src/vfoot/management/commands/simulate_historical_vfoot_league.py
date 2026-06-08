@@ -597,11 +597,21 @@ class Command(BaseCommand):
             "starter_count": len(starters),
             "bench_count": len(bench),
             "starters": [
-                {"player_id": player.player_id, "name": player.name, "event_score": round(player_score, 3)}
+                {
+                    "player_id": player.player_id,
+                    "name": player.name,
+                    "event_score": round(player_score, 3),
+                    "is_goalkeeper": player.player_id in goalkeepers,
+                }
                 for player, player_score in starters
             ],
             "bench": [
-                {"player_id": player.player_id, "name": player.name, "event_score": round(player_score, 3)}
+                {
+                    "player_id": player.player_id,
+                    "name": player.name,
+                    "event_score": round(player_score, 3),
+                    "is_goalkeeper": player.player_id in goalkeepers,
+                }
                 for player, player_score in bench
             ],
             "substitution_report": substitution_report,
