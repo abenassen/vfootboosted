@@ -204,11 +204,12 @@ export default function FormationPage() {
         {toast ? <div className="mt-2 text-sm font-semibold text-green-700">{toast}</div> : null}
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-        <Card className="p-4">
+      <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
+        <Card className="self-start p-4 lg:sticky lg:top-4">
           <SectionTitle>La squadra in campo</SectionTitle>
           <div className="mt-1 text-[11px] text-slate-400">
-            Posizione attesa di ogni titolare (dai dati storici). Il portiere ha il bordo ambra.
+            Posizione attesa di ogni titolare (dai dati storici). Il portiere ha il bordo ambra. Clicca un giocatore per
+            vederne le zone d'influenza.
           </div>
           <PitchLineup
             starterIds={starterIds}
@@ -321,6 +322,13 @@ const DOT_COLOR: Record<PlayerRole, string> = {
   ATT: 'bg-orange-500',
 };
 
+const ROLE_RGB: Record<PlayerRole, string> = {
+  GK: '251,191,36',
+  DEF: '59,130,246',
+  MID: '16,185,129',
+  ATT: '249,115,22',
+};
+
 // The XI placed on a pitch at each player's expected position. Defence on the
 // left, attack on the right; goalkeeper ringed in amber.
 function PitchLineup({
@@ -339,34 +347,84 @@ function PitchLineup({
   // Lay the XI out as formation lines: depth (x) from each player's expected
   // column, width (y) spread within their role line so dots never pile up
   // (footprint centroids alone bunch everyone in the middle).
-  const order: PlayerRole[] = ['GK', 'DEF', 'MID', 'ATT'];
-  const ROLE_X: Record<PlayerRole, number> = { GK: 8, DEF: 30, MID: 53, ATT: 77 };
+  // Base position from the player's REFERENCE zone: depth (x) by role band +
+  // expected column, lateral (y) by the expected row (so wide players stay wide,
+  // central players stay central — attackers are no longer flung to the flanks).
+  const ROLE_X: Record<PlayerRole, number> = { GK: 8, DEF: 30, MID: 53, ATT: 76 };
   const TYPICAL_COL: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 };
-  const groups: Record<PlayerRole, { p: TeamLineupPlayer; col: number }[]> = { GK: [], DEF: [], MID: [], ATT: [] };
-  for (const id of starterIds) {
-    const p = byId.get(id);
-    if (p) groups[p.role].push({ p, col: expectedPos(p.footprint).col });
-  }
-  const dots: { p: TeamLineupPlayer; left: number; top: number; isGk: boolean }[] = [];
-  for (const role of order) {
-    const g = groups[role];
-    const n = g.length;
-    g.forEach((item, i) => {
-      // depth band per role + a small individual nudge from the expected column
-      const nudge = Math.max(-7, Math.min(9, (item.col - TYPICAL_COL[role]) * 5));
-      const left = Math.max(6, Math.min(94, ROLE_X[role] + nudge));
-      const top = n <= 1 ? 50 : 12 + (i / (n - 1)) * 76;
-      dots.push({ p: item.p, left, top, isGk: item.p.player_id === gkId });
+  const dots = starterIds
+    .map((id) => byId.get(id))
+    .filter((p): p is TeamLineupPlayer => !!p)
+    .map((p) => {
+      const { col, row } = expectedPos(p.footprint);
+      const nudge = Math.max(-8, Math.min(9, (col - TYPICAL_COL[p.role]) * 6));
+      return {
+        p,
+        left: Math.max(6, Math.min(94, ROLE_X[p.role] + nudge)),
+        top: Math.max(12, Math.min(88, 12 + (row / 3) * 76)),
+        isGk: p.player_id === gkId,
+      };
     });
+  // Aesthetic de-overlap: gently push apart dots that are too close, keeping each
+  // near its real zone. The user still decides the balance of the lineup.
+  const MIN = 14;
+  for (let iter = 0; iter < 60; iter++) {
+    for (let i = 0; i < dots.length; i++) {
+      for (let j = i + 1; j < dots.length; j++) {
+        let dx = dots[i].left - dots[j].left;
+        let dy = dots[i].top - dots[j].top;
+        let d = Math.hypot(dx, dy);
+        if (d < MIN) {
+          if (d < 0.001) {
+            dx = 0;
+            dy = i % 2 === 0 ? 1 : -1;
+            d = 1;
+          }
+          const push = (MIN - d) / 2;
+          const ux = dx / d;
+          const uy = dy / d;
+          dots[i].left = Math.max(6, Math.min(94, dots[i].left + ux * push));
+          dots[i].top = Math.max(12, Math.min(88, dots[i].top + uy * push));
+          dots[j].left = Math.max(6, Math.min(94, dots[j].left - ux * push));
+          dots[j].top = Math.max(12, Math.min(88, dots[j].top - uy * push));
+        }
+      }
+    }
   }
+
+  const sel = selectedId != null ? byId.get(selectedId) : null;
+  const selMax = sel ? Math.max(0.0001, ...Object.values(sel.footprint)) : 1;
+  const selRgb = sel ? ROLE_RGB[sel.role] : '0,0,0';
   return (
-    <div className="relative mt-3 w-full overflow-hidden rounded-xl border border-green-700/40 bg-gradient-to-r from-green-600 to-green-500 aspect-[3/2] shadow-inner">
+    <div className="relative mt-3 aspect-[7/5] w-full overflow-hidden rounded-xl border border-green-700/40 bg-gradient-to-r from-green-600 to-green-500 shadow-inner">
       {/* pitch markings */}
       <div className="pointer-events-none absolute inset-2 rounded border border-white/40" />
       <div className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-white/40" />
       <div className="pointer-events-none absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/40" />
       <div className="pointer-events-none absolute left-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/40" />
       <div className="pointer-events-none absolute right-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/40" />
+      {/* predicted influence zones of the selected player */}
+      {sel
+        ? Object.entries(sel.footprint).map(([z, share]) => {
+            const m = /^Z_(\d+)_(\d+)$/.exec(z);
+            if (!m) return null;
+            const c = Number(m[1]);
+            const r = Number(m[2]);
+            return (
+              <div
+                key={z}
+                className="pointer-events-none absolute"
+                style={{
+                  left: `${(c / 5) * 100}%`,
+                  top: `${(r / 4) * 100}%`,
+                  width: '20%',
+                  height: '25%',
+                  backgroundColor: `rgba(${selRgb},${0.08 + 0.55 * (share / selMax)})`,
+                }}
+              />
+            );
+          })
+        : null}
       {dots.map(({ p, left, top, isGk }) => (
         <button
           key={p.player_id}
@@ -376,13 +434,13 @@ function PitchLineup({
           title={`${p.name} · rend. atteso ${p.form.toFixed(2)}`}
         >
           <span
-            className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md ${DOT_COLOR[p.role]} ${
+            className={`flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold text-white shadow-md ${DOT_COLOR[p.role]} ${
               isGk ? 'ring-2 ring-amber-200' : ''
             } ${selectedId === p.player_id ? 'ring-2 ring-slate-900 ring-offset-1' : ''}`}
           >
             {initials(p.name)}
           </span>
-          <span className="mt-0.5 max-w-[68px] truncate rounded bg-black/35 px-1 text-[9px] font-semibold leading-tight text-white">
+          <span className="mt-0.5 max-w-[64px] truncate rounded bg-black/40 px-1 text-[8px] font-semibold leading-tight text-white">
             {p.name.split(/\s+/).pop()}
           </span>
         </button>
