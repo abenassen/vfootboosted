@@ -15,7 +15,8 @@ const navItems = [
   { to: '/league-admin?tab=user', label: 'User Admin', icon: '🧑‍💼' },
   { to: '/squad', label: 'Squadra', icon: '👥' },
   { to: '/matches', label: 'Partite', icon: '🎯' },
-  { to: '/market', label: 'Mercato', icon: '💱' }
+  { to: '/market', label: 'Mercato', icon: '💱' },
+  { to: '/simulation', label: 'Simulazione', icon: '🎮' }
 ];
 
 function usePageTitle(pathname: string) {
@@ -28,6 +29,9 @@ function usePageTitle(pathname: string) {
     if (pathname.startsWith('/matches/')) return 'Match';
     if (pathname.startsWith('/matches')) return 'Partite';
     if (pathname.startsWith('/market')) return 'Mercato';
+    if (pathname.startsWith('/simulation/matches/')) return 'Partita simulata';
+    if (pathname.startsWith('/simulation/matches')) return 'Partite simulate';
+    if (pathname.startsWith('/simulation')) return 'Simulazione';
     return 'Vfoot';
   }, [pathname]);
 }
