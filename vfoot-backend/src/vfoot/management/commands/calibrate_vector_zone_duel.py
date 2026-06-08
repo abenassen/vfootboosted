@@ -10,7 +10,7 @@ from pathlib import Path
 from django.core.management.base import BaseCommand
 
 from realdata.models import Match, SIDE_AWAY, SIDE_HOME, TeamZoneFeature
-from vfoot.services.vector_zone_scoring import mirror_zone
+from vfoot.services.vector_zone_scoring import mirror_zone, zone_centrality
 
 
 FEATURES = (
@@ -46,6 +46,7 @@ class VectorZoneSample:
     match_id: int
     zones_home: tuple[tuple[float, ...], ...]
     zones_away: tuple[tuple[float, ...], ...]
+    zone_centrality: tuple[float, ...]  # per-zone centrality (1 central, 0 flank)
     real_home_goals: int
     real_away_goals: int
 
@@ -59,6 +60,9 @@ class VectorParams:
     # zone matters more than dominating it (positioning-sensitive); large K ->
     # near-linear (positioning-agnostic). Calibrated as a free parameter.
     saturation_k: float = 0.5
+    # Central width bands count (1 + zone_center_weight)× vs the flanks. Kept
+    # modest so it nudges toward central play without re-favouring attackers.
+    zone_center_weight: float = 0.25
     xg_shots: float = 1.0
     shots: float = 0.2
     touches_in_box: float = 0.1
@@ -81,6 +85,7 @@ class VectorParams:
             "score_scale": self.score_scale,
             "home_advantage": self.home_advantage,
             "saturation_k": self.saturation_k,
+            "zone_center_weight": self.zone_center_weight,
         }
         for feature in FEATURES:
             out[feature] = getattr(self, feature)
@@ -92,6 +97,7 @@ class VectorParams:
         values["score_scale"] = min(25.0, max(0.5, values["score_scale"]))
         values["home_advantage"] = min(3.0, max(-3.0, values["home_advantage"]))
         values["saturation_k"] = min(5.0, max(0.1, values["saturation_k"]))
+        values["zone_center_weight"] = min(0.6, max(0.0, values["zone_center_weight"]))
         for feature in FEATURES:
             if feature in ERROR_FEATURES:
                 values[feature] = min(0.0, max(-4.0, values[feature]))
@@ -124,14 +130,16 @@ def vector_scores(sample: VectorZoneSample, params: VectorParams) -> tuple[float
     weights = [getattr(params, feature) for feature in FEATURES]
     k = max(1e-6, params.saturation_k)
     total = 0.0
-    n = 0
+    weight_sum = 0.0
     # sample.zones_away is already mirrored at load time, so zip pairs a home
     # zone with the opponent's defensive (mirrored) zone — a specular duel.
-    for home_vec, away_vec in zip(sample.zones_home, sample.zones_away):
-        margin = sum(weights[i] * (home_vec[i] - away_vec[i]) for i in range(len(FEATURES)))
-        total += k * math.tanh(margin / k)  # saturating per-zone outcome
-        n += 1
-    total_margin = total / max(1, n)
+    # Central width bands are weighted (1 + zone_center_weight)× vs flanks.
+    for i, (home_vec, away_vec) in enumerate(zip(sample.zones_home, sample.zones_away)):
+        margin = sum(weights[j] * (home_vec[j] - away_vec[j]) for j in range(len(FEATURES)))
+        zone_weight = 1.0 + params.zone_center_weight * sample.zone_centrality[i]
+        total += zone_weight * k * math.tanh(margin / k)  # weighted saturating outcome
+        weight_sum += zone_weight
+    total_margin = total / max(1e-9, weight_sum)
     home = params.base + params.home_advantage + params.score_scale * total_margin
     away = params.base - params.home_advantage - params.score_scale * total_margin
     return home, away
@@ -183,6 +191,7 @@ def spsa_gradient(samples: list[VectorZoneSample], params: VectorParams, *, rng:
     scales["base"] = 4.0
     scales["score_scale"] = 4.0
     scales["home_advantage"] = 1.0
+    scales["zone_center_weight"] = 0.3
 
     plus = base.copy()
     minus = base.copy()
@@ -354,6 +363,7 @@ class Command(BaseCommand):
                         max_values[feature] = max(max_values[feature], sides[side][feature])
 
         zone_keys = sorted({zone for zones in raw.values() for zone in zones})
+        centrality = tuple(zone_centrality(zone_key) for zone_key in zone_keys)
         samples: list[VectorZoneSample] = []
         for match_id, zones in raw.items():
             home_vectors = []
@@ -371,6 +381,7 @@ class Command(BaseCommand):
                     match_id=match_id,
                     zones_home=tuple(home_vectors),
                     zones_away=tuple(away_vectors),
+                    zone_centrality=centrality,
                     real_home_goals=home_goals,
                     real_away_goals=away_goals,
                 )

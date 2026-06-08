@@ -42,6 +42,17 @@ GRID_COLS = 5
 GRID_ROWS = 4
 
 
+def zone_centrality(zone_key: str, rows: int = GRID_ROWS) -> float:
+    """1.0 for the central width bands, 0.0 for the flanks. Used to weight central
+    zones slightly more than wide ones (most chances happen centrally)."""
+    m = re.match(r"^Z_\d+_(\d+)$", zone_key)
+    if not m:
+        return 0.0
+    row = int(m.group(1))
+    center = (rows - 1) / 2.0
+    return 1.0 if abs(row - center) < rows / 4.0 else 0.0
+
+
 def mirror_zone(zone_key: str, cols: int = GRID_COLS, rows: int = GRID_ROWS) -> str:
     """Point-reflect a zone to the opponent's frame.
 
@@ -147,6 +158,8 @@ def score_zone_duel(
     # dominating one zone has diminishing returns and contesting/neutralizing
     # many zones is rewarded. saturation_k<=0 (or absent) means linear.
     saturation_k = float(params.get("saturation_k", 0.0))
+    # Central width bands count (1 + zone_center_weight)× vs the flanks.
+    zone_center_weight = float(params.get("zone_center_weight", 0.0))
 
     # Iterate physical zones in the home frame; the away side of each zone is
     # taken from its mirrored (opponent-frame) zone so the duel is specular.
@@ -185,6 +198,7 @@ def score_zone_duel(
 
     zones = []
     total_margin = 0.0
+    weight_sum = 0.0
     for zone_key in zone_keys:
         away_key = mirror_zone(zone_key)
         margin = 0.0
@@ -205,7 +219,10 @@ def score_zone_duel(
                         "swing": round(swing, 5),
                     }
                 )
-        total_margin += saturation_k * math.tanh(margin / saturation_k) if saturation_k > 0 else margin
+        outcome = saturation_k * math.tanh(margin / saturation_k) if saturation_k > 0 else margin
+        zone_weight = 1.0 + zone_center_weight * zone_centrality(zone_key)
+        total_margin += zone_weight * outcome
+        weight_sum += zone_weight
         zones.append(
             {
                 "zone_key": zone_key,
@@ -218,7 +235,7 @@ def score_zone_duel(
             }
         )
 
-    mean_margin = total_margin / len(zone_keys) if zone_keys else 0.0
+    mean_margin = total_margin / weight_sum if weight_sum > 0 else 0.0
     boosted = fantasy_margin_boost * mean_margin
     home_score = base + fantasy_home_advantage + score_scale * boosted
     away_score = base - fantasy_home_advantage - score_scale * boosted
