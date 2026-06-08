@@ -1532,3 +1532,164 @@ Potential future UX for a richer zone-duel model:
 ```
 
 This should wait until the backend vector-zone model proves useful in calibration.
+
+---
+
+# CONSOLIDATED STATE SNAPSHOT — 2026-06-08
+
+This section is a self-contained handoff: where the project is, how it works,
+how to run it, and what to do next. It supersedes the older sections above where
+they conflict.
+
+## One-paragraph summary
+
+The historical Serie A StatsBomb season (380 matches) is loaded locally. There
+is a **read-only simulated fantasy league** (10 managers, 38 matchdays) browsable
+in the frontend under `/simulation`. The scoring engine is a **specular,
+saturating, vector zone-duel**: for each pitch zone a team's attacking third is
+compared with the opponent's defensive third (mirror), each zone produces a
+*bounded* outcome (`K·tanh`), and the match score is the mean of those outcomes
+mapped to a base±scale. This makes **player positioning tactically meaningful**
+(contesting many zones and matching defenders to attackers beats stacking the
+strongest players in one place). The match-detail UI explains all of this
+spatially (pitch grid, click-a-zone breakdown, PES-style macro radar, per-player
+zone footprints, role-free colour-coded lineup). Everything is committed on
+`main` (not pushed); working tree clean except the untracked `screenshot/`.
+
+## Scoring model (current, authoritative)
+
+Single source of truth: `vfoot/services/vector_zone_scoring.py` →
+`score_zone_duel(...)`. Used by the simulation and intended for the future
+real-time match endpoint.
+
+- Per-team, per-zone feature vector = sum of that team's players' StatsBomb
+  features in the zone. Features normalized by fixed per-feature scales.
+- **Specular mirror**: zone `(col,row)` of home is compared with away zone
+  `(GRID_COLS-1-col, GRID_ROWS-1-row)` (grid 5×4). StatsBomb normalizes every
+  team to attack toward the last column, so the two teams' frames differ by a
+  180° rotation; the mirror makes the duel attack-vs-defense (verified: a team's
+  left wing faces the opponent's right back). `mirror_zone()` lives in the
+  service; the frontend mirror is `utils/zoneNames.mirrorZoneKey`.
+- Per-zone raw margin: `Σ_f param_f · (home_f − away_f) / scale_f`.
+- **Saturating aggregation** (this is what makes positioning matter):
+  `zone_out = K · tanh(margin / K)`, `match_margin = mean_z(zone_out)`.
+  `team_score = base ± home_adv ± score_scale · (boost · match_margin)`.
+- Per-player attribution is exact (margin is linear in vectors):
+  `contribution(player, zone) = Σ_f param_f · feature_f / scale_f`.
+
+Calibration: `vfoot/management/commands/calibrate_vector_zone_duel.py` (SPSA +
+Adam on the 380 matches, soft goal/sign loss, mirror + saturation baked in).
+Output `calibration/vector_zone_duel_v1.json`, formula
+`vector_zone_duel_v2_specular_saturating`. Current params:
+`saturation_k≈0.72, base≈70.35, score_scale≈8.95, home_advantage≈0.54`,
+weights e.g. `xg_shots 1.40, clearances 0.86, key_passes 0.86,
+progressive_passes 0.68, progressive_carries 0.61, interceptions 0.47`, errors
+negative. Metrics: all soft W/D/L **0.553** (val 0.526), goal MAE 0.860,
+pred goals/team 1.21 vs real 1.29 — i.e. saturation+mirror cost ~nothing in
+predictive accuracy vs the old linear 0.563 while restoring the tactical
+property. Demonstration: same total xG, a *spread* lineup outscores a *stacked*
+one.
+
+Two scoring layers to keep distinct:
+- Team score (and goals/standings) = the vector zone-duel above.
+- Per-player `event_score` in the artifact is ONLY a selection heuristic; it is
+  not a fantavoto and not additive. The UI does not show it.
+
+## Simulation engine (artifact-only)
+
+`vfoot/management/commands/simulate_historical_vfoot_league.py` →
+`calibration/historical_vfoot_league_dry_run.json` (~5 MB, compact JSON,
+deterministic, seed 42; regenerates in ~3 s). It does NOT mutate any persistent
+fantasy tables.
+
+- **Lineups (user-emulating heuristic)**: each manager's XI + bench is picked by
+  **season value** with NO knowledge of who actually plays that round (managers
+  can mis-pick). A picked starter who doesn't appear is `absent` and the engine
+  tries to cover them from the bench. This removes the systematic upward bias of
+  conditioning selection on same-match outcomes.
+- **Substitute coverage (engine, "Mode 1")**: for each starter's on-pitch gaps,
+  pick the best-overlapping unused bench player; bench contribution scaled by
+  overlap. Gaps are classified by **exit category**, not duration:
+  `pre_entry` (came on late), `post_exit` via `substitution_off`, disciplinary
+  (red/second-yellow, not coverable), `absent` (never played). A player who
+  steps off and returns (injury) is NOT a substitution and is ignored.
+- Artifact per fixture stores: scores/goals, `home_lineup`/`away_lineup`
+  (starters/bench, substitution_report), and `vector_report` = {total_margin,
+  boosted_margin, score_build, zones[20] (margin/winner/macros/top features),
+  home_player_totals/away_player_totals (per-zone contributions, own frame)}.
+
+## Backend API (read-only simulation)
+
+`vfoot/services/simulation_report.py` + `vfoot/api/simulation_views.py`
+(AllowAny, mtime-cached). URLs in `vfoot/api/urls.py`:
+- `GET /api/v1/simulations/historical-vfoot/latest` (config, teams, standings,
+  distributions, notes)
+- `GET .../latest/fixtures`
+- `GET .../latest/fixtures/<int:id>`
+
+## Frontend (`vfoot-frontend`, `/simulation` section)
+
+- Pages: `SimulationOverviewPage` (standings + distributions + clickable team
+  squads), `SimulationMatchesPage` (per-round), `SimulationMatchDetailPage`.
+- API client `api/simulation.ts` (always hits the backend artifact, independent
+  of the mock/backend switch). Types in `types/simulation.ts`.
+- **Adapter seam** `api/simulationAdapters.ts`: maps `Sim*` shapes → neutral
+  view-models. The future real league will write an analogous adapter to the
+  SAME view-models, so components are reusable.
+- **Neutral components** (data-source-agnostic):
+  `components/league/StandingsTable`, `components/charts/Bars`,
+  `components/match/{MatchScoreHeader, ZonePitchGrid, ZoneInspector, ZoneRadar,
+  LineupBoard, ScoreBuildExplainer}`, `utils/{vfoot, zoneNames}`.
+- Match-detail UX: score header; "Come nasce il punteggio" explainer (specular +
+  saturating); full 5×4 pitch map (click any zone); ZoneInspector (PES macro
+  radar Attacco/Creazione/Difesa/Recupero/Pulizia + percentage feature bars on
+  hover + who acted here as %); role-free LineupBoard ordered by spatial
+  tendency (avgCol) with DIF/CEN/ATT colour chips, click a player to light up
+  their zones on the (mirrored-for-away) map, substitutions as inline
+  expandables ("entrato al X'", "uscito al X'", "espulso", "non sceso in campo").
+
+## How to run / verify
+
+```bash
+# backend
+cd vfoot-backend/src && ../.venv/bin/python manage.py runserver localhost:8000 --noreload
+# frontend
+cd vfoot-frontend && npm run dev -- --host localhost --port 5173
+# regenerate the simulation artifact (deterministic)
+cd vfoot-backend/src && ../.venv/bin/python manage.py simulate_historical_vfoot_league
+# re-calibrate the scoring model (writes calibration/vector_zone_duel_v1.json)
+cd vfoot-backend/src && ../.venv/bin/python manage.py calibrate_vector_zone_duel --epochs 300
+```
+
+Browse: open `http://localhost:5173/?api=backend`, log in, then "Simulazione".
+A dev test user exists: `simviewer` / `simpass123`. The `?api=backend` is needed
+only on the first load (the provider is fixed for the SPA session). Playwright
+(chromium installed) can drive the app headless: seed
+`localStorage['vfoot_auth_token']` via `addInitScript`, load with `?api=backend`.
+
+Verified this session: `manage.py check` clean; `manage.py test vfoot` passes
+(2 skipped without StatsBomb fixtures in the test DB); `npm run build` passes;
+pages render on desktop + mobile with no console errors.
+
+## Open items / next steps (suggested order)
+
+1. **Spatial balance in the lineup heuristic**: picking the top-11 by value with
+   no roles sometimes fields two goalkeepers / leaves zones uncovered. Add a
+   light balance (cover defense/midfield/attack bands, avoid extreme
+   duplicates). The DIF/CEN/ATT colouring already exposes the problem.
+2. **Predictive player model for the formation page** (the deferred numeric
+   model): where a player is expected to play and expected performance from
+   *recent* history (no leakage), used when a user submits a lineup.
+3. **Materialize a simulation into the persistent league tables** (Phase 2):
+   write a `FantasyLeague` + teams + competition + fixtures so the existing
+   league/match pages can show it; have the real `/matches/<id>` endpoint emit
+   the SAME `vector_report` shape via the shared `vector_zone_scoring` service.
+4. Optional model tuning: nudge base so pred goals/team ≈ real (1.21→1.29);
+   explore K and per-zone weighting; consider whether macro categories need
+   refinement (touches_in_box already excluded as ambiguous).
+5. Repo hygiene: the work is committed on `main` but NOT pushed; push when ready.
+
+## Environment note
+
+Image paste into the Claude Code terminal requires `xclip` (X11 session, no
+clipboard tool was installed). `sudo apt install xclip` fixes it.
