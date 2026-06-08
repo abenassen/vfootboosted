@@ -165,29 +165,47 @@ function SlotBar({ player }: { player: LineupPlayerVM }) {
   const starterKind: 'pos' | 'neg' = player.starterPositive ? 'pos' : 'neg';
 
   const segments: { w: number; kind: 'pos' | 'neg' | 'unc' }[] = [];
+  // Substitution moments (occupant changes) marked with a vertical tick.
+  const ticks: number[] = [];
   let cursor = 0;
+  const mark = (seconds: number) => {
+    if (seconds > 0 && seconds < matchEnd) ticks.push((seconds / matchEnd) * 100);
+  };
   for (const g of [...player.events].sort((a, b) => a.gapStart - b.gapStart)) {
     if (g.gapStart > cursor) segments.push({ w: g.gapStart - cursor, kind: starterKind });
+    mark(g.gapStart);
     const gapLen = g.gapEnd - g.gapStart;
     if (g.kind === 'covered' && g.coveredSeconds) {
       const covered = Math.min(g.coveredSeconds, gapLen);
       segments.push({ w: covered, kind: g.benchPositive ? 'pos' : 'neg' });
-      if (gapLen - covered > 0) segments.push({ w: gapLen - covered, kind: 'unc' });
+      if (gapLen - covered > 0) {
+        segments.push({ w: gapLen - covered, kind: 'unc' });
+        mark(g.gapStart + covered);
+      }
     } else {
       segments.push({ w: gapLen, kind: 'unc' });
     }
     cursor = Math.max(cursor, g.gapEnd);
+    mark(cursor);
   }
   if (cursor < matchEnd) segments.push({ w: matchEnd - cursor, kind: starterKind });
 
   return (
     <div
-      className="mt-1 flex w-full items-stretch overflow-hidden rounded-full bg-slate-100"
-      style={{ height }}
-      title="spessore = impatto · verde = positivo · rosso = negativo · grigio = scoperto"
+      className="relative mt-1 w-full"
+      style={{ height: 12 }}
+      title="spessore = impatto · verde = positivo · rosso = negativo · grigio = scoperto · tacca = sostituzione"
     >
-      {segments.map((s, i) => (
-        <div key={i} className={SEGMENT_COLOR[s.kind]} style={{ width: `${(s.w / matchEnd) * 100}%` }} />
+      <div
+        className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-stretch overflow-hidden rounded-full bg-slate-100"
+        style={{ height }}
+      >
+        {segments.map((s, i) => (
+          <div key={i} className={SEGMENT_COLOR[s.kind]} style={{ width: `${(s.w / matchEnd) * 100}%` }} />
+        ))}
+      </div>
+      {ticks.map((pct, i) => (
+        <div key={i} className="absolute top-0 h-full w-px -translate-x-1/2 bg-slate-700" style={{ left: `${pct}%` }} />
       ))}
     </div>
   );
