@@ -1,18 +1,39 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getCompetitions, getLeagueDetail } from '../api';
+import { getCompetitions, getLeagueDetail, getLeagueStandings } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Card, SectionTitle } from '../components/ui';
-import type { CompetitionItem, LeagueDetail } from '../types/league';
+import { StandingsTable, type StandingRowVM } from '../components/league/StandingsTable';
+import type { CompetitionItem, LeagueDetail, LeagueStandingRow } from '../types/league';
+
+function standingRows(rows: LeagueStandingRow[], myTeam?: string | null): StandingRowVM[] {
+  return rows.map((r) => ({
+    key: String(r.team_id),
+    rank: r.rank,
+    name: r.team,
+    played: r.played,
+    wins: r.wins,
+    draws: r.draws,
+    losses: r.losses,
+    goalsFor: r.goals_for,
+    goalsAgainst: r.goals_against,
+    goalDiff: r.goal_diff,
+    points: r.points,
+    avgScore: r.avg_score_for,
+    highlight: myTeam ? r.team === myTeam : false,
+  }));
+}
 
 export default function LeaguePage() {
   const { leagues, selectedLeagueId, selectedLeague } = useLeagueContext();
   const [detail, setDetail] = useState<LeagueDetail | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionItem[]>([]);
+  const [standings, setStandings] = useState<LeagueStandingRow[]>([]);
 
   useEffect(() => {
     if (!selectedLeagueId) {
       setDetail(null);
+      setStandings([]);
       return;
     }
     void getLeagueDetail(selectedLeagueId)
@@ -21,6 +42,9 @@ export default function LeaguePage() {
     void getCompetitions(selectedLeagueId)
       .then(setCompetitions)
       .catch(() => setCompetitions([]));
+    void getLeagueStandings(selectedLeagueId)
+      .then((r) => setStandings(r.standings))
+      .catch(() => setStandings([]));
   }, [selectedLeagueId]);
 
   if (!leagues.length) {
@@ -56,6 +80,15 @@ export default function LeaguePage() {
         </div>
         <div className="mt-2 text-sm text-slate-600">Invite code: {detail.invite_code}</div>
       </Card>
+
+      {standings.length ? (
+        <Card className="p-4">
+          <SectionTitle>Classifica</SectionTitle>
+          <div className="mt-2">
+            <StandingsTable rows={standingRows(standings, selectedLeague?.team_name)} />
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="p-4">
         <SectionTitle>Partecipanti</SectionTitle>

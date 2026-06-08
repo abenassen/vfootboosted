@@ -6,7 +6,7 @@ import LeaguePage from './pages/LeaguePage';
 import SquadPage from './pages/SquadPage';
 import FormationPage from './pages/FormationPage';
 import MatchesPage from './pages/MatchesPage';
-import MatchDetailPage from './pages/MatchDetailPage';
+import LeagueMatchDetailPage from './pages/LeagueMatchDetailPage';
 import CompetitionPage from './pages/CompetitionPage';
 import MarketPage from './pages/MarketPage';
 import LeagueAdminPage from './pages/LeagueAdminPage';
@@ -43,7 +43,7 @@ export default function App() {
         <Route path="squad" element={<SquadPage />} />
         <Route path="squad/formation" element={<FormationPage />} />
         <Route path="matches" element={<MatchesPage />} />
-        <Route path="matches/:matchId" element={<MatchDetailPage />} />
+        <Route path="matches/:matchId" element={<LeagueMatchDetailPage />} />
         <Route path="competitions/:competitionId" element={<CompetitionPage />} />
         <Route path="market" element={<MarketPage />} />
         <Route path="league-admin" element={<LeagueAdminPage />} />

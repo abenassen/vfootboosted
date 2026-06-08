@@ -597,3 +597,13 @@ export async function concludeLeagueMatchday(
     fixtures_scored: 4,
   };
 }
+
+export async function getLeagueStandings(_leagueId: number): Promise<{ competition_id: number | null; standings: [] }> {
+  await sleep(80);
+  return { competition_id: null, standings: [] };
+}
+
+export async function getFixtureDetail(_fixtureId: number | string): Promise<never> {
+  await sleep(80);
+  throw new Error('Dettaglio partita disponibile solo con il backend reale.');
+}

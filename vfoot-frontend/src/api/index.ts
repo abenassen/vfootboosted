@@ -94,6 +94,8 @@ type ApiImpl = {
   searchPlayers: (q: string, leagueId?: number, limit?: number) => Promise<PlayerSearchItem[]>;
   getAuctionState: (auctionId: number) => Promise<AuctionState>;
   getLeagueFixtures: (leagueId: number, competitionId?: number) => Promise<LeagueFixtureItem[]>;
+  getLeagueStandings: typeof backendApi.getLeagueStandings;
+  getFixtureDetail: typeof backendApi.getFixtureDetail;
   syncLeagueMatchdays: (leagueId: number) => Promise<{ fixtures_linked: number; matchdays_touched: number }>;
   getLeagueMatchdays: (leagueId: number) => Promise<LeagueMatchdayItem[]>;
   concludeLeagueMatchday: (leagueId: number, fantasyMatchdayId: number, force?: boolean) => Promise<unknown>;
@@ -147,6 +149,8 @@ export const closeNomination = typedImpl.closeNomination;
 export const searchPlayers = typedImpl.searchPlayers;
 export const getAuctionState = typedImpl.getAuctionState;
 export const getLeagueFixtures = typedImpl.getLeagueFixtures;
+export const getLeagueStandings = typedImpl.getLeagueStandings;
+export const getFixtureDetail = typedImpl.getFixtureDetail;
 export const syncLeagueMatchdays = typedImpl.syncLeagueMatchdays;
 export const getLeagueMatchdays = typedImpl.getLeagueMatchdays;
 export const concludeLeagueMatchday = typedImpl.concludeLeagueMatchday;

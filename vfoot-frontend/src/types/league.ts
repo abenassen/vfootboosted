@@ -283,3 +283,18 @@ export interface LeagueMatchdayItem {
   concluded_at: string | null;
   concluded_by: string | null;
 }
+
+export interface LeagueStandingRow {
+  rank: number;
+  team_id: number;
+  team: string;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goals_for: number;
+  goals_against: number;
+  goal_diff: number;
+  points: number;
+  avg_score_for: number;
+}

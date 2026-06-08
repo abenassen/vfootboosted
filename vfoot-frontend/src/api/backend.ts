@@ -25,11 +25,13 @@ import type {
   LeagueDetail,
   LeagueFixtureItem,
   LeagueMatchdayItem,
+  LeagueStandingRow,
   LeagueSummary,
   PlayerSearchItem,
   QualificationRuleCreateRequest,
   TeamRoster,
 } from '../types/league';
+import type { SimFixtureDetail } from '../types/simulation';
 
 const DEFAULT_BASE_URL = 'http://localhost:8000/api/v1';
 const TOKEN_STORAGE_KEY = 'vfoot_auth_token';
@@ -514,6 +516,20 @@ export async function getLeagueFixtures(leagueId: number, competitionId?: number
   if (competitionId) params.set('competition_id', String(competitionId));
   const suffix = params.toString() ? `?${params.toString()}` : '';
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/fixtures${suffix}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getLeagueStandings(leagueId: number): Promise<{ competition_id: number | null; standings: LeagueStandingRow[] }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/standings`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getFixtureDetail(fixtureId: number | string): Promise<SimFixtureDetail> {
+  const res = await fetch(`${baseUrl()}/fixtures/${fixtureId}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
