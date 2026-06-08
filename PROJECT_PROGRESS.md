@@ -1671,16 +1671,16 @@ fantasy tables.
   saturating); full 5×4 pitch map (click any zone); ZoneInspector (PES macro
   radar Attacco/Creazione/Difesa/Recupero/Pulizia + percentage feature bars on
   hover + who acted here as %); LineupBoard where each row is a SLOT = starter +
-  the substitute(s) who covered them: the influence bar, the role band (POR/DIF/
-  CEN/ATT from the slot's dominant contributor's role) and the ordering
-  are all computed on the combined starter+subs footprint. The keeper (POR) is
-  shown apart with "gol evitati …". Click a player to light up their zones on the
-  (mirrored-for-away) map. Substitutions are ALWAYS shown inline (not hidden):
-  the slot line shows BOTH names ("Starter / Substitute", no hierarchy), plus
-  a minute timeline (team colour = starter on pitch, grey = substitute, amber =
-  uncovered) + text ("entrato al X'", "uscito al X'", "espulso", "non sceso in
-  campo"), so a substitute who matters more than the starter is visible — and a
-  slot reading ATT because a forward covered an absent full-back is explained.
+  the substitute(s) who covered them: the role band (POR/DIF/CEN/ATT from the
+  slot's dominant contributor) and ordering use the combined starter+subs
+  footprint. The keeper (POR) is shown apart with "gol evitati …". Click a player
+  to light up their zones on the (mirrored-for-away) map. Each outfield slot has
+  ONE bar: THICKNESS = impact magnitude, horizontal SEGMENTS = minutes each
+  occupant played (starter / substitute / uncovered), COLOUR = sign (green =
+  helped, red = hurt, grey = uncovered) — so a relevant-but-negative player reads
+  red. Substitutions are always shown inline: the slot line shows BOTH names
+  ("Starter / Substitute", no hierarchy) + text ("entrato al X'", "uscito al X'",
+  "espulso", "non sceso in campo").
 
 ## How to run / verify
 
