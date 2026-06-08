@@ -1676,6 +1676,7 @@ fantasy tables.
   are all computed on the combined starter+subs footprint. The keeper (POR) is
   shown apart with "gol evitati …". Click a player to light up their zones on the
   (mirrored-for-away) map. Substitutions are ALWAYS shown inline (not hidden):
+  the slot line shows BOTH names ("Starter / Substitute", no hierarchy), plus
   a minute timeline (team colour = starter on pitch, grey = substitute, amber =
   uncovered) + text ("entrato al X'", "uscito al X'", "espulso", "non sceso in
   campo"), so a substitute who matters more than the starter is visible — and a
