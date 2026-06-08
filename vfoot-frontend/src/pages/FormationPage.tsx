@@ -211,7 +211,7 @@ export default function FormationPage() {
           <SectionTitle>La squadra in campo</SectionTitle>
           <div className="mt-1 text-[11px] text-slate-400">
             Posizione attesa di ogni titolare (dai dati storici). Il portiere ha il bordo ambra. Clicca un giocatore per
-            vederne le zone d'influenza.
+            vederne le zone d'influenza (in giallo).
           </div>
           <PitchLineup
             starterIds={starterIds}
@@ -344,13 +344,6 @@ const DOT_COLOR: Record<PlayerRole, string> = {
   ATT: 'bg-orange-500',
 };
 
-const ROLE_RGB: Record<PlayerRole, string> = {
-  GK: '251,191,36',
-  DEF: '59,130,246',
-  MID: '16,185,129',
-  ATT: '249,115,22',
-};
-
 // The XI placed on a pitch at each player's expected position. Defence on the
 // left, attack on the right; goalkeeper ringed in amber.
 function PitchLineup({
@@ -416,7 +409,6 @@ function PitchLineup({
 
   const sel = selectedId != null ? byId.get(selectedId) : null;
   const selMax = sel ? Math.max(0.0001, ...Object.values(sel.footprint)) : 1;
-  const selRgb = sel ? ROLE_RGB[sel.role] : '0,0,0';
   return (
     <div className="relative mt-3 aspect-[7/5] w-full overflow-hidden rounded-xl border border-green-700/40 bg-gradient-to-r from-green-600 to-green-500 shadow-inner">
       {/* pitch markings */}
@@ -432,16 +424,19 @@ function PitchLineup({
             if (!m) return null;
             const c = Number(m[1]);
             const r = Number(m[2]);
+            const intensity = share / selMax;
             return (
               <div
                 key={z}
-                className="pointer-events-none absolute"
+                className="pointer-events-none absolute border border-yellow-100/30"
                 style={{
                   left: `${(c / 5) * 100}%`,
                   top: `${(r / 4) * 100}%`,
                   width: '20%',
                   height: '25%',
-                  backgroundColor: `rgba(${selRgb},${0.08 + 0.55 * (share / selMax)})`,
+                  // high-contrast yellow on the green pitch (role colours like the
+                  // midfielders' green would vanish into the turf)
+                  backgroundColor: `rgba(250,204,21,${(0.25 + 0.6 * intensity).toFixed(3)})`,
                 }}
               />
             );
