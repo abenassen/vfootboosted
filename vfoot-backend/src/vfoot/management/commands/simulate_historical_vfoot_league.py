@@ -418,9 +418,20 @@ class Command(BaseCommand):
             add(best)
             remaining.remove(best)
 
-        # Bench: next best outfielders by value (a single keeper only, no backup GK
-        # so the engine can never field two goalkeepers).
-        bench = sorted(remaining, key=lambda p: p.value, reverse=True)[:bench_size]
+        # Bench = ordered reserves: best remaining players by value, INCLUDING a
+        # backup goalkeeper so the engine can cover the starting keeper if absent.
+        # (Only one GK ever STARTS; the reserve enters only to replace the keeper.)
+        selected_ids = {p.player_id for p in starters}
+        reserves = sorted(
+            (p for p in roster if p.player_id not in selected_ids),
+            key=lambda p: p.value,
+            reverse=True,
+        )
+        bench = reserves[:bench_size]
+        reserve_gks = [p for p in reserves if p.player_id in goalkeepers]
+        if bench_size > 0 and reserve_gks and not any(p.player_id in goalkeepers for p in bench):
+            # guarantee a backup keeper: swap in the best reserve GK for the weakest bench slot
+            bench = sorted(bench[:-1] + reserve_gks[:1], key=lambda p: p.value, reverse=True)
         return starters, bench
 
     def _player_feature_totals(self) -> dict[int, dict[str, float]]:
