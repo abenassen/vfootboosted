@@ -12,12 +12,15 @@ export interface TeamLineupPlayer {
   appearances: number;
   avg_minutes: number;
   minutes_label: MinutesLabel;
+  form: number; // expected per-match contribution from recent form
 }
 
 export interface TeamLineupContext {
   team: { team_id: number; name: string };
   matchdays: number[];
   matchday: number;
+  as_of_matchday: number | null; // data cutoff (only matches before it count)
+  prior_matches: number;
   zone_grid: { cols: number; rows: number; zone_keys: string[] };
   rules: { starters: number; gk_separate_slot: boolean };
   roster: TeamLineupPlayer[];

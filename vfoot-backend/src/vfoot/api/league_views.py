@@ -58,7 +58,13 @@ from vfoot.models import (
     LeagueMembership,
     SavedLineupSnapshot,
 )
+import os as _os
+from functools import lru_cache as _lru_cache
+
+from django.conf import settings as _settings
+
 from vfoot.services.player_profiles import player_profiles
+from vfoot.services.vector_zone_scoring import load_calibration
 from vfoot.services.fantasy_simulation import (
     bulk_assign_players_to_teams,
     generate_knockout_fixtures,
@@ -1990,6 +1996,15 @@ def _zone_grid_keys(cols: int = 5, rows: int = 4) -> list[str]:
     return [f"Z_{c}_{r}" for c in range(cols) for r in range(rows)]
 
 
+@_lru_cache(maxsize=1)
+def _vector_calibration() -> dict:
+    path = _os.path.join(_os.path.dirname(str(_settings.BASE_DIR)), "calibration/vector_zone_duel_v1.json")
+    try:
+        return load_calibration(path)
+    except Exception:
+        return {"params": {}, "feature_scales": {}}
+
+
 class LeagueTeamLineupView(APIView):
     """Real lineup context for the requesting user's team: its roster with
     spatial profiles (role/footprint/minutes), the league matchdays, and the
@@ -2008,9 +2023,18 @@ class LeagueTeamLineupView(APIView):
         matchdays = list(
             FantasyMatchday.objects.filter(league=league).order_by("real_matchday").values_list("real_matchday", flat=True)
         )
-        try:
-            matchday = int(request.query_params.get("matchday") or (matchdays[0] if matchdays else 1))
-        except (TypeError, ValueError):
+        # When a matchday is given we treat it as an "as-of" cutoff: profiles use
+        # only matches BEFORE it, so setting a lineup mid-season never peeks at
+        # future results (no leakage). No matchday -> full-season profiles.
+        matchday_param = request.query_params.get("matchday")
+        as_of: int | None = None
+        if matchday_param is not None:
+            try:
+                matchday = int(matchday_param)
+            except (TypeError, ValueError):
+                matchday = matchdays[0] if matchdays else 1
+            as_of = matchday
+        else:
             matchday = matchdays[0] if matchdays else 1
 
         slots = list(
@@ -2018,7 +2042,14 @@ class LeagueTeamLineupView(APIView):
         )
         player_ids = [s.player_id for s in slots]
         total_matches = Match.objects.values("matchday").distinct().count()
-        profiles = player_profiles(player_ids, total_matches=total_matches)
+        cal = _vector_calibration()
+        profiles = player_profiles(
+            player_ids,
+            total_matches=total_matches,
+            as_of_matchday=as_of,
+            params=cal.get("params", {}),
+            scales=cal.get("feature_scales", {}),
+        )
 
         roster = []
         for s in slots:
@@ -2034,6 +2065,7 @@ class LeagueTeamLineupView(APIView):
                     "appearances": p.get("appearances", 0),
                     "avg_minutes": p.get("avg_minutes", 0.0),
                     "minutes_label": p.get("minutes_label", "low"),
+                    "form": p.get("form", 0.0),
                 }
             )
         roster.sort(key=lambda r: (r["avg_col"], -r["price"]))
@@ -2057,6 +2089,8 @@ class LeagueTeamLineupView(APIView):
                 "team": {"team_id": team.id, "name": team.name},
                 "matchdays": matchdays,
                 "matchday": matchday,
+                "as_of_matchday": as_of,
+                "prior_matches": (as_of - 1) if as_of is not None else total_matches,
                 "zone_grid": {"cols": 5, "rows": 4, "zone_keys": _zone_grid_keys()},
                 "rules": {"starters": 11, "gk_separate_slot": True},
                 "roster": roster,

@@ -52,13 +52,15 @@ def average_column(footprint: dict[str, float]) -> float:
     return round(total, 3)
 
 
-def player_footprints(player_ids: list[int]) -> dict[int, dict[str, float]]:
-    """{player_id: {zone_key: presence_share}} from season touches (sum=1)."""
+def player_footprints(player_ids: list[int], as_of_matchday: int | None = None) -> dict[int, dict[str, float]]:
+    """{player_id: {zone_key: presence_share}} from touches (sum=1). When
+    as_of_matchday is given, only matches BEFORE it count (no leakage: you set a
+    lineup for matchday N knowing only matchdays < N)."""
+    qs = PlayerZoneFeature.objects.filter(feature_key="touches", player_id__in=player_ids)
+    if as_of_matchday is not None:
+        qs = qs.filter(match__matchday__lt=as_of_matchday)
     raw: dict[int, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    rows = PlayerZoneFeature.objects.filter(feature_key="touches", player_id__in=player_ids).values_list(
-        "player_id", "zone_key", "value"
-    )
-    for player_id, zone_key, value in rows:
+    for player_id, zone_key, value in qs.values_list("player_id", "zone_key", "value"):
         raw[int(player_id)][str(zone_key)] += float(value or 0.0)
     footprints: dict[int, dict[str, float]] = {}
     for player_id, zones in raw.items():
@@ -68,12 +70,14 @@ def player_footprints(player_ids: list[int]) -> dict[int, dict[str, float]]:
     return footprints
 
 
-def player_minutes(player_ids: list[int]) -> dict[int, dict]:
-    """{player_id: {appearances, starts, avg_minutes}} over the available matches."""
+def player_minutes(player_ids: list[int], as_of_matchday: int | None = None) -> dict[int, dict]:
+    """{player_id: {appearances, starts, avg_minutes}} over the available matches
+    (only those before as_of_matchday when given)."""
     agg: dict[int, dict] = defaultdict(lambda: {"appearances": 0, "starts": 0, "minutes": 0})
-    rows = MatchAppearance.objects.filter(player_id__in=player_ids).values_list(
-        "player_id", "minutes_played", "is_starter"
-    )
+    qs = MatchAppearance.objects.filter(player_id__in=player_ids)
+    if as_of_matchday is not None:
+        qs = qs.filter(match__matchday__lt=as_of_matchday)
+    rows = qs.values_list("player_id", "minutes_played", "is_starter")
     for player_id, minutes, is_starter in rows:
         a = agg[int(player_id)]
         a["appearances"] += 1
@@ -103,11 +107,53 @@ def minutes_label(avg_minutes: float, appearances: int, total_matches: int) -> s
     return "low"
 
 
-def player_profiles(player_ids: list[int], total_matches: int = 0) -> dict[int, dict]:
-    """Full per-player profile: role, footprint, avg column, minutes summary."""
+def player_form(
+    player_ids: list[int],
+    params: dict[str, float],
+    scales: dict[str, float],
+    as_of_matchday: int | None = None,
+    window: int = 6,
+) -> dict[int, float]:
+    """Expected per-match contribution from RECENT form: the calibration-weighted
+    net value (Σ param·value/scale over zones & features) of each player's last
+    `window` matchdays before the cutoff, averaged per match. Errors carry their
+    negative weight, so a sloppy spell drags the number down."""
+    qs = PlayerZoneFeature.objects.filter(player_id__in=player_ids)
+    if as_of_matchday is not None:
+        qs = qs.filter(match__matchday__lt=as_of_matchday, match__matchday__gte=as_of_matchday - window)
+    per_player_match: dict[tuple[int, int], float] = defaultdict(float)
+    for player_id, match_id, feature_key, value in qs.values_list(
+        "player_id", "match_id", "feature_key", "value"
+    ):
+        w = params.get(feature_key)
+        s = scales.get(feature_key)
+        if w and s:
+            per_player_match[(int(player_id), int(match_id))] += w * (float(value or 0.0) / s)
+    by_player: dict[int, list[float]] = defaultdict(list)
+    for (pid, _mid), contribution in per_player_match.items():
+        by_player[pid].append(contribution)
+    return {pid: round(sum(cs) / len(cs), 3) for pid, cs in by_player.items() if cs}
+
+
+def player_profiles(
+    player_ids: list[int],
+    total_matches: int = 0,
+    as_of_matchday: int | None = None,
+    params: dict[str, float] | None = None,
+    scales: dict[str, float] | None = None,
+) -> dict[int, dict]:
+    """Full per-player profile: role, footprint, avg column, minutes summary, and
+    (when params/scales given) recent-form expected contribution. With
+    as_of_matchday everything is computed from matches before that matchday only."""
     ids = [int(pid) for pid in player_ids]
-    footprints = player_footprints(ids)
-    minutes = player_minutes(ids)
+    footprints = player_footprints(ids, as_of_matchday=as_of_matchday)
+    minutes = player_minutes(ids, as_of_matchday=as_of_matchday)
+    form = (
+        player_form(ids, params, scales, as_of_matchday=as_of_matchday)
+        if params and scales
+        else {}
+    )
+    denom = (as_of_matchday - 1) if as_of_matchday is not None else total_matches
     profiles: dict[int, dict] = {}
     for pid in ids:
         fp = footprints.get(pid, {})
@@ -119,6 +165,7 @@ def player_profiles(player_ids: list[int], total_matches: int = 0) -> dict[int, 
             "appearances": mins["appearances"],
             "starts": mins["starts"],
             "avg_minutes": mins["avg_minutes"],
-            "minutes_label": minutes_label(mins["avg_minutes"], mins["appearances"], total_matches),
+            "minutes_label": minutes_label(mins["avg_minutes"], mins["appearances"], denom),
+            "form": form.get(pid, 0.0),
         }
     return profiles

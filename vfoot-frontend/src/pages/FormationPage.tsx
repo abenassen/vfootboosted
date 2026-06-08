@@ -29,6 +29,19 @@ export default function FormationPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Predictive default/suggestion: best GK by form + the top 10 outfielders by
+  // expected contribution (recent form), all as-of the chosen matchday.
+  const applySuggestion = (roster: TeamLineupPlayer[]) => {
+    const gk = roster.filter((p) => p.role === 'GK').sort((a, b) => b.form - a.form)[0];
+    const outfield = roster
+      .filter((p) => p.role !== 'GK')
+      .sort((a, b) => b.form - a.form)
+      .slice(0, STARTERS)
+      .map((p) => p.player_id);
+    setGkId(gk ? gk.player_id : null);
+    setStarterIds(outfield);
+  };
+
   useEffect(() => {
     if (!selectedLeagueId) return;
     setLoading(true);
@@ -36,21 +49,19 @@ export default function FormationPage() {
     void getTeamLineup(selectedLeagueId, matchday ?? undefined)
       .then((d) => {
         setCtx(d);
-        if (matchday == null) setMatchday(d.matchday);
+        // First load (no matchday yet): jump to a mid-season matchday so we work
+        // as if the lineup is being set partway through the season. The refetch
+        // then loads as-of (no-leakage) profiles.
+        if (matchday == null) {
+          setMatchday(d.matchdays[Math.floor(d.matchdays.length / 2)] ?? d.matchday);
+          return;
+        }
         const saved = d.saved_lineup;
         if (saved && (saved.gk_player_id || saved.starter_player_ids.length)) {
           setGkId(saved.gk_player_id);
           setStarterIds(saved.starter_player_ids.slice(0, STARTERS));
         } else {
-          // Sensible default: most-played GK + the next 10 by role/minutes.
-          const gk = d.roster.filter((p) => p.role === 'GK').sort((a, b) => b.avg_minutes - a.avg_minutes)[0];
-          const outfield = d.roster
-            .filter((p) => p.role !== 'GK')
-            .sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.avg_minutes - a.avg_minutes)
-            .slice(0, STARTERS)
-            .map((p) => p.player_id);
-          setGkId(gk ? gk.player_id : null);
-          setStarterIds(outfield);
+          applySuggestion(d.roster);
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -122,6 +133,12 @@ export default function FormationPage() {
             <div className="mt-1 text-sm text-slate-600">
               Portiere {gkId != null ? '✓' : '—'} · titolari di movimento {starterIds.length}/{STARTERS}
             </div>
+            {ctx.as_of_matchday != null ? (
+              <div className="mt-1 text-[11px] text-amber-600">
+                Formazione per la giornata {ctx.as_of_matchday} · dati aggiornati alla giornata{' '}
+                {ctx.as_of_matchday - 1} ({ctx.prior_matches} partite) — nessuna informazione futura.
+              </div>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <label className="text-xs text-slate-500">Giornata</label>
@@ -136,6 +153,9 @@ export default function FormationPage() {
                 </option>
               ))}
             </select>
+            <Button variant="secondary" onClick={() => applySuggestion(ctx.roster)}>
+              Suggerisci XI
+            </Button>
             <Button onClick={onSave} disabled={!canSave || saving}>
               {saving ? 'Salvataggio…' : 'Salva'}
             </Button>
@@ -215,7 +235,8 @@ function RosterRow({
             {p.name}
           </span>
           <span className="text-[11px] text-slate-500">
-            {p.avg_minutes}′ medi
+            {p.avg_minutes}′ medi · rend. atteso{' '}
+            <b className={p.form >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{p.form.toFixed(2)}</b>
             {p.minutes_label === 'low' ? <Badge tone="amber"> poco impiegato</Badge> : null}
           </span>
         </span>
