@@ -4,13 +4,16 @@ import { SectionTitle } from '../ui';
 import { toMinutes } from '../../utils/vfoot';
 
 export type SubEventKind = 'covered' | 'uncovered' | 'disciplinary';
+export type GapKind = 'pre_entry' | 'post_exit' | 'mid';
 
 export interface LineupSubEvent {
   kind: SubEventKind;
+  gapKind: GapKind;
   gapStart: number; // seconds
   gapEnd: number; // seconds
   bench?: string;
   coveredSeconds?: number;
+  uncoveredSeconds: number;
 }
 
 export interface LineupPlayerVM {
@@ -98,22 +101,9 @@ export function LineupColumn({
                 ) : null}
               </div>
               {hasGaps && isOpen ? (
-                <div className="mt-1.5 space-y-0.5 border-t border-slate-100 pt-1.5 text-[11px] text-slate-600">
+                <div className="mt-1.5 space-y-1 border-t border-slate-100 pt-1.5 text-[11px] text-slate-600">
                   {p.events.map((e, i) => (
-                    <div key={i}>
-                      <span className="text-slate-400">
-                        out {toMinutes(e.gapStart)}–{toMinutes(e.gapEnd)}
-                      </span>{' '}
-                      {e.kind === 'covered' && e.bench ? (
-                        <>
-                          → <b>{e.bench}</b> <span className="text-green-600">({toMinutes(e.coveredSeconds)})</span>
-                        </>
-                      ) : e.kind === 'disciplinary' ? (
-                        <span className="text-red-600">espulso · non sostituibile</span>
-                      ) : (
-                        <span className="text-amber-600">scoperto · nessun subentro</span>
-                      )}
-                    </div>
+                    <EventLine key={i} e={e} />
                   ))}
                 </div>
               ) : null}
@@ -121,6 +111,40 @@ export function LineupColumn({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function EventLine({ e }: { e: LineupSubEvent }) {
+  // Headline describing what happened to the starter over time.
+  let head: string;
+  if (e.kind === 'disciplinary') {
+    head = `🟥 espulso al ${toMinutes(e.gapStart)}`;
+  } else if (e.gapKind === 'pre_entry') {
+    head = `entrato in campo al ${toMinutes(e.gapEnd)}`;
+  } else if (e.gapKind === 'post_exit') {
+    head = `uscito al ${toMinutes(e.gapStart)}`;
+  } else {
+    head = `fuori ${toMinutes(e.gapStart)}–${toMinutes(e.gapEnd)}`;
+  }
+
+  const coverVerb = e.gapKind === 'pre_entry' ? 'prima coperto da' : 'poi coperto da';
+  const showUncovered = e.uncoveredSeconds >= 60;
+
+  return (
+    <div>
+      <span className="text-slate-700">{head}</span>
+      {e.kind === 'covered' && e.bench ? (
+        <span className="text-slate-500">
+          {' '}· {coverVerb} <b className="text-slate-700">{e.bench}</b>{' '}
+          <span className="text-green-600">({toMinutes(e.coveredSeconds)})</span>
+          {showUncovered ? <span className="text-amber-600"> · {toMinutes(e.uncoveredSeconds)} scoperti</span> : null}
+        </span>
+      ) : e.kind === 'disciplinary' ? (
+        <span className="text-red-600"> · non sostituibile</span>
+      ) : (
+        <span className="text-amber-600"> · {toMinutes(e.gapEnd - e.gapStart)} scoperti, nessun subentro</span>
+      )}
     </div>
   );
 }

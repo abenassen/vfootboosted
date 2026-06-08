@@ -33,6 +33,10 @@ FEATURE_WEIGHTS = {
 }
 
 GOAL_THRESHOLDS = (66.0, 72.0, 78.0, 84.0, 90.0, 96.0)
+
+# Gaps shorter than this are lineup artifacts (tactical shifts / brief
+# player-off-on windows), not real substitutions, and are ignored.
+MIN_SUBSTITUTION_GAP_SECONDS = 60
 DEFAULT_VECTOR_CALIBRATION = "calibration/vector_zone_duel_v1.json"
 
 
@@ -562,9 +566,11 @@ class Command(BaseCommand):
                 )
 
             gaps = self._player_gaps(starter_intervals, starter_final_seconds)
-            for gap_start, gap_end, is_disciplinary in gaps:
+            for gap_start, gap_end, is_disciplinary, gap_kind in gaps:
                 gap_seconds = max(0, gap_end - gap_start)
-                if gap_seconds <= 0:
+                # Ignore sub-minute gaps: these are lineup artifacts (tactical
+                # shifts / brief player-off-on windows), not real substitutions.
+                if gap_seconds < MIN_SUBSTITUTION_GAP_SECONDS:
                     continue
                 if is_disciplinary:
                     disciplinary_gap_seconds += gap_seconds
@@ -574,6 +580,7 @@ class Command(BaseCommand):
                             "starter": starter.name,
                             "starter_id": starter.player_id,
                             "gap": [gap_start, gap_end],
+                            "gap_kind": gap_kind,
                             "covered": False,
                             "reason": "disciplinary_gap",
                         }
@@ -594,6 +601,7 @@ class Command(BaseCommand):
                             "starter": starter.name,
                             "starter_id": starter.player_id,
                             "gap": [gap_start, gap_end],
+                            "gap_kind": gap_kind,
                             "covered": False,
                             "reason": "no_bench_overlap",
                         }
@@ -618,6 +626,7 @@ class Command(BaseCommand):
                         "bench": bench_player.name,
                         "bench_id": bench_player.player_id,
                         "gap": [gap_start, gap_end],
+                        "gap_kind": gap_kind,
                         "covered": True,
                         "covered_seconds": overlap_seconds,
                         "gap_seconds": gap_seconds,
@@ -668,20 +677,25 @@ class Command(BaseCommand):
     def _active_seconds(self, intervals: list[dict]) -> int:
         return sum(max(0, int(item["end"]) - int(item["start"])) for item in intervals)
 
-    def _player_gaps(self, intervals: list[dict], final_seconds: int) -> list[tuple[int, int, bool]]:
-        gaps: list[tuple[int, int, bool]] = []
+    def _player_gaps(self, intervals: list[dict], final_seconds: int) -> list[tuple[int, int, bool, str]]:
+        # Returns (start, end, is_disciplinary, kind) where kind classifies the
+        # gap for display: 'pre_entry' (player came on late), 'post_exit'
+        # (player left / sent off before the final whistle), or 'mid'
+        # (a temporary off-pitch window, e.g. injury treatment).
+        gaps: list[tuple[int, int, bool, str]] = []
         cursor = 0
         for interval in intervals:
             start = int(interval["start"])
             end = int(interval["end"])
             if start > cursor:
-                gaps.append((cursor, start, False))
+                kind = "pre_entry" if cursor == 0 else "mid"
+                gaps.append((cursor, start, False, kind))
             cursor = max(cursor, end)
             if interval.get("end_reason") == "red_card" and cursor < final_seconds:
-                gaps.append((cursor, final_seconds, True))
+                gaps.append((cursor, final_seconds, True, "post_exit"))
                 return gaps
         if cursor < final_seconds:
-            gaps.append((cursor, final_seconds, False))
+            gaps.append((cursor, final_seconds, False, "post_exit"))
         return gaps
 
     def _best_bench_candidate(

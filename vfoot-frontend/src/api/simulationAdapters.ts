@@ -123,12 +123,15 @@ export function lineupBoardVMs(lineup: SimLineup, totals: SimPlayerTotal[]): Lin
   for (const s of lineup.substitution_report.substitutions) {
     const kind: LineupSubEvent['kind'] =
       s.covered && s.bench ? 'covered' : s.reason === 'disciplinary_gap' ? 'disciplinary' : 'uncovered';
+    const gapTotal = s.gap[1] - s.gap[0];
     const ev: LineupSubEvent = {
       kind,
+      gapKind: (s.gap_kind as LineupSubEvent['gapKind']) ?? 'post_exit',
       gapStart: s.gap[0],
       gapEnd: s.gap[1],
       bench: s.bench,
       coveredSeconds: s.covered_seconds,
+      uncoveredSeconds: Math.max(0, gapTotal - (s.covered_seconds ?? 0)),
     };
     const arr = subsByStarter.get(s.starter_id) ?? [];
     arr.push(ev);

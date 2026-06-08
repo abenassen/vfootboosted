@@ -98,6 +98,8 @@ export interface SimSubstitution {
   starter_id: number;
   covered: boolean;
   gap: [number, number];
+  // 'pre_entry' (came on late), 'post_exit' (left / sent off), 'mid' (brief off).
+  gap_kind?: string;
   // Present only when the gap was actually covered by a bench player.
   bench?: string;
   bench_id?: number;
