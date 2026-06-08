@@ -1607,15 +1607,24 @@ fantasy tables.
   can mis-pick). A picked starter who doesn't appear is `absent` and the engine
   tries to cover them from the bench. This removes the systematic upward bias of
   conditioning selection on same-match outcomes.
-  - **Exactly one goalkeeper STARTS** (never two in the XI): GKs detected from
-    StatsBomb lineup positions; one (best by value) is fielded. The bench keeps a
-    backup keeper so the engine can replace the starter if absent. The same hard
-    rule (one GK in the XI) will gate user lineups later.
+  - **Roles** are coarse (GK/DEF/MID/ATT) derived from each player's dominant
+    StatsBomb position (`_player_roles`), stored per lineup entry. Avg lineup ≈
+    1 GK / 4.6 DEF / 3.0 MID / 2.4 ATT.
+  - **Exactly one goalkeeper STARTS** (never two in the XI). The bench keeps a
+    backup keeper, and a **goalkeeper may only be substituted by a goalkeeper**
+    (and vice versa) in the engine. The one-GK rule will gate user lineups later.
+  - **Favours regulars**: selection weights value by season start rate and the
+    pool `min_appearances` default is 15, so the fixed XI is built from players
+    who take the field on most matchdays.
   - **Overcrowding-aware**: outfield slots filled greedily by value minus a
     penalty for crowding zones already covered (season touch footprint), so
     strength spreads across the pitch. No explicit "uncovered zone" reward — only
-    the overcrowding disincentive, as intended. Result: all 380 lineups have
-    exactly one GK; avg lineup spans ~2.8/4 columns.
+    the overcrowding disincentive, as intended.
+  - **Known limit**: the heuristic fields the SAME XI every matchday (no
+    per-matchday adaptation, no hindsight), so ~9.7/11 of the picked XI actually
+    play that round and ~8% of gaps stay uncovered (the bench reserve also
+    rested). Real-football rotation makes this expected; closing it needs the
+    per-matchday predictive model (next step #2), not a heuristic tweak.
 - **Substitute coverage (engine, "Mode 1")**: for each starter's on-pitch gaps,
   pick the best-overlapping unused bench player; bench contribution scaled by
   overlap. Gaps are classified by **exit category**, not duration:
@@ -1653,8 +1662,8 @@ fantasy tables.
   saturating); full 5×4 pitch map (click any zone); ZoneInspector (PES macro
   radar Attacco/Creazione/Difesa/Recupero/Pulizia + percentage feature bars on
   hover + who acted here as %); LineupBoard where each row is a SLOT = starter +
-  the substitute(s) who covered them: the influence bar, the spatial-tendency
-  band (POR for the keeper, else DIF/CEN/ATT by combined avgCol) and the ordering
+  the substitute(s) who covered them: the influence bar, the role band (POR/DIF/
+  CEN/ATT from the slot's dominant contributor's position) and the ordering
   are all computed on the combined starter+subs footprint. Click a player to
   light up their zones on the (mirrored-for-away) map; substitutions are inline
   expandables ("entrato al X'", "uscito al X'", "espulso", "non sceso in campo").
