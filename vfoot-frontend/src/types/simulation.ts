@@ -138,10 +138,17 @@ export interface SimZoneFeature {
   swing: number;
 }
 
+export interface SimZoneMacro {
+  key: string;
+  label: string;
+  home_share: number; // 0..1 (away_share = 1 - home_share)
+}
+
 export interface SimZone {
   zone_key: string;
   winner: SimResult;
   margin: number;
+  macros: SimZoneMacro[];
   features: SimZoneFeature[];
 }
 

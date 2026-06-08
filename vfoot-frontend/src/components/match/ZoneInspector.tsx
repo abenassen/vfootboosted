@@ -2,6 +2,7 @@ import clsx from 'clsx';
 import { Badge } from '../ui';
 import { featureLabel } from '../../utils/vfoot';
 import type { MatchResult } from './MatchScoreHeader';
+import { ZoneRadar, type RadarAxis } from './ZoneRadar';
 
 export interface ZoneFeatureVM {
   feature: string;
@@ -24,6 +25,7 @@ export interface ZoneInspectorVM {
   margin: number;
   homeName: string;
   awayName: string;
+  macros: RadarAxis[];
   features: ZoneFeatureVM[];
   homePlayers: ZonePlayerVM[];
   awayPlayers: ZonePlayerVM[];
@@ -45,9 +47,18 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
         <Badge tone={tone}>{zone.winnerLabel}</Badge>
       </div>
 
+      {zone.macros.length ? (
+        <div className="mt-2">
+          <ZoneRadar axes={zone.macros} homeName={zone.homeName} awayName={zone.awayName} />
+        </div>
+      ) : null}
+
       {zone.features.length ? (
-        <div className="mt-3">
-          <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-400">
+        <details className="mt-3 group">
+          <summary className="cursor-pointer list-none text-[11px] uppercase tracking-wide text-slate-400 hover:text-slate-600">
+            Dettaglio per feature ▾
+          </summary>
+          <div className="mt-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-400">
             <span>{zone.homeName}</span>
             <span>{zone.awayName}</span>
           </div>
@@ -56,7 +67,7 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
               <FeatureRow key={f.feature} f={f} homeName={zone.homeName} awayName={zone.awayName} />
             ))}
           </div>
-        </div>
+        </details>
       ) : (
         <div className="mt-3 text-xs text-slate-400">Nessuna azione rilevante in questa zona.</div>
       )}
