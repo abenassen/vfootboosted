@@ -1088,6 +1088,34 @@ non copribile").
 Next UI step: optionally let managers replay/adjust a simulated lineup, then
 decide whether to materialize a simulation into the persistent league models.
 
+### Match-detail redesign + shared scoring service (2026-06-08)
+
+Shared math: `vfoot/services/vector_zone_scoring.py` is now the single source
+of truth for the vector zone-duel. It returns the full explainable breakdown
+(every zone's margin/winner/per-feature home-away swing) and exact per-player
+per-zone contributions (the margin is linear in the feature vectors, so
+attribution is exact). The simulate command uses it and stores, per fixture:
+all 20 zones, score-build params, and home/away `player_totals`. Compact JSON
+keeps the full season ~4MB. The future real-time match endpoint should call the
+same service.
+
+Two scoring layers were clarified for the UI:
+- team score (and goals/standings) = `base ± scale · (boost · mean zone margin
+  over all zones with presence)` — ALL zones contribute, not only the top few;
+- the per-player `event_score` is only a selection heuristic (picks the XI),
+  not a fantavoto and not additive to the team total. It is no longer shown.
+
+Frontend match-detail rewrite (`SimulationMatchDetailPage`):
+- friendly tactical zone names (0-based Z_col_row: col 0..4 defense→attack,
+  row 0..3 flanks; orientation confirmed from xG/clearance distributions);
+- full 20-zone pitch grid, click any zone → `ZoneInspector` graphical
+  breakdown (per-feature home/away bars + swing, plus contributing players);
+- `ScoreBuildExplainer` shows the formula with the actual numbers;
+- `PlayerInfluence` replaces the vote list: most-influential players per team
+  with their zone footprint (chips jump to the zone breakdown).
+- predictive per-player numbers (where a player is expected to play / expected
+  performance from recent history) are deferred to the future formation page.
+
 ## Full Historical Vfoot League Dry Run
 
 Target scenario:
