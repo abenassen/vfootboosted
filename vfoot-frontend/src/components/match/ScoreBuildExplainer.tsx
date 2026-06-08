@@ -19,10 +19,11 @@ export function ScoreBuildExplainer({ vm }: { vm: ScoreBuildVM }) {
   return (
     <div className="space-y-3 text-sm">
       <p className="text-slate-600">
-        Ogni zona produce un <b>margine</b> (chi ha fatto di più). Il punteggio squadra parte da una base e si
-        sposta in base alla <b>media dei margini su tutte le {vm.zoneCount} zone con presenza</b> — non solo quelle
-        evidenziate. Le zone in mappa sono colorate per intensità: quelle più decise spostano di più, ma tutte
-        contano.
+        Ogni zona è un <b>duello</b>: si confronta il tuo terzo offensivo col terzo difensivo avversario (e
+        viceversa). Il punteggio parte da una base e si sposta in base alla <b>media dei duelli sulle{' '}
+        {vm.zoneCount} zone con presenza</b>. Il contributo di ogni zona è <b>saturato</b>: <i>vincere</i> una zona
+        conta, <i>stravincerla</i> rende sempre meno — quindi conviene contendere più zone e mettere i difensori
+        dove l'avversario attacca, non ammassare tutti i big nello stesso punto.
       </p>
 
       <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700">
