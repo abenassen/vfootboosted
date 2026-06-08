@@ -1672,8 +1672,11 @@ fantasy tables.
 - Match-detail UX: score header; "Come nasce il punteggio" explainer (specular +
   saturating); full 5×4 pitch map (click any zone); ZoneInspector — headlined by
   a dominance tug-of-war bar + "X vince · margine N" (who won and by how much),
-  then a PES macro radar (Attacco/Creazione/Difesa/Recupero/Pulizia), percentage
-  feature bars (raw on hover) and who-acted-here as %; LineupBoard where each row is a SLOT = starter +
+  then per-macro SIGNED contribution bars (Attacco/Creazione/Difesa/Recupero/
+  Pulizia, home-left / away-right) that SUM to the margin — faithful, unlike an
+  equal-axis volume radar (which was removed because it could contradict the
+  winner); percentage feature bars (raw on hover) and who-acted-here as %;
+  LineupBoard where each row is a SLOT = starter +
   the substitute(s) who covered them: the role band (POR/DIF/CEN/ATT from the
   slot's dominant contributor) and ordering use the combined starter+subs
   footprint. The keeper (POR) is shown apart with "gol evitati …". Click a player
