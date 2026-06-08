@@ -235,7 +235,6 @@ export default function FormationPage() {
                 key={p.player_id}
                 p={p}
                 isStarter
-                isGk={gkId === p.player_id}
                 selected={selected === p.player_id}
                 onSelect={() => setSelected((s) => (s === p.player_id ? null : p.player_id))}
                 onToggle={() => toggleStarter(p.player_id)}
@@ -251,7 +250,6 @@ export default function FormationPage() {
                 key={p.player_id}
                 p={p}
                 isStarter={false}
-                isGk={false}
                 selected={selected === p.player_id}
                 onSelect={() => setSelected((s) => (s === p.player_id ? null : p.player_id))}
                 onToggle={() => toggleStarter(p.player_id)}
@@ -267,14 +265,12 @@ export default function FormationPage() {
 function RosterRow({
   p,
   isStarter,
-  isGk,
   selected,
   onSelect,
   onToggle,
 }: {
   p: TeamLineupPlayer;
   isStarter: boolean;
-  isGk: boolean;
   selected: boolean;
   onSelect: () => void;
   onToggle: () => void;
@@ -288,7 +284,6 @@ function RosterRow({
         <span className="min-w-0">
           <span className={`block truncate text-sm font-semibold ${selected ? 'text-slate-900 underline' : 'text-slate-800'}`}>
             {p.name}
-            {isStarter && isGk ? <span className="ml-1 text-[10px] font-bold text-amber-600">(portiere)</span> : null}
           </span>
           <span className="text-[11px] text-slate-500">
             {p.avg_minutes}′ medi · rend. atteso{' '}
