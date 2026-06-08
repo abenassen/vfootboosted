@@ -9,7 +9,7 @@ import type { ZoneCellVM } from '../components/match/ZonePitchGrid';
 import type { ZoneInspectorVM, ZonePlayerVM } from '../components/match/ZoneInspector';
 import type { LineupPlayerVM, LineupSubEvent } from '../components/match/LineupBoard';
 import type { ScoreBuildVM } from '../components/match/ScoreBuildExplainer';
-import { parseZoneKey, zoneName } from '../utils/zoneNames';
+import { mirrorZoneKey, parseZoneKey, zoneName } from '../utils/zoneNames';
 import type {
   SimFixtureDetail,
   SimLineup,
@@ -96,8 +96,10 @@ export function buildZoneInspector(
       .filter((f) => Math.abs(f.swing) >= FEATURE_SWING_MIN)
       .slice(0, 6)
       .map((f) => ({ feature: f.feature, home: f.home, away: f.away, swing: f.swing })),
+    // zone_key is in the home (physical) frame; away players act in their own
+    // frame, which is the mirrored zone.
     homePlayers: playersInZone(homeTotals, zone.zone_key),
-    awayPlayers: playersInZone(awayTotals, zone.zone_key),
+    awayPlayers: playersInZone(awayTotals, mirrorZoneKey(zone.zone_key)),
   };
 }
 
@@ -132,7 +134,11 @@ function averageColumn(zones: Record<string, number>): number | null {
   return total > 0 ? weighted / total : null;
 }
 
-export function lineupBoardVMs(lineup: SimLineup, totals: SimPlayerTotal[]): LineupPlayerVM[] {
+export function lineupBoardVMs(
+  lineup: SimLineup,
+  totals: SimPlayerTotal[],
+  mirror = false,
+): LineupPlayerVM[] {
   const totalById = new Map(totals.map((t) => [t.player_id, t]));
 
   const subsByStarter = new Map<number, LineupSubEvent[]>();
@@ -156,10 +162,14 @@ export function lineupBoardVMs(lineup: SimLineup, totals: SimPlayerTotal[]): Lin
 
   const rows = lineup.starters.map((p) => {
     const t = totalById.get(p.player_id);
+    // Footprint zones are placed on the shared (home-perspective) map, so away
+    // players are mirrored. avgCol (the tendency) stays in the player's OWN
+    // frame so an attacker reads as ATT for either team.
+    const ownZoneKeys = t ? Object.keys(t.zones) : [];
     return {
       id: p.player_id,
       name: p.name,
-      zones: t ? Object.keys(t.zones) : [],
+      zones: mirror ? ownZoneKeys.map(mirrorZoneKey) : ownZoneKeys,
       absTotal: t ? Math.abs(t.total) : 0,
       avgCol: t ? averageColumn(t.zones) : null,
       events: subsByStarter.get(p.player_id) ?? [],

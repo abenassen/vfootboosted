@@ -41,3 +41,12 @@ export function zoneShortName(zoneKey: string): string {
   if (!p) return zoneKey;
   return `${COL_SHORT[p.col] ?? p.col} ${ROW_SHORT[p.row] ?? p.row}`;
 }
+
+// Point-reflect a zone into the opponent's frame (both teams attack toward the
+// last column, so their frames differ by 180°). Used to place away-team data
+// onto the shared, home-perspective pitch.
+export function mirrorZoneKey(zoneKey: string): string {
+  const p = parseZoneKey(zoneKey);
+  if (!p) return zoneKey;
+  return `Z_${ZONE_COLS - 1 - p.col}_${ZONE_ROWS - 1 - p.row}`;
+}

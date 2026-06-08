@@ -36,7 +36,7 @@ export default function SimulationMatchDetailPage() {
       zones: vr.zones,
       defaultZone: decisive?.zone_key ?? null,
       homeBoard: lineupBoardVMs(data.home_lineup, vr.home_player_totals),
-      awayBoard: lineupBoardVMs(data.away_lineup, vr.away_player_totals),
+      awayBoard: lineupBoardVMs(data.away_lineup, vr.away_player_totals, true),
     };
   }, [data]);
 
