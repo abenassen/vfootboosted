@@ -31,15 +31,39 @@ Model recap (calibration `vector_zone_duel_v1`):
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Iterable, Mapping
 
 ZoneVectors = Mapping[str, Mapping[str, float]]
+
+# Pitch grid (StatsBomb-normalized: every team attacks toward the last column).
+GRID_COLS = 5
+GRID_ROWS = 4
+
+
+def mirror_zone(zone_key: str, cols: int = GRID_COLS, rows: int = GRID_ROWS) -> str:
+    """Point-reflect a zone to the opponent's frame.
+
+    Each team's features are normalized to attack left->right, so the two teams'
+    frames differ by a 180deg rotation. The same physical area is (col, row) for
+    one team and (cols-1-col, rows-1-row) for the other. We use this so a zone
+    duel is specular: a team's attacking third faces the opponent's defensive
+    third, not the opponent's own attacking third.
+    """
+    m = re.match(r"Z_(\d+)_(\d+)$", zone_key)
+    if not m:
+        return zone_key
+    col, row = int(m.group(1)), int(m.group(2))
+    return f"Z_{cols - 1 - col}_{rows - 1 - row}"
 
 # Aggregate the raw features into a few intelligible macro-categories for a
 # radar-style team comparison. `invert=True` means lower is better (errors), so
 # the share is flipped (the cleaner team gets the larger axis).
 MACROS: list[dict] = [
-    {"key": "attacco", "label": "Attacco", "features": ["xg_shots", "shots", "touches_in_box"], "invert": False},
+    # touches_in_box is intentionally excluded: it is ambiguous (a defending GK
+    # also touches the ball in their own box), which would inflate "Attacco" for
+    # the defending side in a specular duel. It still counts in the score.
+    {"key": "attacco", "label": "Attacco", "features": ["xg_shots", "shots"], "invert": False},
     {
         "key": "creazione",
         "label": "Creazione",
@@ -119,7 +143,9 @@ def score_zone_duel(
     base = params["base"]
     score_scale = params["score_scale"]
 
-    zone_keys = sorted(set(home_vectors) | set(away_vectors))
+    # Iterate physical zones in the home frame; the away side of each zone is
+    # taken from its mirrored (opponent-frame) zone so the duel is specular.
+    zone_keys = sorted(set(home_vectors) | {mirror_zone(z) for z in away_vectors})
 
     # Per-player contribution maps, keyed by player, for fast per-zone lookup.
     def build_players(players):
@@ -155,10 +181,11 @@ def score_zone_duel(
     zones = []
     total_margin = 0.0
     for zone_key in zone_keys:
+        away_key = mirror_zone(zone_key)
         margin = 0.0
         feats = []
         hv = home_vectors.get(zone_key, {})
-        av = away_vectors.get(zone_key, {})
+        av = away_vectors.get(away_key, {})
         for f in features:
             h_raw = float(hv.get(f, 0.0))
             a_raw = float(av.get(f, 0.0))
@@ -182,7 +209,7 @@ def score_zone_duel(
                 "features": sorted(feats, key=lambda r: abs(r["swing"]), reverse=True),
                 "macros": _zone_macros(hv, av, scales),
                 "home_players": players_in_zone(home_player_rows, zone_key),
-                "away_players": players_in_zone(away_player_rows, zone_key),
+                "away_players": players_in_zone(away_player_rows, away_key),
             }
         )
 
