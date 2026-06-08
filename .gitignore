@@ -23,6 +23,13 @@ legacy-fanta/
 # Archive artifacts
 *.zip
 
+# Local session pointer (codex/claude scratch)
+resume_session
+
+# Large generated simulation report variants (canonical dry_run.json is kept)
+vfoot-backend/calibration/historical_vfoot_league_*smoke*.json
+vfoot-backend/calibration/historical_vfoot_league_dry_run_scale_test.json
+
 # Historical datasets (keep only documentation files)
 historical-data/**
 !historical-data/**/
