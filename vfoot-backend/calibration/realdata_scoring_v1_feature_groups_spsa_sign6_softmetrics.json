@@ -1,0 +1,103 @@
+{
+  "feature_groups": {
+    "chance_creation": [
+      "key_passes",
+      "passes_into_box"
+    ],
+    "defending": [
+      "ball_recoveries",
+      "blocks",
+      "clearances",
+      "interceptions"
+    ],
+    "duels": [
+      "duels_won"
+    ],
+    "errors": [
+      "errors_bad_passes",
+      "errors_dispossessed",
+      "errors_fouls_committed",
+      "errors_miscontrols"
+    ],
+    "passing": [
+      "passes_completed"
+    ],
+    "pressure": [
+      "pressures"
+    ],
+    "progression": [
+      "progressive_carries",
+      "progressive_passes_completed"
+    ],
+    "shooting": [
+      "shots",
+      "touches_in_box",
+      "xg_shots"
+    ]
+  },
+  "formula_version": "realdata_scoring_v1_feature_groups_gd",
+  "loss": {
+    "diff_weight": 1.0,
+    "draw_weight": 0.5,
+    "optimizer": "spsa",
+    "regularization": 0.02,
+    "sign_tau": 4.0,
+    "sign_weight": 6.0,
+    "tau": 1.25,
+    "validation_mod": 5
+  },
+  "metrics": {
+    "all": {
+      "avg_pred_goals_per_team": 1.2605263157894737,
+      "avg_real_goals_per_team": 1.2881578947368422,
+      "exact_scoreline_accuracy": 0.09210526315789473,
+      "goal_mae_per_team": 0.8592105263157894,
+      "matches": 380,
+      "raw_score_sign_accuracy": 0.4394736842105263,
+      "soft_avg_pred_goals_per_team": 1.2933221886364592,
+      "soft_goal_diff_mae": 1.288513512981665,
+      "soft_goal_mae_per_team": 0.8996864995571717,
+      "soft_wdl_accuracy": 0.45263157894736844,
+      "wdl_accuracy": 0.38421052631578945
+    },
+    "train": {
+      "avg_pred_goals_per_team": 1.268092105263158,
+      "avg_real_goals_per_team": 1.299342105263158,
+      "exact_scoreline_accuracy": 0.08552631578947369,
+      "goal_mae_per_team": 0.8832236842105263,
+      "matches": 304,
+      "raw_score_sign_accuracy": 0.42105263157894735,
+      "soft_avg_pred_goals_per_team": 1.2965308513244076,
+      "soft_goal_diff_mae": 1.3041300386339916,
+      "soft_goal_mae_per_team": 0.9210028660166025,
+      "soft_wdl_accuracy": 0.4440789473684211,
+      "wdl_accuracy": 0.39473684210526316
+    },
+    "validation": {
+      "avg_pred_goals_per_team": 1.230263157894737,
+      "avg_real_goals_per_team": 1.243421052631579,
+      "exact_scoreline_accuracy": 0.11842105263157894,
+      "goal_mae_per_team": 0.7631578947368421,
+      "matches": 76,
+      "raw_score_sign_accuracy": 0.5131578947368421,
+      "soft_avg_pred_goals_per_team": 1.280487537884663,
+      "soft_goal_diff_mae": 1.2260474103723582,
+      "soft_goal_mae_per_team": 0.8144210337194454,
+      "soft_wdl_accuracy": 0.4868421052631579,
+      "wdl_accuracy": 0.34210526315789475
+    }
+  },
+  "params": {
+    "chance_creation": 1.0722753975654173,
+    "defending": 1.1846904088366115,
+    "duels": 0.8992134012788631,
+    "errors": 0.973061633184291,
+    "home_advantage": 0.7511733536234729,
+    "offset": 7.8725943478887315,
+    "passing": 1.0941945466313752,
+    "pressure": 1.1079362718785977,
+    "progression": 1.1632055596946482,
+    "scale": 0.9703686303888528,
+    "shooting": 1.278839787515563
+  }
+}

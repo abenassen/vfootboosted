@@ -1,0 +1,91 @@
+{
+  "feature_groups": {
+    "chance_creation": [
+      "key_passes",
+      "passes_into_box"
+    ],
+    "defending": [
+      "ball_recoveries",
+      "blocks",
+      "clearances",
+      "interceptions"
+    ],
+    "duels": [
+      "duels_won"
+    ],
+    "errors": [
+      "errors_bad_passes",
+      "errors_dispossessed",
+      "errors_fouls_committed",
+      "errors_miscontrols"
+    ],
+    "passing": [
+      "passes_completed"
+    ],
+    "pressure": [
+      "pressures"
+    ],
+    "progression": [
+      "progressive_carries",
+      "progressive_passes_completed"
+    ],
+    "shooting": [
+      "shots",
+      "touches_in_box",
+      "xg_shots"
+    ]
+  },
+  "formula_version": "realdata_scoring_v1_feature_groups_gd",
+  "loss": {
+    "diff_weight": 0.35,
+    "draw_weight": 0.5,
+    "optimizer": "spsa",
+    "regularization": 0.08,
+    "sign_tau": 4.0,
+    "sign_weight": 1.0,
+    "tau": 1.25,
+    "validation_mod": 5
+  },
+  "metrics": {
+    "all": {
+      "avg_pred_goals_per_team": 1.2539473684210527,
+      "avg_real_goals_per_team": 1.2881578947368422,
+      "exact_scoreline_accuracy": 0.09210526315789473,
+      "goal_mae_per_team": 0.8631578947368421,
+      "matches": 380,
+      "raw_score_sign_accuracy": 0.4368421052631579,
+      "wdl_accuracy": 0.3736842105263158
+    },
+    "train": {
+      "avg_pred_goals_per_team": 1.261513157894737,
+      "avg_real_goals_per_team": 1.299342105263158,
+      "exact_scoreline_accuracy": 0.08552631578947369,
+      "goal_mae_per_team": 0.8865131578947368,
+      "matches": 304,
+      "raw_score_sign_accuracy": 0.41776315789473684,
+      "wdl_accuracy": 0.3815789473684211
+    },
+    "validation": {
+      "avg_pred_goals_per_team": 1.2236842105263157,
+      "avg_real_goals_per_team": 1.243421052631579,
+      "exact_scoreline_accuracy": 0.11842105263157894,
+      "goal_mae_per_team": 0.7697368421052632,
+      "matches": 76,
+      "raw_score_sign_accuracy": 0.5131578947368421,
+      "wdl_accuracy": 0.34210526315789475
+    }
+  },
+  "params": {
+    "chance_creation": 1.0695222795283694,
+    "defending": 0.9811015623915027,
+    "duels": 0.9833691520802358,
+    "errors": 1.1485270163229946,
+    "home_advantage": 0.8145488084499779,
+    "offset": 8.021666302416362,
+    "passing": 1.2004826275607348,
+    "pressure": 1.099575642551157,
+    "progression": 1.0793124114735795,
+    "scale": 0.9725986138010765,
+    "shooting": 1.1735404655330082
+  }
+}

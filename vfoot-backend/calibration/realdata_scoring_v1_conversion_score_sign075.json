@@ -1,0 +1,52 @@
+{
+  "formula_version": "realdata_scoring_v1_conversion_gd",
+  "goal_thresholds": [
+    66.0,
+    72.0,
+    78.0,
+    84.0,
+    90.0,
+    96.0
+  ],
+  "loss": {
+    "diff_weight": 0.35,
+    "draw_weight": 0.5,
+    "regularization": 0.02,
+    "sign_tau": 4.0,
+    "sign_weight": 0.75,
+    "validation_mod": 5
+  },
+  "metrics": {
+    "all": {
+      "avg_pred_goals_per_team": 1.2276315789473684,
+      "avg_real_goals_per_team": 1.2881578947368422,
+      "exact_scoreline_accuracy": 0.08947368421052632,
+      "goal_mae_per_team": 0.8605263157894737,
+      "matches": 380,
+      "wdl_accuracy": 0.3605263157894737
+    },
+    "train": {
+      "avg_pred_goals_per_team": 1.2351973684210527,
+      "avg_real_goals_per_team": 1.299342105263158,
+      "exact_scoreline_accuracy": 0.08552631578947369,
+      "goal_mae_per_team": 0.8799342105263158,
+      "matches": 304,
+      "wdl_accuracy": 0.3684210526315789
+    },
+    "validation": {
+      "avg_pred_goals_per_team": 1.1973684210526316,
+      "avg_real_goals_per_team": 1.243421052631579,
+      "exact_scoreline_accuracy": 0.10526315789473684,
+      "goal_mae_per_team": 0.7828947368421053,
+      "matches": 76,
+      "wdl_accuracy": 0.32894736842105265
+    }
+  },
+  "params": {
+    "diff_boost": 0.0,
+    "home_advantage": 0.7720504032056266,
+    "offset": 7.985887935927297,
+    "scale": 0.9765902434376331
+  },
+  "soft_goal_tau": 1.25
+}
