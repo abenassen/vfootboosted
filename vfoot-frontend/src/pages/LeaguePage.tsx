@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getCompetitions, getLeagueDetail, getLeagueStandings } from '../api';
+import { getCompetitions, getLeagueDetail, getLeagueStandings, getTeamRoster } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
-import { Badge, Card, SectionTitle } from '../components/ui';
+import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import { StandingsTable, type StandingRowVM } from '../components/league/StandingsTable';
-import type { CompetitionItem, LeagueDetail, LeagueStandingRow } from '../types/league';
+import type { CompetitionItem, LeagueDetail, LeagueStandingRow, TeamRoster } from '../types/league';
 
 function standingRows(rows: LeagueStandingRow[], myTeam?: string | null): StandingRowVM[] {
   return rows.map((r) => ({
@@ -29,8 +29,11 @@ export default function LeaguePage() {
   const [detail, setDetail] = useState<LeagueDetail | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionItem[]>([]);
   const [standings, setStandings] = useState<LeagueStandingRow[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
+  const [roster, setRoster] = useState<TeamRoster | null>(null);
 
   useEffect(() => {
+    setSelectedTeamId(null);
     if (!selectedLeagueId) {
       setDetail(null);
       setStandings([]);
@@ -46,6 +49,16 @@ export default function LeaguePage() {
       .then((r) => setStandings(r.standings))
       .catch(() => setStandings([]));
   }, [selectedLeagueId]);
+
+  useEffect(() => {
+    if (!selectedLeagueId || selectedTeamId == null) {
+      setRoster(null);
+      return;
+    }
+    void getTeamRoster(selectedLeagueId, selectedTeamId)
+      .then(setRoster)
+      .catch(() => setRoster(null));
+  }, [selectedLeagueId, selectedTeamId]);
 
   if (!leagues.length) {
     return (
@@ -71,22 +84,57 @@ export default function LeaguePage() {
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <SectionTitle>Lega Attiva</SectionTitle>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <div className="text-xl font-black">{detail.name}</div>
-          <Badge tone={selectedLeague?.market_open ? 'green' : 'red'}>
-            Mercato {selectedLeague?.market_open ? 'aperto' : 'chiuso'}
-          </Badge>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitle>Lega Attiva</SectionTitle>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="text-xl font-black">{detail.name}</div>
+              <Badge tone={selectedLeague?.market_open ? 'green' : 'red'}>
+                Mercato {selectedLeague?.market_open ? 'aperto' : 'chiuso'}
+              </Badge>
+            </div>
+            <div className="mt-2 text-sm text-slate-600">Invite code: {detail.invite_code}</div>
+          </div>
+          <Link to="/matches">
+            <Button variant="primary" size="sm">
+              Sfoglia le partite →
+            </Button>
+          </Link>
         </div>
-        <div className="mt-2 text-sm text-slate-600">Invite code: {detail.invite_code}</div>
       </Card>
 
       {standings.length ? (
         <Card className="p-4">
           <SectionTitle>Classifica</SectionTitle>
+          <div className="mt-1 text-[11px] text-slate-400">Clicca una squadra per vederne la rosa.</div>
           <div className="mt-2">
-            <StandingsTable rows={standingRows(standings, selectedLeague?.team_name)} />
+            <StandingsTable
+              rows={standingRows(standings, selectedLeague?.team_name)}
+              promoCount={4}
+              selectedKey={selectedTeamId != null ? String(selectedTeamId) : null}
+              onRowClick={(row) => setSelectedTeamId((cur) => (cur === Number(row.key) ? null : Number(row.key)))}
+            />
           </div>
+          {roster ? (
+            <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-slate-800">{roster.team_name} · rosa</div>
+                <span className="text-xs text-slate-500">
+                  {roster.players.length} giocatori · valore {roster.players.reduce((s, p) => s + p.price, 0)}
+                </span>
+              </div>
+              <div className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                {[...roster.players]
+                  .sort((a, b) => b.price - a.price)
+                  .map((p) => (
+                    <div key={p.player_id} className="flex items-center justify-between text-sm">
+                      <span className="text-slate-700">{p.name}</span>
+                      <span className="font-mono text-xs text-slate-500">{p.price}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ) : null}
         </Card>
       ) : null}
 

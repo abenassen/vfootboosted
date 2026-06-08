@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getLeagueFixtures } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
-import { Badge, Button, Card, SectionTitle } from '../components/ui';
+import { Card, SectionTitle } from '../components/ui';
 import type { LeagueFixtureItem } from '../types/league';
 
+// Full league calendar, mirroring the simulation matches page: a matchday
+// selector, all fixtures of the round, each clickable to the rich detail.
 export default function MatchesPage() {
   const { selectedLeagueId } = useLeagueContext();
   const [fixtures, setFixtures] = useState<LeagueFixtureItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [round, setRound] = useState<number | null>(null);
 
   useEffect(() => {
     if (!selectedLeagueId) return;
@@ -21,45 +24,9 @@ export default function MatchesPage() {
       .finally(() => setLoading(false));
   }, [selectedLeagueId]);
 
-  const filteredFixtures = useMemo(() => {
-    const involved = fixtures.filter((f) => f.is_user_involved);
-    if (!involved.length) return [];
-
-    const withRealMatchday = involved.filter((f) => typeof f.real_matchday === 'number');
-    if (withRealMatchday.length) {
-      const unique = [...new Set(withRealMatchday.map((f) => Number(f.real_matchday)))].sort((a, b) => a - b);
-      const pending = [
-        ...new Set(
-          withRealMatchday
-            .filter((f) => f.status !== 'finished')
-            .map((f) => Number(f.real_matchday))
-        ),
-      ].sort((a, b) => a - b);
-      const current = pending.length ? pending[0] : unique[unique.length - 1];
-      const next = current + 1;
-      return withRealMatchday.filter((f) => {
-        const md = Number(f.real_matchday);
-        return md === current || md === next;
-      });
-    }
-
-    const uniqueRounds = [...new Set(involved.map((f) => f.round_no))].sort((a, b) => a - b);
-    const pendingRounds = [...new Set(involved.filter((f) => f.status !== 'finished').map((f) => f.round_no))].sort((a, b) => a - b);
-    const currentRound = pendingRounds.length ? pendingRounds[0] : uniqueRounds[uniqueRounds.length - 1];
-    const nextRound = currentRound + 1;
-    return involved.filter((f) => f.round_no === currentRound || f.round_no === nextRound);
-  }, [fixtures]);
-
-  const grouped = useMemo(() => {
-    const map = new Map<string, LeagueFixtureItem[]>();
-    for (const f of filteredFixtures) {
-      const key = `${f.competition_id}:${f.competition_name}`;
-      const curr = map.get(key) ?? [];
-      curr.push(f);
-      map.set(key, curr);
-    }
-    return [...map.entries()].map(([k, v]) => ({ key: k, competitionName: v[0].competition_name, fixtures: v }));
-  }, [filteredFixtures]);
+  const rounds = useMemo(() => [...new Set(fixtures.map((f) => f.round_no))].sort((a, b) => a - b), [fixtures]);
+  const activeRound = round ?? rounds[0] ?? null;
+  const shown = useMemo(() => fixtures.filter((f) => f.round_no === activeRound), [fixtures, activeRound]);
 
   if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per vedere le partite.</div>;
   if (loading) return <div className="text-sm text-slate-500">Caricamento partite…</div>;
@@ -68,62 +35,75 @@ export default function MatchesPage() {
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <SectionTitle>Partite</SectionTitle>
-        <div className="mt-2 text-sm text-slate-600">
-          Mostrate solo le partite della tua squadra, limitate al matchday corrente e al successivo.
+        <SectionTitle>Calendario</SectionTitle>
+        <div className="mt-1 text-sm text-slate-600">
+          {fixtures.length} partite · {rounds.length} giornate
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1">
+          {rounds.map((r) => (
+            <button
+              key={r}
+              onClick={() => setRound(r)}
+              className={
+                r === activeRound
+                  ? 'rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white'
+                  : 'rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-200'
+              }
+            >
+              {r}
+            </button>
+          ))}
         </div>
       </Card>
 
-      {!grouped.length ? (
-        <Card className="p-4 text-sm text-slate-500">Nessuna partita trovata per la tua squadra nella finestra corrente/prossima.</Card>
-      ) : null}
-
-      {grouped.map((g) => {
-        const next = g.fixtures.filter((f) => f.status !== 'finished');
-        const past = g.fixtures.filter((f) => f.status === 'finished');
-        return (
-          <Card key={g.key} className="p-4">
-            <SectionTitle>{g.competitionName}</SectionTitle>
-            <div className="mt-2 grid gap-4 md:grid-cols-2">
-              <div>
-                <div className="text-xs font-semibold text-slate-500">Prossime</div>
-                <div className="mt-2 space-y-2">
-                  {next.length ? next.map((f) => <FixtureRow key={f.fixture_id} f={f} />) : <div className="text-xs text-slate-500">Nessuna.</div>}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-semibold text-slate-500">Recenti</div>
-                <div className="mt-2 space-y-2">
-                  {past.length ? past.map((f) => <FixtureRow key={f.fixture_id} f={f} />) : <div className="text-xs text-slate-500">Nessuna.</div>}
-                </div>
-              </div>
-            </div>
-          </Card>
-        );
-      })}
+      <Card className="p-4">
+        <SectionTitle>Giornata {activeRound}</SectionTitle>
+        <div className="mt-2 space-y-2">
+          {shown.length ? (
+            shown.map((f) => <FixtureRow key={f.fixture_id} f={f} />)
+          ) : (
+            <div className="text-sm text-slate-500">Nessuna partita in questa giornata.</div>
+          )}
+        </div>
+      </Card>
     </div>
   );
 }
 
 function FixtureRow({ f }: { f: LeagueFixtureItem }) {
+  const finished = f.status === 'finished' && f.score;
+  const hs = f.score?.home_total ?? 0;
+  const as = f.score?.away_total ?? 0;
+  const homeWin = !!finished && hs > as;
+  const awayWin = !!finished && as > hs;
   return (
-    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
-      <div className="flex items-start justify-between gap-2">
-        <div className="font-semibold">
-          {f.home_team.name} <span className="text-slate-400">vs</span> {f.away_team.name}
-          <div className="mt-1 text-xs text-slate-500">
-            {f.round_label ?? `Round ${f.round_no}`} ·
-            {typeof f.real_matchday === 'number' ? ` MD ${f.real_matchday} · ` : ' '}
-            {f.kickoff ? new Date(f.kickoff).toLocaleString() : 'Data da definire'}
-          </div>
+    <Link
+      to={`/matches/${f.fixture_id}`}
+      className="block rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 transition hover:border-slate-300 hover:bg-white"
+    >
+      <div className="flex items-center gap-3">
+        <div className="flex-1 text-right">
+          <span className={homeWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.home_team.name}</span>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <Badge tone={f.status === 'finished' ? 'green' : f.status === 'live' ? 'amber' : 'slate'}>{f.status}</Badge>
-          <Link to={`/matches/${f.fixture_id}`}>
-            <Button size="sm" variant="secondary">Dettagli</Button>
-          </Link>
+        <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 font-mono text-sm font-bold shadow-sm">
+          {finished ? (
+            <>
+              <span className={homeWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(hs)}</span>
+              <span className="text-slate-300">-</span>
+              <span className={awayWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(as)}</span>
+            </>
+          ) : (
+            <span className="text-slate-400">vs</span>
+          )}
+        </div>
+        <div className="flex-1">
+          <span className={awayWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.away_team.name}</span>
         </div>
       </div>
-    </div>
+      <div className="mt-1 text-center text-[10px] uppercase tracking-wide text-slate-400">
+        Giornata {f.round_no}
+        {typeof f.real_matchday === 'number' ? ` · Serie A reale ${f.real_matchday}` : ''}
+      </div>
+    </Link>
   );
 }
