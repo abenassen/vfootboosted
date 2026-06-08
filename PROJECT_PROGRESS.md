@@ -1675,7 +1675,8 @@ fantasy tables.
   then per-macro SIGNED contribution bars (Attacco/Creazione/Difesa/Recupero/
   Pulizia, home-left / away-right) that SUM to the margin — faithful, unlike an
   equal-axis volume radar (which was removed because it could contradict the
-  winner); percentage feature bars (raw on hover) and who-acted-here as %;
+  winner); a collapsible "Dati reali per feature" (RAW event values home vs away,
+  not duplicate percentage bars) and who-acted-here as %;
   LineupBoard where each row is a SLOT = starter +
   the substitute(s) who covered them: the role band (POR/DIF/CEN/ATT from the
   slot's dominant contributor) and ordering use the combined starter+subs
