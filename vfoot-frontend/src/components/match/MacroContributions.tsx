@@ -20,8 +20,8 @@ export function MacroContributions({
   return (
     <div>
       <div className="flex items-center justify-between text-[11px] font-semibold">
-        <span className="text-green-700">◄ {homeName}</span>
-        <span className="text-sky-700">{awayName} ►</span>
+        <span className="text-red-600">◄ {homeName}</span>
+        <span className="text-blue-700">{awayName} ►</span>
       </div>
       <div className="mt-1.5 space-y-1.5">
         {ordered.map((m) => {
@@ -32,11 +32,11 @@ export function MacroContributions({
               <span className="w-16 shrink-0 text-slate-600">{m.label}</span>
               <div className="flex flex-1 items-center">
                 <div className="flex h-2.5 flex-1 justify-end overflow-hidden rounded-l-full bg-slate-100">
-                  {home ? <div className="h-full bg-green-500" style={{ width: `${frac * 100}%` }} /> : null}
+                  {home ? <div className="h-full bg-red-500" style={{ width: `${frac * 100}%` }} /> : null}
                 </div>
                 <div className="h-3 w-px bg-slate-300" />
                 <div className="flex h-2.5 flex-1 overflow-hidden rounded-r-full bg-slate-100">
-                  {!home ? <div className="h-full bg-sky-500" style={{ width: `${frac * 100}%` }} /> : null}
+                  {!home ? <div className="h-full bg-blue-600" style={{ width: `${frac * 100}%` }} /> : null}
                 </div>
               </div>
             </div>

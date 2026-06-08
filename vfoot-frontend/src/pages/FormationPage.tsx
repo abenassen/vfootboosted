@@ -138,7 +138,9 @@ export default function FormationPage() {
     }
   };
 
-  const roster = [...ctx.roster].sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form);
+  const byRole = (a: TeamLineupPlayer, b: TeamLineupPlayer) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form;
+  const starters = ctx.roster.filter((p) => starterIds.includes(p.player_id)).sort(byRole);
+  const bench = ctx.roster.filter((p) => !starterIds.includes(p.player_id)).sort(byRole);
   const compName = ctx.competitions.find((c) => c.competition_id === competition)?.name;
 
   return (
@@ -222,14 +224,34 @@ export default function FormationPage() {
 
         <Card className="p-4">
           <SectionTitle>Rosa · titolari e panchina (un solo portiere fra i titolari)</SectionTitle>
-          <div className="mt-1 text-[11px] text-slate-400">Clicca il nome per vederne il footprint sulla mappa.</div>
-          <div className="mt-2 divide-y">
-            {roster.map((p) => (
+          <div className="mt-1 text-[11px] text-slate-400">Clicca il nome per vederne le zone sulla mappa.</div>
+
+          <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Titolari {starterIds.length}/{XI}
+          </div>
+          <div className="divide-y">
+            {starters.map((p) => (
               <RosterRow
                 key={p.player_id}
                 p={p}
-                isStarter={starterIds.includes(p.player_id)}
+                isStarter
                 isGk={gkId === p.player_id}
+                selected={selected === p.player_id}
+                onSelect={() => setSelected((s) => (s === p.player_id ? null : p.player_id))}
+                onToggle={() => toggleStarter(p.player_id)}
+              />
+            ))}
+            {starters.length === 0 ? <div className="py-2 text-sm text-slate-400">Nessun titolare selezionato.</div> : null}
+          </div>
+
+          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Panchina</div>
+          <div className="divide-y">
+            {bench.map((p) => (
+              <RosterRow
+                key={p.player_id}
+                p={p}
+                isStarter={false}
+                isGk={false}
                 selected={selected === p.player_id}
                 onSelect={() => setSelected((s) => (s === p.player_id ? null : p.player_id))}
                 onToggle={() => toggleStarter(p.player_id)}

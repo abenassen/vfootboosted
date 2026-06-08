@@ -35,8 +35,8 @@ export interface ZoneInspectorVM {
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
-  const tone = zone.winner === 'home' ? 'green' : zone.winner === 'away' ? 'slate' : 'amber';
-  const winnerColor = zone.winner === 'home' ? 'text-green-600' : zone.winner === 'away' ? 'text-sky-600' : 'text-slate-500';
+  const tone = zone.winner === 'home' ? 'red' : zone.winner === 'away' ? 'blue' : 'amber';
+  const winnerColor = zone.winner === 'home' ? 'text-red-600' : zone.winner === 'away' ? 'text-blue-600' : 'text-slate-500';
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3">
       <div className="flex items-center justify-between">
@@ -47,7 +47,7 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
       {/* Headline: who won and by how much (dominance tug-of-war). */}
       <div className="mt-2">
         <div className="flex items-center justify-between text-[11px]">
-          <span className={zone.winner === 'home' ? 'font-semibold text-green-700' : 'text-slate-500'}>{zone.homeName}</span>
+          <span className={zone.winner === 'home' ? 'font-semibold text-red-600' : 'text-slate-500'}>{zone.homeName}</span>
           <span className="text-slate-500">
             {zone.winner === 'draw' ? (
               'equilibrio'
@@ -58,14 +58,14 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
               </>
             )}
           </span>
-          <span className={zone.winner === 'away' ? 'font-semibold text-sky-700' : 'text-slate-500'}>{zone.awayName}</span>
+          <span className={zone.winner === 'away' ? 'font-semibold text-blue-700' : 'text-slate-500'}>{zone.awayName}</span>
         </div>
         <div className="relative mt-1 h-3 overflow-hidden rounded-full bg-slate-100">
           {/* centre line */}
           <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-slate-300" />
           {zone.winner !== 'draw' ? (
             <div
-              className={`absolute top-0 h-full ${zone.winner === 'home' ? 'bg-green-500' : 'bg-sky-500'}`}
+              className={`absolute top-0 h-full ${zone.winner === 'home' ? 'bg-red-500' : 'bg-blue-600'}`}
               style={
                 zone.winner === 'home'
                   ? { right: '50%', width: `${zone.marginShare * 50}%` }
@@ -88,8 +88,8 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
             Dati reali per feature ▾
           </summary>
           <div className="mt-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-400">
-            <span className="text-green-700">{zone.homeName}</span>
-            <span className="text-sky-700">{zone.awayName}</span>
+            <span className="text-red-600">{zone.homeName}</span>
+            <span className="text-blue-700">{zone.awayName}</span>
           </div>
           <div className="mt-1 space-y-0.5">
             {zone.features.map((f) => (
@@ -122,11 +122,11 @@ function FeatureRow({ f }: { f: ZoneFeatureVM }) {
   const awayBig = f.away > f.home;
   return (
     <div className="flex items-center gap-2 text-[11px]">
-      <span className={clsx('w-12 text-right font-mono', homeBig ? 'font-semibold text-green-700' : 'text-slate-400')}>
+      <span className={clsx('w-12 text-right font-mono', homeBig ? 'font-semibold text-red-600' : 'text-slate-400')}>
         {fmtVal(f.home)}
       </span>
       <span className="flex-1 text-center text-slate-600">{featureLabel(f.feature)}</span>
-      <span className={clsx('w-12 font-mono', awayBig ? 'font-semibold text-sky-700' : 'text-slate-400')}>
+      <span className={clsx('w-12 font-mono', awayBig ? 'font-semibold text-blue-700' : 'text-slate-400')}>
         {fmtVal(f.away)}
       </span>
     </div>
@@ -134,7 +134,7 @@ function FeatureRow({ f }: { f: ZoneFeatureVM }) {
 }
 
 function PlayerColumn({ players, side }: { players: ZonePlayerVM[]; side: 'home' | 'away' }) {
-  const bar = side === 'home' ? 'bg-green-500' : 'bg-sky-500';
+  const bar = side === 'home' ? 'bg-red-500' : 'bg-blue-600';
   return (
     <div className="space-y-1">
       {players.length ? (

@@ -59,7 +59,7 @@ export function LineupColumn({
   selectedPlayerId?: string | number | null;
   onSelectPlayer?: (id: string | number | null) => void;
 }) {
-  const accent = side === 'home' ? 'text-green-700' : 'text-sky-700';
+  const accent = side === 'home' ? 'text-red-600' : 'text-blue-700';
   // Goalkeeper → defenders → midfielders → attackers; within a role, by spatial
   // centre of gravity. Slots with no role/action go last.
   const ordered = [...players].sort((a, b) => {

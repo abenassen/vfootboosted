@@ -110,10 +110,10 @@ export function MatchDetail({
             />
             <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-500">
               <span className="flex items-center gap-1">
-                <span className="h-3 w-3 rounded bg-green-500" /> {data.home_team}
+                <span className="h-3 w-3 rounded bg-red-500" /> {data.home_team}
               </span>
               <span className="flex items-center gap-1">
-                <span className="h-3 w-3 rounded bg-sky-500" /> {data.away_team}
+                <span className="h-3 w-3 rounded bg-blue-600" /> {data.away_team}
               </span>
               {highlightZones ? (
                 <span className="flex items-center gap-1">
