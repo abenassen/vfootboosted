@@ -4,8 +4,7 @@ import { getSimulationFixtureDetail } from '../api/simulation';
 import {
   buildZoneInspector,
   fixtureToHeaderVM,
-  lineupToSubReport,
-  playerInfluenceVMs,
+  lineupBoardVMs,
   scoreBuildVM,
   zonesToCells,
 } from '../api/simulationAdapters';
@@ -13,9 +12,8 @@ import { Button, Card, SectionTitle } from '../components/ui';
 import { MatchScoreHeader } from '../components/match/MatchScoreHeader';
 import { ZonePitchGrid } from '../components/match/ZonePitchGrid';
 import { ZoneInspector } from '../components/match/ZoneInspector';
-import { PlayerInfluence } from '../components/match/PlayerInfluence';
 import { ScoreBuildExplainer } from '../components/match/ScoreBuildExplainer';
-import { SubstitutionReport } from '../components/match/LineupPanel';
+import { LineupColumn } from '../components/match/LineupBoard';
 import { useAsync } from '../utils/useAsync';
 
 export default function SimulationMatchDetailPage() {
@@ -23,26 +21,30 @@ export default function SimulationMatchDetailPage() {
   const id = Number(fixtureId);
   const { data, loading, error } = useAsync(() => getSimulationFixtureDetail(id), [fixtureId]);
   const [selectedZone, setSelectedZone] = useState<string | null>(null);
+  const [selectedPlayer, setSelectedPlayer] = useState<string | number | null>(null);
 
   const vm = useMemo(() => {
     if (!data) return null;
     const vr = data.vector_report;
-    const cells = zonesToCells(vr.zones);
     const decisive = [...vr.zones]
       .filter((z) => z.features.length > 0)
       .sort((a, b) => Math.abs(b.margin) - Math.abs(a.margin))[0];
     return {
       header: fixtureToHeaderVM(data),
       scoreBuild: scoreBuildVM(data),
-      cells,
+      cells: zonesToCells(vr.zones),
       zones: vr.zones,
       defaultZone: decisive?.zone_key ?? null,
-      homeInfluence: playerInfluenceVMs(vr.home_player_totals),
-      awayInfluence: playerInfluenceVMs(vr.away_player_totals),
-      homeSub: lineupToSubReport(data.home_lineup),
-      awaySub: lineupToSubReport(data.away_lineup),
+      homeBoard: lineupBoardVMs(data.home_lineup, vr.home_player_totals),
+      awayBoard: lineupBoardVMs(data.away_lineup, vr.away_player_totals),
     };
   }, [data]);
+
+  const highlightZones = useMemo(() => {
+    if (!vm || selectedPlayer == null) return null;
+    const p = [...vm.homeBoard, ...vm.awayBoard].find((x) => x.id === selectedPlayer);
+    return p?.zones ?? null;
+  }, [vm, selectedPlayer]);
 
   if (loading) return <div className="text-sm text-slate-500">Caricamento partita…</div>;
   if (error || !data || !vm) {
@@ -56,8 +58,18 @@ export default function SimulationMatchDetailPage() {
   const activeZoneKey = selectedZone ?? vm.defaultZone;
   const activeZone = vm.zones.find((z) => z.zone_key === activeZoneKey) ?? null;
   const inspector = activeZone
-    ? buildZoneInspector(activeZone, data.vector_report.home_player_totals, data.vector_report.away_player_totals, data.home_team, data.away_team)
+    ? buildZoneInspector(
+        activeZone,
+        data.vector_report.home_player_totals,
+        data.vector_report.away_player_totals,
+        data.home_team,
+        data.away_team,
+      )
     : null;
+
+  const selectPlayer = (pid: string | number | null) => {
+    setSelectedPlayer(pid);
+  };
 
   return (
     <div className="space-y-4">
@@ -87,10 +99,27 @@ export default function SimulationMatchDetailPage() {
       </Card>
 
       <Card className="p-4">
-        <SectionTitle>Mappa del campo · clicca una zona</SectionTitle>
+        <div className="flex items-center justify-between">
+          <SectionTitle>Mappa del campo</SectionTitle>
+          {selectedPlayer != null ? (
+            <button
+              onClick={() => setSelectedPlayer(null)}
+              className="text-[11px] font-semibold text-slate-500 hover:text-slate-700"
+            >
+              ✕ deseleziona giocatore
+            </button>
+          ) : (
+            <span className="text-[11px] text-slate-400">clicca una zona, o un giocatore in basso</span>
+          )}
+        </div>
         <div className="mt-3 grid gap-4 md:grid-cols-[minmax(240px,300px)_1fr]">
           <div>
-            <ZonePitchGrid cells={vm.cells} selectedZone={activeZoneKey} onSelectZone={setSelectedZone} />
+            <ZonePitchGrid
+              cells={vm.cells}
+              selectedZone={activeZoneKey}
+              onSelectZone={(z) => setSelectedZone(z)}
+              highlightZones={highlightZones}
+            />
             <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-500">
               <span className="flex items-center gap-1">
                 <span className="h-3 w-3 rounded bg-green-500" /> {data.home_team}
@@ -98,47 +127,36 @@ export default function SimulationMatchDetailPage() {
               <span className="flex items-center gap-1">
                 <span className="h-3 w-3 rounded bg-sky-500" /> {data.away_team}
               </span>
+              {highlightZones ? (
+                <span className="flex items-center gap-1">
+                  <span className="h-3 w-3 rounded ring-2 ring-amber-300" /> zone del giocatore
+                </span>
+              ) : null}
             </div>
           </div>
           {inspector ? <ZoneInspector zone={inspector} /> : null}
         </div>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="p-4">
-          <PlayerInfluence
-            title={data.home_team}
+      <Card className="p-4">
+        <SectionTitle>Formazioni · clicca un giocatore per vederne le zone</SectionTitle>
+        <div className="mt-3 grid gap-6 sm:grid-cols-2">
+          <LineupColumn
+            teamName={data.home_team}
             side="home"
-            players={vm.homeInfluence}
-            selectedZone={activeZoneKey}
-            onSelectZone={setSelectedZone}
+            players={vm.homeBoard}
+            selectedPlayerId={selectedPlayer}
+            onSelectPlayer={selectPlayer}
           />
-        </Card>
-        <Card className="p-4">
-          <PlayerInfluence
-            title={data.away_team}
+          <LineupColumn
+            teamName={data.away_team}
             side="away"
-            players={vm.awayInfluence}
-            selectedZone={activeZoneKey}
-            onSelectZone={setSelectedZone}
+            players={vm.awayBoard}
+            selectedPlayerId={selectedPlayer}
+            onSelectPlayer={selectPlayer}
           />
-        </Card>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="p-4">
-          <SectionTitle>{data.home_team} · sostituzioni</SectionTitle>
-          <div className="mt-1">
-            <SubstitutionReport report={vm.homeSub} />
-          </div>
-        </Card>
-        <Card className="p-4">
-          <SectionTitle>{data.away_team} · sostituzioni</SectionTitle>
-          <div className="mt-1">
-            <SubstitutionReport report={vm.awaySub} />
-          </div>
-        </Card>
-      </div>
+        </div>
+      </Card>
     </div>
   );
 }

@@ -25,16 +25,20 @@ export function ZonePitchGrid({
   cells,
   selectedZone,
   onSelectZone,
+  highlightZones,
 }: {
   cells: ZoneCellVM[];
   selectedZone?: string | null;
   onSelectZone?: (zoneKey: string | null) => void;
+  highlightZones?: string[] | null;
 }) {
   const byKey = useMemo(() => {
     const map = new Map<string, ZoneCellVM>();
     for (const c of cells) map.set(c.zoneKey, c);
     return map;
   }, [cells]);
+  const highlighted = useMemo(() => new Set(highlightZones ?? []), [highlightZones]);
+  const hasHighlight = highlighted.size > 0;
   const maxAbs = useMemo(
     () => Math.max(0.0001, ...cells.filter((c) => c.hasPresence).map((c) => Math.abs(c.margin))),
     [cells],
@@ -47,7 +51,9 @@ export function ZonePitchGrid({
       const cell = byKey.get(key);
       const active = cell?.hasPresence ?? false;
       const selected = selectedZone === key;
-      const intensity = active ? 0.4 + 0.6 * (Math.abs(cell!.margin) / maxAbs) : 1;
+      const isHighlighted = highlighted.has(key);
+      const dimmed = hasHighlight && !isHighlighted;
+      const intensity = dimmed ? 0.18 : active ? 0.4 + 0.6 * (Math.abs(cell!.margin) / maxAbs) : 1;
       items.push(
         <button
           key={key}
@@ -58,9 +64,10 @@ export function ZonePitchGrid({
             'flex aspect-[4/3] items-center justify-center rounded-md text-[10px] font-bold transition',
             active ? `${WINNER_BG[cell!.winner]} text-white` : 'bg-emerald-800/40 text-emerald-200/40',
             onSelectZone && 'hover:brightness-110',
+            isHighlighted && 'ring-2 ring-amber-300',
             selected && 'ring-2 ring-white ring-offset-2 ring-offset-emerald-900',
           )}
-          style={active ? { opacity: intensity } : undefined}
+          style={active || dimmed ? { opacity: intensity } : undefined}
         >
           {active ? cell!.margin.toFixed(1) : '·'}
         </button>,

@@ -6,19 +6,21 @@
 import type { StandingRowVM } from '../components/league/StandingsTable';
 import type { MatchHeaderVM } from '../components/match/MatchScoreHeader';
 import type { ZoneCellVM } from '../components/match/ZonePitchGrid';
-import type { ZoneInspectorVM } from '../components/match/ZoneInspector';
-import type { PlayerInfluenceVM } from '../components/match/PlayerInfluence';
+import type { ZoneInspectorVM, ZonePlayerVM } from '../components/match/ZoneInspector';
+import type { LineupPlayerVM, LineupSubEvent } from '../components/match/LineupBoard';
 import type { ScoreBuildVM } from '../components/match/ScoreBuildExplainer';
-import type { LineupVM, SubEntryVM, SubReportVM } from '../components/match/LineupPanel';
 import { parseZoneKey, zoneName } from '../utils/zoneNames';
 import type {
   SimFixtureDetail,
   SimLineup,
   SimPlayerTotal,
   SimStanding,
-  SimSubstitution,
   SimZone,
 } from '../types/simulation';
+
+// Feature swings below this magnitude are noise (often zero-weight features) —
+// not worth showing.
+const FEATURE_SWING_MIN = 0.02;
 
 export function standingsToVM(standings: SimStanding[], highlightTeam?: string | null): StandingRowVM[] {
   return standings.map((s) => ({
@@ -64,10 +66,13 @@ export function zonesToCells(zones: SimZone[]): ZoneCellVM[] {
   });
 }
 
-function playersInZone(totals: SimPlayerTotal[], zoneKey: string) {
-  return totals
+function playersInZone(totals: SimPlayerTotal[], zoneKey: string): ZonePlayerVM[] {
+  const list = totals
     .filter((p) => zoneKey in p.zones)
-    .map((p) => ({ name: p.name, contribution: p.zones[zoneKey] }))
+    .map((p) => ({ name: p.name, contribution: p.zones[zoneKey] }));
+  const sumAbs = list.reduce((s, p) => s + Math.abs(p.contribution), 0) || 1;
+  return list
+    .map((p) => ({ ...p, share: Math.abs(p.contribution) / sumAbs }))
     .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
 }
 
@@ -86,22 +91,13 @@ export function buildZoneInspector(
     margin: zone.margin,
     homeName,
     awayName,
-    features: zone.features.map((f) => ({ feature: f.feature, home: f.home, away: f.away, swing: f.swing })),
+    features: zone.features
+      .filter((f) => Math.abs(f.swing) >= FEATURE_SWING_MIN)
+      .slice(0, 6)
+      .map((f) => ({ feature: f.feature, home: f.home, away: f.away, swing: f.swing })),
     homePlayers: playersInZone(homeTotals, zone.zone_key),
     awayPlayers: playersInZone(awayTotals, zone.zone_key),
   };
-}
-
-export function playerInfluenceVMs(totals: SimPlayerTotal[]): PlayerInfluenceVM[] {
-  return totals.map((p) => ({
-    playerId: p.player_id,
-    name: p.name,
-    total: p.total,
-    footprint: Object.entries(p.zones)
-      .map(([zoneKey, value]) => ({ zoneKey, value: value as number }))
-      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-      .slice(0, 5),
-  }));
 }
 
 export function scoreBuildVM(fx: SimFixtureDetail): ScoreBuildVM {
@@ -120,38 +116,37 @@ export function scoreBuildVM(fx: SimFixtureDetail): ScoreBuildVM {
   };
 }
 
-function subEntryToVM(s: SimSubstitution): SubEntryVM {
-  const kind = s.covered && s.bench ? 'covered' : s.reason === 'disciplinary_gap' ? 'disciplinary' : 'uncovered';
-  return {
-    starter: s.starter,
-    gapStart: s.gap[0],
-    gapEnd: s.gap[1],
-    kind,
-    bench: s.bench,
-    coveredSeconds: s.covered_seconds,
-  };
-}
+export function lineupBoardVMs(lineup: SimLineup, totals: SimPlayerTotal[]): LineupPlayerVM[] {
+  const totalById = new Map(totals.map((t) => [t.player_id, t]));
 
-export function lineupToSubReport(lineup: SimLineup): SubReportVM {
-  const sub = lineup.substitution_report;
-  return {
-    coveredSeconds: sub.covered_gap_seconds,
-    uncoveredSeconds: sub.uncovered_gap_seconds,
-    disciplinarySeconds: sub.disciplinary_gap_seconds,
-    usedBenchCount: sub.used_bench_count,
-    entries: sub.substitutions.map(subEntryToVM),
-  };
-}
+  const subsByStarter = new Map<number, LineupSubEvent[]>();
+  for (const s of lineup.substitution_report.substitutions) {
+    const kind: LineupSubEvent['kind'] =
+      s.covered && s.bench ? 'covered' : s.reason === 'disciplinary_gap' ? 'disciplinary' : 'uncovered';
+    const ev: LineupSubEvent = {
+      kind,
+      gapStart: s.gap[0],
+      gapEnd: s.gap[1],
+      bench: s.bench,
+      coveredSeconds: s.covered_seconds,
+    };
+    const arr = subsByStarter.get(s.starter_id) ?? [];
+    arr.push(ev);
+    subsByStarter.set(s.starter_id, arr);
+  }
 
-export function lineupToVM(lineup: SimLineup, teamName: string, side: 'home' | 'away'): LineupVM {
-  return {
-    teamName,
-    side,
-    score: lineup.score,
-    starters: [...lineup.starters]
-      .sort((a, b) => b.event_score - a.event_score)
-      .map((p) => ({ id: p.player_id, name: p.name, score: p.event_score })),
-    bench: lineup.bench.map((p) => ({ id: p.player_id, name: p.name, score: p.event_score })),
-    subReport: lineupToSubReport(lineup),
-  };
+  const rows = lineup.starters.map((p) => {
+    const t = totalById.get(p.player_id);
+    return {
+      id: p.player_id,
+      name: p.name,
+      zones: t ? Object.keys(t.zones) : [],
+      absTotal: t ? Math.abs(t.total) : 0,
+      events: subsByStarter.get(p.player_id) ?? [],
+    };
+  });
+  const sum = rows.reduce((s, r) => s + r.absTotal, 0) || 1;
+  return rows
+    .map((r) => ({ id: r.id, name: r.name, zones: r.zones, share: r.absTotal / sum, events: r.events }))
+    .sort((a, b) => b.share - a.share);
 }
