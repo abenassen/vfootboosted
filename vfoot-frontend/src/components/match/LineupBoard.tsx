@@ -78,6 +78,10 @@ export function LineupColumn({
           const hasGaps = p.events.length > 0;
           const sentOff = p.events.some((e) => e.kind === 'disciplinary');
           const band = tendencyBand(p.role);
+          // Both starter and the substitute(s) who covered the slot, on one line
+          // (no hard hierarchy: the reserve sometimes matters more, or the
+          // starter never played).
+          const slotNames = [p.name, ...p.events.filter((e) => e.kind === 'covered' && e.bench).map((e) => e.bench!)];
           return (
             <div
               key={p.id}
@@ -102,7 +106,12 @@ export function LineupColumn({
                     </span>
                     {sentOff ? <span title="Espulso">🟥</span> : null}
                     <span className={clsx('truncate text-sm', selected ? `font-semibold ${accent}` : 'text-slate-800')}>
-                      {p.name}
+                      {slotNames.map((name, i) => (
+                        <span key={i}>
+                          {i > 0 ? <span className="text-slate-400"> / </span> : null}
+                          {name}
+                        </span>
+                      ))}
                     </span>
                   </div>
                   {p.role === 'GK' ? (
