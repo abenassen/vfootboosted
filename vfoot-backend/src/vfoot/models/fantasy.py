@@ -307,6 +307,19 @@ class FantasyLineupSubmission(models.Model):
         indexes = [models.Index(fields=["fixture", "team"])]
 
 
+class FantasyFixtureDetail(models.Model):
+    """Rich, self-contained per-fixture breakdown for the match-detail UI
+    (Vfoot scores, zone-vector duel, per-zone macros/players, lineups).
+
+    Stored as a JSON payload with the same shape the simulation produces, so the
+    real match-detail page reuses the exact same components."""
+
+    fixture = models.OneToOneField(FantasyFixture, on_delete=models.CASCADE, related_name="detail")
+    vfoot_home = models.FloatField(default=0.0)
+    vfoot_away = models.FloatField(default=0.0)
+    payload = models.JSONField(default=dict)
+
+
 class AuctionSession(models.Model):
     STATUS_DRAFT = "draft"
     STATUS_ACTIVE = "active"

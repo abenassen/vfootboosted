@@ -1888,3 +1888,97 @@ class AuctionCloseNominationView(APIView):
         nomination.save(update_fields=["status", "closed_winner_team"])
 
         return Response({"nomination_id": nomination.id, "winner_team_id": winner_team_id}, status=status.HTTP_200_OK)
+
+
+class LeagueStandingsView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+        comp = league.competitions.order_by("id").first()
+        pw, pd, pl = (comp.points_win, comp.points_draw, comp.points_loss) if comp else (3, 1, 0)
+
+        fixtures = (
+            FantasyFixture.objects.filter(competition__league=league, status=FantasyFixture.STATUS_FINISHED)
+            .select_related("home_team", "away_team", "detail")
+        )
+        rows: dict[int, dict] = {}
+        names: dict[int, str] = {}
+
+        def row(team_id: int) -> dict:
+            return rows.setdefault(
+                team_id,
+                {"pts": 0, "played": 0, "w": 0, "d": 0, "l": 0, "gf": 0.0, "ga": 0.0, "score_sum": 0.0},
+            )
+
+        for fx in fixtures:
+            names[fx.home_team_id] = fx.home_team.name
+            names[fx.away_team_id] = fx.away_team.name
+            h, a = row(fx.home_team_id), row(fx.away_team_id)
+            hs, as_ = fx.home_total, fx.away_total
+            h["played"] += 1
+            a["played"] += 1
+            h["gf"] += hs
+            h["ga"] += as_
+            a["gf"] += as_
+            a["ga"] += hs
+            if hs > as_:
+                h["pts"] += pw
+                a["pts"] += pl
+                h["w"] += 1
+                a["l"] += 1
+            elif hs < as_:
+                a["pts"] += pw
+                h["pts"] += pl
+                a["w"] += 1
+                h["l"] += 1
+            else:
+                h["pts"] += pd
+                a["pts"] += pd
+                h["d"] += 1
+                a["d"] += 1
+            detail = getattr(fx, "detail", None)
+            if detail is not None:
+                h["score_sum"] += detail.vfoot_home
+                a["score_sum"] += detail.vfoot_away
+
+        ranked = sorted(
+            rows.items(),
+            key=lambda kv: (kv[1]["pts"], kv[1]["gf"] - kv[1]["ga"], kv[1]["gf"]),
+            reverse=True,
+        )
+        standings = [
+            {
+                "rank": i + 1,
+                "team_id": tid,
+                "team": names.get(tid, str(tid)),
+                "played": r["played"],
+                "wins": r["w"],
+                "draws": r["d"],
+                "losses": r["l"],
+                "goals_for": int(r["gf"]),
+                "goals_against": int(r["ga"]),
+                "goal_diff": int(r["gf"] - r["ga"]),
+                "points": r["pts"],
+                "avg_score_for": round(r["score_sum"] / r["played"], 3) if r["played"] else 0.0,
+            }
+            for i, (tid, r) in enumerate(ranked)
+        ]
+        return Response({"competition_id": comp.id if comp else None, "standings": standings})
+
+
+class FixtureDetailView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, fixture_id: int):
+        fx = get_object_or_404(
+            FantasyFixture.objects.select_related("competition__league", "detail"), id=fixture_id
+        )
+        _membership_or_404(fx.competition.league, request.user.id)
+        detail = getattr(fx, "detail", None)
+        if detail is None:
+            return Response({"detail": "No rich detail for this fixture."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(detail.payload)

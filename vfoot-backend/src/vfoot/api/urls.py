@@ -19,6 +19,8 @@ from vfoot.api.league_views import (
     CompetitionStageListView,
     CompetitionStageResolveView,
     CompetitionPrizeListCreateView,
+    FixtureDetailView,
+    LeagueStandingsView,
     CompetitionPrizeDeleteView,
     CompetitionResolveDependenciesView,
     LeagueDetailView,
@@ -58,6 +60,8 @@ urlpatterns = [
     path("leagues/join", LeagueJoinView.as_view(), name="league-join"),
     path("leagues/<int:league_id>", LeagueDetailView.as_view(), name="league-detail"),
     path("leagues/<int:league_id>/fixtures", LeagueFixturesView.as_view(), name="league-fixtures"),
+    path("leagues/<int:league_id>/standings", LeagueStandingsView.as_view(), name="league-standings"),
+    path("fixtures/<int:fixture_id>", FixtureDetailView.as_view(), name="fixture-detail"),
     path("leagues/<int:league_id>/matchdays/sync", LeagueMatchdaySyncView.as_view(), name="league-matchday-sync"),
     path("leagues/<int:league_id>/matchdays", LeagueMatchdayListView.as_view(), name="league-matchday-list"),
     path(

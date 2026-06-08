@@ -323,6 +323,11 @@ class Command(BaseCommand):
                         }
                         for player in sorted(team.roster, key=lambda p: p.value, reverse=True)[:5]
                     ],
+                    # Full squad, for materializing rosters into the real DB.
+                    "roster": [
+                        {"player_id": player.player_id, "name": player.name, "price": player.price}
+                        for player in sorted(team.roster, key=lambda p: p.value, reverse=True)
+                    ],
                 }
                 for team in teams
             ],
