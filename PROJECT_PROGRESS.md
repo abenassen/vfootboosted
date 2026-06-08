@@ -1765,9 +1765,15 @@ data:
    overcrowding-aware outfield selection (see Simulation engine above). Possible
    refinement: tune the overcrowding weight, or extend the GK rule to a
    user-facing lineup validator in Phase 2.
-2. **Predictive player model for the formation page** (the deferred numeric
-   model): where a player is expected to play and expected performance from
-   *recent* history (no leakage), used when a user submits a lineup.
+2. ~~Predictive player model for the formation page~~ — FIRST VERSION DONE.
+   The Formation page is an as-of, no-leakage mid-season view: choosing matchday
+   N computes role/footprint/minutes from matches BEFORE N only, plus a
+   recent-form "expected contribution" per player (calibration-weighted net value
+   over the last ~6 matchdays; in `player_profiles.player_form`). It defaults to a
+   mid-season matchday, shows the data cutoff, and offers a form-based "Suggerisci
+   XI". Next refinements: position/availability prediction (not just descriptive
+   form), opponent-aware expectation, and surfacing expected coverage vs the
+   opponent.
 3. ~~Materialize a simulation into the persistent league tables~~ — DONE
    (Phase 2): see "Materialized league" below.
 4. Optional model tuning: nudge base so pred goals/team ≈ real (1.21→1.29);
