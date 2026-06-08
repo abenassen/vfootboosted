@@ -4,7 +4,7 @@ import { SectionTitle } from '../ui';
 import { toMinutes } from '../../utils/vfoot';
 
 export type SubEventKind = 'covered' | 'uncovered' | 'disciplinary';
-export type GapKind = 'pre_entry' | 'post_exit' | 'mid';
+export type GapKind = 'pre_entry' | 'post_exit' | 'mid' | 'absent';
 
 export interface LineupSubEvent {
   kind: SubEventKind;
@@ -21,7 +21,16 @@ export interface LineupPlayerVM {
   name: string;
   zones: string[]; // zone keys to light up on the pitch map
   share: number; // 0..1 relative influence within the team
+  avgCol: number | null; // spatial tendency: 0 = defense ... 4 = attack
   events: LineupSubEvent[];
+}
+
+// Spatial tendency band inferred from where the player acted (no fixed roles).
+function tendencyBand(avgCol: number | null): { label: string; chip: string } {
+  if (avgCol == null) return { label: '—', chip: 'bg-slate-300' };
+  if (avgCol < 1.0) return { label: 'DIF', chip: 'bg-blue-500' };
+  if (avgCol < 2.5) return { label: 'CEN', chip: 'bg-emerald-500' };
+  return { label: 'ATT', chip: 'bg-orange-500' };
 }
 
 // Full lineup list. Clicking a player lights up their zones on the pitch map
@@ -44,6 +53,9 @@ export function LineupColumn({
   const max = Math.max(0.0001, ...players.map((p) => p.share));
   const bar = side === 'home' ? 'bg-green-500' : 'bg-sky-500';
   const accent = side === 'home' ? 'text-green-700' : 'text-sky-700';
+  // Order from most defensive to most advanced (no fixed roles: inferred from
+  // where each player acted). Players who didn't act go last.
+  const ordered = [...players].sort((a, b) => (a.avgCol ?? 99) - (b.avgCol ?? 99));
 
   const toggle = (id: string | number) =>
     setExpanded((cur) => {
@@ -56,11 +68,12 @@ export function LineupColumn({
     <div>
       <SectionTitle>{teamName}</SectionTitle>
       <div className="mt-2 space-y-1">
-        {players.map((p) => {
+        {ordered.map((p) => {
           const selected = p.id === selectedPlayerId;
           const isOpen = expanded.has(p.id);
           const hasGaps = p.events.length > 0;
           const sentOff = p.events.some((e) => e.kind === 'disciplinary');
+          const band = tendencyBand(p.avgCol);
           return (
             <div
               key={p.id}
@@ -77,6 +90,12 @@ export function LineupColumn({
                   title="Mostra le zone del giocatore sulla mappa"
                 >
                   <div className="flex items-center gap-1.5">
+                    <span
+                      className={clsx('rounded px-1 py-0.5 text-[9px] font-bold leading-none text-white', band.chip)}
+                      title="Tendenza spaziale (difesa→attacco)"
+                    >
+                      {band.label}
+                    </span>
                     {sentOff ? <span title="Espulso">🟥</span> : null}
                     <span className={clsx('truncate text-sm', selected ? `font-semibold ${accent}` : 'text-slate-800')}>
                       {p.name}
@@ -120,6 +139,8 @@ function EventLine({ e }: { e: LineupSubEvent }) {
   let head: string;
   if (e.kind === 'disciplinary') {
     head = `🟥 espulso al ${toMinutes(e.gapStart)}`;
+  } else if (e.gapKind === 'absent') {
+    head = 'non sceso in campo';
   } else if (e.gapKind === 'pre_entry') {
     head = `entrato in campo al ${toMinutes(e.gapEnd)}`;
   } else if (e.gapKind === 'post_exit') {
@@ -128,7 +149,8 @@ function EventLine({ e }: { e: LineupSubEvent }) {
     head = `fuori ${toMinutes(e.gapStart)}–${toMinutes(e.gapEnd)}`;
   }
 
-  const coverVerb = e.gapKind === 'pre_entry' ? 'prima coperto da' : 'poi coperto da';
+  const coverVerb =
+    e.gapKind === 'pre_entry' ? 'prima coperto da' : e.gapKind === 'absent' ? 'coperto da' : 'poi coperto da';
   const showUncovered = e.uncoveredSeconds >= 60;
 
   return (

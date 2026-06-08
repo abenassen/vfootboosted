@@ -117,6 +117,21 @@ export function scoreBuildVM(fx: SimFixtureDetail): ScoreBuildVM {
   };
 }
 
+// Spatial centre of gravity along the pitch length (0 = own defense, 4 =
+// attack), weighted by the magnitude of the player's zone contributions.
+function averageColumn(zones: Record<string, number>): number | null {
+  let weighted = 0;
+  let total = 0;
+  for (const [zoneKey, value] of Object.entries(zones)) {
+    const pos = parseZoneKey(zoneKey);
+    if (!pos) continue;
+    const w = Math.abs(value);
+    weighted += w * pos.col;
+    total += w;
+  }
+  return total > 0 ? weighted / total : null;
+}
+
 export function lineupBoardVMs(lineup: SimLineup, totals: SimPlayerTotal[]): LineupPlayerVM[] {
   const totalById = new Map(totals.map((t) => [t.player_id, t]));
 
@@ -146,11 +161,17 @@ export function lineupBoardVMs(lineup: SimLineup, totals: SimPlayerTotal[]): Lin
       name: p.name,
       zones: t ? Object.keys(t.zones) : [],
       absTotal: t ? Math.abs(t.total) : 0,
+      avgCol: t ? averageColumn(t.zones) : null,
       events: subsByStarter.get(p.player_id) ?? [],
     };
   });
   const sum = rows.reduce((s, r) => s + r.absTotal, 0) || 1;
-  return rows
-    .map((r) => ({ id: r.id, name: r.name, zones: r.zones, share: r.absTotal / sum, events: r.events }))
-    .sort((a, b) => b.share - a.share);
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    zones: r.zones,
+    share: r.absTotal / sum,
+    avgCol: r.avgCol,
+    events: r.events,
+  }));
 }
