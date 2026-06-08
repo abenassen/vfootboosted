@@ -1738,6 +1738,27 @@ its standard UI.
 - NOTE: the run-server must be restarted after backend code changes
   (`--noreload`). The materialized league for the current DB is id 30.
 
+## Page revision — real-data pass (DONE)
+
+Audited every page (code + live as `simviewer`) and brought the rest onto real
+data:
+- **Squad + Formation**: now use the real team roster via a new shared service
+  `vfoot/services/player_profiles.py` (footprint, spatially-inferred role,
+  minutes from `MatchAppearance`) and endpoints `GET /leagues/<id>/lineup` +
+  `POST /leagues/<id>/lineup/save` (SavedLineupSnapshot keyed per
+  league+matchday+team). Formation is a real XI builder (GK + 10 via POR/XI/Panca,
+  matchday selector, **live coverage heatmap from footprints**, save). Replaced
+  the synthetic `data_builders` lineup for league play.
+- **Home/Dashboard**: real rank/points, next-or-last fixture → rich detail,
+  market status, season record (from standings + fixtures).
+- **Market**: honest — real market status + roster value + link to the real
+  auction in League Admin (removed the fake "Offri" stub).
+- **Cleanup**: League Admin gated behind `selectedLeague.role === 'admin'`;
+  competition-card link relabeled "Apri" (the unified calendar is `/matches`).
+- Still synthetic-only: the old `lineup/context`/`data_builders` path (kept for
+  mock mode). Predictive per-matchday model is the next enhancement on top of
+  `player_profiles`.
+
 ## Open items / next steps (suggested order)
 
 1. ~~Spatial balance in the lineup heuristic~~ — DONE: exactly one GK +
