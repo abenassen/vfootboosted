@@ -1,13 +1,15 @@
 import clsx from 'clsx';
 import { useMemo } from 'react';
 import type { MatchResult } from './MatchScoreHeader';
+import { ZONE_COLS, ZONE_ROWS, zoneName } from '../../utils/zoneNames';
 
 export interface ZoneCellVM {
   zoneKey: string;
-  col: number; // 1-based, left (defense) -> right (attack) for the home team
-  row: number; // 1-based
+  col: number; // 0-based, 0 = own defense -> ZONE_COLS-1 = attack (home perspective)
+  row: number; // 0-based, across the width
   winner: MatchResult;
   margin: number;
+  hasPresence: boolean;
 }
 
 const WINNER_BG: Record<MatchResult, string> = {
@@ -16,19 +18,15 @@ const WINNER_BG: Record<MatchResult, string> = {
   draw: 'bg-slate-300',
 };
 
-// 5x4 (configurable) pitch grid. Only the provided cells are "decisive"; the
-// rest render as empty pitch. Cells are clickable and the selected one gets a
-// ring, so a host page can sync selection with a detail list.
+// Full pitch grid (every zone shown). Zones with presence are coloured by
+// winner with intensity by |margin|; zones where neither team acted are faint.
+// Any zone is clickable and the selected one gets a ring.
 export function ZonePitchGrid({
   cells,
-  cols = 5,
-  rows = 4,
   selectedZone,
   onSelectZone,
 }: {
   cells: ZoneCellVM[];
-  cols?: number;
-  rows?: number;
   selectedZone?: string | null;
   onSelectZone?: (zoneKey: string | null) => void;
 }) {
@@ -37,31 +35,34 @@ export function ZonePitchGrid({
     for (const c of cells) map.set(c.zoneKey, c);
     return map;
   }, [cells]);
-  const maxAbs = useMemo(() => Math.max(0.0001, ...cells.map((c) => Math.abs(c.margin))), [cells]);
+  const maxAbs = useMemo(
+    () => Math.max(0.0001, ...cells.filter((c) => c.hasPresence).map((c) => Math.abs(c.margin))),
+    [cells],
+  );
 
   const items = [];
-  for (let row = 1; row <= rows; row++) {
-    for (let col = 1; col <= cols; col++) {
+  for (let row = 0; row < ZONE_ROWS; row++) {
+    for (let col = 0; col < ZONE_COLS; col++) {
       const key = `Z_${col}_${row}`;
       const cell = byKey.get(key);
+      const active = cell?.hasPresence ?? false;
       const selected = selectedZone === key;
-      const intensity = cell ? 0.35 + 0.65 * (Math.abs(cell.margin) / maxAbs) : 1;
+      const intensity = active ? 0.4 + 0.6 * (Math.abs(cell!.margin) / maxAbs) : 1;
       items.push(
         <button
           key={key}
           type="button"
-          disabled={!cell && !onSelectZone}
-          title={cell ? `${key} · ${cell.winner} ${cell.margin.toFixed(2)}` : key}
-          onClick={cell && onSelectZone ? () => onSelectZone(selected ? null : key) : undefined}
+          title={`${zoneName(key)}${active ? ` · margine ${cell!.margin.toFixed(2)}` : ' · nessuna presenza'}`}
+          onClick={onSelectZone ? () => onSelectZone(selected ? null : key) : undefined}
           className={clsx(
-            'flex aspect-square items-center justify-center rounded text-[9px] font-semibold transition',
-            cell ? `${WINNER_BG[cell.winner]} text-white` : 'bg-slate-100 text-slate-300',
-            cell && onSelectZone && 'hover:brightness-110',
-            selected && 'ring-2 ring-white ring-offset-1 ring-offset-emerald-900',
+            'flex aspect-[4/3] items-center justify-center rounded-md text-[10px] font-bold transition',
+            active ? `${WINNER_BG[cell!.winner]} text-white` : 'bg-emerald-800/40 text-emerald-200/40',
+            onSelectZone && 'hover:brightness-110',
+            selected && 'ring-2 ring-white ring-offset-2 ring-offset-emerald-900',
           )}
-          style={cell ? { opacity: intensity } : undefined}
+          style={active ? { opacity: intensity } : undefined}
         >
-          {cell ? cell.margin.toFixed(1) : ''}
+          {active ? cell!.margin.toFixed(1) : '·'}
         </button>,
       );
     }
@@ -70,12 +71,15 @@ export function ZonePitchGrid({
   return (
     <div>
       <div
-        className="grid gap-1 rounded-xl bg-emerald-900/90 p-2"
-        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        className="grid gap-1.5 rounded-xl bg-gradient-to-r from-emerald-900 to-emerald-800 p-2.5"
+        style={{ gridTemplateColumns: `repeat(${ZONE_COLS}, minmax(0, 1fr))` }}
       >
         {items}
       </div>
-      <div className="mt-1 text-center text-[10px] text-slate-400">difesa ← → attacco (casa)</div>
+      <div className="mt-1 flex justify-between px-1 text-[10px] text-slate-400">
+        <span>← difesa (casa)</span>
+        <span>attacco →</span>
+      </div>
     </div>
   );
 }

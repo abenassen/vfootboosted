@@ -6,15 +6,18 @@
 import type { StandingRowVM } from '../components/league/StandingsTable';
 import type { MatchHeaderVM } from '../components/match/MatchScoreHeader';
 import type { ZoneCellVM } from '../components/match/ZonePitchGrid';
-import type { ZoneDuelVM } from '../components/match/ZoneDuelList';
+import type { ZoneInspectorVM } from '../components/match/ZoneInspector';
+import type { PlayerInfluenceVM } from '../components/match/PlayerInfluence';
+import type { ScoreBuildVM } from '../components/match/ScoreBuildExplainer';
 import type { LineupVM, SubEntryVM, SubReportVM } from '../components/match/LineupPanel';
-import { parseZoneKey } from '../utils/vfoot';
+import { parseZoneKey, zoneName } from '../utils/zoneNames';
 import type {
   SimFixtureDetail,
   SimLineup,
+  SimPlayerTotal,
   SimStanding,
   SimSubstitution,
-  SimTopZone,
+  SimZone,
 } from '../types/simulation';
 
 export function standingsToVM(standings: SimStanding[], highlightTeam?: string | null): StandingRowVM[] {
@@ -47,24 +50,74 @@ export function fixtureToHeaderVM(fx: SimFixtureDetail): MatchHeaderVM {
   };
 }
 
-export function zonesToCells(zones: SimTopZone[]): ZoneCellVM[] {
-  const cells: ZoneCellVM[] = [];
-  for (const z of zones) {
-    const pos = parseZoneKey(z.zone_key);
-    if (!pos) continue;
-    cells.push({ zoneKey: z.zone_key, col: pos.col, row: pos.row, winner: z.winner, margin: z.margin });
-  }
-  return cells;
+export function zonesToCells(zones: SimZone[]): ZoneCellVM[] {
+  return zones.map((z) => {
+    const pos = parseZoneKey(z.zone_key) ?? { col: 0, row: 0 };
+    return {
+      zoneKey: z.zone_key,
+      col: pos.col,
+      row: pos.row,
+      winner: z.winner,
+      margin: z.margin,
+      hasPresence: z.features.length > 0,
+    };
+  });
 }
 
-export function zonesToDuelVM(zones: SimTopZone[], homeName: string, awayName: string): ZoneDuelVM[] {
-  return zones.map((z) => ({
-    zoneKey: z.zone_key,
-    winner: z.winner,
-    winnerLabel: z.winner === 'home' ? homeName : z.winner === 'away' ? awayName : 'Pari',
-    margin: z.margin,
-    contributions: z.top_contributions.map((c) => ({ feature: c.feature, swing: c.swing })),
+function playersInZone(totals: SimPlayerTotal[], zoneKey: string) {
+  return totals
+    .filter((p) => zoneKey in p.zones)
+    .map((p) => ({ name: p.name, contribution: p.zones[zoneKey] }))
+    .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+}
+
+export function buildZoneInspector(
+  zone: SimZone,
+  homeTotals: SimPlayerTotal[],
+  awayTotals: SimPlayerTotal[],
+  homeName: string,
+  awayName: string,
+): ZoneInspectorVM {
+  return {
+    zoneKey: zone.zone_key,
+    name: zoneName(zone.zone_key),
+    winner: zone.winner,
+    winnerLabel: zone.winner === 'home' ? homeName : zone.winner === 'away' ? awayName : 'Pari',
+    margin: zone.margin,
+    homeName,
+    awayName,
+    features: zone.features.map((f) => ({ feature: f.feature, home: f.home, away: f.away, swing: f.swing })),
+    homePlayers: playersInZone(homeTotals, zone.zone_key),
+    awayPlayers: playersInZone(awayTotals, zone.zone_key),
+  };
+}
+
+export function playerInfluenceVMs(totals: SimPlayerTotal[]): PlayerInfluenceVM[] {
+  return totals.map((p) => ({
+    playerId: p.player_id,
+    name: p.name,
+    total: p.total,
+    footprint: Object.entries(p.zones)
+      .map(([zoneKey, value]) => ({ zoneKey, value: value as number }))
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+      .slice(0, 5),
   }));
+}
+
+export function scoreBuildVM(fx: SimFixtureDetail): ScoreBuildVM {
+  const sb = fx.vector_report.score_build;
+  return {
+    base: sb.base,
+    scoreScale: sb.score_scale,
+    boost: sb.fantasy_margin_boost,
+    meanMargin: fx.vector_report.total_margin,
+    boostedMargin: fx.vector_report.boosted_margin,
+    zoneCount: sb.zone_count,
+    homeName: fx.home_team,
+    awayName: fx.away_team,
+    homeScore: fx.home_score,
+    awayScore: fx.away_score,
+  };
 }
 
 function subEntryToVM(s: SimSubstitution): SubEntryVM {
@@ -79,15 +132,18 @@ function subEntryToVM(s: SimSubstitution): SubEntryVM {
   };
 }
 
-export function lineupToVM(lineup: SimLineup, teamName: string, side: 'home' | 'away'): LineupVM {
+export function lineupToSubReport(lineup: SimLineup): SubReportVM {
   const sub = lineup.substitution_report;
-  const report: SubReportVM = {
+  return {
     coveredSeconds: sub.covered_gap_seconds,
     uncoveredSeconds: sub.uncovered_gap_seconds,
     disciplinarySeconds: sub.disciplinary_gap_seconds,
     usedBenchCount: sub.used_bench_count,
     entries: sub.substitutions.map(subEntryToVM),
   };
+}
+
+export function lineupToVM(lineup: SimLineup, teamName: string, side: 'home' | 'away'): LineupVM {
   return {
     teamName,
     side,
@@ -96,6 +152,6 @@ export function lineupToVM(lineup: SimLineup, teamName: string, side: 'home' | '
       .sort((a, b) => b.event_score - a.event_score)
       .map((p) => ({ id: p.player_id, name: p.name, score: p.event_score })),
     bench: lineup.bench.map((p) => ({ id: p.player_id, name: p.name, score: p.event_score })),
-    subReport: report,
+    subReport: lineupToSubReport(lineup),
   };
 }

@@ -66,12 +66,12 @@ export function LineupPanel({ lineup }: { lineup: LineupVM }) {
         </div>
       ) : null}
 
-      {sub ? <SubReport report={sub} /> : null}
+      {sub ? <SubstitutionReport report={sub} /> : null}
     </div>
   );
 }
 
-function SubReport({ report }: { report: SubReportVM }) {
+export function SubstitutionReport({ report }: { report: SubReportVM }) {
   return (
     <div className="mt-3 border-t border-slate-100 pt-2">
       <div className="text-[11px] uppercase tracking-wide text-slate-400">Sostituzioni temporali</div>

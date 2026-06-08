@@ -30,10 +30,3 @@ export function toMinutes(seconds: number | undefined | null): string {
   if (seconds == null || Number.isNaN(seconds)) return "0'";
   return `${Math.round(seconds / 60)}'`;
 }
-
-// "Z_<col>_<row>" -> { col, row }. Returns null when the key is not a zone key.
-export function parseZoneKey(zoneKey: string): { col: number; row: number } | null {
-  const m = /^Z_(\d+)_(\d+)$/.exec(zoneKey);
-  if (!m) return null;
-  return { col: Number(m[1]), row: Number(m[2]) };
-}

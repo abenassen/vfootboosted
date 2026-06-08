@@ -129,22 +129,42 @@ export interface SimLineup {
   substitution_report: SimSubstitutionReport;
 }
 
-export interface SimZoneContribution {
+export interface SimZoneFeature {
   feature: string;
+  home: number;
+  away: number;
   swing: number;
 }
 
-export interface SimTopZone {
+export interface SimZone {
   zone_key: string;
   winner: SimResult;
   margin: number;
-  top_contributions: SimZoneContribution[];
+  features: SimZoneFeature[];
+}
+
+export interface SimPlayerTotal {
+  player_id: number;
+  name: string;
+  total: number;
+  zones: Record<string, number>;
+}
+
+export interface SimScoreBuild {
+  base: number;
+  score_scale: number;
+  fantasy_margin_boost: number;
+  fantasy_home_advantage: number;
+  zone_count: number;
 }
 
 export interface SimVectorReport {
   total_margin: number;
   boosted_margin: number;
-  top_zones: SimTopZone[];
+  score_build: SimScoreBuild;
+  zones: SimZone[];
+  home_player_totals: SimPlayerTotal[];
+  away_player_totals: SimPlayerTotal[];
 }
 
 export interface SimFixtureDetail extends SimFixtureSummary {

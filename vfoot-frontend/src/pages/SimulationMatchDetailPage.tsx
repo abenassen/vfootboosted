@@ -2,16 +2,20 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getSimulationFixtureDetail } from '../api/simulation';
 import {
+  buildZoneInspector,
   fixtureToHeaderVM,
-  lineupToVM,
+  lineupToSubReport,
+  playerInfluenceVMs,
+  scoreBuildVM,
   zonesToCells,
-  zonesToDuelVM,
 } from '../api/simulationAdapters';
-import { Badge, Button, Card, SectionTitle } from '../components/ui';
+import { Button, Card, SectionTitle } from '../components/ui';
 import { MatchScoreHeader } from '../components/match/MatchScoreHeader';
 import { ZonePitchGrid } from '../components/match/ZonePitchGrid';
-import { ZoneDuelList } from '../components/match/ZoneDuelList';
-import { LineupPanel } from '../components/match/LineupPanel';
+import { ZoneInspector } from '../components/match/ZoneInspector';
+import { PlayerInfluence } from '../components/match/PlayerInfluence';
+import { ScoreBuildExplainer } from '../components/match/ScoreBuildExplainer';
+import { SubstitutionReport } from '../components/match/LineupPanel';
 import { useAsync } from '../utils/useAsync';
 
 export default function SimulationMatchDetailPage() {
@@ -22,12 +26,21 @@ export default function SimulationMatchDetailPage() {
 
   const vm = useMemo(() => {
     if (!data) return null;
+    const vr = data.vector_report;
+    const cells = zonesToCells(vr.zones);
+    const decisive = [...vr.zones]
+      .filter((z) => z.features.length > 0)
+      .sort((a, b) => Math.abs(b.margin) - Math.abs(a.margin))[0];
     return {
       header: fixtureToHeaderVM(data),
-      cells: zonesToCells(data.vector_report.top_zones),
-      duels: zonesToDuelVM(data.vector_report.top_zones, data.home_team, data.away_team),
-      home: lineupToVM(data.home_lineup, data.home_team, 'home'),
-      away: lineupToVM(data.away_lineup, data.away_team, 'away'),
+      scoreBuild: scoreBuildVM(data),
+      cells,
+      zones: vr.zones,
+      defaultZone: decisive?.zone_key ?? null,
+      homeInfluence: playerInfluenceVMs(vr.home_player_totals),
+      awayInfluence: playerInfluenceVMs(vr.away_player_totals),
+      homeSub: lineupToSubReport(data.home_lineup),
+      awaySub: lineupToSubReport(data.away_lineup),
     };
   }, [data]);
 
@@ -39,6 +52,12 @@ export default function SimulationMatchDetailPage() {
       </Card>
     );
   }
+
+  const activeZoneKey = selectedZone ?? vm.defaultZone;
+  const activeZone = vm.zones.find((z) => z.zone_key === activeZoneKey) ?? null;
+  const inspector = activeZone
+    ? buildZoneInspector(activeZone, data.vector_report.home_player_totals, data.vector_report.away_player_totals, data.home_team, data.away_team)
+    : null;
 
   return (
     <div className="space-y-4">
@@ -57,35 +76,67 @@ export default function SimulationMatchDetailPage() {
               </Button>
             </Link>
           }
-          footer={<Badge tone="slate">margine zona-vettore {data.vector_report.total_margin.toFixed(3)}</Badge>}
         />
       </Card>
 
       <Card className="p-4">
-        <SectionTitle>Duello a zone (decisive)</SectionTitle>
-        <div className="mt-3 grid gap-4 md:grid-cols-[180px_1fr]">
-          <ZonePitchGrid cells={vm.cells} selectedZone={selectedZone} onSelectZone={setSelectedZone} />
-          <ZoneDuelList zones={vm.duels} selectedZone={selectedZone} onSelect={setSelectedZone} />
+        <SectionTitle>Come nasce il punteggio</SectionTitle>
+        <div className="mt-2">
+          <ScoreBuildExplainer vm={vm.scoreBuild} />
         </div>
-        <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-slate-500">
-          <span className="flex items-center gap-1">
-            <span className="h-3 w-3 rounded bg-green-500" /> {data.home_team} (casa)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="h-3 w-3 rounded bg-sky-500" /> {data.away_team} (trasferta)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="h-3 w-3 rounded bg-slate-200" /> zona non decisiva
-          </span>
+      </Card>
+
+      <Card className="p-4">
+        <SectionTitle>Mappa del campo · clicca una zona</SectionTitle>
+        <div className="mt-3 grid gap-4 md:grid-cols-[minmax(240px,300px)_1fr]">
+          <div>
+            <ZonePitchGrid cells={vm.cells} selectedZone={activeZoneKey} onSelectZone={setSelectedZone} />
+            <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-500">
+              <span className="flex items-center gap-1">
+                <span className="h-3 w-3 rounded bg-green-500" /> {data.home_team}
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="h-3 w-3 rounded bg-sky-500" /> {data.away_team}
+              </span>
+            </div>
+          </div>
+          {inspector ? <ZoneInspector zone={inspector} /> : null}
         </div>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4">
-          <LineupPanel lineup={vm.home} />
+          <PlayerInfluence
+            title={data.home_team}
+            side="home"
+            players={vm.homeInfluence}
+            selectedZone={activeZoneKey}
+            onSelectZone={setSelectedZone}
+          />
         </Card>
         <Card className="p-4">
-          <LineupPanel lineup={vm.away} />
+          <PlayerInfluence
+            title={data.away_team}
+            side="away"
+            players={vm.awayInfluence}
+            selectedZone={activeZoneKey}
+            onSelectZone={setSelectedZone}
+          />
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="p-4">
+          <SectionTitle>{data.home_team} · sostituzioni</SectionTitle>
+          <div className="mt-1">
+            <SubstitutionReport report={vm.homeSub} />
+          </div>
+        </Card>
+        <Card className="p-4">
+          <SectionTitle>{data.away_team} · sostituzioni</SectionTitle>
+          <div className="mt-1">
+            <SubstitutionReport report={vm.awaySub} />
+          </div>
         </Card>
       </div>
     </div>
