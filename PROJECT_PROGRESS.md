@@ -1576,6 +1576,14 @@ real-time match endpoint.
   `team_score = base ± home_adv ± score_scale · (boost · match_margin)`.
 - Per-player attribution is exact (margin is linear in vectors):
   `contribution(player, zone) = Σ_f param_f · feature_f / scale_f`.
+- **Goalkeeper is scored separately, NOT in the zones.** The keeper is excluded
+  from the team zone vectors; instead they get a "goals prevented" rating =
+  xG faced (opponent real xG) − goals conceded (opponent real goals), and a good
+  keeper REDUCES the opponent's score: `away_score -= w·home_gk` /
+  `home_score -= w·away_gk` (w = `--gk-weight`, default 2.5; rating clamped ±2).
+  Excluding the keeper from the zones is ≈ symmetric so the calibration (fit with
+  keepers) is kept as-is. Surfaced in the UI: the POR row shows "gol evitati …"
+  and the score explainer notes each keeper's effect on the opponent.
 
 Calibration: `vfoot/management/commands/calibrate_vector_zone_duel.py` (SPSA +
 Adam on the 380 matches, soft goal/sign loss, mirror + saturation baked in).
