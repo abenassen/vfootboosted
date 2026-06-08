@@ -1572,8 +1572,10 @@ real-time match endpoint.
   service; the frontend mirror is `utils/zoneNames.mirrorZoneKey`.
 - Per-zone raw margin: `Σ_f param_f · (home_f − away_f) / scale_f`.
 - **Saturating aggregation** (this is what makes positioning matter):
-  `zone_out = K · tanh(margin / K)`, `match_margin = mean_z(zone_out)`.
-  `team_score = base ± home_adv ± score_scale · (boost · match_margin)`.
+  `zone_out = K · tanh(margin / K)`, `match_margin = WEIGHTED mean_z(zone_out)`
+  where central width bands count `(1 + zone_center_weight)×` vs flanks
+  (`zone_center_weight` calibrated, small ≈ 0.06 → ~6% heavier, intentionally
+  modest). `team_score = base ± home_adv ± score_scale · (boost · match_margin)`.
 - Per-player attribution is exact (margin is linear in vectors):
   `contribution(player, zone) = Σ_f param_f · feature_f / scale_f`.
 - **Goalkeeper is scored separately, NOT in the zones.** The keeper is excluded
