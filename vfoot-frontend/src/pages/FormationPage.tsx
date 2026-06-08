@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import { getTeamLineup, saveTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
-import { zoneName, zoneShortName } from '../utils/zoneNames';
 import type { PlayerRole, TeamLineupContext, TeamLineupPlayer } from '../types/lineup';
 
 const XI = 11; // starters incl. exactly one goalkeeper
@@ -40,15 +39,36 @@ export default function FormationPage() {
     setSearchParams(p, { replace: true });
   };
 
-  // Suggestion / default: best GK by form + the top 10 outfielders by form.
+  // Suggestion / default: a balanced 4-4-2 by inferred role, each slot the best
+  // available by recent form (falls back across roles if a line is short).
   const suggest = (roster: TeamLineupPlayer[]): number[] => {
-    const gk = roster.filter((p) => p.role === 'GK').sort((a, b) => b.form - a.form)[0];
-    const outfield = roster
-      .filter((p) => p.role !== 'GK')
-      .sort((a, b) => b.form - a.form)
-      .slice(0, XI - 1)
-      .map((p) => p.player_id);
-    return gk ? [gk.player_id, ...outfield] : outfield;
+    const byForm = (a: TeamLineupPlayer, b: TeamLineupPlayer) => b.form - a.form;
+    const gk = [...roster].filter((p) => p.role === 'GK').sort(byForm)[0];
+    const chosen = new Set<number>();
+    if (gk) chosen.add(gk.player_id);
+    const targets: [PlayerRole, number][] = [['DEF', 4], ['MID', 4], ['ATT', 2]];
+    const out: number[] = [];
+    for (const [role, n] of targets) {
+      roster
+        .filter((p) => p.role === role && !chosen.has(p.player_id))
+        .sort(byForm)
+        .slice(0, n)
+        .forEach((p) => {
+          chosen.add(p.player_id);
+          out.push(p.player_id);
+        });
+    }
+    // top up to 10 outfielders from whoever is left, by form
+    roster
+      .filter((p) => p.role !== 'GK' && !chosen.has(p.player_id))
+      .sort(byForm)
+      .forEach((p) => {
+        if (out.length < XI - 1) {
+          chosen.add(p.player_id);
+          out.push(p.player_id);
+        }
+      });
+    return gk ? [gk.player_id, ...out] : out;
   };
 
   useEffect(() => {
@@ -85,16 +105,6 @@ export default function FormationPage() {
     [starterIds, byId],
   );
   const gkId = gkStarters[0] ?? null;
-
-  const coverage = useMemo(() => {
-    const acc: Record<string, number> = {};
-    const source = selected != null ? [selected] : starterIds;
-    for (const id of source) {
-      const fp = byId.get(id)?.footprint ?? {};
-      for (const [z, v] of Object.entries(fp)) acc[z] = (acc[z] ?? 0) + v;
-    }
-    return { values: acc, max: Math.max(0.0001, ...Object.values(acc)) };
-  }, [starterIds, selected, byId]);
 
   if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per impostare la formazione.</div>;
   if (loading && !ctx) return <div className="text-sm text-slate-500">Caricamento formazione…</div>;
@@ -194,20 +204,19 @@ export default function FormationPage() {
         {toast ? <div className="mt-2 text-sm font-semibold text-green-700">{toast}</div> : null}
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
         <Card className="p-4">
-          <div className="flex items-center justify-between">
-            <SectionTitle>Copertura del campo</SectionTitle>
-            {selected != null ? (
-              <button onClick={() => setSelected(null)} className="text-[11px] font-semibold text-slate-500 hover:text-slate-700">
-                ✕ {byId.get(selected)?.name}
-              </button>
-            ) : null}
-          </div>
+          <SectionTitle>La squadra in campo</SectionTitle>
           <div className="mt-1 text-[11px] text-slate-400">
-            {selected != null ? 'Footprint del giocatore selezionato.' : 'Presenza attesa dei titolari (più verde = più presidiata).'}
+            Posizione attesa di ogni titolare (dai dati storici). Il portiere ha il bordo ambra.
           </div>
-          <CoverageGrid zoneKeys={ctx.zone_grid.zone_keys} values={coverage.values} max={coverage.max} />
+          <PitchLineup
+            starterIds={starterIds}
+            byId={byId}
+            gkId={gkId}
+            selectedId={selected}
+            onSelect={(id) => setSelected((s) => (s === id ? null : id))}
+          />
         </Card>
 
         <Card className="p-4">
@@ -283,34 +292,101 @@ function RosterRow({
   );
 }
 
-// 5×4 pitch (col 0 = own goal → col 4 = attack), green intensity = presence.
-function CoverageGrid({ zoneKeys, values, max }: { zoneKeys: string[]; values: Record<string, number>; max: number }) {
-  const cols = 5;
-  const rows = 4;
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Expected position of a player = footprint centroid in (col,row) space.
+function expectedPos(footprint: Record<string, number>): { col: number; row: number } {
+  let scol = 0;
+  let srow = 0;
+  let tot = 0;
+  for (const [z, s] of Object.entries(footprint)) {
+    const m = /^Z_(\d+)_(\d+)$/.exec(z);
+    if (m) {
+      scol += Number(m[1]) * s;
+      srow += Number(m[2]) * s;
+      tot += s;
+    }
+  }
+  return tot > 0 ? { col: scol / tot, row: srow / tot } : { col: 2, row: 1.5 };
+}
+
+const DOT_COLOR: Record<PlayerRole, string> = {
+  GK: 'bg-amber-400',
+  DEF: 'bg-blue-500',
+  MID: 'bg-emerald-500',
+  ATT: 'bg-orange-500',
+};
+
+// The XI placed on a pitch at each player's expected position. Defence on the
+// left, attack on the right; goalkeeper ringed in amber.
+function PitchLineup({
+  starterIds,
+  byId,
+  gkId,
+  selectedId,
+  onSelect,
+}: {
+  starterIds: number[];
+  byId: Map<number, TeamLineupPlayer>;
+  gkId: number | null;
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+}) {
+  // Lay the XI out as formation lines: depth (x) from each player's expected
+  // column, width (y) spread within their role line so dots never pile up
+  // (footprint centroids alone bunch everyone in the middle).
+  const order: PlayerRole[] = ['GK', 'DEF', 'MID', 'ATT'];
+  const ROLE_X: Record<PlayerRole, number> = { GK: 8, DEF: 30, MID: 53, ATT: 77 };
+  const TYPICAL_COL: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 };
+  const groups: Record<PlayerRole, { p: TeamLineupPlayer; col: number }[]> = { GK: [], DEF: [], MID: [], ATT: [] };
+  for (const id of starterIds) {
+    const p = byId.get(id);
+    if (p) groups[p.role].push({ p, col: expectedPos(p.footprint).col });
+  }
+  const dots: { p: TeamLineupPlayer; left: number; top: number; isGk: boolean }[] = [];
+  for (const role of order) {
+    const g = groups[role];
+    const n = g.length;
+    g.forEach((item, i) => {
+      // depth band per role + a small individual nudge from the expected column
+      const nudge = Math.max(-7, Math.min(9, (item.col - TYPICAL_COL[role]) * 5));
+      const left = Math.max(6, Math.min(94, ROLE_X[role] + nudge));
+      const top = n <= 1 ? 50 : 12 + (i / (n - 1)) * 76;
+      dots.push({ p: item.p, left, top, isGk: item.p.player_id === gkId });
+    });
+  }
   return (
-    <div className="mt-3 rounded-lg bg-gradient-to-r from-slate-100 to-green-50 p-2">
-      <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
-        {Array.from({ length: rows }).flatMap((_, r) =>
-          Array.from({ length: cols }).map((__, c) => {
-            const key = `Z_${c}_${r}`;
-            const v = values[key] ?? 0;
-            return (
-              <div
-                key={key}
-                title={`${zoneName(key)} · ${(v * 100).toFixed(0)}%`}
-                className="flex h-9 items-center justify-center rounded text-[9px] font-semibold text-slate-700"
-                style={{ backgroundColor: `rgba(34,197,94,${0.12 + 0.8 * (v / max)})` }}
-              >
-                {zoneKeys.includes(key) ? zoneShortName(key) : ''}
-              </div>
-            );
-          }),
-        )}
-      </div>
-      <div className="mt-1 flex justify-between text-[9px] uppercase tracking-wide text-slate-400">
-        <span>← difesa</span>
-        <span>attacco →</span>
-      </div>
+    <div className="relative mt-3 w-full overflow-hidden rounded-xl border border-green-700/40 bg-gradient-to-r from-green-600 to-green-500 aspect-[3/2] shadow-inner">
+      {/* pitch markings */}
+      <div className="pointer-events-none absolute inset-2 rounded border border-white/40" />
+      <div className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-white/40" />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/40" />
+      <div className="pointer-events-none absolute left-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/40" />
+      <div className="pointer-events-none absolute right-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/40" />
+      {dots.map(({ p, left, top, isGk }) => (
+        <button
+          key={p.player_id}
+          onClick={() => onSelect(p.player_id)}
+          className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+          style={{ left: `${left}%`, top: `${top}%` }}
+          title={`${p.name} · rend. atteso ${p.form.toFixed(2)}`}
+        >
+          <span
+            className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md ${DOT_COLOR[p.role]} ${
+              isGk ? 'ring-2 ring-amber-200' : ''
+            } ${selectedId === p.player_id ? 'ring-2 ring-slate-900 ring-offset-1' : ''}`}
+          >
+            {initials(p.name)}
+          </span>
+          <span className="mt-0.5 max-w-[68px] truncate rounded bg-black/35 px-1 text-[9px] font-semibold leading-tight text-white">
+            {p.name.split(/\s+/).pop()}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
