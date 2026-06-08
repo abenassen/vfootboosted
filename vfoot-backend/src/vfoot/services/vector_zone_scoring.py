@@ -35,6 +35,43 @@ from typing import Any, Iterable, Mapping
 
 ZoneVectors = Mapping[str, Mapping[str, float]]
 
+# Aggregate the raw features into a few intelligible macro-categories for a
+# radar-style team comparison. `invert=True` means lower is better (errors), so
+# the share is flipped (the cleaner team gets the larger axis).
+MACROS: list[dict] = [
+    {"key": "attacco", "label": "Attacco", "features": ["xg_shots", "shots", "touches_in_box"], "invert": False},
+    {
+        "key": "creazione",
+        "label": "Creazione",
+        "features": ["key_passes", "passes_into_box", "progressive_passes_completed", "progressive_carries"],
+        "invert": False,
+    },
+    {"key": "difesa", "label": "Difesa", "features": ["clearances", "interceptions"], "invert": False},
+    {"key": "recupero", "label": "Recupero", "features": ["ball_recoveries", "pressures"], "invert": False},
+    {
+        "key": "pulizia",
+        "label": "Pulizia",
+        "features": ["errors_bad_passes", "errors_dispossessed", "errors_fouls_committed", "errors_miscontrols"],
+        "invert": True,
+    },
+]
+
+
+def _zone_macros(hv: Mapping[str, float], av: Mapping[str, float], scales: dict[str, float]) -> list[dict]:
+    out = []
+    for macro in MACROS:
+        mh = sum(float(hv.get(f, 0.0)) / scales[f] for f in macro["features"] if f in scales)
+        ma = sum(float(av.get(f, 0.0)) / scales[f] for f in macro["features"] if f in scales)
+        total = mh + ma
+        if total <= 0:
+            home_share = 0.5
+        elif macro["invert"]:
+            home_share = ma / total  # fewer errors -> larger (cleaner) share
+        else:
+            home_share = mh / total
+        out.append({"key": macro["key"], "label": macro["label"], "home_share": round(home_share, 4)})
+    return out
+
 
 def load_calibration(path: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as fh:
@@ -143,6 +180,7 @@ def score_zone_duel(
                 "margin": round(margin, 5),
                 "winner": "home" if margin > 0 else "away" if margin < 0 else "draw",
                 "features": sorted(feats, key=lambda r: abs(r["swing"]), reverse=True),
+                "macros": _zone_macros(hv, av, scales),
                 "home_players": players_in_zone(home_player_rows, zone_key),
                 "away_players": players_in_zone(away_player_rows, zone_key),
             }

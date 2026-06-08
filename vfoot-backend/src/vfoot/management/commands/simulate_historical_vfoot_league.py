@@ -33,10 +33,6 @@ FEATURE_WEIGHTS = {
 }
 
 GOAL_THRESHOLDS = (66.0, 72.0, 78.0, 84.0, 90.0, 96.0)
-
-# Gaps shorter than this are lineup artifacts (tactical shifts / brief
-# player-off-on windows), not real substitutions, and are ignored.
-MIN_SUBSTITUTION_GAP_SECONDS = 60
 DEFAULT_VECTOR_CALIBRATION = "calibration/vector_zone_duel_v1.json"
 
 
@@ -464,8 +460,16 @@ class Command(BaseCommand):
         temporal_substitutions: bool,
     ) -> dict:
         scores = player_scores.get(real_matchday, {})
-        available = [(player, scores.get(player.player_id, 0.0)) for player in team.roster if scores.get(player.player_id, 0.0) > 0]
-        available.sort(key=lambda item: (item[1], item[0].value), reverse=True)
+        # Emulate a user picking their lineup before the match: rank by season
+        # value (a pre-match expectation), NOT by that-day performance, which the
+        # user could not know. We still restrict to players who actually appeared
+        # that matchday so the engine has real intervals to score and to cover.
+        available = [
+            (player, scores.get(player.player_id, 0.0))
+            for player in team.roster
+            if scores.get(player.player_id, 0.0) > 0
+        ]
+        available.sort(key=lambda item: (item[0].value, item[1]), reverse=True)
         starters = available[:starters_count]
         bench = available[starters_count : starters_count + bench_size]
         raw_sum = sum(score for _, score in starters)
@@ -568,9 +572,7 @@ class Command(BaseCommand):
             gaps = self._player_gaps(starter_intervals, starter_final_seconds)
             for gap_start, gap_end, is_disciplinary, gap_kind in gaps:
                 gap_seconds = max(0, gap_end - gap_start)
-                # Ignore sub-minute gaps: these are lineup artifacts (tactical
-                # shifts / brief player-off-on windows), not real substitutions.
-                if gap_seconds < MIN_SUBSTITUTION_GAP_SECONDS:
+                if gap_seconds <= 0:
                     continue
                 if is_disciplinary:
                     disciplinary_gap_seconds += gap_seconds
@@ -678,23 +680,32 @@ class Command(BaseCommand):
         return sum(max(0, int(item["end"]) - int(item["start"])) for item in intervals)
 
     def _player_gaps(self, intervals: list[dict], final_seconds: int) -> list[tuple[int, int, bool, str]]:
-        # Returns (start, end, is_disciplinary, kind) where kind classifies the
-        # gap for display: 'pre_entry' (player came on late), 'post_exit'
-        # (player left / sent off before the final whistle), or 'mid'
-        # (a temporary off-pitch window, e.g. injury treatment).
+        # Returns (start, end, is_disciplinary, kind). We only treat a gap as a
+        # real lineup change worth covering when it matches a substitution
+        # category — not when a player merely steps off and returns:
+        #   - 'pre_entry'  : player came on after kickoff (subentrato)
+        #   - 'post_exit'  : player left for good via substitution or was sent off
+        # A player who exits and later re-enters (e.g. injury treatment) is NOT
+        # substituted: that intermediate window is ignored regardless of length.
+        disciplinary_reasons = {"red_card", "second_yellow"}
         gaps: list[tuple[int, int, bool, str]] = []
         cursor = 0
+        last_end_reason: str | None = None
         for interval in intervals:
             start = int(interval["start"])
             end = int(interval["end"])
-            if start > cursor:
-                kind = "pre_entry" if cursor == 0 else "mid"
-                gaps.append((cursor, start, False, kind))
+            # Pre-entry gap only: a gap that opens between two intervals means the
+            # player returned, so it is a temporary absence and is skipped.
+            if start > cursor and cursor == 0:
+                gaps.append((cursor, start, False, "pre_entry"))
             cursor = max(cursor, end)
-            if interval.get("end_reason") == "red_card" and cursor < final_seconds:
+            last_end_reason = interval.get("end_reason")
+            if last_end_reason in disciplinary_reasons and cursor < final_seconds:
                 gaps.append((cursor, final_seconds, True, "post_exit"))
                 return gaps
-        if cursor < final_seconds:
+        # Terminal exit before the final whistle counts only if it was a real
+        # substitution (not an unexplained player_off / tactical truncation).
+        if cursor < final_seconds and last_end_reason == "substitution_off":
             gaps.append((cursor, final_seconds, False, "post_exit"))
         return gaps
 
@@ -757,6 +768,7 @@ class Command(BaseCommand):
                 "zone_key": z["zone_key"],
                 "margin": z["margin"],
                 "winner": z["winner"],
+                "macros": z["macros"],
                 "features": z["features"][:8],
             }
             for z in result["zones"]
