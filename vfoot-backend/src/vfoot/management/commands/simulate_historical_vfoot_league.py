@@ -11,6 +11,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Count, Sum
 
 from realdata.models import Match, MatchAppearance, PlayerOnPitchInterval, PlayerZoneFeature
+from vfoot.services.vector_zone_scoring import score_zone_duel
 
 
 FEATURE_WEIGHTS = {
@@ -189,6 +190,8 @@ class Command(BaseCommand):
                         home_result["_zone_vectors"],
                         away_result["_zone_vectors"],
                         vector_calibration,
+                        home_players=home_result.get("_player_vectors", []),
+                        away_players=away_result.get("_player_vectors", []),
                         fantasy_home_advantage=fantasy_home_advantage,
                         fantasy_margin_boost=fantasy_margin_boost,
                     )
@@ -198,6 +201,8 @@ class Command(BaseCommand):
                     away_result["vector_margin"] = round(-vector_report["total_margin"], 6)
                 home_result.pop("_zone_vectors", None)
                 away_result.pop("_zone_vectors", None)
+                home_result.pop("_player_vectors", None)
+                away_result.pop("_player_vectors", None)
                 home_goals = hard_goals(home_result["score"])
                 away_goals = hard_goals(away_result["score"])
                 self._apply_result(home, away, home_result["score"], away_result["score"], home_goals, away_goals)
@@ -289,7 +294,7 @@ class Command(BaseCommand):
         if not out_path.is_absolute():
             out_path = Path.cwd().parent / out_path
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        out_path.write_text(json.dumps(report, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
         self.stdout.write(self.style.SUCCESS(f"Wrote {out_path}"))
         self.stdout.write(
             self.style.SUCCESS(
@@ -463,7 +468,7 @@ class Command(BaseCommand):
         avg_event_score = raw_sum / max(1.0, starters_count)
         score = score_base + score_scale * avg_event_score
         if temporal_substitutions:
-            zone_vectors, substitution_report = self._temporal_team_zone_vectors(
+            zone_vectors, substitution_report, player_vectors = self._temporal_team_zone_vectors(
                 starters=[player for player, _ in starters],
                 bench=[player for player, _ in bench],
                 player_zone_features=player_zone_features,
@@ -472,7 +477,9 @@ class Command(BaseCommand):
                 matchday_final_seconds=matchday_final_seconds,
             )
         else:
-            zone_vectors = self._team_zone_vectors([player.player_id for player, _ in starters], player_zone_features)
+            zone_vectors, player_vectors = self._team_zone_vectors(
+                [player for player, _ in starters], player_zone_features
+            )
             substitution_report = {
                 "mode": "disabled",
                 "substitutions": [],
@@ -497,19 +504,31 @@ class Command(BaseCommand):
             ],
             "substitution_report": substitution_report,
             "_zone_vectors": zone_vectors,
+            "_player_vectors": player_vectors,
         }
 
     def _team_zone_vectors(
         self,
-        player_ids: list[int],
+        players: list[PoolPlayer],
         player_zone_features: dict[int, dict[str, dict[str, float]]],
-    ) -> dict[str, dict[str, float]]:
+    ) -> tuple[dict[str, dict[str, float]], list[dict]]:
         vectors: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-        for player_id in player_ids:
-            for zone_key, features in player_zone_features.get(player_id, {}).items():
+        player_vectors: list[dict] = []
+        for player in players:
+            pv: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+            for zone_key, features in player_zone_features.get(player.player_id, {}).items():
                 for feature_key, value in features.items():
                     vectors[zone_key][feature_key] += float(value)
-        return vectors
+                    pv[zone_key][feature_key] += float(value)
+            if pv:
+                player_vectors.append(
+                    {
+                        "player_id": player.player_id,
+                        "name": player.name,
+                        "vectors": {z: dict(f) for z, f in pv.items()},
+                    }
+                )
+        return vectors, player_vectors
 
     def _temporal_team_zone_vectors(
         self,
@@ -520,8 +539,9 @@ class Command(BaseCommand):
         player_intervals: dict[int, list[dict]],
         player_final_seconds: dict[int, int],
         matchday_final_seconds: int,
-    ) -> tuple[dict[str, dict[str, float]], dict]:
+    ) -> tuple[dict[str, dict[str, float]], dict, list[dict]]:
         vectors: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        player_vectors_map: dict[int, dict] = {}
         substitutions = []
         used_bench: set[int] = set()
         covered_gap_seconds = 0
@@ -537,6 +557,8 @@ class Command(BaseCommand):
                     vectors,
                     player_zone_features.get(starter.player_id, {}),
                     scale=1.0,
+                    player=starter,
+                    player_vectors_map=player_vectors_map,
                 )
 
             gaps = self._player_gaps(starter_intervals, starter_final_seconds)
@@ -586,6 +608,8 @@ class Command(BaseCommand):
                     vectors,
                     player_zone_features.get(bench_player.player_id, {}),
                     scale=overlap_seconds / max(1, bench_active_seconds),
+                    player=bench_player,
+                    player_vectors_map=player_vectors_map,
                 )
                 substitutions.append(
                     {
@@ -600,14 +624,22 @@ class Command(BaseCommand):
                     }
                 )
 
-        return vectors, {
-            "mode": "auto_mode_1_temporal_scaled",
-            "substitutions": substitutions,
-            "covered_gap_seconds": covered_gap_seconds,
-            "uncovered_gap_seconds": uncovered_gap_seconds,
-            "disciplinary_gap_seconds": disciplinary_gap_seconds,
-            "used_bench_count": len(used_bench),
-        }
+        player_vectors = [
+            {"player_id": pid, "name": rec["name"], "vectors": {z: dict(f) for z, f in rec["vectors"].items()}}
+            for pid, rec in player_vectors_map.items()
+        ]
+        return (
+            vectors,
+            {
+                "mode": "auto_mode_1_temporal_scaled",
+                "substitutions": substitutions,
+                "covered_gap_seconds": covered_gap_seconds,
+                "uncovered_gap_seconds": uncovered_gap_seconds,
+                "disciplinary_gap_seconds": disciplinary_gap_seconds,
+                "used_bench_count": len(used_bench),
+            },
+            player_vectors,
+        )
 
     def _add_scaled_player_features(
         self,
@@ -615,12 +647,23 @@ class Command(BaseCommand):
         zone_features: dict[str, dict[str, float]],
         *,
         scale: float,
+        player: PoolPlayer | None = None,
+        player_vectors_map: dict[int, dict] | None = None,
     ):
         if scale <= 0:
             return
+        pv = None
+        if player is not None and player_vectors_map is not None:
+            pv = player_vectors_map.setdefault(
+                player.player_id,
+                {"name": player.name, "vectors": defaultdict(lambda: defaultdict(float))},
+            )["vectors"]
         for zone_key, features in zone_features.items():
             for feature_key, value in features.items():
-                vectors[zone_key][feature_key] += float(value) * scale
+                scaled = float(value) * scale
+                vectors[zone_key][feature_key] += scaled
+                if pv is not None:
+                    pv[zone_key][feature_key] += scaled
 
     def _active_seconds(self, intervals: list[dict]) -> int:
         return sum(max(0, int(item["end"]) - int(item["start"])) for item in intervals)
@@ -676,52 +719,61 @@ class Command(BaseCommand):
         away_vectors: dict[str, dict[str, float]],
         calibration: dict,
         *,
+        home_players: list[dict],
+        away_players: list[dict],
         fantasy_home_advantage: float,
         fantasy_margin_boost: float,
     ) -> tuple[float, float, dict]:
-        features = list(calibration["features"])
-        scales = {key: max(1e-9, float(value)) for key, value in calibration["feature_scales"].items()}
-        params = {key: float(value) for key, value in calibration["params"].items()}
-        zone_keys = sorted(set(home_vectors) | set(away_vectors))
-        if not zone_keys:
-            base = params["base"]
-            return base, base, {"total_margin": 0.0, "top_zones": []}
-
-        zone_reports = []
-        total_margin = 0.0
-        for zone_key in zone_keys:
-            margin = 0.0
-            contributions = []
-            for feature in features:
-                home_value = float(home_vectors.get(zone_key, {}).get(feature, 0.0)) / scales[feature]
-                away_value = float(away_vectors.get(zone_key, {}).get(feature, 0.0)) / scales[feature]
-                swing = params[feature] * (home_value - away_value)
-                margin += swing
-                if abs(swing) > 1e-9:
-                    contributions.append({"feature": feature, "swing": round(swing, 6)})
-            total_margin += margin
-            zone_reports.append(
-                {
-                    "zone_key": zone_key,
-                    "margin": round(margin, 6),
-                    "winner": "home" if margin > 0 else "away" if margin < 0 else "draw",
-                    "top_contributions": sorted(contributions, key=lambda row: abs(row["swing"]), reverse=True)[:3],
-                }
-            )
-
-        total_margin = total_margin / len(zone_keys)
-        boosted_margin = fantasy_margin_boost * total_margin
-        home_score = params["base"] + fantasy_home_advantage + params["score_scale"] * boosted_margin
-        away_score = params["base"] - fantasy_home_advantage - params["score_scale"] * boosted_margin
-        return (
-            home_score,
-            away_score,
-            {
-                "total_margin": round(total_margin, 6),
-                "boosted_margin": round(boosted_margin, 6),
-                "top_zones": sorted(zone_reports, key=lambda row: abs(row["margin"]), reverse=True)[:5],
-            },
+        result = score_zone_duel(
+            home_vectors,
+            away_vectors,
+            calibration,
+            home_players=home_players,
+            away_players=away_players,
+            fantasy_home_advantage=fantasy_home_advantage,
+            fantasy_margin_boost=fantasy_margin_boost,
         )
+        # Keep the artifact compact: store zone margins + the top feature swings,
+        # and the per-player zone contributions once (as player_totals). The
+        # per-zone player lists are derivable from player_totals on the client,
+        # so we strip them here. The shared service still returns them for the
+        # future real-time match-detail endpoint.
+        zones = [
+            {
+                "zone_key": z["zone_key"],
+                "margin": z["margin"],
+                "winner": z["winner"],
+                "features": z["features"][:8],
+            }
+            for z in result["zones"]
+        ]
+        def compact_player_totals(rows):
+            out = []
+            for r in rows:
+                top_zones = sorted(
+                    ((z, c) for z, c in r["zones"].items() if abs(c) >= 0.01),
+                    key=lambda item: abs(item[1]),
+                    reverse=True,
+                )[:8]
+                out.append(
+                    {
+                        "player_id": r["player_id"],
+                        "name": r["name"],
+                        "total": round(r["total"], 3),
+                        "zones": {z: round(c, 3) for z, c in top_zones},
+                    }
+                )
+            return out
+
+        report = {
+            "total_margin": result["total_margin"],
+            "boosted_margin": result["boosted_margin"],
+            "score_build": result["score_build"],
+            "zones": zones,
+            "home_player_totals": compact_player_totals(result["home_player_totals"]),
+            "away_player_totals": compact_player_totals(result["away_player_totals"]),
+        }
+        return result["home_score"], result["away_score"], report
 
     def _apply_result(
         self,
