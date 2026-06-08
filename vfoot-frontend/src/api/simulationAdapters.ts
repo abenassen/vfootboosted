@@ -19,9 +19,6 @@ import type {
   SimZonePlayer,
 } from '../types/simulation';
 
-// Feature swings below this magnitude are noise (often zero-weight features) —
-// not worth showing.
-const FEATURE_SWING_MIN = 0.02;
 
 export function standingsToVM(standings: SimStanding[], highlightTeam?: string | null): StandingRowVM[] {
   return standings.map((s) => ({
@@ -93,12 +90,14 @@ export function buildZoneInspector(
     homeName,
     awayName,
     macros: zone.macros.map((m) => ({ label: m.label, net: m.net })),
+    // Raw feature data (real events), most-active first.
     features: zone.features
-      .filter((f) => Math.abs(f.swing) >= FEATURE_SWING_MIN)
-      .slice(0, 6)
+      .filter((f) => f.home > 0 || f.away > 0)
+      .sort((a, b) => b.home + b.away - (a.home + a.away))
+      .slice(0, 8)
       .map((f) => ({ feature: f.feature, home: f.home, away: f.away, swing: f.swing })),
     // Per-zone players come straight from the backend (consistent with the
-    // radar/feature bars; away side already mirrored to the physical zone).
+    // macro bars; away side already mirrored to the physical zone).
     homePlayers: zonePlayersVM(zone.home_players),
     awayPlayers: zonePlayersVM(zone.away_players),
   };

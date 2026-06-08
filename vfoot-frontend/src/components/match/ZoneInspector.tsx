@@ -85,21 +85,19 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
       {zone.features.length ? (
         <details className="mt-3 group">
           <summary className="cursor-pointer list-none text-[11px] uppercase tracking-wide text-slate-400 hover:text-slate-600">
-            Dettaglio per feature ▾
+            Dati reali per feature ▾
           </summary>
-          <div className="mt-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-400">
-            <span>{zone.homeName}</span>
-            <span>{zone.awayName}</span>
+          <div className="mt-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-400">
+            <span className="text-green-700">{zone.homeName}</span>
+            <span className="text-sky-700">{zone.awayName}</span>
           </div>
-          <div className="mt-2 space-y-2.5">
+          <div className="mt-1 space-y-0.5">
             {zone.features.map((f) => (
-              <FeatureRow key={f.feature} f={f} homeName={zone.homeName} awayName={zone.awayName} />
+              <FeatureRow key={f.feature} f={f} />
             ))}
           </div>
         </details>
-      ) : (
-        <div className="mt-3 text-xs text-slate-400">Nessuna azione rilevante in questa zona.</div>
-      )}
+      ) : null}
 
       {zone.homePlayers.length || zone.awayPlayers.length ? (
         <div className="mt-4">
@@ -114,20 +112,23 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
   );
 }
 
-function FeatureRow({ f, homeName, awayName }: { f: ZoneFeatureVM; homeName: string; awayName: string }) {
-  const total = f.home + f.away;
-  const homeShare = total > 0 ? f.home / total : 0.5;
+const fmtVal = (v: number) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100));
+
+// Raw per-feature values (actual events), home vs away. The larger side is
+// emphasised. This shows the real data behind the macro bars, not a duplicate
+// of them.
+function FeatureRow({ f }: { f: ZoneFeatureVM }) {
+  const homeBig = f.home > f.away;
+  const awayBig = f.away > f.home;
   return (
-    <div title={`${featureLabel(f.feature)} — ${homeName} ${f.home} · ${awayName} ${f.away}`}>
-      <div className="text-[11px] text-slate-600">{featureLabel(f.feature)}</div>
-      <div className="mt-0.5 flex items-center gap-1.5">
-        <span className="w-8 text-right font-mono text-[10px] text-green-700">{pct(homeShare)}</span>
-        <div className="flex h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-          <div className="h-full bg-green-500" style={{ width: `${homeShare * 100}%` }} />
-          <div className="h-full bg-sky-500" style={{ width: `${(1 - homeShare) * 100}%` }} />
-        </div>
-        <span className="w-8 font-mono text-[10px] text-sky-700">{pct(1 - homeShare)}</span>
-      </div>
+    <div className="flex items-center gap-2 text-[11px]">
+      <span className={clsx('w-12 text-right font-mono', homeBig ? 'font-semibold text-green-700' : 'text-slate-400')}>
+        {fmtVal(f.home)}
+      </span>
+      <span className="flex-1 text-center text-slate-600">{featureLabel(f.feature)}</span>
+      <span className={clsx('w-12 font-mono', awayBig ? 'font-semibold text-sky-700' : 'text-slate-400')}>
+        {fmtVal(f.away)}
+      </span>
     </div>
   );
 }
