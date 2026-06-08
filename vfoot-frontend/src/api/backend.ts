@@ -32,6 +32,7 @@ import type {
   TeamRoster,
 } from '../types/league';
 import type { SimFixtureDetail } from '../types/simulation';
+import type { SaveTeamLineupRequest, TeamLineupContext } from '../types/lineup';
 
 const DEFAULT_BASE_URL = 'http://localhost:8000/api/v1';
 const TOKEN_STORAGE_KEY = 'vfoot_auth_token';
@@ -531,6 +532,23 @@ export async function getLeagueStandings(leagueId: number): Promise<{ competitio
 export async function getFixtureDetail(fixtureId: number | string): Promise<SimFixtureDetail> {
   const res = await fetch(`${baseUrl()}/fixtures/${fixtureId}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getTeamLineup(leagueId: number, matchday?: number): Promise<TeamLineupContext> {
+  const q = matchday != null ? `?matchday=${matchday}` : '';
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/lineup${q}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function saveTeamLineup(leagueId: number, req: SaveTeamLineupRequest): Promise<{ ok: boolean }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/lineup/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
   });
   return parseJsonOrThrow(res);
 }

@@ -607,3 +607,13 @@ export async function getFixtureDetail(_fixtureId: number | string): Promise<nev
   await sleep(80);
   throw new Error('Dettaglio partita disponibile solo con il backend reale.');
 }
+
+export async function getTeamLineup(_leagueId: number, _matchday?: number): Promise<never> {
+  await sleep(80);
+  throw new Error('Formazione disponibile solo con il backend reale.');
+}
+
+export async function saveTeamLineup(_leagueId: number, _req: unknown): Promise<{ ok: boolean }> {
+  await sleep(80);
+  return { ok: true };
+}
