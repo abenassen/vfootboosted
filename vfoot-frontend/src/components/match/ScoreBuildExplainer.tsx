@@ -23,9 +23,10 @@ export function ScoreBuildExplainer({ vm }: { vm: ScoreBuildVM }) {
       <p className="text-slate-600">
         Ogni zona è un <b>duello</b>: si confronta il tuo terzo offensivo col terzo difensivo avversario (e
         viceversa). Il punteggio parte da una base e si sposta in base alla <b>media dei duelli sulle{' '}
-        {vm.zoneCount} zone con presenza</b>. Il contributo di ogni zona è <b>saturato</b>: <i>vincere</i> una zona
-        conta, <i>stravincerla</i> rende sempre meno — quindi conviene contendere più zone e mettere i difensori
-        dove l'avversario attacca, non ammassare tutti i big nello stesso punto.
+        {vm.zoneCount} zone con presenza</b> (le zone <b>centrali</b> pesano un po' più delle laterali). Il
+        contributo di ogni zona è <b>saturato</b>: <i>vincere</i> una zona conta, <i>stravincerla</i> rende sempre
+        meno — quindi conviene contendere più zone e mettere i difensori dove l'avversario attacca, non ammassare
+        tutti i big nello stesso punto.
       </p>
 
       <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700">
