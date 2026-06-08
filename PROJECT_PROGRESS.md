@@ -1652,9 +1652,11 @@ fantasy tables.
 - Match-detail UX: score header; "Come nasce il punteggio" explainer (specular +
   saturating); full 5×4 pitch map (click any zone); ZoneInspector (PES macro
   radar Attacco/Creazione/Difesa/Recupero/Pulizia + percentage feature bars on
-  hover + who acted here as %); role-free LineupBoard ordered by spatial
-  tendency (avgCol) with DIF/CEN/ATT colour chips, click a player to light up
-  their zones on the (mirrored-for-away) map, substitutions as inline
+  hover + who acted here as %); LineupBoard where each row is a SLOT = starter +
+  the substitute(s) who covered them: the influence bar, the spatial-tendency
+  band (POR for the keeper, else DIF/CEN/ATT by combined avgCol) and the ordering
+  are all computed on the combined starter+subs footprint. Click a player to
+  light up their zones on the (mirrored-for-away) map; substitutions are inline
   expandables ("entrato al X'", "uscito al X'", "espulso", "non sceso in campo").
 
 ## How to run / verify
