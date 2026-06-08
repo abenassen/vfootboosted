@@ -149,6 +149,7 @@ export function lineupBoardVMs(
       gapStart: s.gap[0],
       gapEnd: s.gap[1],
       bench: s.bench,
+      benchPositive: s.bench_id != null ? (totalById.get(s.bench_id)?.total ?? 0) >= 0 : true,
       coveredSeconds: s.covered_seconds,
       uncoveredSeconds: Math.max(0, gapTotal - (s.covered_seconds ?? 0)),
     };
@@ -209,17 +210,19 @@ export function lineupBoardVMs(
       role,
       zones: mirror ? ownZoneKeys.map(mirrorZoneKey) : ownZoneKeys,
       absTotal: Math.abs(combinedTotal),
+      starterPositive: (totalById.get(p.player_id)?.total ?? 0) >= 0,
       avgCol: averageColumn(combinedZones),
       events: subsByStarter.get(p.player_id) ?? [],
     };
   });
-  const sum = rows.reduce((s, r) => s + r.absTotal, 0) || 1;
+  const maxAbs = Math.max(0.0001, ...rows.map((r) => r.absTotal));
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     role: r.role,
     zones: r.zones,
-    share: r.absTotal / sum,
+    relevance: r.absTotal / maxAbs,
+    starterPositive: r.starterPositive,
     avgCol: r.avgCol,
     events: r.events,
   }));

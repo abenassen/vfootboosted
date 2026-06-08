@@ -132,6 +132,18 @@ export default function SimulationMatchDetailPage() {
 
       <Card className="p-4">
         <SectionTitle>Formazioni · clicca un giocatore per vederne le zone</SectionTitle>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+          <span>Barra: spessore = impatto, lunghezza = minuti.</span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-3 rounded-full bg-emerald-500" /> positivo
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-3 rounded-full bg-rose-500" /> negativo
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-3 rounded-full bg-slate-200" /> scoperto
+          </span>
+        </div>
         <div className="mt-3 grid gap-6 sm:grid-cols-2">
           <LineupColumn
             teamName={data.home_team}
