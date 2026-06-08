@@ -1607,9 +1607,10 @@ fantasy tables.
   can mis-pick). A picked starter who doesn't appear is `absent` and the engine
   tries to cover them from the bench. This removes the systematic upward bias of
   conditioning selection on same-match outcomes.
-  - **Exactly one goalkeeper** (never two): GKs detected from StatsBomb lineup
-    positions; one (best by value) is fielded, any other keeper excluded from XI
-    and bench. The same hard rule will gate user lineups later.
+  - **Exactly one goalkeeper STARTS** (never two in the XI): GKs detected from
+    StatsBomb lineup positions; one (best by value) is fielded. The bench keeps a
+    backup keeper so the engine can replace the starter if absent. The same hard
+    rule (one GK in the XI) will gate user lineups later.
   - **Overcrowding-aware**: outfield slots filled greedily by value minus a
     penalty for crowding zones already covered (season touch footprint), so
     strength spreads across the pitch. No explicit "uncovered zone" reward — only
