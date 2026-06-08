@@ -19,6 +19,44 @@ SIDE_CHOICES = [
     (SIDE_UNKNOWN, "Unknown"),
 ]
 
+CARD_YELLOW = "yellow"
+CARD_SECOND_YELLOW = "second_yellow"
+CARD_RED = "red"
+CARD_UNKNOWN = "unknown"
+CARD_CHOICES = [
+    (CARD_YELLOW, "Yellow"),
+    (CARD_SECOND_YELLOW, "Second Yellow"),
+    (CARD_RED, "Red"),
+    (CARD_UNKNOWN, "Unknown"),
+]
+
+INTERVAL_STARTING_XI = "starting_xi"
+INTERVAL_SUBSTITUTION_ON = "substitution_on"
+INTERVAL_TACTICAL_SHIFT = "tactical_shift"
+INTERVAL_PLAYER_ON = "player_on"
+INTERVAL_UNKNOWN_START = "unknown_start"
+INTERVAL_START_REASON_CHOICES = [
+    (INTERVAL_STARTING_XI, "Starting XI"),
+    (INTERVAL_SUBSTITUTION_ON, "Substitution On"),
+    (INTERVAL_TACTICAL_SHIFT, "Tactical Shift"),
+    (INTERVAL_PLAYER_ON, "Player On"),
+    (INTERVAL_UNKNOWN_START, "Unknown Start"),
+]
+
+INTERVAL_FINAL_WHISTLE = "final_whistle"
+INTERVAL_SUBSTITUTION_OFF = "substitution_off"
+INTERVAL_RED_CARD = "red_card"
+INTERVAL_PLAYER_OFF = "player_off"
+INTERVAL_UNKNOWN_END = "unknown_end"
+INTERVAL_END_REASON_CHOICES = [
+    (INTERVAL_FINAL_WHISTLE, "Final Whistle"),
+    (INTERVAL_SUBSTITUTION_OFF, "Substitution Off"),
+    (INTERVAL_TACTICAL_SHIFT, "Tactical Shift"),
+    (INTERVAL_RED_CARD, "Red Card"),
+    (INTERVAL_PLAYER_OFF, "Player Off"),
+    (INTERVAL_UNKNOWN_END, "Unknown End"),
+]
+
 
 class Competition(models.Model):
     name = models.CharField(max_length=80)          # "Serie A"
@@ -265,4 +303,107 @@ class TeamZoneFeature(models.Model):
             models.Index(fields=["match", "team_side"]),
             models.Index(fields=["match", "zone_key"]),
             models.Index(fields=["feature_key"]),
+        ]
+
+
+class MatchDisciplinaryEvent(models.Model):
+    """
+    Provider-normalized disciplinary event for one match.
+
+    This keeps a stable internal card taxonomy while preserving source-specific
+    identifiers and labels for auditing and future provider adapters.
+    """
+
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="disciplinary_events")
+    player = models.ForeignKey(
+        Player,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="disciplinary_events",
+    )
+    team_season = models.ForeignKey(
+        TeamSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="disciplinary_events",
+    )
+
+    team_side = models.CharField(max_length=12, choices=SIDE_CHOICES, default=SIDE_UNKNOWN)
+    period = models.IntegerField(default=1)
+    minute = models.IntegerField(default=0)
+    second = models.IntegerField(default=0)
+    elapsed_seconds = models.IntegerField(default=0)
+
+    card_type = models.CharField(max_length=24, choices=CARD_CHOICES, default=CARD_UNKNOWN)
+    reason = models.CharField(max_length=80, blank=True, default="")
+
+    provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES, default=PROVIDER_STATSBOMB)
+    provider_event_id = models.CharField(max_length=80, blank=True, default="")
+    source_event_type = models.CharField(max_length=80, blank=True, default="")
+    source_card_name = models.CharField(max_length=80, blank=True, default="")
+    payload = models.JSONField(blank=True, default=dict)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = [("match", "provider", "provider_event_id", "card_type")]
+        indexes = [
+            models.Index(fields=["match", "team_side"]),
+            models.Index(fields=["match", "player"]),
+            models.Index(fields=["match", "card_type"]),
+            models.Index(fields=["provider", "source_event_type"]),
+            models.Index(fields=["minute", "second"]),
+        ]
+
+
+class PlayerOnPitchInterval(models.Model):
+    """
+    Provider-normalized interval during which a player was on the pitch.
+
+    This is the canonical temporal participation object for future event-window
+    scoring and fantasy substitution logic.
+    """
+
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="on_pitch_intervals")
+    player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="on_pitch_intervals")
+    team_season = models.ForeignKey(TeamSeason, on_delete=models.PROTECT, related_name="on_pitch_intervals")
+
+    team_side = models.CharField(max_length=12, choices=SIDE_CHOICES, default=SIDE_UNKNOWN)
+    start_period = models.IntegerField(default=1)
+    start_minute = models.IntegerField(default=0)
+    start_second = models.IntegerField(default=0)
+    start_elapsed_seconds = models.IntegerField(default=0)
+    end_period = models.IntegerField(null=True, blank=True)
+    end_minute = models.IntegerField(default=90)
+    end_second = models.IntegerField(default=0)
+    end_elapsed_seconds = models.IntegerField(default=90 * 60)
+
+    start_reason = models.CharField(
+        max_length=32,
+        choices=INTERVAL_START_REASON_CHOICES,
+        default=INTERVAL_UNKNOWN_START,
+    )
+    end_reason = models.CharField(
+        max_length=32,
+        choices=INTERVAL_END_REASON_CHOICES,
+        default=INTERVAL_UNKNOWN_END,
+    )
+    source_start_reason = models.CharField(max_length=120, blank=True, default="")
+    source_end_reason = models.CharField(max_length=120, blank=True, default="")
+    source_position = models.CharField(max_length=80, blank=True, default="")
+
+    provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES, default=PROVIDER_STATSBOMB)
+    provider_interval_id = models.CharField(max_length=120, blank=True, default="")
+    payload = models.JSONField(blank=True, default=dict)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = [("match", "player", "provider", "provider_interval_id")]
+        indexes = [
+            models.Index(fields=["match", "team_side"]),
+            models.Index(fields=["match", "player"]),
+            models.Index(fields=["match", "start_elapsed_seconds"]),
+            models.Index(fields=["match", "end_elapsed_seconds"]),
+            models.Index(fields=["start_reason", "end_reason"]),
         ]
