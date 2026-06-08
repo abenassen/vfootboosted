@@ -17,6 +17,8 @@ export interface TeamLineupPlayer {
 
 export interface TeamLineupContext {
   team: { team_id: number; name: string };
+  competitions: { competition_id: number; name: string }[];
+  competition: number | null; // the competition this lineup refers to
   matchdays: number[];
   matchday: number;
   as_of_matchday: number | null; // data cutoff (only matches before it count)
@@ -34,6 +36,8 @@ export interface TeamLineupContext {
 
 export interface SaveTeamLineupRequest {
   matchday: number;
+  competition?: number | null;
+  all_competitions?: boolean;
   gk_player_id: number | null;
   starter_player_ids: number[];
   bench_player_ids: number[];

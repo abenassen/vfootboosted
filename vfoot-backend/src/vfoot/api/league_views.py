@@ -2020,9 +2020,35 @@ class LeagueTeamLineupView(APIView):
         if team is None:
             return Response({"detail": "Nessuna squadra associata in questa lega."}, status=status.HTTP_404_NOT_FOUND)
 
-        matchdays = list(
-            FantasyMatchday.objects.filter(league=league).order_by("real_matchday").values_list("real_matchday", flat=True)
-        )
+        # A lineup is referred to a COMPETITION (a set of league fixtures mapped to
+        # real matchdays). Default to the first competition; its matchdays come
+        # from its fixtures.
+        competitions = list(league.competitions.order_by("id").values("id", "name"))
+        comp_param = request.query_params.get("competition")
+        competition_id: int | None = None
+        if comp_param:
+            try:
+                competition_id = int(comp_param)
+            except (TypeError, ValueError):
+                competition_id = None
+        if competition_id is None and competitions:
+            competition_id = competitions[0]["id"]
+
+        matchdays: list[int] = []
+        if competition_id is not None:
+            matchdays = sorted(
+                {
+                    int(md)
+                    for md in FantasyFixture.objects.filter(
+                        competition_id=competition_id, fantasy_matchday__isnull=False
+                    ).values_list("fantasy_matchday__real_matchday", flat=True)
+                    if md is not None
+                }
+            )
+        if not matchdays:
+            matchdays = list(
+                FantasyMatchday.objects.filter(league=league).order_by("real_matchday").values_list("real_matchday", flat=True)
+            )
         # When a matchday is given we treat it as an "as-of" cutoff: profiles use
         # only matches BEFORE it, so setting a lineup mid-season never peeks at
         # future results (no leakage). No matchday -> full-season profiles.
@@ -2070,8 +2096,9 @@ class LeagueTeamLineupView(APIView):
             )
         roster.sort(key=lambda r: (r["avg_col"], -r["price"]))
 
+        lineup_key = f"team{team.id}" + (f":comp{competition_id}" if competition_id is not None else "")
         snap = SavedLineupSnapshot.objects.filter(
-            league_id=str(league_id), matchday_id=str(matchday), lineup_id=f"team{team.id}"
+            league_id=str(league_id), matchday_id=str(matchday), lineup_id=lineup_key
         ).first()
         saved_lineup = (
             {
@@ -2087,6 +2114,8 @@ class LeagueTeamLineupView(APIView):
         return Response(
             {
                 "team": {"team_id": team.id, "name": team.name},
+                "competitions": [{"competition_id": c["id"], "name": c["name"]} for c in competitions],
+                "competition": competition_id,
                 "matchdays": matchdays,
                 "matchday": matchday,
                 "as_of_matchday": as_of,
@@ -2114,15 +2143,26 @@ class LeagueTeamLineupSaveView(APIView):
         if matchday is None:
             return Response({"detail": "matchday richiesto."}, status=status.HTTP_400_BAD_REQUEST)
         gk = request.data.get("gk_player_id")
-        SavedLineupSnapshot.objects.update_or_create(
-            league_id=str(league_id),
-            matchday_id=str(matchday),
-            lineup_id=f"team{team.id}",
-            defaults={
-                "gk_player_id": str(gk) if gk else None,
-                "starter_player_ids": request.data.get("starter_player_ids", []),
-                "bench_player_ids": request.data.get("bench_player_ids", []),
-                "starter_backups": request.data.get("starter_backups", []),
-            },
-        )
-        return Response({"ok": True})
+
+        # The lineup is referred to a competition; optionally apply it to all the
+        # league's competitions at once (same matchday) to streamline.
+        if request.data.get("all_competitions"):
+            target_comp_ids: list[int | None] = list(league.competitions.values_list("id", flat=True)) or [None]
+        else:
+            comp = request.data.get("competition")
+            target_comp_ids = [int(comp)] if comp else [None]
+
+        defaults = {
+            "gk_player_id": str(gk) if gk else None,
+            "starter_player_ids": request.data.get("starter_player_ids", []),
+            "bench_player_ids": request.data.get("bench_player_ids", []),
+            "starter_backups": request.data.get("starter_backups", []),
+        }
+        for cid in target_comp_ids:
+            SavedLineupSnapshot.objects.update_or_create(
+                league_id=str(league_id),
+                matchday_id=str(matchday),
+                lineup_id=f"team{team.id}" + (f":comp{cid}" if cid is not None else ""),
+                defaults=defaults,
+            )
+        return Response({"ok": True, "saved_competitions": len([c for c in target_comp_ids if c is not None]) or 1})

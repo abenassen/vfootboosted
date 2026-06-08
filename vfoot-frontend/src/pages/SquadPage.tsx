@@ -1,5 +1,4 @@
-import { Link } from 'react-router-dom';
-import { Card, SectionTitle, Button, Badge } from '../components/ui';
+import { Card, SectionTitle, Badge } from '../components/ui';
 import { useAsync } from '../utils/useAsync';
 import { getTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
@@ -29,17 +28,15 @@ export default function SquadPage() {
 
   return (
     <div className="space-y-4">
-      <Card className="flex items-center justify-between gap-4 p-4">
-        <div>
-          <SectionTitle>Squadra</SectionTitle>
-          <div className="mt-1 text-xl font-black">{data.team.name}</div>
-          <div className="text-sm text-slate-500">
-            Rosa: {data.roster.length} giocatori · valore {data.roster.reduce((s, p) => s + p.price, 0)}
-          </div>
+      <Card className="p-4">
+        <SectionTitle>Squadra</SectionTitle>
+        <div className="mt-1 text-xl font-black">{data.team.name}</div>
+        <div className="text-sm text-slate-500">
+          Rosa: {data.roster.length} giocatori · valore {data.roster.reduce((s, p) => s + p.price, 0)}
         </div>
-        <Link to="/squad/formation">
-          <Button>Modifica formazione</Button>
-        </Link>
+        <div className="mt-1 text-[11px] text-slate-400">
+          La formazione si imposta per competizione, dal Calendario o dalla competizione.
+        </div>
       </Card>
 
       <Card className="p-4">

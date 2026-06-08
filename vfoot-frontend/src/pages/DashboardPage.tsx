@@ -56,7 +56,13 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link to="/squad/formation">
+            <Link
+              to={
+                feature && feature.real_matchday != null
+                  ? `/squad/formation?competition=${feature.competition_id}&matchday=${feature.real_matchday}`
+                  : '/squad/formation'
+              }
+            >
               <Button>Formazione</Button>
             </Link>
             <Link to="/matches">

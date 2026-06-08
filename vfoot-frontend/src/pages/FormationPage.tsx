@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import { getTeamLineup, saveTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { zoneName, zoneShortName } from '../utils/zoneNames';
 import type { PlayerRole, TeamLineupContext, TeamLineupPlayer } from '../types/lineup';
 
-const STARTERS = 10; // outfield; the GK is a separate slot
+const XI = 11; // starters incl. exactly one goalkeeper
 
 const ROLE_LABEL: Record<PlayerRole, string> = { GK: 'POR', DEF: 'DIF', MID: 'CEN', ATT: 'ATT' };
 const ROLE_CHIP: Record<PlayerRole, string> = {
@@ -18,133 +19,158 @@ const ROLE_ORDER: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 }
 
 export default function FormationPage() {
   const { selectedLeagueId } = useLeagueContext();
-  const [matchday, setMatchday] = useState<number | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const competition = searchParams.get('competition') ? Number(searchParams.get('competition')) : null;
+  const matchday = searchParams.get('matchday') ? Number(searchParams.get('matchday')) : null;
+
   const [ctx, setCtx] = useState<TeamLineupContext | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [gkId, setGkId] = useState<number | null>(null);
   const [starterIds, setStarterIds] = useState<number[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
+  const [allComps, setAllComps] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  // Predictive default/suggestion: best GK by form + the top 10 outfielders by
-  // expected contribution (recent form), all as-of the chosen matchday.
-  const applySuggestion = (roster: TeamLineupPlayer[]) => {
+  const setParams = (next: { competition?: number; matchday?: number }) => {
+    const p = new URLSearchParams(searchParams);
+    if (next.competition != null) p.set('competition', String(next.competition));
+    if (next.matchday != null) p.set('matchday', String(next.matchday));
+    setSearchParams(p, { replace: true });
+  };
+
+  // Suggestion / default: best GK by form + the top 10 outfielders by form.
+  const suggest = (roster: TeamLineupPlayer[]): number[] => {
     const gk = roster.filter((p) => p.role === 'GK').sort((a, b) => b.form - a.form)[0];
     const outfield = roster
       .filter((p) => p.role !== 'GK')
       .sort((a, b) => b.form - a.form)
-      .slice(0, STARTERS)
+      .slice(0, XI - 1)
       .map((p) => p.player_id);
-    setGkId(gk ? gk.player_id : null);
-    setStarterIds(outfield);
+    return gk ? [gk.player_id, ...outfield] : outfield;
   };
 
   useEffect(() => {
     if (!selectedLeagueId) return;
     setLoading(true);
     setError(null);
-    void getTeamLineup(selectedLeagueId, matchday ?? undefined)
+    void getTeamLineup(selectedLeagueId, matchday, competition)
       .then((d) => {
         setCtx(d);
-        // First load (no matchday yet): jump to a mid-season matchday so we work
-        // as if the lineup is being set partway through the season. The refetch
-        // then loads as-of (no-leakage) profiles.
-        if (matchday == null) {
-          setMatchday(d.matchdays[Math.floor(d.matchdays.length / 2)] ?? d.matchday);
+        // First visit: pick the competition + a mid-season matchday, which
+        // re-fetches as-of (no-leakage) profiles for that competition.
+        if (competition == null || matchday == null) {
+          setParams({
+            competition: competition ?? d.competition ?? undefined,
+            matchday: matchday ?? d.matchdays[Math.floor(d.matchdays.length / 2)] ?? d.matchday,
+          });
           return;
         }
         const saved = d.saved_lineup;
         if (saved && (saved.gk_player_id || saved.starter_player_ids.length)) {
-          setGkId(saved.gk_player_id);
-          setStarterIds(saved.starter_player_ids.slice(0, STARTERS));
+          const ids = [...(saved.gk_player_id ? [saved.gk_player_id] : []), ...saved.starter_player_ids];
+          setStarterIds(ids.slice(0, XI));
         } else {
-          applySuggestion(d.roster);
+          setStarterIds(suggest(d.roster));
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [selectedLeagueId, matchday]);
+  }, [selectedLeagueId, competition, matchday]);
 
   const byId = useMemo(() => new Map((ctx?.roster ?? []).map((p) => [p.player_id, p])), [ctx]);
-  const onPitch = useMemo(() => [gkId, ...starterIds].filter((x): x is number => x != null), [gkId, starterIds]);
+  const gkStarters = useMemo(
+    () => starterIds.filter((id) => byId.get(id)?.role === 'GK'),
+    [starterIds, byId],
+  );
+  const gkId = gkStarters[0] ?? null;
 
-  // Live team coverage: summed footprints of the 11 on the pitch (or the
-  // selected player's own footprint when one is selected).
   const coverage = useMemo(() => {
     const acc: Record<string, number> = {};
-    const source = selected != null ? [selected] : onPitch;
+    const source = selected != null ? [selected] : starterIds;
     for (const id of source) {
       const fp = byId.get(id)?.footprint ?? {};
       for (const [z, v] of Object.entries(fp)) acc[z] = (acc[z] ?? 0) + v;
     }
-    const max = Math.max(0.0001, ...Object.values(acc));
-    return { values: acc, max };
-  }, [onPitch, selected, byId]);
+    return { values: acc, max: Math.max(0.0001, ...Object.values(acc)) };
+  }, [starterIds, selected, byId]);
 
   if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per impostare la formazione.</div>;
   if (loading && !ctx) return <div className="text-sm text-slate-500">Caricamento formazione…</div>;
   if (error || !ctx) return <div className="text-sm text-red-600">Errore: {error ?? '…'}</div>;
 
-  const setGk = (id: number) => {
-    setGkId(id);
-    setStarterIds((s) => s.filter((x) => x !== id));
-  };
-  const addStarter = (id: number) => {
-    setGkId((g) => (g === id ? null : g));
-    setStarterIds((s) => (s.includes(id) || s.length >= STARTERS ? s : [...s, id]));
-  };
-  const benchify = (id: number) => {
-    setGkId((g) => (g === id ? null : g));
-    setStarterIds((s) => s.filter((x) => x !== id));
+  const toggleStarter = (id: number) => {
+    setStarterIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= XI ? s : [...s, id]));
   };
 
-  const canSave = gkId != null && starterIds.length === STARTERS;
+  const gkOk = gkStarters.length === 1;
+  const canSave = starterIds.length === XI && gkOk;
   const onSave = async () => {
     if (!canSave || !selectedLeagueId || matchday == null) return;
     setSaving(true);
     try {
-      const benchIds = ctx.roster.map((p) => p.player_id).filter((id) => id !== gkId && !starterIds.includes(id));
-      await saveTeamLineup(selectedLeagueId, {
+      const benchIds = ctx.roster.map((p) => p.player_id).filter((id) => !starterIds.includes(id));
+      const res = await saveTeamLineup(selectedLeagueId, {
         matchday,
+        competition: allComps ? null : competition,
+        all_competitions: allComps,
         gk_player_id: gkId,
-        starter_player_ids: starterIds,
+        starter_player_ids: starterIds.filter((id) => id !== gkId),
         bench_player_ids: benchIds,
       });
-      setToast('Formazione salvata ✓');
+      setToast(allComps ? `Formazione salvata su ${res.saved_competitions} competizioni ✓` : 'Formazione salvata ✓');
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Errore nel salvataggio');
     } finally {
       setSaving(false);
-      setTimeout(() => setToast(null), 2500);
+      setTimeout(() => setToast(null), 2800);
     }
   };
 
-  const roster = [...ctx.roster].sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.avg_minutes - a.avg_minutes);
+  const roster = [...ctx.roster].sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form);
+  const compName = ctx.competitions.find((c) => c.competition_id === competition)?.name;
 
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <SectionTitle>Formazione · {ctx.team.name}</SectionTitle>
             <div className="mt-1 text-sm text-slate-600">
-              Portiere {gkId != null ? '✓' : '—'} · titolari di movimento {starterIds.length}/{STARTERS}
+              {compName ? <>Competizione <b>{compName}</b> · </> : null}
+              titolari {starterIds.length}/{XI}
+              {gkStarters.length !== 1 ? (
+                <span className="ml-2 font-semibold text-rose-600">
+                  {gkStarters.length === 0 ? '· manca il portiere' : '· un solo portiere consentito'}
+                </span>
+              ) : null}
             </div>
             {ctx.as_of_matchday != null ? (
               <div className="mt-1 text-[11px] text-amber-600">
-                Formazione per la giornata {ctx.as_of_matchday} · dati aggiornati alla giornata{' '}
-                {ctx.as_of_matchday - 1} ({ctx.prior_matches} partite) — nessuna informazione futura.
+                Giornata {ctx.as_of_matchday} · dati aggiornati alla giornata {ctx.as_of_matchday - 1} (
+                {ctx.prior_matches} partite) — nessuna informazione futura.
               </div>
             ) : null}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {ctx.competitions.length > 1 ? (
+              <select
+                value={competition ?? ''}
+                onChange={(e) => setParams({ competition: Number(e.target.value) })}
+                className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
+              >
+                {ctx.competitions.map((c) => (
+                  <option key={c.competition_id} value={c.competition_id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <label className="text-xs text-slate-500">Giornata</label>
             <select
               value={matchday ?? ''}
-              onChange={(e) => setMatchday(Number(e.target.value))}
+              onChange={(e) => setParams({ matchday: Number(e.target.value) })}
               className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
             >
               {ctx.matchdays.map((m) => (
@@ -153,7 +179,7 @@ export default function FormationPage() {
                 </option>
               ))}
             </select>
-            <Button variant="secondary" onClick={() => applySuggestion(ctx.roster)}>
+            <Button variant="secondary" onClick={() => setStarterIds(suggest(ctx.roster))}>
               Suggerisci XI
             </Button>
             <Button onClick={onSave} disabled={!canSave || saving}>
@@ -161,6 +187,10 @@ export default function FormationPage() {
             </Button>
           </div>
         </div>
+        <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+          <input type="checkbox" checked={allComps} onChange={(e) => setAllComps(e.target.checked)} />
+          Invia questa formazione a tutte le competizioni della lega (stessa giornata)
+        </label>
         {toast ? <div className="mt-2 text-sm font-semibold text-green-700">{toast}</div> : null}
       </Card>
 
@@ -181,20 +211,18 @@ export default function FormationPage() {
         </Card>
 
         <Card className="p-4">
-          <SectionTitle>Rosa · scegli portiere, titolari e panchina</SectionTitle>
+          <SectionTitle>Rosa · titolari e panchina (un solo portiere fra i titolari)</SectionTitle>
           <div className="mt-1 text-[11px] text-slate-400">Clicca il nome per vederne il footprint sulla mappa.</div>
           <div className="mt-2 divide-y">
             {roster.map((p) => (
               <RosterRow
                 key={p.player_id}
                 p={p}
-                isGk={gkId === p.player_id}
                 isStarter={starterIds.includes(p.player_id)}
+                isGk={gkId === p.player_id}
                 selected={selected === p.player_id}
                 onSelect={() => setSelected((s) => (s === p.player_id ? null : p.player_id))}
-                onGk={() => setGk(p.player_id)}
-                onStart={() => addStarter(p.player_id)}
-                onBench={() => benchify(p.player_id)}
+                onToggle={() => toggleStarter(p.player_id)}
               />
             ))}
           </div>
@@ -206,24 +234,19 @@ export default function FormationPage() {
 
 function RosterRow({
   p,
-  isGk,
   isStarter,
+  isGk,
   selected,
   onSelect,
-  onGk,
-  onStart,
-  onBench,
+  onToggle,
 }: {
   p: TeamLineupPlayer;
-  isGk: boolean;
   isStarter: boolean;
+  isGk: boolean;
   selected: boolean;
   onSelect: () => void;
-  onGk: () => void;
-  onStart: () => void;
-  onBench: () => void;
+  onToggle: () => void;
 }) {
-  const state: 'gk' | 'xi' | 'bench' = isGk ? 'gk' : isStarter ? 'xi' : 'bench';
   return (
     <div className={`flex items-center justify-between gap-2 py-2 ${selected ? 'bg-slate-50' : ''}`}>
       <button onClick={onSelect} className="flex min-w-0 items-center gap-2 text-left">
@@ -233,6 +256,7 @@ function RosterRow({
         <span className="min-w-0">
           <span className={`block truncate text-sm font-semibold ${selected ? 'text-slate-900 underline' : 'text-slate-800'}`}>
             {p.name}
+            {isStarter && isGk ? <span className="ml-1 text-[10px] font-bold text-amber-600">(portiere)</span> : null}
           </span>
           <span className="text-[11px] text-slate-500">
             {p.avg_minutes}′ medi · rend. atteso{' '}
@@ -242,22 +266,20 @@ function RosterRow({
         </span>
       </button>
       <div className="flex shrink-0 overflow-hidden rounded-lg border border-slate-200 text-[11px] font-semibold">
-        <Seg active={state === 'gk'} onClick={onGk} label="POR" activeClass="bg-amber-500 text-white" />
-        <Seg active={state === 'xi'} onClick={onStart} label="XI" activeClass="bg-slate-900 text-white" />
-        <Seg active={state === 'bench'} onClick={onBench} label="Panca" activeClass="bg-slate-500 text-white" />
+        <button
+          onClick={onToggle}
+          className={isStarter ? 'bg-slate-900 px-3 py-1 text-white' : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'}
+        >
+          Titolare
+        </button>
+        <button
+          onClick={onToggle}
+          className={!isStarter ? 'bg-slate-500 px-3 py-1 text-white' : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'}
+        >
+          Panca
+        </button>
       </div>
     </div>
-  );
-}
-
-function Seg({ active, onClick, label, activeClass }: { active: boolean; onClick: () => void; label: string; activeClass: string }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-2 py-1 ${active ? activeClass : 'bg-white text-slate-600 hover:bg-slate-100'}`}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -272,13 +294,12 @@ function CoverageGrid({ zoneKeys, values, max }: { zoneKeys: string[]; values: R
           Array.from({ length: cols }).map((__, c) => {
             const key = `Z_${c}_${r}`;
             const v = values[key] ?? 0;
-            const intensity = v / max;
             return (
               <div
                 key={key}
                 title={`${zoneName(key)} · ${(v * 100).toFixed(0)}%`}
                 className="flex h-9 items-center justify-center rounded text-[9px] font-semibold text-slate-700"
-                style={{ backgroundColor: `rgba(34,197,94,${0.12 + 0.8 * intensity})` }}
+                style={{ backgroundColor: `rgba(34,197,94,${0.12 + 0.8 * (v / max)})` }}
               >
                 {zoneKeys.includes(key) ? zoneShortName(key) : ''}
               </div>

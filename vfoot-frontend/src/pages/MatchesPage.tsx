@@ -76,34 +76,44 @@ function FixtureRow({ f }: { f: LeagueFixtureItem }) {
   const as = f.score?.away_total ?? 0;
   const homeWin = !!finished && hs > as;
   const awayWin = !!finished && as > hs;
+  const canSetLineup = f.is_user_involved && typeof f.real_matchday === 'number';
   return (
-    <Link
-      to={`/matches/${f.fixture_id}`}
-      className="block rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 transition hover:border-slate-300 hover:bg-white"
-    >
-      <div className="flex items-center gap-3">
-        <div className="flex-1 text-right">
-          <span className={homeWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.home_team.name}</span>
+    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+      <Link to={`/matches/${f.fixture_id}`} className="block transition hover:opacity-80">
+        <div className="flex items-center gap-3">
+          <div className="flex-1 text-right">
+            <span className={homeWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.home_team.name}</span>
+          </div>
+          <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 font-mono text-sm font-bold shadow-sm">
+            {finished ? (
+              <>
+                <span className={homeWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(hs)}</span>
+                <span className="text-slate-300">-</span>
+                <span className={awayWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(as)}</span>
+              </>
+            ) : (
+              <span className="text-slate-400">vs</span>
+            )}
+          </div>
+          <div className="flex-1">
+            <span className={awayWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.away_team.name}</span>
+          </div>
         </div>
-        <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 font-mono text-sm font-bold shadow-sm">
-          {finished ? (
-            <>
-              <span className={homeWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(hs)}</span>
-              <span className="text-slate-300">-</span>
-              <span className={awayWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(as)}</span>
-            </>
-          ) : (
-            <span className="text-slate-400">vs</span>
-          )}
-        </div>
-        <div className="flex-1">
-          <span className={awayWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.away_team.name}</span>
-        </div>
+      </Link>
+      <div className="mt-1 flex items-center justify-center gap-3 text-[10px] uppercase tracking-wide text-slate-400">
+        <span>
+          Giornata {f.round_no}
+          {typeof f.real_matchday === 'number' ? ` · Serie A reale ${f.real_matchday}` : ''}
+        </span>
+        {canSetLineup ? (
+          <Link
+            to={`/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`}
+            className="rounded bg-slate-900 px-2 py-0.5 font-semibold normal-case text-white hover:bg-slate-700"
+          >
+            Imposta formazione
+          </Link>
+        ) : null}
       </div>
-      <div className="mt-1 text-center text-[10px] uppercase tracking-wide text-slate-400">
-        Giornata {f.round_no}
-        {typeof f.real_matchday === 'number' ? ` · Serie A reale ${f.real_matchday}` : ''}
-      </div>
-    </Link>
+    </div>
   );
 }

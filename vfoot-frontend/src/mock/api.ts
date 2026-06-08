@@ -613,7 +613,7 @@ export async function getTeamLineup(_leagueId: number, _matchday?: number): Prom
   throw new Error('Formazione disponibile solo con il backend reale.');
 }
 
-export async function saveTeamLineup(_leagueId: number, _req: unknown): Promise<{ ok: boolean }> {
+export async function saveTeamLineup(_leagueId: number, _req: unknown): Promise<{ ok: boolean; saved_competitions: number }> {
   await sleep(80);
-  return { ok: true };
+  return { ok: true, saved_competitions: 1 };
 }

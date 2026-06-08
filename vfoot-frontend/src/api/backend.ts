@@ -536,15 +536,25 @@ export async function getFixtureDetail(fixtureId: number | string): Promise<SimF
   return parseJsonOrThrow(res);
 }
 
-export async function getTeamLineup(leagueId: number, matchday?: number): Promise<TeamLineupContext> {
-  const q = matchday != null ? `?matchday=${matchday}` : '';
+export async function getTeamLineup(
+  leagueId: number,
+  matchday?: number | null,
+  competition?: number | null,
+): Promise<TeamLineupContext> {
+  const params = new URLSearchParams();
+  if (matchday != null) params.set('matchday', String(matchday));
+  if (competition != null) params.set('competition', String(competition));
+  const q = params.toString() ? `?${params.toString()}` : '';
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/lineup${q}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
 }
 
-export async function saveTeamLineup(leagueId: number, req: SaveTeamLineupRequest): Promise<{ ok: boolean }> {
+export async function saveTeamLineup(
+  leagueId: number,
+  req: SaveTeamLineupRequest,
+): Promise<{ ok: boolean; saved_competitions: number }> {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/lineup/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
