@@ -1051,6 +1051,43 @@ substitution_on(player, t) => replacement active after t
 4. Replace synthetic match detail progressively once output stability is acceptable.
 5. Add fixture-aware lineup selection using real fantasy rosters instead of starter-like real match appearances.
 
+## Simulation UI Integration
+
+Done on 2026-06-08.
+
+Read-only API serving the dry-run artifact (no persistent-state mutation):
+
+- `vfoot/services/simulation_report.py`
+  - loads `calibration/historical_vfoot_league_dry_run.json`;
+  - mtime-keyed `lru_cache`, so regenerating the report is picked up without
+    a server restart;
+  - assigns stable index-based `fixture_id`s and computes result/scoreline
+    distributions and score range.
+- `vfoot/api/simulation_views.py` (public read-only, `AllowAny`):
+  - `GET /api/v1/simulations/historical-vfoot/latest`
+  - `GET /api/v1/simulations/historical-vfoot/latest/fixtures`
+  - `GET /api/v1/simulations/historical-vfoot/latest/fixtures/<id>`
+
+Frontend `/simulation` section (consumes the API above, independent of the
+mock/backend product switch since the artifact is always backend-served):
+
+- `pages/SimulationOverviewPage.tsx`: config snapshot, full standings table,
+  result distribution, top scorelines, score range, notes.
+- `pages/SimulationMatchesPage.tsx`: per-round fixture browser with Vfoot
+  score + goals and winner highlighting.
+- `pages/SimulationMatchDetailPage.tsx`: zone-vector pitch grid (5x4) with
+  per-zone feature-swing contributions, both lineups sorted by event score,
+  and the temporal substitution report (covered / uncovered / red-card gaps).
+- `api/simulation.ts`, `types/simulation.ts`, nav link + routes wired.
+
+Verified in-browser with Playwright on desktop and mobile. Fixed a NaN
+rendering bug on uncovered/disciplinary substitution rows (those entries omit
+`bench`/`covered_seconds`; disciplinary gaps now render "espulso, intervallo
+non copribile").
+
+Next UI step: optionally let managers replay/adjust a simulated lineup, then
+decide whether to materialize a simulation into the persistent league models.
+
 ## Full Historical Vfoot League Dry Run
 
 Target scenario:
