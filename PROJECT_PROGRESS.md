@@ -1607,6 +1607,14 @@ fantasy tables.
   can mis-pick). A picked starter who doesn't appear is `absent` and the engine
   tries to cover them from the bench. This removes the systematic upward bias of
   conditioning selection on same-match outcomes.
+  - **Exactly one goalkeeper** (never two): GKs detected from StatsBomb lineup
+    positions; one (best by value) is fielded, any other keeper excluded from XI
+    and bench. The same hard rule will gate user lineups later.
+  - **Overcrowding-aware**: outfield slots filled greedily by value minus a
+    penalty for crowding zones already covered (season touch footprint), so
+    strength spreads across the pitch. No explicit "uncovered zone" reward — only
+    the overcrowding disincentive, as intended. Result: all 380 lineups have
+    exactly one GK; avg lineup spans ~2.8/4 columns.
 - **Substitute coverage (engine, "Mode 1")**: for each starter's on-pitch gaps,
   pick the best-overlapping unused bench player; bench contribution scaled by
   overlap. Gaps are classified by **exit category**, not duration:
@@ -1673,10 +1681,10 @@ pages render on desktop + mobile with no console errors.
 
 ## Open items / next steps (suggested order)
 
-1. **Spatial balance in the lineup heuristic**: picking the top-11 by value with
-   no roles sometimes fields two goalkeepers / leaves zones uncovered. Add a
-   light balance (cover defense/midfield/attack bands, avoid extreme
-   duplicates). The DIF/CEN/ATT colouring already exposes the problem.
+1. ~~Spatial balance in the lineup heuristic~~ — DONE: exactly one GK +
+   overcrowding-aware outfield selection (see Simulation engine above). Possible
+   refinement: tune the overcrowding weight, or extend the GK rule to a
+   user-facing lineup validator in Phase 2.
 2. **Predictive player model for the formation page** (the deferred numeric
    model): where a player is expected to play and expected performance from
    *recent* history (no leakage), used when a user submits a lineup.
