@@ -31,6 +31,7 @@ Model recap (calibration `vector_zone_duel_v1`):
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any, Iterable, Mapping
 
@@ -142,6 +143,10 @@ def score_zone_duel(
     params = {k: float(v) for k, v in calibration["params"].items()}
     base = params["base"]
     score_scale = params["score_scale"]
+    # Per-zone saturation makes positioning matter: a zone outcome is bounded, so
+    # dominating one zone has diminishing returns and contesting/neutralizing
+    # many zones is rewarded. saturation_k<=0 (or absent) means linear.
+    saturation_k = float(params.get("saturation_k", 0.0))
 
     # Iterate physical zones in the home frame; the away side of each zone is
     # taken from its mirrored (opponent-frame) zone so the duel is specular.
@@ -200,7 +205,7 @@ def score_zone_duel(
                         "swing": round(swing, 5),
                     }
                 )
-        total_margin += margin
+        total_margin += saturation_k * math.tanh(margin / saturation_k) if saturation_k > 0 else margin
         zones.append(
             {
                 "zone_key": zone_key,

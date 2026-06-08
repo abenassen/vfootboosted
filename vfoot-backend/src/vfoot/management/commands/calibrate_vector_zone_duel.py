@@ -10,6 +10,7 @@ from pathlib import Path
 from django.core.management.base import BaseCommand
 
 from realdata.models import Match, SIDE_AWAY, SIDE_HOME, TeamZoneFeature
+from vfoot.services.vector_zone_scoring import mirror_zone
 
 
 FEATURES = (
@@ -54,6 +55,10 @@ class VectorParams:
     base: float = 66.0
     score_scale: float = 8.0
     home_advantage: float = 0.25
+    # Per-zone saturation: zone_out = K * tanh(margin / K). Small K -> winning a
+    # zone matters more than dominating it (positioning-sensitive); large K ->
+    # near-linear (positioning-agnostic). Calibrated as a free parameter.
+    saturation_k: float = 0.5
     xg_shots: float = 1.0
     shots: float = 0.2
     touches_in_box: float = 0.1
@@ -75,6 +80,7 @@ class VectorParams:
             "base": self.base,
             "score_scale": self.score_scale,
             "home_advantage": self.home_advantage,
+            "saturation_k": self.saturation_k,
         }
         for feature in FEATURES:
             out[feature] = getattr(self, feature)
@@ -85,6 +91,7 @@ class VectorParams:
         values["base"] = min(76.0, max(56.0, values["base"]))
         values["score_scale"] = min(25.0, max(0.5, values["score_scale"]))
         values["home_advantage"] = min(3.0, max(-3.0, values["home_advantage"]))
+        values["saturation_k"] = min(5.0, max(0.1, values["saturation_k"]))
         for feature in FEATURES:
             if feature in ERROR_FEATURES:
                 values[feature] = min(0.0, max(-4.0, values[feature]))
@@ -115,11 +122,16 @@ def soft_goals(score: float, tau: float) -> float:
 
 def vector_scores(sample: VectorZoneSample, params: VectorParams) -> tuple[float, float]:
     weights = [getattr(params, feature) for feature in FEATURES]
-    zone_margins: list[float] = []
+    k = max(1e-6, params.saturation_k)
+    total = 0.0
+    n = 0
+    # sample.zones_away is already mirrored at load time, so zip pairs a home
+    # zone with the opponent's defensive (mirrored) zone — a specular duel.
     for home_vec, away_vec in zip(sample.zones_home, sample.zones_away):
         margin = sum(weights[i] * (home_vec[i] - away_vec[i]) for i in range(len(FEATURES)))
-        zone_margins.append(margin)
-    total_margin = sum(zone_margins) / max(1, len(zone_margins))
+        total += k * math.tanh(margin / k)  # saturating per-zone outcome
+        n += 1
+    total_margin = total / max(1, n)
     home = params.base + params.home_advantage + params.score_scale * total_margin
     away = params.base - params.home_advantage - params.score_scale * total_margin
     return home, away
@@ -296,7 +308,7 @@ class Command(BaseCommand):
                 )
 
         result = {
-            "formula_version": "vector_zone_duel_v1",
+            "formula_version": "vector_zone_duel_v2_specular_saturating",
             "features": list(FEATURES),
             "feature_scales": feature_scales,
             "loss": {
@@ -347,9 +359,12 @@ class Command(BaseCommand):
             home_vectors = []
             away_vectors = []
             for zone_key in zone_keys:
-                sides = zones[zone_key]
-                home_vectors.append(tuple(sides[SIDE_HOME][feature] / max_values[feature] for feature in FEATURES))
-                away_vectors.append(tuple(sides[SIDE_AWAY][feature] / max_values[feature] for feature in FEATURES))
+                home_sides = zones[zone_key]
+                # Away contribution to this physical zone comes from its mirrored
+                # (opponent-frame) zone, so the duel is specular.
+                away_sides = zones[mirror_zone(zone_key)]
+                home_vectors.append(tuple(home_sides[SIDE_HOME][feature] / max_values[feature] for feature in FEATURES))
+                away_vectors.append(tuple(away_sides[SIDE_AWAY][feature] / max_values[feature] for feature in FEATURES))
             home_goals, away_goals = match_goals[match_id]
             samples.append(
                 VectorZoneSample(

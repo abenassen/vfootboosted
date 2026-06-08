@@ -33,7 +33,7 @@
     "errors_fouls_committed",
     "errors_miscontrols"
   ],
-  "formula_version": "vector_zone_duel_v1",
+  "formula_version": "vector_zone_duel_v2_specular_saturating",
   "loss": {
     "diff_weight": 1.0,
     "draw_weight": 0.5,
@@ -47,46 +47,47 @@
     "all": {
       "avg_real_goals_per_team": 1.2881578947368422,
       "matches": 380,
-      "soft_avg_pred_goals_per_team": 1.3241809862043523,
-      "soft_goal_diff_mae": 1.1707409764747725,
-      "soft_goal_mae_per_team": 0.8597429439506439,
-      "soft_wdl_accuracy": 0.5631578947368421
+      "soft_avg_pred_goals_per_team": 1.2057991631136453,
+      "soft_goal_diff_mae": 1.2282994942433225,
+      "soft_goal_mae_per_team": 0.8604245803579371,
+      "soft_wdl_accuracy": 0.5526315789473685
     },
     "train": {
       "avg_real_goals_per_team": 1.299342105263158,
       "matches": 304,
-      "soft_avg_pred_goals_per_team": 1.3243891136747947,
-      "soft_goal_diff_mae": 1.1781451430937315,
-      "soft_goal_mae_per_team": 0.8738517963947562,
-      "soft_wdl_accuracy": 0.569078947368421
+      "soft_avg_pred_goals_per_team": 1.206200573650589,
+      "soft_goal_diff_mae": 1.2405131086513084,
+      "soft_goal_mae_per_team": 0.8760121709875246,
+      "soft_wdl_accuracy": 0.5592105263157895
     },
     "validation": {
       "avg_real_goals_per_team": 1.243421052631579,
       "matches": 76,
-      "soft_avg_pred_goals_per_team": 1.3233484763225867,
-      "soft_goal_diff_mae": 1.1411243099989332,
-      "soft_goal_mae_per_team": 0.8033075341741917,
-      "soft_wdl_accuracy": 0.5394736842105263
+      "soft_avg_pred_goals_per_team": 1.2041935209658707,
+      "soft_goal_diff_mae": 1.1794450366113816,
+      "soft_goal_mae_per_team": 0.7980742178395875,
+      "soft_wdl_accuracy": 0.5263157894736842
     }
   },
   "params": {
-    "ball_recoveries": 0.0,
-    "base": 70.99509652220887,
-    "clearances": 1.0106836216043098,
-    "errors_bad_passes": -1.2573227004262164,
-    "errors_dispossessed": -0.6460265189856822,
-    "errors_fouls_committed": -0.40131193877710797,
-    "errors_miscontrols": -0.4359906560724681,
-    "home_advantage": 0.5570077115186327,
-    "interceptions": 0.7534822170883498,
-    "key_passes": 0.8730681841672583,
-    "passes_into_box": 0.0,
-    "pressures": 0.0227029489702067,
-    "progressive_carries": 0.620198930230854,
-    "progressive_passes_completed": 0.9845414054432898,
-    "score_scale": 9.677760956594469,
-    "shots": 0.625034174658978,
-    "touches_in_box": 0.15786998338175215,
-    "xg_shots": 1.4963995216728512
+    "ball_recoveries": 0.0011156809741555915,
+    "base": 70.35489536057297,
+    "clearances": 0.8591941965727423,
+    "errors_bad_passes": -0.4846888652851164,
+    "errors_dispossessed": -0.2534283520333696,
+    "errors_fouls_committed": -0.07732810281831536,
+    "errors_miscontrols": -0.08909341325016565,
+    "home_advantage": 0.5376192850223445,
+    "interceptions": 0.4743687873609474,
+    "key_passes": 0.8591354750850362,
+    "passes_into_box": 0.05695213461274165,
+    "pressures": 0.00977294025109389,
+    "progressive_carries": 0.6107299848684945,
+    "progressive_passes_completed": 0.6766412726818983,
+    "saturation_k": 0.7215697581408368,
+    "score_scale": 8.951776638696611,
+    "shots": 0.09739341325247908,
+    "touches_in_box": 0.20778983939766435,
+    "xg_shots": 1.3989311342933473
   }
 }
