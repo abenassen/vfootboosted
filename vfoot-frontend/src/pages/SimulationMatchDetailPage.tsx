@@ -57,15 +57,7 @@ export default function SimulationMatchDetailPage() {
 
   const activeZoneKey = selectedZone ?? vm.defaultZone;
   const activeZone = vm.zones.find((z) => z.zone_key === activeZoneKey) ?? null;
-  const inspector = activeZone
-    ? buildZoneInspector(
-        activeZone,
-        data.vector_report.home_player_totals,
-        data.vector_report.away_player_totals,
-        data.home_team,
-        data.away_team,
-      )
-    : null;
+  const inspector = activeZone ? buildZoneInspector(activeZone, data.home_team, data.away_team) : null;
 
   const selectPlayer = (pid: string | number | null) => {
     setSelectedPlayer(pid);

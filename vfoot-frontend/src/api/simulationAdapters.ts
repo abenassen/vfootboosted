@@ -16,6 +16,7 @@ import type {
   SimPlayerTotal,
   SimStanding,
   SimZone,
+  SimZonePlayer,
 } from '../types/simulation';
 
 // Feature swings below this magnitude are noise (often zero-weight features) —
@@ -66,23 +67,17 @@ export function zonesToCells(zones: SimZone[]): ZoneCellVM[] {
   });
 }
 
-function playersInZone(totals: SimPlayerTotal[], zoneKey: string): ZonePlayerVM[] {
-  const list = totals
-    .filter((p) => zoneKey in p.zones)
-    .map((p) => ({ name: p.name, contribution: p.zones[zoneKey] }));
-  const sumAbs = list.reduce((s, p) => s + Math.abs(p.contribution), 0) || 1;
-  return list
-    .map((p) => ({ ...p, share: Math.abs(p.contribution) / sumAbs }))
-    .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+function zonePlayersVM(players: SimZonePlayer[]): ZonePlayerVM[] {
+  // Stored per-zone contributors (already specular & top-N from the backend).
+  const sumAbs = players.reduce((s, p) => s + Math.abs(p.contribution), 0) || 1;
+  return players.map((p) => ({
+    name: p.name,
+    contribution: p.contribution,
+    share: Math.abs(p.contribution) / sumAbs,
+  }));
 }
 
-export function buildZoneInspector(
-  zone: SimZone,
-  homeTotals: SimPlayerTotal[],
-  awayTotals: SimPlayerTotal[],
-  homeName: string,
-  awayName: string,
-): ZoneInspectorVM {
+export function buildZoneInspector(zone: SimZone, homeName: string, awayName: string): ZoneInspectorVM {
   return {
     zoneKey: zone.zone_key,
     name: zoneName(zone.zone_key),
@@ -96,10 +91,10 @@ export function buildZoneInspector(
       .filter((f) => Math.abs(f.swing) >= FEATURE_SWING_MIN)
       .slice(0, 6)
       .map((f) => ({ feature: f.feature, home: f.home, away: f.away, swing: f.swing })),
-    // zone_key is in the home (physical) frame; away players act in their own
-    // frame, which is the mirrored zone.
-    homePlayers: playersInZone(homeTotals, zone.zone_key),
-    awayPlayers: playersInZone(awayTotals, mirrorZoneKey(zone.zone_key)),
+    // Per-zone players come straight from the backend (consistent with the
+    // radar/feature bars; away side already mirrored to the physical zone).
+    homePlayers: zonePlayersVM(zone.home_players),
+    awayPlayers: zonePlayersVM(zone.away_players),
   };
 }
 

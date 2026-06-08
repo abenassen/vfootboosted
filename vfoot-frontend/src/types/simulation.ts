@@ -146,12 +146,19 @@ export interface SimZoneMacro {
   home_share: number; // 0..1 (away_share = 1 - home_share)
 }
 
+export interface SimZonePlayer {
+  name: string;
+  contribution: number;
+}
+
 export interface SimZone {
   zone_key: string;
   winner: SimResult;
   margin: number;
   macros: SimZoneMacro[];
   features: SimZoneFeature[];
+  home_players: SimZonePlayer[];
+  away_players: SimZonePlayer[];
 }
 
 export interface SimPlayerTotal {

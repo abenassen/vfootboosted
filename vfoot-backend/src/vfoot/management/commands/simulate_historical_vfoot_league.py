@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +34,13 @@ FEATURE_WEIGHTS = {
 }
 
 GOAL_THRESHOLDS = (66.0, 72.0, 78.0, 84.0, 90.0, 96.0)
+
+_ZONE_RE = re.compile(r"^Z_(\d+)_(\d+)$")
+
+
+def parse_zone_col(zone_key: str) -> int | None:
+    m = _ZONE_RE.match(zone_key)
+    return int(m.group(1)) if m else None
 DEFAULT_VECTOR_CALIBRATION = "calibration/vector_zone_duel_v1.json"
 
 
@@ -101,7 +109,7 @@ class Command(BaseCommand):
         parser.add_argument("--budget", type=int, default=500)
         parser.add_argument("--squad-size", type=int, default=25)
         parser.add_argument("--starters", type=int, default=11)
-        parser.add_argument("--bench-size", type=int, default=7)
+        parser.add_argument("--bench-size", type=int, default=0, help="0 = all remaining squad players are reserves.")
         parser.add_argument("--matchdays", type=int, default=0, help="0 means all available real matchdays.")
         parser.add_argument("--min-appearances", type=int, default=15)
         parser.add_argument("--score-base", type=float, default=58.0)
@@ -119,7 +127,9 @@ class Command(BaseCommand):
         budget = int(options["budget"])
         squad_size = int(options["squad_size"])
         starters_count = int(options["starters"])
-        bench_size = int(options["bench_size"])
+        # Default: the whole remaining squad is the (ordered) reserve list, so the
+        # engine can almost always find a covering substitute.
+        bench_size = int(options["bench_size"]) or (squad_size - starters_count)
         seed = int(options["seed"])
         score_base = float(options["score_base"])
         score_scale = float(options["score_scale"])
@@ -146,10 +156,17 @@ class Command(BaseCommand):
         matchday_player_scores = self._matchday_player_scores()
         matchday_player_zone_features = self._matchday_player_zone_features() if scoring_mode == "vector" else {}
         matchday_player_intervals = self._matchday_player_intervals()
-        player_roles = self._player_roles()
-        goalkeepers = {pid for pid, role in player_roles.items() if role == "GK"}
         season_footprints = self._player_season_footprints()
+        player_roles = self._player_roles(season_footprints)  # roles inferred spatially
+        goalkeepers = {pid for pid, role in player_roles.items() if role == "GK"}
         vector_calibration = self._load_vector_calibration(str(options["vector_calibration"])) if scoring_mode == "vector" else None
+        # Per matchday-player weighted contribution (calibration-weighted), used to
+        # pick the substitute that most improves the team, not merely overlaps.
+        matchday_player_weighted = (
+            self._matchday_player_weighted(matchday_player_zone_features, vector_calibration)
+            if scoring_mode == "vector"
+            else {}
+        )
         schedule = round_robin_rounds([team.id for team in teams], seed=seed)
         team_by_id = {team.id: team for team in teams}
         fixture_reports = []
@@ -175,6 +192,7 @@ class Command(BaseCommand):
                     goalkeepers=goalkeepers,
                     season_footprints=season_footprints,
                     player_roles=player_roles,
+                    player_weighted=matchday_player_weighted.get(real_matchday, {}),
                 )
                 away_result = self._lineup_and_score(
                     away,
@@ -192,6 +210,7 @@ class Command(BaseCommand):
                     goalkeepers=goalkeepers,
                     season_footprints=season_footprints,
                     player_roles=player_roles,
+                    player_weighted=matchday_player_weighted.get(real_matchday, {}),
                 )
                 vector_report = None
                 if scoring_mode == "vector":
@@ -354,29 +373,30 @@ class Command(BaseCommand):
         return pool
 
     @staticmethod
-    def _role_from_position(position: str) -> str:
-        # Coarse, intelligible role from a StatsBomb position label. Vfoot is
-        # role-free for scoring; this is only for display/lineup structure.
-        if "Goalkeeper" in position:
-            return "GK"
-        if "Back" in position:  # Center/Left/Right Back, Wing Back
-            return "DEF"
-        if "Midfield" in position:  # incl. Defensive/Attacking Midfield
+    def _role_from_footprint(footprint: dict[str, float]) -> str:
+        # Coarse role INFERRED from where the player acts on the pitch (no role
+        # labels). footprint is a normalized presence over zones (sum=1).
+        # Thresholds set from the data: GK touch almost only their own box (col 0
+        # share ~0.96); defenders/midfielders/attackers separate by the column
+        # centre of gravity (~1.7 / 2.2 / 2.8).
+        col_share: dict[int, float] = defaultdict(float)
+        for zone_key, presence in footprint.items():
+            pos = parse_zone_col(zone_key)
+            if pos is not None:
+                col_share[pos] += presence
+        if not col_share:
             return "MID"
-        if "Wing" in position:  # Left/Right Wing (winger, not Wing Back)
-            return "ATT"
-        if "Forward" in position or "Striker" in position:
-            return "ATT"
-        return "MID"
+        avg_col = sum(col * share for col, share in col_share.items())
+        if col_share.get(0, 0.0) >= 0.6 or avg_col < 0.5:
+            return "GK"
+        if avg_col < 1.9:
+            return "DEF"
+        if avg_col < 2.5:
+            return "MID"
+        return "ATT"
 
-    def _player_roles(self) -> dict[int, str]:
-        # Player -> coarse role from their dominant lineup position.
-        counts: dict[int, Counter] = defaultdict(Counter)
-        for player_id, source_position in (
-            PlayerOnPitchInterval.objects.exclude(source_position="").values_list("player_id", "source_position")
-        ):
-            counts[int(player_id)][str(source_position)] += 1
-        return {pid: self._role_from_position(c.most_common(1)[0][0]) for pid, c in counts.items()}
+    def _player_roles(self, footprints: dict[int, dict[str, float]]) -> dict[int, str]:
+        return {pid: self._role_from_footprint(fp) for pid, fp in footprints.items()}
 
     def _player_season_footprints(self) -> dict[int, dict[str, float]]:
         # Normalized presence over zones (sum=1) from season touches; used as the
@@ -499,6 +519,30 @@ class Command(BaseCommand):
             data[int(matchday)][int(player_id)][str(zone_key)][str(feature_key)] += float(value or 0.0)
         return data
 
+    def _matchday_player_weighted(self, matchday_zone_features: dict, calibration: dict | None) -> dict[int, dict[int, float]]:
+        # Per matchday-player calibration-weighted contribution:
+        # W = Σ_zone Σ_feature param_f · feature / scale_f. This is what a bench
+        # player would add to the team if fully played, so substitutions can pick
+        # the player who most improves performance.
+        if not calibration:
+            return {}
+        params = {k: float(v) for k, v in calibration["params"].items()}
+        scales = {k: max(1e-9, float(v)) for k, v in calibration["feature_scales"].items()}
+        features = list(calibration["features"])
+        out: dict[int, dict[int, float]] = {}
+        for matchday, players in matchday_zone_features.items():
+            md_out: dict[int, float] = {}
+            for player_id, zones in players.items():
+                total = 0.0
+                for fmap in zones.values():
+                    for feature in features:
+                        value = float(fmap.get(feature, 0.0))
+                        if value:
+                            total += params[feature] * (value / scales[feature])
+                md_out[int(player_id)] = total
+            out[int(matchday)] = md_out
+        return out
+
     def _matchday_player_intervals(self) -> dict[str, dict]:
         matchday_by_match = dict(Match.objects.values_list("id", "matchday"))
         players: dict[int, dict[int, list[dict]]] = defaultdict(lambda: defaultdict(list))
@@ -577,6 +621,7 @@ class Command(BaseCommand):
         goalkeepers: set[int],
         season_footprints: dict[int, dict[str, float]],
         player_roles: dict[int, str],
+        player_weighted: dict[int, float],
     ) -> dict:
         scores = player_scores.get(real_matchday, {})
         # Emulate a user picking their lineup BEFORE the match: best players by
@@ -605,6 +650,7 @@ class Command(BaseCommand):
                 player_final_seconds=player_final_seconds,
                 matchday_final_seconds=matchday_final_seconds,
                 goalkeepers=goalkeepers,
+                player_weighted=player_weighted,
             )
         else:
             zone_vectors, player_vectors = self._team_zone_vectors(
@@ -682,6 +728,7 @@ class Command(BaseCommand):
         player_final_seconds: dict[int, int],
         matchday_final_seconds: int,
         goalkeepers: set[int],
+        player_weighted: dict[int, float],
     ) -> tuple[dict[str, dict[str, float]], dict, list[dict]]:
         vectors: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         player_vectors_map: dict[int, dict] = {}
@@ -732,6 +779,7 @@ class Command(BaseCommand):
                     player_intervals=player_intervals,
                     goalkeepers=goalkeepers,
                     require_goalkeeper=starter.player_id in goalkeepers,
+                    player_weighted=player_weighted,
                 )
                 if candidate is None:
                     uncovered_gap_seconds += gap_seconds
@@ -860,9 +908,14 @@ class Command(BaseCommand):
         player_intervals: dict[int, list[dict]],
         goalkeepers: set[int],
         require_goalkeeper: bool,
+        player_weighted: dict[int, float],
     ) -> tuple[PoolPlayer, int, int] | None:
+        # Pick the eligible bench player that most IMPROVES the team, not merely
+        # the one with the largest temporal overlap: the gain is the candidate's
+        # calibration-weighted contribution scaled by how much of the gap they
+        # can actually cover (overlap / their active time).
         best = None
-        best_key = None
+        best_gain = None
         for candidate in bench:
             if candidate.player_id in used_bench:
                 continue
@@ -878,10 +931,13 @@ class Command(BaseCommand):
                 overlap += max(0, min(gap_end, int(interval["end"])) - max(gap_start, int(interval["start"])))
             if overlap <= 0:
                 continue
-            key = (overlap, candidate.value)
-            if best_key is None or key > best_key:
+            gain = (overlap / active) * player_weighted.get(candidate.player_id, 0.0)
+            # Tie-break by value so a useful keeper/outfielder is still picked
+            # when weighted gains are ~equal (e.g. event mode with no weights).
+            key = (gain, candidate.value)
+            if best_gain is None or key > best_gain:
                 best = (candidate, overlap, active)
-                best_key = key
+                best_gain = key
         return best
 
     def _vector_fixture_scores(
@@ -904,11 +960,15 @@ class Command(BaseCommand):
             fantasy_home_advantage=fantasy_home_advantage,
             fantasy_margin_boost=fantasy_margin_boost,
         )
-        # Keep the artifact compact: store zone margins + the top feature swings,
-        # and the per-player zone contributions once (as player_totals). The
-        # per-zone player lists are derivable from player_totals on the client,
-        # so we strip them here. The shared service still returns them for the
-        # future real-time match-detail endpoint.
+        # Store, per zone: margins, top feature swings, macros, and the top
+        # contributing players on each side (already mirrored by the service), so
+        # the "who acted here" panel is consistent with the radar/feature bars.
+        def top_players(rows):
+            return [
+                {"name": r["name"], "contribution": round(r["contribution"], 4)}
+                for r in rows[:6]
+            ]
+
         zones = [
             {
                 "zone_key": z["zone_key"],
@@ -916,6 +976,8 @@ class Command(BaseCommand):
                 "winner": z["winner"],
                 "macros": z["macros"],
                 "features": z["features"][:8],
+                "home_players": top_players(z["home_players"]),
+                "away_players": top_players(z["away_players"]),
             }
             for z in result["zones"]
         ]
