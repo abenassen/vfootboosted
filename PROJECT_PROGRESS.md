@@ -1712,6 +1712,32 @@ Verified this session: `manage.py check` clean; `manage.py test vfoot` passes
 (2 skipped without StatsBomb fixtures in the test DB); `npm run build` passes;
 pages render on desktop + mobile with no console errors.
 
+## Materialized league (Phase 2 — DONE)
+
+The dry-run simulation is now persisted as a real league the app manages through
+its standard UI.
+
+- DB backup taken first: `vfoot-backend/src/db_backup_<ts>.sqlite3` (gitignored).
+- `FantasyFixtureDetail` (OneToOne→FantasyFixture, `vfoot_home/away`, JSON
+  `payload`) stores each fixture's rich breakdown (same shape the simulation
+  produces), migration `0008`.
+- `python manage.py materialize_simulation` builds, from the artifact: a
+  `FantasyLeague` (owner+admin = `simviewer`, who also manages **Manager 1**;
+  the other 9 managers are generated `sim_manager_N` users), teams + full 25-man
+  rosters, a round-robin `FantasyCompetition` (status done), 38 matchdays, 190
+  finished fixtures (goals in `home_total/away_total`), per-team
+  `FantasyLineupSubmission`s, and a `FantasyFixtureDetail` payload per fixture.
+  Idempotent (replaces a prior run in PROTECT-FK dependency order). The
+  `simulate_*` command now also emits full squads (`teams[].roster`).
+- Endpoints: `GET /leagues/<id>/standings` (computed from fixtures, incl. avg
+  Vfoot score) and `GET /fixtures/<id>` (the rich payload).
+- Frontend: `LeaguePage` shows a Classifica table (reuses `StandingsTable`, own
+  team highlighted); the rich view is the reusable `components/match/MatchDetail`
+  used by BOTH the simulation page and `LeagueMatchDetailPage` (`/matches/:id` →
+  `GET /fixtures/<id>`). Verified logged in as `simviewer`.
+- NOTE: the run-server must be restarted after backend code changes
+  (`--noreload`). The materialized league for the current DB is id 30.
+
 ## Open items / next steps (suggested order)
 
 1. ~~Spatial balance in the lineup heuristic~~ — DONE: exactly one GK +
@@ -1721,10 +1747,8 @@ pages render on desktop + mobile with no console errors.
 2. **Predictive player model for the formation page** (the deferred numeric
    model): where a player is expected to play and expected performance from
    *recent* history (no leakage), used when a user submits a lineup.
-3. **Materialize a simulation into the persistent league tables** (Phase 2):
-   write a `FantasyLeague` + teams + competition + fixtures so the existing
-   league/match pages can show it; have the real `/matches/<id>` endpoint emit
-   the SAME `vector_report` shape via the shared `vector_zone_scoring` service.
+3. ~~Materialize a simulation into the persistent league tables~~ — DONE
+   (Phase 2): see "Materialized league" below.
 4. Optional model tuning: nudge base so pred goals/team ≈ real (1.21→1.29);
    explore K and per-zone weighting; consider whether macro categories need
    refinement (touches_in_box already excluded as ambiguous).
