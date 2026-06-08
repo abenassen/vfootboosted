@@ -45,12 +45,14 @@ export function LineupColumn({
   teamName,
   side,
   players,
+  gkRating,
   selectedPlayerId,
   onSelectPlayer,
 }: {
   teamName: string;
   side: 'home' | 'away';
   players: LineupPlayerVM[];
+  gkRating?: number | null;
   selectedPlayerId?: string | number | null;
   onSelectPlayer?: (id: string | number | null) => void;
 }) {
@@ -111,9 +113,25 @@ export function LineupColumn({
                       {p.name}
                     </span>
                   </div>
-                  <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100">
-                    <div className={clsx('h-full', bar)} style={{ width: `${(p.share / max) * 100}%` }} />
-                  </div>
+                  {p.role === 'GK' ? (
+                    <div className="mt-0.5 text-[11px] text-slate-500">
+                      {gkRating == null ? (
+                        'portiere'
+                      ) : (
+                        <>
+                          gol evitati{' '}
+                          <b className={gkRating >= 0 ? 'text-green-600' : 'text-red-600'}>
+                            {gkRating >= 0 ? '+' : ''}
+                            {gkRating.toFixed(2)}
+                          </b>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100">
+                      <div className={clsx('h-full', bar)} style={{ width: `${(p.share / max) * 100}%` }} />
+                    </div>
+                  )}
                 </button>
                 {hasGaps ? (
                   <button

@@ -122,6 +122,8 @@ export interface SimSubstitutionReport {
 
 export interface SimLineup {
   score: number;
+  gk_rating?: number; // goals prevented (xG faced − goals conceded)
+  gk_adjustment?: number; // points this team's score gained/lost from the OPPONENT keeper
   vector_margin: number;
   avg_event_score: number;
   raw_event_sum: number;

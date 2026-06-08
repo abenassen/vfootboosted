@@ -9,6 +9,8 @@ export interface ScoreBuildVM {
   awayName: string;
   homeScore: number;
   awayScore: number;
+  homeGkAdjustment: number; // points added to home score by the away keeper (usually ≤ 0)
+  awayGkAdjustment: number;
 }
 
 // Explains, with the actual numbers, how the per-zone duels aggregate into the
@@ -47,6 +49,18 @@ export function ScoreBuildExplainer({ vm }: { vm: ScoreBuildVM }) {
         </span>
         <TeamScore name={vm.awayName} score={vm.awayScore} accent="text-sky-600" up={!favoursHome} />
       </div>
+
+      {vm.homeGkAdjustment || vm.awayGkAdjustment ? (
+        <p className="text-[11px] text-slate-500">
+          Il <b>portiere</b> è valutato a parte (gol evitati) e <b>riduce le chance dell'avversario</b>:
+          {vm.homeGkAdjustment ? (
+            <> il portiere di {vm.awayName} ha inciso <b>{vm.homeGkAdjustment.toFixed(1)}</b> sul punteggio di {vm.homeName};</>
+          ) : null}
+          {vm.awayGkAdjustment ? (
+            <> il portiere di {vm.homeName} ha inciso <b>{vm.awayGkAdjustment.toFixed(1)}</b> su {vm.awayName}.</>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   );
 }

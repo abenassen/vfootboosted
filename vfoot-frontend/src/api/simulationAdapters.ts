@@ -111,6 +111,8 @@ export function scoreBuildVM(fx: SimFixtureDetail): ScoreBuildVM {
     awayName: fx.away_team,
     homeScore: fx.home_score,
     awayScore: fx.away_score,
+    homeGkAdjustment: fx.home_lineup.gk_adjustment ?? 0,
+    awayGkAdjustment: fx.away_lineup.gk_adjustment ?? 0,
   };
 }
 

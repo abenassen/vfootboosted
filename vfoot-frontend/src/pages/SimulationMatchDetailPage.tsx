@@ -137,6 +137,7 @@ export default function SimulationMatchDetailPage() {
             teamName={data.home_team}
             side="home"
             players={vm.homeBoard}
+            gkRating={data.home_lineup.gk_rating}
             selectedPlayerId={selectedPlayer}
             onSelectPlayer={selectPlayer}
           />
@@ -144,6 +145,7 @@ export default function SimulationMatchDetailPage() {
             teamName={data.away_team}
             side="away"
             players={vm.awayBoard}
+            gkRating={data.away_lineup.gk_rating}
             selectedPlayerId={selectedPlayer}
             onSelectPlayer={selectPlayer}
           />

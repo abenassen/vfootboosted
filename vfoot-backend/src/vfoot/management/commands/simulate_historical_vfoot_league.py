@@ -11,7 +11,15 @@ from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Count, Sum
 
-from realdata.models import Match, MatchAppearance, PlayerOnPitchInterval, PlayerZoneFeature
+from realdata.models import (
+    Match,
+    MatchAppearance,
+    PlayerOnPitchInterval,
+    PlayerZoneFeature,
+    SIDE_AWAY,
+    SIDE_HOME,
+    TeamZoneFeature,
+)
 from vfoot.services.vector_zone_scoring import score_zone_duel
 
 
@@ -118,6 +126,12 @@ class Command(BaseCommand):
         parser.add_argument("--vector-calibration", type=str, default=DEFAULT_VECTOR_CALIBRATION)
         parser.add_argument("--fantasy-home-advantage", type=float, default=0.0)
         parser.add_argument("--fantasy-margin-boost", type=float, default=2.0)
+        parser.add_argument(
+            "--gk-weight",
+            type=float,
+            default=2.5,
+            help="Score points removed from the opponent per goal the keeper prevents.",
+        )
         parser.add_argument("--disable-temporal-substitutions", action="store_true")
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--output", type=str, default="calibration/historical_vfoot_league_dry_run.json")
@@ -159,6 +173,8 @@ class Command(BaseCommand):
         season_footprints = self._player_season_footprints()
         player_roles = self._player_roles(season_footprints)  # roles inferred spatially
         goalkeepers = {pid for pid, role in player_roles.items() if role == "GK"}
+        gk_weight = float(options["gk_weight"])
+        gk_ratings = self._matchday_gk_ratings(goalkeepers)
         vector_calibration = self._load_vector_calibration(str(options["vector_calibration"])) if scoring_mode == "vector" else None
         # Per matchday-player weighted contribution (calibration-weighted), used to
         # pick the substitute that most improves the team, not merely overlaps.
@@ -193,6 +209,7 @@ class Command(BaseCommand):
                     season_footprints=season_footprints,
                     player_roles=player_roles,
                     player_weighted=matchday_player_weighted.get(real_matchday, {}),
+                    gk_ratings=gk_ratings.get(real_matchday, {}),
                 )
                 away_result = self._lineup_and_score(
                     away,
@@ -211,6 +228,7 @@ class Command(BaseCommand):
                     season_footprints=season_footprints,
                     player_roles=player_roles,
                     player_weighted=matchday_player_weighted.get(real_matchday, {}),
+                    gk_ratings=gk_ratings.get(real_matchday, {}),
                 )
                 vector_report = None
                 if scoring_mode == "vector":
@@ -223,8 +241,16 @@ class Command(BaseCommand):
                         fantasy_home_advantage=fantasy_home_advantage,
                         fantasy_margin_boost=fantasy_margin_boost,
                     )
+                    # Goalkeeper acts separately from the zones: a good keeper
+                    # REDUCES the opponent's score (goals prevented vs xG faced).
+                    home_gk = max(-2.0, min(2.0, float(home_result.get("gk_rating", 0.0))))
+                    away_gk = max(-2.0, min(2.0, float(away_result.get("gk_rating", 0.0))))
+                    home_score -= gk_weight * away_gk
+                    away_score -= gk_weight * home_gk
                     home_result["score"] = home_score
                     away_result["score"] = away_score
+                    home_result["gk_adjustment"] = round(-gk_weight * away_gk, 3)
+                    away_result["gk_adjustment"] = round(-gk_weight * home_gk, 3)
                     home_result["vector_margin"] = round(vector_report["total_margin"], 6)
                     away_result["vector_margin"] = round(-vector_report["total_margin"], 6)
                 home_result.pop("_zone_vectors", None)
@@ -277,6 +303,7 @@ class Command(BaseCommand):
                 "vector_calibration": str(options["vector_calibration"]) if scoring_mode == "vector" else None,
                 "fantasy_home_advantage": fantasy_home_advantage,
                 "fantasy_margin_boost": fantasy_margin_boost,
+                "gk_weight": gk_weight,
                 "temporal_substitutions": not bool(options["disable_temporal_substitutions"]),
             },
             "player_pool_size": len(pool),
@@ -397,6 +424,39 @@ class Command(BaseCommand):
 
     def _player_roles(self, footprints: dict[int, dict[str, float]]) -> dict[int, str]:
         return {pid: self._role_from_footprint(fp) for pid, fp in footprints.items()}
+
+    def _matchday_gk_ratings(self, goalkeepers: set[int]) -> dict[int, dict[int, float]]:
+        # Goalkeeper performance per real matchday = goals prevented =
+        # xG faced (opponent team xG) - goals conceded (opponent real goals).
+        # Positive = the opponent scored less than expected (good keeper/defence).
+        matchday_by_match = dict(Match.objects.values_list("id", "matchday"))
+        goals: dict[int, tuple[int, int]] = {
+            m.id: (int(m.home_goals or 0), int(m.away_goals or 0))
+            for m in Match.objects.filter(home_goals__isnull=False, away_goals__isnull=False).only(
+                "id", "home_goals", "away_goals"
+            )
+        }
+        team_xg: dict[int, dict[str, float]] = defaultdict(lambda: {SIDE_HOME: 0.0, SIDE_AWAY: 0.0})
+        for match_id, side, value in TeamZoneFeature.objects.filter(feature_key="xg_shots").values_list(
+            "match_id", "team_side", "value"
+        ):
+            if str(side) in (SIDE_HOME, SIDE_AWAY):
+                team_xg[int(match_id)][str(side)] += float(value or 0.0)
+
+        ratings: dict[int, dict[int, float]] = defaultdict(dict)
+        for match_id, player_id, side in MatchAppearance.objects.filter(player_id__in=goalkeepers).values_list(
+            "match_id", "player_id", "side"
+        ):
+            matchday = matchday_by_match.get(match_id)
+            if matchday is None or match_id not in goals:
+                continue
+            home_goals, away_goals = goals[match_id]
+            if str(side) == SIDE_HOME:
+                faced, conceded = team_xg[match_id][SIDE_AWAY], away_goals
+            else:
+                faced, conceded = team_xg[match_id][SIDE_HOME], home_goals
+            ratings[int(matchday)][int(player_id)] = faced - conceded
+        return ratings
 
     def _player_season_footprints(self) -> dict[int, dict[str, float]]:
         # Normalized presence over zones (sum=1) from season touches; used as the
@@ -622,6 +682,7 @@ class Command(BaseCommand):
         season_footprints: dict[int, dict[str, float]],
         player_roles: dict[int, str],
         player_weighted: dict[int, float],
+        gk_ratings: dict[int, float],
     ) -> dict:
         scores = player_scores.get(real_matchday, {})
         # Emulate a user picking their lineup BEFORE the match: best players by
@@ -641,10 +702,21 @@ class Command(BaseCommand):
         raw_sum = sum(score for _, score in starters)
         avg_event_score = raw_sum / max(1.0, starters_count)
         score = score_base + score_scale * avg_event_score
+
+        # Goalkeeper is scored SEPARATELY (not in the zones): take the fielded
+        # keeper's real "goals prevented"; if they didn't play, use a bench keeper.
+        gk_rating = 0.0
+        for player in starter_players + bench_players:
+            if player.player_id in goalkeepers and player.player_id in gk_ratings:
+                gk_rating = gk_ratings[player.player_id]
+                break
+
+        # Outfield players only feed the zone vectors; the keeper is excluded.
+        outfield_starters = [player for player, _ in starters if player.player_id not in goalkeepers]
         if temporal_substitutions:
             zone_vectors, substitution_report, player_vectors = self._temporal_team_zone_vectors(
-                starters=[player for player, _ in starters],
-                bench=[player for player, _ in bench],
+                starters=outfield_starters,
+                bench=[player for player, _ in bench if player.player_id not in goalkeepers],
                 player_zone_features=player_zone_features,
                 player_intervals=player_intervals,
                 player_final_seconds=player_final_seconds,
@@ -653,9 +725,7 @@ class Command(BaseCommand):
                 player_weighted=player_weighted,
             )
         else:
-            zone_vectors, player_vectors = self._team_zone_vectors(
-                [player for player, _ in starters], player_zone_features
-            )
+            zone_vectors, player_vectors = self._team_zone_vectors(outfield_starters, player_zone_features)
             substitution_report = {
                 "mode": "disabled",
                 "substitutions": [],
@@ -665,6 +735,7 @@ class Command(BaseCommand):
             }
         return {
             "score": score,
+            "gk_rating": round(gk_rating, 3),
             "raw_event_sum": round(raw_sum, 3),
             "avg_event_score": round(avg_event_score, 3),
             "available_players": sum(1 for player in team.roster if scores.get(player.player_id, 0.0) > 0),
