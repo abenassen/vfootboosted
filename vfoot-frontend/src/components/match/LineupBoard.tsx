@@ -1,7 +1,8 @@
 import clsx from 'clsx';
-import { useState } from 'react';
 import { SectionTitle } from '../ui';
 import { toMinutes } from '../../utils/vfoot';
+
+const MATCH_SECONDS = 5400; // 90'; the real end can be slightly later (added time)
 
 export type SubEventKind = 'covered' | 'uncovered' | 'disciplinary';
 export type GapKind = 'pre_entry' | 'post_exit' | 'mid' | 'absent';
@@ -56,7 +57,6 @@ export function LineupColumn({
   selectedPlayerId?: string | number | null;
   onSelectPlayer?: (id: string | number | null) => void;
 }) {
-  const [expanded, setExpanded] = useState<Set<string | number>>(new Set());
   const max = Math.max(0.0001, ...players.map((p) => p.share));
   const bar = side === 'home' ? 'bg-green-500' : 'bg-sky-500';
   const accent = side === 'home' ? 'text-green-700' : 'text-sky-700';
@@ -69,20 +69,12 @@ export function LineupColumn({
     return (a.avgCol ?? 99) - (b.avgCol ?? 99);
   });
 
-  const toggle = (id: string | number) =>
-    setExpanded((cur) => {
-      const next = new Set(cur);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-
   return (
     <div>
       <SectionTitle>{teamName}</SectionTitle>
       <div className="mt-2 space-y-1">
         {ordered.map((p) => {
           const selected = p.id === selectedPlayerId;
-          const isOpen = expanded.has(p.id);
           const hasGaps = p.events.length > 0;
           const sentOff = p.events.some((e) => e.kind === 'disciplinary');
           const band = tendencyBand(p.role);
@@ -133,22 +125,11 @@ export function LineupColumn({
                     </div>
                   )}
                 </button>
-                {hasGaps ? (
-                  <button
-                    type="button"
-                    onClick={() => toggle(p.id)}
-                    className={clsx(
-                      'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold',
-                      sentOff ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700',
-                    )}
-                    title="Dettaglio sostituzione"
-                  >
-                    ⇄ {isOpen ? '▲' : '▼'}
-                  </button>
-                ) : null}
+                {hasGaps ? <span className="shrink-0 text-[10px] text-amber-600" title="Slot con sostituzioni">⇄</span> : null}
               </div>
-              {hasGaps && isOpen ? (
+              {hasGaps ? (
                 <div className="mt-1.5 space-y-1 border-t border-slate-100 pt-1.5 text-[11px] text-slate-600">
+                  <SlotTimeline events={p.events} side={side} />
                   {p.events.map((e, i) => (
                     <EventLine key={i} e={e} />
                   ))}
@@ -158,6 +139,41 @@ export function LineupColumn({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Minute timeline for a slot: team colour = starter on the pitch, grey = covered
+// by a substitute, amber/red = uncovered / sent off. Makes the respective
+// minutes of starter and substitute visible at a glance.
+function SlotTimeline({ events, side }: { events: LineupSubEvent[]; side: 'home' | 'away' }) {
+  const matchEnd = Math.max(MATCH_SECONDS, ...events.map((e) => e.gapEnd));
+  const baseColor = side === 'home' ? 'bg-green-500' : 'bg-sky-500';
+  return (
+    <div className="flex items-center gap-1 text-[9px] text-slate-400">
+      <span>0'</span>
+      <div
+        className={clsx('relative h-2 flex-1 overflow-hidden rounded-full', baseColor)}
+        title="colore squadra = titolare in campo · grigio = subentro · ambra = scoperto"
+      >
+        {events.map((e, i) => {
+          const left = (e.gapStart / matchEnd) * 100;
+          const width = ((e.gapEnd - e.gapStart) / matchEnd) * 100;
+          const coveredFrac =
+            e.kind === 'covered' && e.coveredSeconds
+              ? Math.min(1, e.coveredSeconds / Math.max(1, e.gapEnd - e.gapStart))
+              : 0;
+          return (
+            <div key={i} className="absolute top-0 h-full" style={{ left: `${left}%`, width: `${width}%` }}>
+              <div className={clsx('h-full w-full', e.kind === 'disciplinary' ? 'bg-red-400' : 'bg-amber-300')} />
+              {coveredFrac > 0 ? (
+                <div className="absolute left-0 top-0 h-full bg-slate-400" style={{ width: `${coveredFrac * 100}%` }} />
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      <span>{toMinutes(matchEnd)}</span>
     </div>
   );
 }
