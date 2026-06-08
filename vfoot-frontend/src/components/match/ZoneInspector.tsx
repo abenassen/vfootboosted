@@ -2,7 +2,7 @@ import clsx from 'clsx';
 import { Badge } from '../ui';
 import { featureLabel } from '../../utils/vfoot';
 import type { MatchResult } from './MatchScoreHeader';
-import { ZoneRadar, type RadarAxis } from './ZoneRadar';
+import { MacroContributions, type MacroContributionVM } from './MacroContributions';
 
 export interface ZoneFeatureVM {
   feature: string;
@@ -26,7 +26,7 @@ export interface ZoneInspectorVM {
   marginShare: number; // |margin| / match max |margin| (0..1), for the dominance bar
   homeName: string;
   awayName: string;
-  macros: RadarAxis[];
+  macros: MacroContributionVM[];
   features: ZoneFeatureVM[];
   homePlayers: ZonePlayerVM[];
   awayPlayers: ZonePlayerVM[];
@@ -78,7 +78,7 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
 
       {zone.macros.length ? (
         <div className="mt-3">
-          <ZoneRadar axes={zone.macros} homeName={zone.homeName} awayName={zone.awayName} />
+          <MacroContributions items={zone.macros} homeName={zone.homeName} awayName={zone.awayName} />
         </div>
       ) : null}
 

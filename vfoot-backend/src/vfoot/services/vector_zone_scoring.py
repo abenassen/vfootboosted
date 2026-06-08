@@ -68,44 +68,38 @@ def mirror_zone(zone_key: str, cols: int = GRID_COLS, rows: int = GRID_ROWS) -> 
     col, row = int(m.group(1)), int(m.group(2))
     return f"Z_{cols - 1 - col}_{rows - 1 - row}"
 
-# Aggregate the raw features into a few intelligible macro-categories for a
-# radar-style team comparison. `invert=True` means lower is better (errors), so
-# the share is flipped (the cleaner team gets the larger axis).
+# Macro-categories covering ALL features, so their signed NET contributions sum
+# exactly to the zone margin. Each macro's net = Σ param_f·(home_f−away_f)/scale_f
+# (positive = favours home/green, negative = favours away). This is faithful to
+# the result (unlike an equal-axis volume radar, which over-weights balance).
 MACROS: list[dict] = [
-    # touches_in_box is intentionally excluded: it is ambiguous (a defending GK
-    # also touches the ball in their own box), which would inflate "Attacco" for
-    # the defending side in a specular duel. It still counts in the score.
-    {"key": "attacco", "label": "Attacco", "features": ["xg_shots", "shots"], "invert": False},
+    {"key": "attacco", "label": "Attacco", "features": ["xg_shots", "shots", "touches_in_box"]},
     {
         "key": "creazione",
         "label": "Creazione",
         "features": ["key_passes", "passes_into_box", "progressive_passes_completed", "progressive_carries"],
-        "invert": False,
     },
-    {"key": "difesa", "label": "Difesa", "features": ["clearances", "interceptions"], "invert": False},
-    {"key": "recupero", "label": "Recupero", "features": ["ball_recoveries", "pressures"], "invert": False},
+    {"key": "difesa", "label": "Difesa", "features": ["clearances", "interceptions"]},
+    {"key": "recupero", "label": "Recupero", "features": ["ball_recoveries", "pressures"]},
     {
         "key": "pulizia",
         "label": "Pulizia",
         "features": ["errors_bad_passes", "errors_dispossessed", "errors_fouls_committed", "errors_miscontrols"],
-        "invert": True,
     },
 ]
 
 
-def _zone_macros(hv: Mapping[str, float], av: Mapping[str, float], scales: dict[str, float]) -> list[dict]:
+def _zone_macros(
+    hv: Mapping[str, float], av: Mapping[str, float], scales: dict[str, float], params: dict[str, float]
+) -> list[dict]:
     out = []
     for macro in MACROS:
-        mh = sum(float(hv.get(f, 0.0)) / scales[f] for f in macro["features"] if f in scales)
-        ma = sum(float(av.get(f, 0.0)) / scales[f] for f in macro["features"] if f in scales)
-        total = mh + ma
-        if total <= 0:
-            home_share = 0.5
-        elif macro["invert"]:
-            home_share = ma / total  # fewer errors -> larger (cleaner) share
-        else:
-            home_share = mh / total
-        out.append({"key": macro["key"], "label": macro["label"], "home_share": round(home_share, 4)})
+        net = 0.0
+        for f in macro["features"]:
+            if f not in scales:
+                continue
+            net += params.get(f, 0.0) * ((float(hv.get(f, 0.0)) - float(av.get(f, 0.0))) / scales[f])
+        out.append({"key": macro["key"], "label": macro["label"], "net": round(net, 5)})
     return out
 
 
@@ -229,7 +223,7 @@ def score_zone_duel(
                 "margin": round(margin, 5),
                 "winner": "home" if margin > 0 else "away" if margin < 0 else "draw",
                 "features": sorted(feats, key=lambda r: abs(r["swing"]), reverse=True),
-                "macros": _zone_macros(hv, av, scales),
+                "macros": _zone_macros(hv, av, scales, params),
                 "home_players": players_in_zone(home_player_rows, zone_key),
                 "away_players": players_in_zone(away_player_rows, away_key),
             }

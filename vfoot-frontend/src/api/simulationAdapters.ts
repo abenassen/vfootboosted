@@ -92,7 +92,7 @@ export function buildZoneInspector(
     marginShare: Math.min(1, Math.abs(zone.margin) / Math.max(0.0001, maxMargin)),
     homeName,
     awayName,
-    macros: zone.macros.map((m) => ({ label: m.label, homeShare: m.home_share })),
+    macros: zone.macros.map((m) => ({ label: m.label, net: m.net })),
     features: zone.features
       .filter((f) => Math.abs(f.swing) >= FEATURE_SWING_MIN)
       .slice(0, 6)

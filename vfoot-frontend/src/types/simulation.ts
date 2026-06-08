@@ -145,7 +145,7 @@ export interface SimZoneFeature {
 export interface SimZoneMacro {
   key: string;
   label: string;
-  home_share: number; // 0..1 (away_share = 1 - home_share)
+  net: number; // signed contribution to the zone margin (>0 home, <0 away)
 }
 
 export interface SimZonePlayer {
