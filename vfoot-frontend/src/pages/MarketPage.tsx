@@ -1,36 +1,66 @@
-import { Card, SectionTitle, Button, Badge } from '../components/ui';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { getTeamLineup } from '../api';
+import { useLeagueContext } from '../league/LeagueContext';
+import { Badge, Button, Card, SectionTitle } from '../components/ui';
+import type { TeamLineupContext } from '../types/lineup';
 
 export default function MarketPage() {
+  const { selectedLeagueId, selectedLeague } = useLeagueContext();
+  const [ctx, setCtx] = useState<TeamLineupContext | null>(null);
+
+  useEffect(() => {
+    if (!selectedLeagueId) {
+      setCtx(null);
+      return;
+    }
+    void getTeamLineup(selectedLeagueId).then(setCtx).catch(() => setCtx(null));
+  }, [selectedLeagueId]);
+
+  if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per vedere il mercato.</div>;
+
+  const open = !!selectedLeague?.market_open;
+  const value = ctx ? ctx.roster.reduce((s, p) => s + p.price, 0) : null;
+
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <SectionTitle>Mercato</SectionTitle>
-        <div className="mt-2 flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="font-bold">Sessione aperta</div>
-            <div className="text-sm text-slate-500">Offerte e scambi (mock)</div>
+            <SectionTitle>Mercato</SectionTitle>
+            <div className="mt-1 text-sm text-slate-600">
+              {open ? 'Il mercato è aperto: puoi acquisire giocatori tramite l’asta.' : 'Il mercato è chiuso.'}
+            </div>
           </div>
-          <Badge tone="green">aperto</Badge>
+          <Badge tone={open ? 'green' : 'slate'}>{open ? 'aperto' : 'chiuso'}</Badge>
         </div>
       </Card>
 
       <Card className="p-4">
-        <SectionTitle>Giocatori disponibili</SectionTitle>
-        <div className="mt-3 space-y-3">
-          {[
-            { name: 'Giocatore J', price: 12, note: 'Buona copertura fascia' },
-            { name: 'Giocatore K', price: 8, note: 'Affidabile minuti' },
-            { name: 'Giocatore L', price: 15, note: 'Top value in area' }
-          ].map((p) => (
-            <div key={p.name} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-3">
-              <div>
-                <div className="font-semibold">{p.name} · €{p.price}</div>
-                <div className="text-xs text-slate-500">{p.note}</div>
-              </div>
-              <Button variant="secondary" size="sm">Offri</Button>
-            </div>
-          ))}
+        <SectionTitle>La tua rosa</SectionTitle>
+        {ctx ? (
+          <div className="mt-2 text-sm text-slate-700">
+            <b>{ctx.team.name}</b> · {ctx.roster.length} giocatori · valore complessivo <b>{value}</b>
+          </div>
+        ) : (
+          <div className="mt-2 text-sm text-slate-500">Nessuna squadra associata in questa lega.</div>
+        )}
+        <Link to="/squad" className="mt-3 inline-flex">
+          <Button variant="secondary" size="sm">
+            Vedi rosa
+          </Button>
+        </Link>
+      </Card>
+
+      <Card className="p-4">
+        <SectionTitle>Asta</SectionTitle>
+        <div className="mt-2 text-sm text-slate-600">
+          Acquisizioni e scambi si svolgono tramite l’<b>asta</b> della lega (chiamata, rilancio, assegnazione),
+          gestita dalla sezione amministrazione.
         </div>
+        <Link to="/league-admin?tab=league" className="mt-3 inline-flex">
+          <Button>Vai all’asta (League Admin)</Button>
+        </Link>
       </Card>
     </div>
   );

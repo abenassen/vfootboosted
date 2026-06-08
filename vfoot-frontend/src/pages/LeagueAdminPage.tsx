@@ -55,6 +55,7 @@ export default function LeagueAdminPage() {
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const { leagues, selectedLeagueId, selectedLeague, setSelectedLeagueId, refreshLeagues } = useLeagueContext();
+  const isAdmin = selectedLeague?.role === 'admin';
 
   const [activeTab, setActiveTab] = useState<AdminTab>('user');
   const [leagueTab, setLeagueTab] = useState<LeagueTab>('overview');
@@ -634,6 +635,14 @@ export default function LeagueAdminPage() {
             </div>
           </Card>
         </>
+      ) : !isAdmin ? (
+        <Card className="p-4">
+          <SectionTitle>League Admin</SectionTitle>
+          <div className="mt-2 text-sm text-slate-600">
+            Serve il ruolo <b>admin</b> in questa lega per gestire roster, competizioni, giornate e asta.
+            {selectedLeague ? ` Il tuo ruolo qui è "${selectedLeague.role}".` : ' Seleziona una lega.'}
+          </div>
+        </Card>
       ) : (
         <>
           <Card className="p-4">
