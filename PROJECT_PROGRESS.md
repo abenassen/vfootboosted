@@ -1672,10 +1672,14 @@ fantasy tables.
   radar Attacco/Creazione/Difesa/Recupero/Pulizia + percentage feature bars on
   hover + who acted here as %); LineupBoard where each row is a SLOT = starter +
   the substitute(s) who covered them: the influence bar, the role band (POR/DIF/
-  CEN/ATT from the slot's dominant contributor's position) and the ordering
-  are all computed on the combined starter+subs footprint. Click a player to
-  light up their zones on the (mirrored-for-away) map; substitutions are inline
-  expandables ("entrato al X'", "uscito al X'", "espulso", "non sceso in campo").
+  CEN/ATT from the slot's dominant contributor's role) and the ordering
+  are all computed on the combined starter+subs footprint. The keeper (POR) is
+  shown apart with "gol evitati …". Click a player to light up their zones on the
+  (mirrored-for-away) map. Substitutions are ALWAYS shown inline (not hidden):
+  a minute timeline (team colour = starter on pitch, grey = substitute, amber =
+  uncovered) + text ("entrato al X'", "uscito al X'", "espulso", "non sceso in
+  campo"), so a substitute who matters more than the starter is visible — and a
+  slot reading ATT because a forward covered an absent full-back is explained.
 
 ## How to run / verify
 
