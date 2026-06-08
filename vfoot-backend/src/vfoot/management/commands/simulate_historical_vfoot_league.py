@@ -460,15 +460,13 @@ class Command(BaseCommand):
         temporal_substitutions: bool,
     ) -> dict:
         scores = player_scores.get(real_matchday, {})
-        # Emulate a user picking their lineup before the match: rank by season
-        # value (a pre-match expectation), NOT by that-day performance, which the
-        # user could not know. We still restrict to players who actually appeared
-        # that matchday so the engine has real intervals to score and to cover.
-        available = [
-            (player, scores.get(player.player_id, 0.0))
-            for player in team.roster
-            if scores.get(player.player_id, 0.0) > 0
-        ]
+        # Emulate a user picking their lineup BEFORE the match: rank by season
+        # value (a pre-match expectation), with NO knowledge of who will actually
+        # play that day. We deliberately do NOT filter to players who appeared,
+        # so the manager can "get it wrong" (field someone who is benched/injured
+        # that round). Conditioning selection on same-match outcomes would bias
+        # scores upward systematically.
+        available = [(player, scores.get(player.player_id, 0.0)) for player in team.roster]
         available.sort(key=lambda item: (item[0].value, item[1]), reverse=True)
         starters = available[:starters_count]
         bench = available[starters_count : starters_count + bench_size]
@@ -688,6 +686,10 @@ class Command(BaseCommand):
         # A player who exits and later re-enters (e.g. injury treatment) is NOT
         # substituted: that intermediate window is ignored regardless of length.
         disciplinary_reasons = {"red_card", "second_yellow"}
+        # Picked starter who never appeared this matchday: absent the whole game,
+        # coverable by a bench player (a realistic lineup mistake).
+        if not intervals:
+            return [(0, final_seconds, False, "absent")]
         gaps: list[tuple[int, int, bool, str]] = []
         cursor = 0
         last_end_reason: str | None = None
