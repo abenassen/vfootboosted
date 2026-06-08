@@ -56,7 +56,9 @@ from vfoot.models import (
     FantasyRosterSlot,
     FantasyTeam,
     LeagueMembership,
+    SavedLineupSnapshot,
 )
+from vfoot.services.player_profiles import player_profiles
 from vfoot.services.fantasy_simulation import (
     bulk_assign_players_to_teams,
     generate_knockout_fixtures,
@@ -1982,3 +1984,111 @@ class FixtureDetailView(APIView):
         if detail is None:
             return Response({"detail": "No rich detail for this fixture."}, status=status.HTTP_404_NOT_FOUND)
         return Response(detail.payload)
+
+
+def _zone_grid_keys(cols: int = 5, rows: int = 4) -> list[str]:
+    return [f"Z_{c}_{r}" for c in range(cols) for r in range(rows)]
+
+
+class LeagueTeamLineupView(APIView):
+    """Real lineup context for the requesting user's team: its roster with
+    spatial profiles (role/footprint/minutes), the league matchdays, and the
+    saved lineup for the chosen matchday."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        membership = _membership_or_404(league, request.user.id)
+        team = getattr(membership, "team", None)
+        if team is None:
+            return Response({"detail": "Nessuna squadra associata in questa lega."}, status=status.HTTP_404_NOT_FOUND)
+
+        matchdays = list(
+            FantasyMatchday.objects.filter(league=league).order_by("real_matchday").values_list("real_matchday", flat=True)
+        )
+        try:
+            matchday = int(request.query_params.get("matchday") or (matchdays[0] if matchdays else 1))
+        except (TypeError, ValueError):
+            matchday = matchdays[0] if matchdays else 1
+
+        slots = list(
+            FantasyRosterSlot.objects.filter(team=team, released_at__isnull=True).select_related("player")
+        )
+        player_ids = [s.player_id for s in slots]
+        total_matches = Match.objects.values("matchday").distinct().count()
+        profiles = player_profiles(player_ids, total_matches=total_matches)
+
+        roster = []
+        for s in slots:
+            p = profiles.get(s.player_id, {})
+            roster.append(
+                {
+                    "player_id": s.player_id,
+                    "name": s.player.short_name or s.player.full_name,
+                    "price": s.purchase_price,
+                    "role": p.get("role", "MID"),
+                    "avg_col": p.get("avg_col", 0.0),
+                    "footprint": p.get("footprint", {}),
+                    "appearances": p.get("appearances", 0),
+                    "avg_minutes": p.get("avg_minutes", 0.0),
+                    "minutes_label": p.get("minutes_label", "low"),
+                }
+            )
+        roster.sort(key=lambda r: (r["avg_col"], -r["price"]))
+
+        snap = SavedLineupSnapshot.objects.filter(
+            league_id=str(league_id), matchday_id=str(matchday), lineup_id=f"team{team.id}"
+        ).first()
+        saved_lineup = (
+            {
+                "gk_player_id": int(snap.gk_player_id) if snap.gk_player_id else None,
+                "starter_player_ids": snap.starter_player_ids,
+                "bench_player_ids": snap.bench_player_ids,
+                "starter_backups": snap.starter_backups,
+            }
+            if snap
+            else None
+        )
+
+        return Response(
+            {
+                "team": {"team_id": team.id, "name": team.name},
+                "matchdays": matchdays,
+                "matchday": matchday,
+                "zone_grid": {"cols": 5, "rows": 4, "zone_keys": _zone_grid_keys()},
+                "rules": {"starters": 11, "gk_separate_slot": True},
+                "roster": roster,
+                "saved_lineup": saved_lineup,
+            }
+        )
+
+
+class LeagueTeamLineupSaveView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        membership = _membership_or_404(league, request.user.id)
+        team = getattr(membership, "team", None)
+        if team is None:
+            return Response({"detail": "Nessuna squadra associata in questa lega."}, status=status.HTTP_400_BAD_REQUEST)
+
+        matchday = request.data.get("matchday")
+        if matchday is None:
+            return Response({"detail": "matchday richiesto."}, status=status.HTTP_400_BAD_REQUEST)
+        gk = request.data.get("gk_player_id")
+        SavedLineupSnapshot.objects.update_or_create(
+            league_id=str(league_id),
+            matchday_id=str(matchday),
+            lineup_id=f"team{team.id}",
+            defaults={
+                "gk_player_id": str(gk) if gk else None,
+                "starter_player_ids": request.data.get("starter_player_ids", []),
+                "bench_player_ids": request.data.get("bench_player_ids", []),
+                "starter_backups": request.data.get("starter_backups", []),
+            },
+        )
+        return Response({"ok": True})
