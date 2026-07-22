@@ -1,3 +1,4 @@
+import type { LeagueDecisionsResponse } from '../types/decisions';
 import type { LineupContextResponse, MatchDetailResponse, MatchListItem, SaveLineupRequest, SaveLineupResponse } from '../types/contracts';
 import type {
   AuthResponse,
@@ -676,4 +677,33 @@ export async function getTeamLineup(_leagueId: number, _matchday?: number): Prom
 export async function saveTeamLineup(_leagueId: number, _req: unknown): Promise<{ ok: boolean; saved_competitions: number }> {
   await sleep(80);
   return { ok: true, saved_competitions: 1 };
+}
+
+// --- league decisions -------------------------------------------------------
+// The mock league has nothing pending: the queue only makes sense against real
+// squad data, and inventing fake players to disambiguate would teach the wrong
+// thing about what blocks a market.
+export async function getLeagueDecisions(): Promise<LeagueDecisionsResponse> {
+  await sleep(60);
+  return { is_admin: true, blocked_reason: null, blocking_open: 0, attention: 0, decisions: [] };
+}
+
+function mockDecisionsUnavailable(): never {
+  throw new Error('Le decisioni di lega richiedono il backend reale.');
+}
+export async function voteLeagueDecision(): Promise<never> {
+  await sleep(60);
+  return mockDecisionsUnavailable();
+}
+export async function resolveLeagueDecision(): Promise<never> {
+  await sleep(60);
+  return mockDecisionsUnavailable();
+}
+export async function consultLeagueDecision(): Promise<never> {
+  await sleep(60);
+  return mockDecisionsUnavailable();
+}
+export async function acceptAllLeagueDecisions(): Promise<{ resolved: number; blocked_reason: string | null }> {
+  await sleep(60);
+  return { resolved: 0, blocked_reason: null };
 }

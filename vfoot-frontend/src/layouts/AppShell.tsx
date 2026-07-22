@@ -9,12 +9,15 @@ import logo from '../assets/logo.png';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { compColor } from '../league/competitionColors';
+import { useDecisionAlerts } from '../league/useDecisionAlerts';
 
 // League-scoped navigation (left sidebar + mobile bar): everything here is about
 // the CURRENTLY selected league. User-level actions (Le mie leghe) and switching
 // between leagues live in the top bar instead.
 // scope: 'competition' pages refer to the CURRENT competition (they follow the
 // competition switcher) and get an indigo accent; 'league' pages are global.
+type NavItem = { to: string; label: string; icon: string; scope: 'league' | 'competition'; badge?: number };
+
 const leagueNav = [
   { to: '/home', label: 'Home', icon: '🏠', scope: 'league' as const },
   { to: '/league', label: 'Lega', icon: '🏆', scope: 'league' as const },
@@ -24,6 +27,7 @@ const leagueNav = [
   { to: '/serie-a', label: 'Serie A', icon: '⚽', scope: 'league' as const },
   { to: '/listone', label: 'Listone', icon: '📋', scope: 'league' as const },
   { to: '/market', label: 'Mercato', icon: '💱', scope: 'league' as const },
+  { to: '/decisioni', label: 'Decisioni', icon: '🗳️', scope: 'league' as const },
   { to: '/league-admin?tab=league', label: 'Gestione lega', icon: '⚙️', scope: 'league' as const },
 ];
 
@@ -43,6 +47,7 @@ function usePageTitle(pathname: string) {
     if (pathname.startsWith('/serie-a')) return 'Serie A';
     if (pathname.startsWith('/listone')) return 'Listone';
     if (pathname.startsWith('/market')) return 'Mercato';
+    if (pathname.startsWith('/decisioni')) return 'Decisioni';
     return 'Vfoot';
   }, [pathname]);
 }
@@ -65,6 +70,9 @@ export default function AppShell() {
   const activeTeamName = selectedLeague?.team_name?.trim() || null;
   // the current competition's accent colour (distinct per competition in the league)
   const color = compColor(competitions.findIndex((c) => c.competition_id === selectedCompetitionId));
+  // Pending league decisions: shown on the Decisioni entry so nobody has to go
+  // looking for a question that was addressed to them.
+  const alerts = useDecisionAlerts(selectedLeague?.league_id ?? null);
 
   // The "results" page (and its menu entry/title) adapts to the current competition:
   // a round-robin shows a standings table → "Classifica"; a knockout shows a bracket
@@ -76,14 +84,15 @@ export default function AppShell() {
   // (year-independent, e.g. "Serie A"); the season/year lives on the page badge.
   // Falls back to "Serie A" only when the league has no reference season yet.
   const refCompetition = selectedLeague?.reference_season?.competition ?? 'Serie A';
-  const nav = useMemo(
-    () => leagueNav.map((it) => {
+  const nav = useMemo<NavItem[]>(
+    () => leagueNav.map((it): NavItem => {
       if (it.to === '/standings')
         return { ...it, label: standingsLabel, icon: resultView === 'classifica' ? '📊' : '🗂️' };
       if (it.to === '/serie-a') return { ...it, label: refCompetition };
+      if (it.to === '/decisioni') return { ...it, badge: alerts.attention || alerts.blocking };
       return it;
     }),
-    [standingsLabel, resultView, refCompetition],
+    [standingsLabel, resultView, refCompetition, alerts],
   );
   const baseTitle = usePageTitle(location.pathname);
   const title = location.pathname.startsWith('/standings')
@@ -108,12 +117,17 @@ export default function AppShell() {
           : 'text-slate-700 hover:bg-slate-200'
     );
 
-  function renderNav(item: { to: string; label: string; icon: string; scope: 'league' | 'competition' }) {
+  function renderNav(item: NavItem) {
     const manual = leagueAdminActive(location.search, location.pathname, item.to);
     const content = (
       <>
         <span className="text-lg">{item.icon}</span>
         {item.label}
+        {item.badge ? (
+          <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+            {item.badge}
+          </span>
+        ) : null}
       </>
     );
     if (manual === undefined) {
@@ -274,7 +288,14 @@ export default function AppShell() {
               );
             const inner = (
               <>
-                <span className="text-lg leading-none">{it.icon}</span>
+                <span className="relative text-lg leading-none">
+                  {it.icon}
+                  {it.badge ? (
+                    <span className="absolute -right-2 -top-1 rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white">
+                      {it.badge}
+                    </span>
+                  ) : null}
+                </span>
                 <span className="mt-1">{it.label}</span>
               </>
             );

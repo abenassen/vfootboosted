@@ -1,3 +1,4 @@
+import type { LeagueDecision, LeagueDecisionsResponse } from '../types/decisions';
 import type {
   LineupContextResponse,
   MatchDetailResponse,
@@ -802,5 +803,51 @@ export async function getAuctionState(auctionId: number): Promise<AuctionState> 
   const res = await fetch(`${baseUrl()}/auctions/${auctionId}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
+  return parseJsonOrThrow(res);
+}
+
+// --- league decisions -------------------------------------------------------
+
+export async function getLeagueDecisions(
+  leagueId: number,
+  status: 'open' | 'all' = 'open',
+): Promise<LeagueDecisionsResponse> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/decisions?status=${status}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function voteLeagueDecision(
+  leagueId: number,
+  decisionId: number,
+  option: string,
+): Promise<LeagueDecision> {
+  const res = await jsonPost(`/leagues/${leagueId}/decisions/${decisionId}/vote`, { option });
+  return parseJsonOrThrow(res);
+}
+
+export async function resolveLeagueDecision(
+  leagueId: number,
+  decisionId: number,
+  option: string,
+): Promise<LeagueDecision> {
+  const res = await jsonPost(`/leagues/${leagueId}/decisions/${decisionId}/resolve`, { option });
+  return parseJsonOrThrow(res);
+}
+
+export async function consultLeagueDecision(
+  leagueId: number,
+  decisionId: number,
+  open: boolean,
+): Promise<LeagueDecision> {
+  const res = await jsonPost(`/leagues/${leagueId}/decisions/${decisionId}/consult`, { open });
+  return parseJsonOrThrow(res);
+}
+
+export async function acceptAllLeagueDecisions(
+  leagueId: number,
+): Promise<{ resolved: number; blocked_reason: string | null }> {
+  const res = await jsonPost(`/leagues/${leagueId}/decisions/accept-all`, {});
   return parseJsonOrThrow(res);
 }

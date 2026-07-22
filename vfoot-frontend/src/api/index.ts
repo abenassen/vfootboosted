@@ -113,6 +113,11 @@ type ApiImpl = {
   syncLeagueMatchdays: (leagueId: number) => Promise<{ fixtures_linked: number; matchdays_touched: number }>;
   getLeagueMatchdays: (leagueId: number) => Promise<LeagueMatchdayItem[]>;
   concludeLeagueMatchday: (leagueId: number, fantasyMatchdayId: number, force?: boolean) => Promise<unknown>;
+  getLeagueDecisions: typeof backendApi.getLeagueDecisions;
+  voteLeagueDecision: typeof backendApi.voteLeagueDecision;
+  resolveLeagueDecision: typeof backendApi.resolveLeagueDecision;
+  consultLeagueDecision: typeof backendApi.consultLeagueDecision;
+  acceptAllLeagueDecisions: typeof backendApi.acceptAllLeagueDecisions;
 };
 
 const typedImpl = impl as ApiImpl;
@@ -177,3 +182,8 @@ export const saveTeamLineup = typedImpl.saveTeamLineup;
 export const syncLeagueMatchdays = typedImpl.syncLeagueMatchdays;
 export const getLeagueMatchdays = typedImpl.getLeagueMatchdays;
 export const concludeLeagueMatchday = typedImpl.concludeLeagueMatchday;
+export const getLeagueDecisions = typedImpl.getLeagueDecisions;
+export const voteLeagueDecision = typedImpl.voteLeagueDecision;
+export const resolveLeagueDecision = typedImpl.resolveLeagueDecision;
+export const consultLeagueDecision = typedImpl.consultLeagueDecision;
+export const acceptAllLeagueDecisions = typedImpl.acceptAllLeagueDecisions;

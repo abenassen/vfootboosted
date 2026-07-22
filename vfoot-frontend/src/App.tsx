@@ -21,6 +21,7 @@ import ClassificaPage from './pages/ClassificaPage';
 import RealChampionshipPage from './pages/RealChampionshipPage';
 import RealMatchDetailPage from './pages/RealMatchDetailPage';
 import ListonePage from './pages/ListonePage';
+import DecisionsPage from './pages/DecisionsPage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -57,6 +58,7 @@ export default function App() {
         <Route path="listone" element={<ListonePage />} />
         <Route path="competitions/:competitionId" element={<CompetitionPage />} />
         <Route path="market" element={<MarketPage />} />
+        <Route path="decisioni" element={<DecisionsPage />} />
         <Route path="league-admin" element={<LeagueAdminPage />} />
         <Route path="league-admin/competitions/new" element={<CompetitionCreatePage />} />
       </Route>
