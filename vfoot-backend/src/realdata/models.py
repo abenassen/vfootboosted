@@ -287,6 +287,20 @@ class MatchAppearance(models.Model):
     goals = models.IntegerField(default=0)
     assists = models.IntegerField(default=0)
 
+    # The provider's COMPLETE per-match statistics for this player, as sent.
+    #
+    # Kept verbatim, and deliberately not curated, because the alternative has
+    # already cost us three full re-imports of the season: every time a question
+    # needed a column the adapter had not been told to keep — duels lost, tackles,
+    # dribbles conceded — the only way to answer it was to ingest everything
+    # again. Sixty-odd numbers per appearance is nothing to store and removes the
+    # need to predict which of them a future question will want.
+    #
+    # This is a RAW mirror, not an interface: nothing should score off it directly.
+    # Anything the model actually uses gets a named feature with its own semantics
+    # (see DISTRIBUTED_STAT_MAP), so provider quirks stay in one place.
+    raw_stats = models.JSONField(default=dict, blank=True)
+
     class Meta:
         unique_together = [("match", "player")]
         indexes = [models.Index(fields=["match", "side"]),

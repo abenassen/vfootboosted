@@ -106,6 +106,36 @@ DISTRIBUTED_STAT_MAP: dict[str, Any] = {
     # Goalkeeper channel. Without these a keeper has NO measurable output: the
     # outfield features above are near-empty for them, which is why keepers had no
     # voto at all. All non-negative counts.
+    # Denominators. duels_won and dribbles_won were stored as bare counts, which
+    # makes a defender who won 5 duels of 6 indistinguishable from one who won 5 of
+    # 20; against the provider's own rating the SUCCESS RATE tracks performance
+    # better than the count (+0.387 vs +0.348). The losing side of each contest is
+    # what makes that rate computable.
+    "duels_lost": "duelLost",
+    "aerials_won": "aerialWon",
+    "aerials_lost": "aerialLost",
+    "dribbles_attempted": "totalContest",
+    "dribbled_past": "challengeLost",       # he got beaten: the individual
+                                            # defensive failure our features could
+                                            # not see at all
+    "tackles": "totalTackle",
+    "tackles_won": "wonTackle",
+    "last_man_tackle": "lastManTackle",
+    "clearances_off_line": "clearanceOffLine",
+    # Progression in possession. The old weights named passes_into_box and
+    # progressive_passes_completed, which SofaScore never sends; passes completed
+    # in the opponent half is the proxy it does send, and it correlates +0.240 with
+    # the provider rating.
+    "passes_opp_half": "accurateOppositionHalfPasses",
+    "long_balls_completed": "accurateLongBalls",
+    "crosses_completed": "accurateCross",
+    "possession_lost": "possessionLostCtrl",
+    "was_fouled": "wasFouled",
+    # Conceding a penalty carries NO fantacalcio malus, so unlike a missed penalty
+    # it is invisible unless the base vote accounts for it. Winning one is likewise
+    # unrewarded: the goal bonus goes to whoever converts.
+    "penalties_conceded": "penaltyConceded",
+    "penalties_won": "penaltyWon",
     "gk_saves": "saves",
     "gk_saves_inside_box": "savedShotsFromInsideTheBox",
     "gk_penalty_saves": "penaltySave",
@@ -125,6 +155,11 @@ SIGNED_DISTRIBUTED_STAT_MAP: dict[str, Any] = {
 }
 
 KNOWN_FEATURE_KEYS = [
+    "duels_lost", "aerials_won", "aerials_lost", "dribbles_attempted",
+    "dribbled_past", "tackles", "tackles_won", "last_man_tackle",
+    "clearances_off_line", "passes_opp_half", "long_balls_completed",
+    "crosses_completed", "possession_lost", "was_fouled", "penalties_conceded",
+    "penalties_won",
     "touches", "touches_in_box", "shots", "xg_shots",
     "passes_completed", "errors_bad_passes", "key_passes", "duels_won",
     "ball_recoveries", "interceptions", "blocks", "clearances",
@@ -487,7 +522,9 @@ def _ingest_match(
             defaults={"team_season": team_ts, "side": side,
                       "minutes_played": minutes, "is_starter": is_starter,
                       "goals": int(_stat(row, "goals")),
-                      "assists": int(_stat(row, "goalAssist"))},
+                      "assists": int(_stat(row, "goalAssist")),
+                      "raw_stats": {k: v for k, v in row.items()
+                                    if isinstance(v, (int, float, bool))}},
         )
         appearances += 1
 
