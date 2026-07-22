@@ -184,6 +184,11 @@ VFOOT_DATA_DIR = Path(os.environ.get("VFOOT_DATA_DIR", str(REPO_ROOT)))
 VFOOT_SOFASCORE_CACHE = str(VFOOT_DATA_DIR / "historical-data" / "serie-a"
                             / "sofascore" / "cache")
 
+# Percorso del browser per lo scraping. Sul server usiamo il Chromium di SISTEMA
+# (pacchettizzato da Debian) invece di far scaricare a Playwright una copia
+# separata: stessa funzione, ~150 MB e un aggiornamento in meno da gestire.
+VFOOT_CHROMIUM_PATH = os.environ.get("VFOOT_CHROMIUM_PATH", "") or None
+
 # File-based so expensive season aggregates (voto-puro reference, player values)
 # SURVIVE a restart and are shared across worker processes — the default locmem
 # cache is per-process and would recompute on every boot. Entries are keyed by a

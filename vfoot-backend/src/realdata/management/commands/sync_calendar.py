@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from realdata.services.calendar_sync import (
@@ -60,6 +61,10 @@ class Command(BaseCommand):
                                  "Cloudflare) instead of the plain client.")
         parser.add_argument("--channel", type=str, default=None,
                             help="Browser channel, e.g. 'chrome' (with --browser).")
+        parser.add_argument("--chromium-path", type=str, default=None,
+                            help="Browser binary to drive; defaults to "
+                                 "settings.VFOOT_CHROMIUM_PATH (the system Chromium "
+                                 "on the server).")
         parser.add_argument("--headful", action="store_true",
                             help="Run the browser headful (with --browser).")
 
@@ -80,6 +85,8 @@ class Command(BaseCommand):
             return SofaScoreBrowserClient(
                 cache_dir, min_delay=1.0, logger=self.stdout.write,
                 headless=not options["headful"], channel=options["channel"],
+                chromium_path=(options["chromium_path"]
+                               or getattr(settings, "VFOOT_CHROMIUM_PATH", None)),
                 tournament_id=SERIE_A_TID)
         from realdata.services.sofascore_client import SofaScoreClient
         return SofaScoreClient(cache_dir=cache_dir, logger=self.stdout.write,
