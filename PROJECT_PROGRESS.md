@@ -3232,3 +3232,129 @@ Postgres su una macchina da 965 MB.
 Restano per il deploy vero: codice sul server + venv 3.12, `.env` di produzione, build del
 frontend, nginx (nuovo vhost su vfoot.it al posto del legacy), gunicorn+systemd, timer per
 sync_calendar/tick, e la ricostruzione dati dalla cache.
+
+## Vincoli di deploy emersi: WordPress convivente e asta realtime (2026-07-22)
+
+**1. La Linode ospita anche il WordPress personale dell'utente.** Isolamento verificato:
+vhost nginx separati (`andreadeluca.online.conf` vs `fanta_nginx.conf` — tocchiamo solo
+quest'ultimo), database MySQL distinti con utenti distinti (`wordpress_db` non toccato
+quando è stato creato `vfoot_app`), php-fpm non coinvolto. L'unico punto di contatto reale
+è la RAM: php-fpm ~117 MB, mysqld ~21 MB; fermare uwsgi+daphne del legacy ne libera ~83 MB.
+
+**2. L'asta live è un requisito da portare.** Il legacy la implementava con **Django
+Channels + WebSocket** (`chat/consumers.py`, `fanta/routing.py`, `fanta/asgi.py`), servita
+da **daphne** sulla 8089 con **Redis** come channel layer — ecco a cosa servivano quei
+processi. Meccanica: un banditore chiama un giocatore, i partecipanti connessi lo vedono
+subito e rilanciano, il banditore accetta o no.
+La NUOVA app ha i modelli (`AuctionSession`/`AuctionNomination`/`AuctionBid`) e gli
+endpoint REST, ma NESSUN realtime: `getAuctionState` è su richiesta, niente polling né
+WebSocket, nessuna dipendenza realtime in requirements.
+Precisazione sulla diagnosi dell'utente: il costo non è dell'asta ma del POLLING (N client
+× refresh continuo per sentirsi dire "nessuna novità"). Un'asta a 10 partecipanti su
+WebSocket è carico trascurabile anche su questa macchina.
+
+**DECISIONE DI ARCHITETTURA**: deployare da subito con **uvicorn (ASGI)** invece di
+gunicorn (WSGI). `config/asgi.py` esiste già e Django 5.2 serve l'HTTP identicamente;
+partire WSGI significherebbe rifare layer server e nginx quando aggiungeremo i WebSocket.
+nginx va configurato SUBITO con l'inoltro dell'upgrade WebSocket sul percorso dedicato.
+Redis è già in esecuzione: nessuna installazione aggiuntiva per il channel layer.
+
+**DA FARE (asta live)**: aggiungere `channels` + `channels-redis`, i consumer per la
+sessione d'asta (chiamata giocatore / rilancio / aggiudicazione), e l'aggancio frontend
+via WebSocket al posto della lettura su richiesta.
+
+## Deploy in produzione: rebuild su Debian 13 e app online (2026-07-22)
+
+Il server era fermo a Ubuntu 20.04 (2020): Python 3.8, PostgreSQL 12, MariaDB 10.3, PHP 7.4
+(fine vita 2022) — tutti sotto i minimi richiesti, e ogni passo richiedeva un aggiramento.
+Scelta dell'utente: **Rebuild della stessa Linode** (nessun costo aggiuntivo, IP invariato),
+con **Debian 13** preferita a Ubuntu 26.04 per base piu leggera e maturita (1 GB di RAM).
+
+**Backup** (86 MB, verificato integro e ripristinabile prima del rebuild): WordPress file+DB,
+certificati, configurazioni, app legacy senza log. Scoperta: 4,9 GB dei "dati" erano log mai
+ruotati (`uwsgi.log` da solo 4,1 GB).
+
+**Risultato del cambio di base** — spariti tutti gli aggiramenti:
+Python 3.8 -> **3.13.5** · PostgreSQL 12 -> **17.10** · PHP 7.4 -> **8.4.23** ·
+Chromium ora pacchettizzato nativamente · RAM disponibile 511 -> 764 Mi con **swap a zero**
+(era 259 Mi) · disco 79% -> 4% occupato.
+
+**Messa in sicurezza**: SSH solo a chiave (fail2ban ha registrato 97 tentativi falliti nella
+prima ora), firewall nftables (solo 22/80/443, database irraggiungibili dall'esterno),
+aggiornamenti automatici, hardening systemd sul servizio.
+
+**Ripristinato**: WordPress su PHP 8.4, verificato a 200 con contenuto reale.
+
+**Nuova app ONLINE su https://vfoot.it**: SPA React servita da nginx, API su uvicorn
+**ASGI** (non WSGI — scelta presa per l'asta live, cosi i WebSocket non richiederanno di
+rifare il layer server), PostgreSQL 17, TLS valido, redirect HTTP->HTTPS, percorso `/ws/`
+gia predisposto per i WebSocket.
+
+**Due bug intercettati verificando invece di assumere**:
+1. La SECRET_KEY scritta via heredoc SSH era stata **corrotta dall'espansione della shell**
+   (39 caratteri invece di 50: i `$` erano stati mangiati). Rigenerata ESEGUENDO Python sul
+   server, senza passare da alcuna shell. Una chiave indebolita compromette sessioni, CSRF e
+   token di reset password.
+2. `check --deploy` segnalava 5 problemi: aggiunte impostazioni HTTPS dietro proxy
+   (`SECURE_PROXY_SSL_HEADER` — senza, Django crede che tutto sia in chiaro e i cookie
+   sicuri non attecchiscono), cookie sicuri, redirect SSL, HSTS **deliberatamente breve**
+   (un max-age lungo e' difficile da annullare). Restano 2 avvisi, entrambi scelte
+   consapevoli (HSTS su sottodomini e preload, quest ultimo di fatto irreversibile).
+
+**Flusso di deploy collaudato**: modifica in locale -> commit -> push -> `git pull` sul
+server -> migrate/collectstatic -> restart. Usato davvero due volte durante il deploy.
+
+**Consumo attuale**: php-fpm 208 MB + mariadb 156 MB (WordPress) > postgres 89 + uvicorn 67
+(la nostra app). 402 Mi disponibili. Se servira' margine per il browser, il primo posto dove
+guardare e' la configurazione di WordPress, non la nostra app.
+
+**Restano**: playwright+chromium per lo scraping, ricostruzione dati dalla cache, creazione
+utente, taratura php-fpm/mariadb. I timer (`vfoot-tick`, `vfoot-calendar`) sono registrati e
+abilitati ma NON avviati: prima servono dati e gli hook di scrape reali.
+
+---
+
+## 22 luglio 2026 — server operativo con dati veri e utente di test
+
+**Chromium**: usiamo quello **di sistema** pacchettizzato da Debian invece di far
+scaricare a Playwright una seconda copia dello stesso browser (~150 MB e un
+aggiornamento in meno su una macchina da 1 GB). Il percorso e' configurabile
+(`VFOOT_CHROMIUM_PATH`), non cablato nel codice.
+
+**Cache di scraping fuori dal checkout**: `import_sofascore` e `sync_calendar`
+risolvono la cache da `settings` (`VFOOT_DATA_DIR`), non piu' dalla posizione del
+file sorgente. Sul server 1,5 GB di JSON stanno in `/srv/vfoot-data` e un
+redeploy non li tocca. In locale il default resta invariato.
+
+**Dati ricostruiti sul server** (PostgreSQL, da cache, zero rete):
+380 partite 25/26, 772 giocatori, 17.773 presenze, 1.263.313 feature di zona;
+calendario 26/27 (380 partite) e rose Transfermarkt (660 giocatori, 20 squadre,
+660 valori di mercato, 72 portieri).
+
+**Utente `andrea` creato** (staff+superuser) e due leghe di prova: `Lega Classic
+Demo` sul 25/26 concluso (180 partite + coppe) e `Lega Serie A 2026-2027`
+pre-campionato con listone congelato.
+
+**Tre problemi trovati verificando, non assumendo**:
+1. `import_sofascore` **non timbra lo stato** delle partite: restavano tutte
+   `scheduled`, quindi la "stagione precedente con dati" non veniva trovata e
+   TUTTI i valori del listone erano nulli. Lo stato lo assegna `sync_calendar`,
+   che sul server avevo lanciato solo per il 26/27. Risolto sincronizzando anche
+   il 25/26 offline. **Da ricordare: dopo un import storico serve sempre il sync
+   del calendario di quella stagione.**
+2. La cache Django viveva **dentro il checkout** e finiva di proprieta' di chi
+   aveva lanciato per ultimo un comando (root, nel mio caso): il servizio poi
+   riceveva `PermissionError` e rispondeva 500. Spostata in una directory di
+   runtime (`DJANGO_CACHE_DIR`) di proprieta' dell'utente del servizio.
+3. Con `DEBUG=False` Django **non logga da nessuna parte** i traceback delle
+   richieste: il 500 era una pagina bianca e un journal vuoto. Aggiunta una
+   configurazione `LOGGING` che manda `django.request` su stderr, che systemd
+   cattura.
+
+**Listone in produzione**: 4,5s a freddo, **0,29s a caldo** (cache calda), fit
+valore/mercato r=0,443.
+
+**Aperto**: lo scraping in rete dal server (Chromium parte davvero, 7-8 processi,
+RAM libera che scende a ~190 Mi ma senza OOM) **non ha ancora completato una
+fetch reale**: resta appeso, presumibilmente sulla sfida Cloudflare. Da chiarire
+prima di avviare i timer, perche' e' il presupposto del polling live.
