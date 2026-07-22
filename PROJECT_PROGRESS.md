@@ -3354,7 +3354,22 @@ pre-campionato con listone congelato.
 **Listone in produzione**: 4,5s a freddo, **0,29s a caldo** (cache calda), fit
 valore/mercato r=0,443.
 
-**Aperto**: lo scraping in rete dal server (Chromium parte davvero, 7-8 processi,
-RAM libera che scende a ~190 Mi ma senza OOM) **non ha ancora completato una
-fetch reale**: resta appeso, presumibilmente sulla sfida Cloudflare. Da chiarire
-prima di avviare i timer, perche' e' il presupposto del polling live.
+**RISOLTO (ed e' una notizia che cambia il piano)**: lo scraping dal server NON
+funziona, e non per le ragioni che sospettavo. Confronto controllato, stesso
+codice e stesso client:
+
+| origine | token x-requested-with | esito |
+|---|---|---|
+| macchina locale (IP residenziale) | catturato (`7f4b46`) | **HTTP 200 in 5s** |
+| server Linode (IP datacenter) | catturato (`7f4b46`) | **HTTP 403**, backoff fino a 7 tentativi |
+
+Non e' RAM, non e' Chromium, non e' la sandbox: **Chromium sul server parte e
+funziona** (7-8 processi, RAM libera ~190 Mi, nessun OOM, swap disponibile) e il
+sito pubblico si carica con status 200 e titolo reale. A essere bloccate sono
+solo le chiamate `/api/v1/` dall'IP del datacenter. Sembrava un blocco perche'
+il client ritenta con backoff esponenziale invece di fallire subito.
+
+**Conseguenza sul piano**: il polling live non puo' partire dal Linode. La strada
+gia' ipotizzata — polling sul **Raspberry di casa** (IP residenziale) che spinge
+i dati verso il server — diventa quella necessaria. Da decidere il meccanismo di
+push (API autenticata vs SSH/rsync). I timer restano deliberatamente fermi.
