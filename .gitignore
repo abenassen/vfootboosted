@@ -34,3 +34,19 @@ vfoot-backend/calibration/historical_vfoot_league_dry_run_scale_test.json
 historical-data/**
 !historical-data/**/
 !historical-data/**/README.md
+
+# External datasets (voti fantacalcio.it .xlsx): data, not source
+data_fantacalcio/
+# Screenshots / scratch notes
+screenshot/
+claudesession
+warm.log
+settings.local.json
+# Django runtime cache (season aggregates, regenerated on demand)
+**/.django_cache/
+# Probe leftovers that landed in the source tree: throwaway caches and logs
+vfoot-backend/src/realdata/services/_probe_*_cache/
+vfoot-backend/src/realdata/services/live_probe_cache/
+vfoot-backend/src/realdata/services/live_probe*.jsonl
+vfoot-backend/src/realdata/services/api_v1_*.json
+vfoot-backend/src/realdata/services/Browser

@@ -10,22 +10,46 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Repository root (BASE_DIR is vfoot-backend/src, so two levels up).
+REPO_ROOT = BASE_DIR.parent.parent
+
+# Machine-specific configuration lives in a .env that is NEVER committed; see
+# .env.example for the full list. This is what lets the same code run unchanged
+# on a laptop (SQLite) and on the server (MySQL), which is the whole point.
+load_dotenv(REPO_ROOT / ".env")
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_list(name: str, default: str = "") -> list[str]:
+    return [x.strip() for x in os.environ.get(name, default).split(",") if x.strip()]
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-c=_x9oa9$cb(wub-c)f*tudwa1jh#1dz)5+xm@4%(iaq&y+7cw'
+# Never hardcoded: set DJANGO_SECRET_KEY in .env. The insecure fallback exists only
+# so a fresh clone runs in DEBUG; production refuses to start without a real one
+# (see the guard below).
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-only-key")
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_bool("DJANGO_DEBUG", True)
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
+ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
+
+if not DEBUG and SECRET_KEY == "django-insecure-dev-only-key":
+    raise RuntimeError(
+        "DJANGO_SECRET_KEY must be set when DEBUG is off — refusing to start with "
+        "the development fallback key.")
 
 
 # Application definition
@@ -60,11 +84,11 @@ MIDDLEWARE = [
 ]
 
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",   # Vite
-    "http://127.0.0.1:5173",   # Vite (alt host)
-    "http://localhost:3000",   # CRA
-]
+# In production the SPA is served from the same origin as the API, so this list is
+# typically empty there; in development it points at the Vite dev server.
+CORS_ALLOWED_ORIGINS = _env_list(
+    "DJANGO_CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -98,10 +122,58 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
+# DB_ENGINE: sqlite (default, laptop) | mysql | postgresql. Everything else comes
+# from the environment, so moving engine is configuration, never a code change.
+_DB_ENGINE = os.environ.get("DB_ENGINE", "sqlite").strip().lower()
+
+if _DB_ENGINE == "sqlite":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.environ.get("DB_NAME", str(BASE_DIR / "db.sqlite3")),
+        }
+    }
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": f"django.db.backends.{_DB_ENGINE}",
+            "NAME": os.environ.get("DB_NAME", "vfoot"),
+            "USER": os.environ.get("DB_USER", ""),
+            "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+            "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
+            "PORT": os.environ.get("DB_PORT", ""),
+            # utf8mb4 + strict mode: without this MySQL silently truncates rather
+            # than raising, which would corrupt player names and feature values.
+            **({"OPTIONS": {"charset": "utf8mb4",
+                            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'"}}
+               if _DB_ENGINE == "mysql" else {}),
+        }
+    }
+
+# How often a LIVE match may be re-scraped, in minutes. The scheduler tick can run
+# every minute, but each match is polled at most this often — this is the knob that
+# adapts scraping intensity to the machine (a small VPS driving a headless browser
+# cannot sustain a per-minute poll across ten simultaneous matches). Override with
+# the VFOOT_LIVE_POLL_MINUTES env var; no code change needed to retune it.
+VFOOT_LIVE_POLL_MINUTES = float(os.environ.get("VFOOT_LIVE_POLL_MINUTES", "2"))
+
+# Where the scraped/reference datasets live (historical-data/, data_fantacalcio/).
+# Auxiliary commands derive their defaults from here instead of hardcoding a path,
+# so they run on any machine.
+VFOOT_DATA_DIR = Path(os.environ.get("VFOOT_DATA_DIR", str(REPO_ROOT)))
+VFOOT_SOFASCORE_CACHE = str(VFOOT_DATA_DIR / "historical-data" / "serie-a"
+                            / "sofascore" / "cache")
+
+# File-based so expensive season aggregates (voto-puro reference, player values)
+# SURVIVE a restart and are shared across worker processes — the default locmem
+# cache is per-process and would recompute on every boot. Entries are keyed by a
+# data version (match count + last data check), so new results invalidate them.
+CACHES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+        'LOCATION': str(BASE_DIR / '.django_cache'),
+        'TIMEOUT': None,
+        'OPTIONS': {'MAX_ENTRIES': 500},
     }
 }
 
@@ -128,7 +200,10 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+# The app is Italian-facing: this makes Django/DRF emit their built-in validation
+# messages already translated ("This field is required." -> "Campo obbligatorio."),
+# so the frontend can show them to the user as they are.
+LANGUAGE_CODE = 'it'
 
 TIME_ZONE = 'UTC'
 
