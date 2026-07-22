@@ -56,18 +56,26 @@ TOTAL_WEIGHTS = {
 
 # VOLUME / involvement — rescaled to PER-90 (density is the signal: 120 touches in 90'
 # != 30 in 20'), tail-compressed, with a floor so a short cameo isn't projected to 90'.
+#
+# Every key here must be one the provider actually supplies (see
+# ``sofascore_adapter.KNOWN_FEATURE_KEYS``; enforced by a test). This table used to
+# carry ``passes_into_box`` at 0.40 — the largest weight in the block — plus
+# ``progressive_passes_completed``, ``progressive_carries`` and ``pressures``,
+# none of which SofaScore reports. They were not merely empty for a season: the
+# adapter never writes them, so they contributed exactly zero to every voto ever
+# computed, while reading as if progression and pressing were being rewarded.
+# Removing them changes no vote (verified over a full season); what it removes is
+# the illusion. The intent behind them — credit for creating and progressing — is
+# in fact carried by the TOTAL block, where expected_assists, key_passes and
+# big_chance_created are the three heaviest positive terms.
 PER90_WEIGHTS = {
-    "passes_into_box": 0.40,
     "dribbles_won": 0.25,
-    "progressive_passes_completed": 0.15,
-    "progressive_carries": 0.15,
     "touches_in_box": 0.10,
     "duels_won": 0.20,
     "interceptions": 0.30,
     "ball_recoveries": 0.15,
     "blocks": 0.30,
     "clearances": 0.10,
-    "pressures": 0.05,
     "passes_completed": 0.02,
     "touches": 0.01,
     "errors_bad_passes": -0.15,
