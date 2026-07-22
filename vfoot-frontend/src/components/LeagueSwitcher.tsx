@@ -2,6 +2,12 @@ import { Link } from 'react-router-dom';
 import { Badge } from './ui';
 import { useLeagueContext } from '../league/LeagueContext';
 
+const ROLE_LABELS: Record<string, string> = {
+  admin: 'amministratore',
+  member: 'partecipante',
+  owner: 'proprietario',
+};
+
 export default function LeagueSwitcher({ compact }: { compact?: boolean }) {
   const { leagues, selectedLeagueId, selectedLeague, setSelectedLeagueId, loading } = useLeagueContext();
 
@@ -18,7 +24,11 @@ export default function LeagueSwitcher({ compact }: { compact?: boolean }) {
 
   return (
     <div className={compact ? 'flex w-full items-center gap-2' : 'flex items-center gap-2'}>
-      {!compact && selectedLeague ? <Badge tone="slate">{selectedLeague.role}</Badge> : null}
+      {/* Prefixed: on its own, a bare "admin" next to the username reads as an
+          identity rather than as the role held in the selected league. */}
+      {!compact && selectedLeague ? (
+        <Badge tone="slate">{`Ruolo: ${ROLE_LABELS[selectedLeague.role] ?? selectedLeague.role}`}</Badge>
+      ) : null}
       <select
         value={selectedLeagueId ?? ''}
         onChange={(e) => setSelectedLeagueId(e.target.value ? Number(e.target.value) : null)}

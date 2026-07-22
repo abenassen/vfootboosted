@@ -54,7 +54,7 @@ export default function LeaguePage() {
         <SectionTitle>Lega</SectionTitle>
         <div className="mt-2 text-sm text-slate-600">Non appartieni ancora a nessuna lega.</div>
         <Link to="/league-admin" className="mt-3 inline-flex rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">
-          Vai a User Admin (crea/join)
+          Vai a Le mie leghe (crea o unisciti)
         </Link>
       </Card>
     );
@@ -169,9 +169,9 @@ export default function LeaguePage() {
 
       <Card className="p-4">
         <SectionTitle>Gestione Lega</SectionTitle>
-        <div className="mt-2 text-sm text-slate-600">Mercato, roster, competizioni e asta sono nella sezione League Admin (contesto lega).</div>
+        <div className="mt-2 text-sm text-slate-600">Mercato, roster, competizioni e asta sono nella sezione Gestione lega.</div>
         <Link to="/league-admin?tab=league" className="mt-3 inline-flex rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">
-          Apri League Admin (lega)
+          Apri Gestione lega
         </Link>
       </Card>
     </div>

@@ -59,7 +59,7 @@ export default function MarketPage() {
           gestita dalla sezione amministrazione.
         </div>
         <Link to="/league-admin?tab=league" className="mt-3 inline-flex">
-          <Button>Vai all’asta (League Admin)</Button>
+          <Button>Vai all’asta (Gestione lega)</Button>
         </Link>
       </Card>
     </div>

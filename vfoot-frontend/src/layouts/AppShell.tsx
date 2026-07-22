@@ -11,7 +11,7 @@ import { useCompetitionContext } from '../league/CompetitionContext';
 import { compColor } from '../league/competitionColors';
 
 // League-scoped navigation (left sidebar + mobile bar): everything here is about
-// the CURRENTLY selected league. User-level actions (User Admin) and switching
+// the CURRENTLY selected league. User-level actions (Le mie leghe) and switching
 // between leagues live in the top bar instead.
 // scope: 'competition' pages refer to the CURRENT competition (they follow the
 // competition switcher) and get an indigo accent; 'league' pages are global.
@@ -166,7 +166,7 @@ export default function AppShell() {
                 isUserAdmin ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
               )}
             >
-              <span>🧑‍💼</span> User Admin
+              <span>🧑‍💼</span> Le mie leghe
             </Link>
             <div className="text-right text-xs leading-tight">
               <div className="text-slate-500">{user?.username ?? 'Utente'}</div>
@@ -195,7 +195,7 @@ export default function AppShell() {
                 ? `Ruolo: ${selectedLeague.role}`
                 : leagues.length
                   ? 'Seleziona una lega dal menu in alto'
-                  : 'Crea o unisciti a una lega da User Admin'}
+                  : 'Crea o unisciti a una lega da Le mie leghe'}
             </div>
           </div>
         </aside>
@@ -219,7 +219,7 @@ export default function AppShell() {
             <div className="flex items-center gap-2">
               <Link
                 to={USER_ADMIN_TO}
-                aria-label="User Admin"
+                aria-label="Le mie leghe"
                 className={clsx(
                   'rounded-xl px-2 py-2 text-sm',
                   isUserAdmin ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'

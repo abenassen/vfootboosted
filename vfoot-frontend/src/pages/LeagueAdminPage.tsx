@@ -539,7 +539,7 @@ export default function LeagueAdminPage() {
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <SectionTitle>{activeTab === 'user' ? 'User Admin' : 'League Admin'}</SectionTitle>
+        <SectionTitle>{activeTab === 'user' ? 'Le mie leghe' : 'Gestione lega'}</SectionTitle>
         <div className="mt-2 text-sm text-slate-600">
           {activeTab === 'user'
             ? 'Profilo utente e gestione delle tue leghe.'
@@ -663,7 +663,7 @@ export default function LeagueAdminPage() {
                 ))}
               </select>
               <Button size="sm" variant="secondary" onClick={() => setActiveTab('league')} disabled={!selectedLeagueId}>
-                Vai a League Admin
+                Vai a Gestione lega
               </Button>
               {selectedLeague ? <Badge tone={selectedLeague.market_open ? 'green' : 'red'}>Mercato {selectedLeague.market_open ? 'aperto' : 'chiuso'}</Badge> : null}
             </div>
@@ -671,7 +671,7 @@ export default function LeagueAdminPage() {
         </>
       ) : !isAdmin ? (
         <Card className="p-4">
-          <SectionTitle>League Admin</SectionTitle>
+          <SectionTitle>Gestione lega</SectionTitle>
           <div className="mt-2 text-sm text-slate-600">
             Serve il ruolo <b>admin</b> in questa lega per gestire roster, competizioni, giornate e asta.
             {selectedLeague ? ` Il tuo ruolo qui è "${selectedLeague.role}".` : ' Seleziona una lega.'}
@@ -869,7 +869,7 @@ export default function LeagueAdminPage() {
 
               {leagueTab === 'overview' ? (
                 <Card className="p-4">
-                  <SectionTitle>League Admin Overview</SectionTitle>
+                  <SectionTitle>Panoramica lega</SectionTitle>
                   <ul className="mt-3 space-y-2 text-sm text-slate-700">
                     <li>• Roster: gestione giocatori per ciascun team della lega.</li>
                     <li>• Competizioni: crea round robin / knockout dai team partecipanti.</li>
@@ -1841,7 +1841,7 @@ export default function LeagueAdminPage() {
           ) : (
             <div className="grid gap-4 lg:grid-cols-2">
               <Card className="p-4">
-                <SectionTitle>Funzioni League Admin</SectionTitle>
+                <SectionTitle>Funzioni di gestione lega</SectionTitle>
                 <ul className="mt-3 space-y-2 text-sm text-slate-700">
                   <li>• Apri/chiudi mercato</li>
                   <li>• Modifica roster con ricerca giocatori per nome</li>
@@ -1852,9 +1852,9 @@ export default function LeagueAdminPage() {
               <Card className="p-4">
                 <SectionTitle>Come Procedere</SectionTitle>
                 <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-700">
-                  <li>Passa al tab User Admin per creare/joinare una lega.</li>
+                  <li>Passa alla scheda Le mie leghe per creare una lega o unirti a una esistente.</li>
                   <li>Seleziona la lega nel menu in alto.</li>
-                  <li>Torna su League Admin per i controlli avanzati.</li>
+                  <li>Torna su Gestione lega per i controlli avanzati.</li>
                 </ol>
               </Card>
             </div>
