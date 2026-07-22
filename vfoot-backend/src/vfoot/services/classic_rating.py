@@ -32,7 +32,8 @@ from collections import defaultdict
 from django.db.models import Sum
 
 from realdata.models import (
-    MatchAppearance, Match, Player, PlayerZoneFeature, PROVIDER_SOFASCORE,
+    MatchAppearance, Match, MatchShot, Player, PlayerOnPitchInterval,
+    PlayerZoneFeature, PROVIDER_SOFASCORE,
 )
 
 # Relative value of each action. Errors are negative. Only the ratios matter (the
@@ -146,6 +147,33 @@ SHRINKAGE_MINUTES = 25
 # the fat-tailed-cameo problem at its source (the per-90 blow-up), before shrinkage.
 EXTRAP_FLOOR_MINUTES = 55
 
+# --- Defensive exposure (outfield defenders) ---------------------------------
+# A defender's index is otherwise built from clearances, interceptions, blocks and
+# duels — the VOLUME of defending. Under siege those all rise while the team
+# concedes, so the two signals cancel and the vote ends up blind to the outcome:
+# measured over a season, our defender vote correlated -0.055 with goals conceded
+# against -0.53 for both an external pagella and SofaScore's own rating.
+#
+# The fix is deliberately NOT "the team conceded, so the back four all drop". That
+# is collective punishment, and it is demonstrably what the external sources do:
+# among defenders with no recorded individual error at all, their vote still falls
+# from 6.28 to 5.12 as the team goes from 0 to 4 conceded. Instead we charge each
+# defender with the danger the opponent created IN THE ZONES HE PATROLLED, from
+# the shot map, scaled by how long he was on the pitch. A centre-back does not pay
+# for a goal born on the far flank.
+#
+# That measure turns out to carry both components on its own, in a proportion the
+# data chose rather than one we imposed: 57% of its variance is between back
+# lines (the team suffered) and 43% within one (this defender was exposed).
+#
+# Weight 1.0: swept against SofaScore's INDEPENDENT rating, agreement peaks there
+# (0.531 -> 0.541) and falls away beyond it, while agreement with the external
+# pagella keeps climbing to 3.0. Past 1.0 we would not be measuring better, only
+# importing their collective punishment — the independent referee is what sets the
+# stop. The effect is deliberately modest: defenders end up at -0.09 against goals
+# conceded, not the -0.53 of the sources that punish the whole back line.
+DEF_EXPOSURE_WEIGHT = 1.0
+
 # 'A voto' vs 'senza voto' (s.v.): classic fantacalcio rates a player only if he
 # played enough AND was involved enough; below that he gets NO vote (a bench player
 # replaces him), not a 6. Involvement is proxied by ball touches. Both tunable.
@@ -222,11 +250,19 @@ def _gk_index_from_totals(totals: dict, minutes: int) -> float:
     return idx
 
 
-def index_for_role(role: str, totals: dict, minutes: int) -> float:
-    """Dispatch to the goalkeeper or outfield index for a player's role."""
+def index_for_role(role: str, totals: dict, minutes: int,
+                   exposure: float = 0.0) -> float:
+    """Dispatch to the goalkeeper or outfield index for a player's role.
+
+    ``exposure`` is the opponent xG created in the zones a DEFENDER patrolled (see
+    DEF_EXPOSURE_WEIGHT); it is ignored for every other role, whose job is not to
+    prevent it."""
     if role == Player.ROLE_GK:
         return _gk_index_from_totals(totals, minutes)
-    return _index_from_totals(totals, minutes)
+    idx = _index_from_totals(totals, minutes)
+    if role == Player.ROLE_DEF and exposure > 0:
+        idx -= DEF_EXPOSURE_WEIGHT * _compress(exposure)
+    return idx
 
 
 def _index_from_totals(totals: dict, minutes: int) -> float:
@@ -259,6 +295,100 @@ def _per_match_player_totals(match_ids):
     return out
 
 
+def _fallback_window(minutes: int, is_starter: bool) -> tuple[float, float]:
+    """Last-resort on-pitch window when no interval was recorded for the match.
+
+    A starter is assumed to run from kick-off, a substitute to finish the match.
+    Wrong whenever a substitute is himself withdrawn later — a case this shape
+    cannot express at all — which is exactly why PlayerOnPitchInterval exists and
+    is preferred wherever it has been built.
+    """
+    minutes = max(0, min(int(minutes or 0), 95))
+    if is_starter:
+        return 0.0, float(minutes)
+    return float(max(0, 95 - minutes)), 95.0
+
+
+def on_pitch_windows(match_ids, minutes: dict, appearances: dict) -> dict:
+    """{(match_id, player_id): (from_minute, to_minute)}.
+
+    Prefers the recorded interval — built from the provider's substitution and
+    red-card incidents, so it is exact and covers the substitute who is himself
+    replaced — and falls back to the crude assumption only for matches where no
+    interval exists.
+    """
+    windows = {(mid, pid): (float(a), float(b)) for mid, pid, a, b in
+               (PlayerOnPitchInterval.objects
+                .filter(match_id__in=match_ids)
+                .values_list("match_id", "player_id", "start_minute", "end_minute"))}
+    for key, (side, is_starter) in appearances.items():
+        if key not in windows:
+            windows[key] = _fallback_window(minutes.get(key, 0), is_starter)
+    return windows
+
+
+def defensive_exposure(match_ids, minutes: dict) -> dict:
+    """{(match_id, player_id): opponent xG created where AND WHILE this player played}.
+
+    Two frames have to line up, and both are verified rather than assumed:
+
+    * the two teams' zone grids are a 180 degree rotation of each other, so an
+      attacking zone (col, row) is (4-col, 3-row) for the defence. Attributing
+      with the row mirrored puts more conceded danger on the defenders who
+      actually committed a shot-conceding error (1.21x vs 1.14x unmirrored),
+      matching the rotation independently established for the shot map;
+    * only shots struck while he was on the pitch count. Scaling a whole-match
+      total by minutes played, which is what this did first, is unbiased on
+      average (-0.005) yet misattributes more than 20 percentage points of a
+      match's danger for one defender in seven. A defender must not answer for a
+      goal conceded after he came off.
+    """
+    minute_of: dict[tuple, list] = defaultdict(list)
+    for mid, side, minute, zk, xg in (MatchShot.objects
+                                      .filter(match_id__in=match_ids,
+                                              provider=PROVIDER_SOFASCORE)
+                                      .values_list("match_id", "team_side", "minute",
+                                                   "zone_key", "xg")):
+        if not xg:
+            continue
+        _, col, row = zk.split("_")
+        minute_of[(mid, side)].append((minute, int(col), int(row), xg))
+    if not minute_of:
+        return {}
+
+    appearances = {(a["match_id"], a["player_id"]): (a["side"], a["is_starter"])
+                   for a in MatchAppearance.objects.filter(match_id__in=match_ids)
+                   .values("match_id", "player_id", "side", "is_starter")}
+    presence: dict[tuple, dict] = defaultdict(dict)
+    for mid, pid, zk, v in (PlayerZoneFeature.objects
+                            .filter(match_id__in=match_ids, provider=PROVIDER_SOFASCORE,
+                                    feature_key="touches")
+                            .values_list("match_id", "player_id", "zone_key")
+                            .annotate(v=Sum("value"))
+                            .values_list("match_id", "player_id", "zone_key", "v")):
+        _, col, row = zk.split("_")
+        presence[(mid, pid)][(int(col), int(row))] = v
+
+    windows = on_pitch_windows(match_ids, minutes, appearances)
+    opposite = {"home": "away", "away": "home"}
+    out = {}
+    for key, zones in presence.items():
+        side, is_starter = appearances.get(key, (None, False))
+        opp = opposite.get(side)
+        total = sum(zones.values())
+        if not opp or total <= 0:
+            continue
+        lo, hi = windows.get(key, _fallback_window(minutes.get(key, 0), is_starter))
+        exposure = 0.0
+        for minute, col, row, xg in minute_of.get((key[0], opp), ()):
+            if minute is not None and not (lo <= minute <= hi):
+                continue
+            exposure += zones.get((4 - col, 3 - row), 0.0) / total * xg
+        if exposure:
+            out[key] = exposure
+    return out
+
+
 def _minutes_map(match_ids):
     return {(a["match_id"], a["player_id"]): a["minutes_played"]
             for a in MatchAppearance.objects
@@ -279,6 +409,7 @@ def build_reference(competition_season_id: int, *, pooled_std: bool = False) -> 
                      .values_list("id", flat=True))
     totals = _per_match_player_totals(match_ids)
     minutes = _minutes_map(match_ids)
+    exposure = defensive_exposure(match_ids, minutes)
     roles = dict(Player.objects.exclude(classic_role="")
                  .values_list("id", "classic_role"))
 
@@ -292,7 +423,8 @@ def build_reference(competition_season_id: int, *, pooled_std: bool = False) -> 
             continue
         # GKs get their own index AND their own role bucket, so they are z-scored
         # WITHIN the role: the keeper scale is self-calibrating like every other.
-        samples[role].append(index_for_role(role, feats, mins))
+        samples[role].append(index_for_role(role, feats, mins,
+                                            exposure.get((mid, pid), 0.0)))
 
     ref = {}
     for role, vals in samples.items():
@@ -352,6 +484,7 @@ def voto_puro_for_match(match, reference: dict,
     """
     totals = _per_match_player_totals([match.id])
     minutes = _minutes_map([match.id])
+    exposure = defensive_exposure([match.id], minutes)
     roles = dict(Player.objects.values_list("id", "classic_role"))
     keepers = dict(Player.objects.values_list("id", "is_goalkeeper"))
     names = dict(Player.objects.values_list("id", "short_name"))
@@ -364,7 +497,7 @@ def voto_puro_for_match(match, reference: dict,
             continue
         role, role_known = resolve_role(roles.get(pid) or "", feats,
                                         bool(keepers.get(pid)))
-        idx = index_for_role(role, feats, mins)
+        idx = index_for_role(role, feats, mins, exposure.get((mid, pid), 0.0))
         # An inferred KEEPER still belongs in the keeper distribution — his own
         # features identified him. Only an unknown outfielder needs the pool.
         ref_key = role if role else POOLED_OUTFIELD

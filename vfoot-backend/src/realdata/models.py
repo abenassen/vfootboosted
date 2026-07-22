@@ -399,6 +399,52 @@ class PlayerZoneFeature(models.Model):
         ]
 
 
+class MatchShot(models.Model):
+    """One shot, with WHEN and WHERE it happened.
+
+    The zone features aggregate shots and throw the minute away, which is fine for
+    a season total and wrong for anything that has to respect who was on the pitch.
+    It cost us a real defect: charging a defender with the danger conceded in his
+    zones, scaled by minutes played, misattributed more than 20 percentage points
+    of a match's danger for one defender in seven — a player penalised for a goal
+    conceded after he had already been substituted.
+
+    Kept as its own row rather than as another zone feature because a shot is an
+    event, not a quantity: it has a time, an outcome and a taker. Live scoring and
+    match timelines need the same thing.
+    """
+
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="shots")
+    player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name="shots")
+    team_side = models.CharField(max_length=12, choices=SIDE_CHOICES, default=SIDE_UNKNOWN)
+    # Match minute as the provider reports it (stoppage time folded into the
+    # preceding minute, so a 90+3 shot reads 90).
+    minute = models.IntegerField(null=True, blank=True)
+    zone_key = models.CharField(max_length=24)
+    xg = models.FloatField(default=0.0)
+    xgot = models.FloatField(default=0.0)     # post-shot xG; 0 when off target
+    is_goal = models.BooleanField(default=False)
+    shot_type = models.CharField(max_length=24, blank=True, default="")
+    provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES,
+                                default=PROVIDER_SOFASCORE)
+    external_id = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [models.Index(fields=["match", "team_side"]),
+                   models.Index(fields=["match", "minute"])]
+        constraints = [
+            # The provider's own shot id makes re-imports idempotent.
+            models.UniqueConstraint(fields=["match", "provider", "external_id"],
+                                    condition=~models.Q(external_id=""),
+                                    name="uniq_shot_per_provider_id"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.match_id} {self.minute}' {self.team_side} xg={self.xg:.2f}"
+
+
 class TeamZoneFeature(models.Model):
     """
     Aggregated feature values by team side and zone for one match.

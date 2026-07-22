@@ -54,6 +54,7 @@ from realdata.models import (
     Match,
     MatchAppearance,
     MatchDisciplinaryEvent,
+    MatchShot,
     Player,
     PlayerAlias,
     PlayerZoneFeature,
@@ -551,7 +552,8 @@ def _ingest_match(
             if n:
                 log(f"    {side:<5} {pos:<3} meanx={sx / n:.2f} n={n}")
 
-    # Shotmap -> exact shots / xG per zone.
+    # Shotmap -> exact shots / xG per zone, AND one event row per shot.
+    shot_rows: list[MatchShot] = []
     for shot in shots_rows:
         pdata = shot.get("player") or {}
         if not isinstance(pdata, dict) or "id" not in pdata:
@@ -567,6 +569,16 @@ def _ingest_match(
                          player_cache, dob_ts=pdata.get("dateOfBirthTimestamp"))
         inc(player.id, side, zone, "shots", 1.0)
         inc(player.id, side, zone, "xg_shots", _num(shot.get("xg")))
+        # The event itself: the zone aggregate loses the minute, and anything that
+        # must respect who was actually on the pitch needs it.
+        shot_rows.append(MatchShot(
+            match=match, player=player, team_side=side, zone_key=zone,
+            minute=(int(shot["time"]) if isinstance(shot.get("time"), (int, float))
+                    else None),
+            xg=_num(shot.get("xg")), xgot=_num(shot.get("xgot")),
+            is_goal=(str(shot.get("shotType") or "").lower() == "goal"),
+            shot_type=str(shot.get("shotType") or "")[:24],
+            provider=PROVIDER, external_id=str(shot.get("id") or "")))
 
     # Incidents -> disciplinary events (cards). Cards live ONLY here, not in the
     # /lineups statistics, so they must be ingested as part of every import.
@@ -575,6 +587,8 @@ def _ingest_match(
     # Idempotent write: drop this match+provider, then bulk insert.
     PlayerZoneFeature.objects.filter(match=match, provider=PROVIDER).delete()
     TeamZoneFeature.objects.filter(match=match, provider=PROVIDER).delete()
+    MatchShot.objects.filter(match=match, provider=PROVIDER).delete()
+    MatchShot.objects.bulk_create(shot_rows, batch_size=500, ignore_conflicts=True)
 
     def method_for(key: str) -> str:
         if key in ("shots", "xg_shots"):
