@@ -50,3 +50,7 @@ vfoot-backend/src/realdata/services/live_probe_cache/
 vfoot-backend/src/realdata/services/live_probe*.jsonl
 vfoot-backend/src/realdata/services/api_v1_*.json
 vfoot-backend/src/realdata/services/Browser
+
+# Segreti tenuti fuori dal repo per errore/comodita': mai committarli.
+key_single_use.txt
+*.key
