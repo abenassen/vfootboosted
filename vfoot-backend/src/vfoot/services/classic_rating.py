@@ -111,6 +111,25 @@ PER90_WEIGHTS = {
     # one played in your own. This is the progression signal the deleted
     # passes_into_box and progressive_passes were reaching for and never had.
     "passes_opp_half": 0.05,
+    # Aerial duels, also a subset of the duel counts: the claim is that a header
+    # contested is worth about half again a duel on the ground, because that is
+    # where set pieces and crosses are decided. Same mirrored shape as the duels.
+    "aerials_won": 0.10,
+    "aerials_lost": -0.10,
+    # A tackle is a committed, deliberate intervention, unlike coming out of a
+    # loose 50-50. Extra weight on the subset of duels won that way.
+    "tackles_won": 0.10,
+    # Being fouled is evidence an opponent had to stop you illegally.
+    "was_fouled": 0.05,
+    # An accurate long ball is progression, like a pass in the opponent half.
+    "long_balls_completed": 0.05,
+    # NOT here: crosses_completed. An accurate cross accrues to whoever crosses
+    # OFTEN, and the crosses that actually create something are already counted by
+    # expected_assists and key_passes — so it adds volume without end product. The
+    # diagnostic agrees: adding it at 0.10 LOWERS agreement with the provider's
+    # rating for every outfield role (DIF .623 -> .613, CEN .699 -> .695).
+    # NOT here either: possession_lost, which CONTAINS dispossessed and
+    # unsuccessfulTouch, both already weighted.
     "touches_in_box": 0.10,
     "duels_won": 0.20,
     "interceptions": 0.30,
