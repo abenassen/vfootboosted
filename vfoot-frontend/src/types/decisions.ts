@@ -7,6 +7,13 @@
 export interface DecisionOption {
   value: string;
   label: string;
+  /** How often players in the same provider position turned out to be this role,
+   *  among the ones we could actually measure. Absent when we have no comparable
+   *  cases at all. */
+  share?: number;
+  /** How many such players. "75%" out of four and out of forty are different
+   *  statements, and only one is worth acting on. */
+  sample?: number;
 }
 
 export interface LeagueDecision {
