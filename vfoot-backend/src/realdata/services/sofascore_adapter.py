@@ -207,6 +207,32 @@ def _norm_point(x: Any, y: Any, side: str, flip_away: bool) -> tuple[float, floa
     return min(1.0, max(0.0, nx)), min(1.0, max(0.0, ny))
 
 
+def _shot_point_xy(coords: Any) -> tuple[Any, Any]:
+    """Shot coordinates, brought into the SAME frame as the heatmap.
+
+    SofaScore's two payloads do not agree. A heatmap point is already expressed in
+    the player's attacking direction (own goal at x=0), which is why keepers sit
+    at x~10 and forwards at x~64. The shotmap's ``playerCoordinates`` instead
+    measure from the goal being ATTACKED: every shot, for both teams, lands at
+    x~15 — which read in the heatmap frame would put every strike inside the
+    shooter's own six-yard box.
+
+    It is a 180 degree rotation, not a mirror of the long axis alone: comparing
+    1295 shots with their taker's own heatmap, the y correlation is -0.47, and
+    562 of 761 shots by clearly wide players fell on the opposite flank. So BOTH
+    axes are inverted.
+
+    Consequence of not doing this, which is why it went unnoticed for so long:
+    the voto puro sums xg_shots across zones, so a shot in the wrong zone changed
+    no vote. Only spatial consumers — the Aura zone vectors — were affected.
+    """
+    x, y = _point_xy(coords)
+    try:
+        return 100.0 - float(x), 100.0 - float(y)
+    except (TypeError, ValueError):
+        return None, None
+
+
 def _point_xy(pt: Any) -> tuple[Any, Any]:
     if isinstance(pt, (list, tuple)) and len(pt) >= 2:
         return pt[0], pt[1]
@@ -532,7 +558,7 @@ def _ingest_match(
             continue
         side = SIDE_HOME if shot.get("isHome") else SIDE_AWAY
         coords = shot.get("playerCoordinates") or {}
-        px, py = _point_xy(coords)
+        px, py = _shot_point_xy(coords)
         norm = _norm_point(px, py, side, flip_away)
         if norm is None:
             continue
