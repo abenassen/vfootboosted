@@ -66,6 +66,17 @@ _TM_ROLE_MAP = {
     "right winger": Player.ROLE_MID,
     "centre-forward": Player.ROLE_FWD,
     "second striker": Player.ROLE_FWD,
+    # Generic labels TM uses when it has no detailed position on file. Omitting
+    # them left the player with NO role at all — and a player with no role used
+    # to disappear from the pagella as 'senza voto'. An unmapped position is now
+    # also COUNTED and listed in the report (see stats["unmapped_position"]):
+    # silence is what let this class of hole survive.
+    "sweeper": Player.ROLE_DEF,
+    "defender": Player.ROLE_DEF,
+    "midfielder": Player.ROLE_MID,
+    "striker": Player.ROLE_FWD,
+    "forward": Player.ROLE_FWD,
+    "attack": Player.ROLE_FWD,
 }
 # Filler tokens stripped before matching TM club names to SofaScore team names.
 _CLUB_FILLER = {"fc", "ac", "us", "ss", "ssc", "acf", "as", "bc", "cfc", "afc",
@@ -270,8 +281,9 @@ class Command(BaseCommand):
 
         stats = {"relinked": 0, "dob": 0, "name": 0, "fuzzy": 0, "created": 0,
                  "unmatched_skipped": 0, "market_values": 0, "dob_fixed": 0, "stints": 0, "gk_tagged": 0,
-                 "role_set": 0, "departures_closed": 0}
+                 "role_set": 0, "departures_closed": 0, "unmapped_position": 0}
         dob_changes, created_players, fuzzy_pairs, unmatched = [], [], [], []
+        unmapped_positions = set()
         # (player_id, team_season_id) pairs present in THIS scrape — drives the
         # departure check below. Players never seen here whose stint is still open
         # have left every Serie A squad (transfer out / abroad).
@@ -288,6 +300,12 @@ class Command(BaseCommand):
                     pos_norm = (pl.get("position") or "").strip().lower()
                     is_gk = pos_norm == _TM_GK_POSITION
                     tm_role = _TM_ROLE_MAP.get(pos_norm, "")
+                    # A position we don't know maps to NO role, and a player with
+                    # no role used to vanish from the pagella as 'senza voto'.
+                    # Never let that happen quietly: surface it in the report.
+                    if pos_norm and not tm_role:
+                        stats["unmapped_position"] += 1
+                        unmapped_positions.add(pos_norm)
                     player = tm_alias.get(tm_id)
                     method = "relink"
                     if player is None:
@@ -430,6 +448,10 @@ class Command(BaseCommand):
         self.stdout.write(f"DOB corrections from TM      : {s['dob_fixed']}")
         self.stdout.write(f"Goalkeeper tags set/changed  : {s['gk_tagged']}")
         self.stdout.write(f"Classic roles set/changed    : {s['role_set']}")
+        if s["unmapped_position"]:
+            self.stdout.write(self.style.WARNING(
+                f"POSIZIONI TM NON MAPPATE      : {s['unmapped_position']} giocatori "
+                f"restano SENZA ruolo -> {sorted(unmapped_positions)}"))
         if not close_departures:
             self.stdout.write("Departures (transfers out)   : not checked "
                               "(--no-close-departures)")
