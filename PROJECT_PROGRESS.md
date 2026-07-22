@@ -3369,6 +3369,14 @@ sito pubblico si carica con status 200 e titolo reale. A essere bloccate sono
 solo le chiamate `/api/v1/` dall'IP del datacenter. Sembrava un blocco perche'
 il client ritenta con backoff esponenziale invece di fallire subito.
 
+**VPN provata, non risolve**: con Surfshark attivo dalla macchina di casa l'IP di
+uscita e' `169.150.197.59` — **Datacamp Limited**, cioe' un provider di hosting.
+Risultato: **403**, identico al Linode, mentre la stessa chiamata senza VPN da'
+200 in 5s. Le VPN commerciali non danno un IP residenziale, spostano solo da un
+datacenter a un altro (e per giunta condiviso da molti utenti, quindi piu'
+segnalato). Quindi far usare la VPN al Linode non ha senso: stesso esito, in
+cambio della complicazione del routing selettivo.
+
 **Conseguenza sul piano**: il polling live non puo' partire dal Linode. La strada
 gia' ipotizzata — polling sul **Raspberry di casa** (IP residenziale) che spinge
 i dati verso il server — diventa quella necessaria. Da decidere il meccanismo di
