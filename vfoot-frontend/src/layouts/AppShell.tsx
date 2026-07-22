@@ -25,7 +25,6 @@ const leagueNav = [
   { to: '/listone', label: 'Listone', icon: '📋', scope: 'league' as const },
   { to: '/market', label: 'Mercato', icon: '💱', scope: 'league' as const },
   { to: '/league-admin?tab=league', label: 'Gestione lega', icon: '⚙️', scope: 'league' as const },
-  { to: '/simulation', label: 'Simulazione', icon: '🎮', scope: 'league' as const },
 ];
 
 const USER_ADMIN_TO = '/league-admin?tab=user';
@@ -44,9 +43,6 @@ function usePageTitle(pathname: string) {
     if (pathname.startsWith('/serie-a')) return 'Serie A';
     if (pathname.startsWith('/listone')) return 'Listone';
     if (pathname.startsWith('/market')) return 'Mercato';
-    if (pathname.startsWith('/simulation/matches/')) return 'Partita simulata';
-    if (pathname.startsWith('/simulation/matches')) return 'Partite simulate';
-    if (pathname.startsWith('/simulation')) return 'Simulazione';
     return 'Vfoot';
   }, [pathname]);
 }
@@ -187,17 +183,16 @@ export default function AppShell() {
           </div>
           <nav className="space-y-1">{nav.map(renderNav)}</nav>
 
-          <div className="mt-6 rounded-2xl bg-white shadow-card p-4">
-            <div className="text-xs font-semibold text-slate-500">Lega attiva</div>
-            <div className="mt-1 font-semibold">{selectedLeague?.name ?? 'Nessuna lega selezionata'}</div>
-            <div className="mt-2 text-xs text-slate-500">
-              {selectedLeague
-                ? `Ruolo: ${selectedLeague.role}`
-                : leagues.length
-                  ? 'Seleziona una lega dal menu in alto'
-                  : 'Crea o unisciti a una lega da Le mie leghe'}
+          {/* No "active league" card here: name and role are already in the top
+              bar, where they can also be CHANGED. Only the empty state needs a
+              word, since then the sidebar links lead nowhere useful. */}
+          {!selectedLeague ? (
+            <div className="mt-6 rounded-2xl bg-white shadow-card p-4 text-xs text-slate-500">
+              {leagues.length
+                ? 'Seleziona una lega dal menu in alto.'
+                : 'Crea o unisciti a una lega da Le mie leghe.'}
             </div>
-          </div>
+          ) : null}
         </aside>
 
         {/* Main */}

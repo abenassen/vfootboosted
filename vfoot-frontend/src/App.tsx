@@ -11,9 +11,6 @@ import CompetitionPage from './pages/CompetitionPage';
 import MarketPage from './pages/MarketPage';
 import LeagueAdminPage from './pages/LeagueAdminPage';
 import CompetitionCreatePage from './pages/CompetitionCreatePage';
-import SimulationOverviewPage from './pages/SimulationOverviewPage';
-import SimulationMatchesPage from './pages/SimulationMatchesPage';
-import SimulationMatchDetailPage from './pages/SimulationMatchDetailPage';
 import NotFoundPage from './pages/NotFoundPage';
 import LandingPage from './pages/LandingPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
@@ -62,9 +59,6 @@ export default function App() {
         <Route path="market" element={<MarketPage />} />
         <Route path="league-admin" element={<LeagueAdminPage />} />
         <Route path="league-admin/competitions/new" element={<CompetitionCreatePage />} />
-        <Route path="simulation" element={<SimulationOverviewPage />} />
-        <Route path="simulation/matches" element={<SimulationMatchesPage />} />
-        <Route path="simulation/matches/:fixtureId" element={<SimulationMatchDetailPage />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
