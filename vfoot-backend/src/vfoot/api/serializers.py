@@ -35,13 +35,22 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
-    email = serializers.EmailField(required=False, allow_blank=True)
+    # Mandatory and unique since accounts are confirmed by email: without a
+    # deliverable, unshared address there is no way to prove ownership or to
+    # recover a password.
+    email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True, min_length=8)
 
     def validate_username(self, value: str) -> str:
-        if User.objects.filter(username=value).exists():
+        if User.objects.filter(username__iexact=value).exists():
             raise serializers.ValidationError("Username already exists.")
+        return value
+
+    def validate_email(self, value: str) -> str:
+        value = value.strip().lower()
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("Email already registered.")
         return value
 
     def validate(self, attrs):
@@ -54,3 +63,16 @@ class RegisterSerializer(serializers.Serializer):
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True)
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    uid = serializers.CharField(max_length=64)
+    token = serializers.CharField(max_length=128)
+
+
+class ResendVerificationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    credential = serializers.CharField(write_only=True)

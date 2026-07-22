@@ -14,12 +14,25 @@ from rest_framework.views import APIView
 
 from vfoot.api.data_builders import build_lineup_context
 from vfoot.api.serializers import (
+    GoogleAuthSerializer,
     LineupContextQuerySerializer,
     LoginSerializer,
     MatchesQuerySerializer,
     RegisterSerializer,
+    ResendVerificationSerializer,
     SaveLineupRequestSerializer,
     UserSerializer,
+    VerifyEmailSerializer,
+)
+from vfoot.services.email_verification import (
+    activate,
+    send_verification_email,
+    user_from_uid,
+)
+from vfoot.services.google_auth import (
+    GoogleAuthError,
+    get_or_create_user,
+    verify_id_token,
 )
 from vfoot.models import SavedLineupSnapshot
 from vfoot.services.duel_engine import compute_match_zone_duels
@@ -34,17 +47,86 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        # Inactive until the emailed link is opened, and NO token is returned:
+        # handing out credentials here would make the confirmation decorative.
         user = User.objects.create_user(
             username=data["username"],
-            email=data.get("email", ""),
+            email=data["email"],
             password=data["password"],
+            is_active=False,
         )
-        token, _ = Token.objects.get_or_create(user=user)
+        # Only send once the row is safely committed — otherwise a later failure
+        # in this transaction would roll the user back after the mail had gone.
+        transaction.on_commit(lambda: send_verification_email(user))
 
         return Response(
-            {"token": token.key, "user": UserSerializer(user).data},
+            {"detail": "Ti abbiamo inviato un'email di conferma. Apri il link "
+                       "per attivare l'account.",
+             "email": user.email},
             status=status.HTTP_201_CREATED,
         )
+
+
+class VerifyEmailView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = user_from_uid(data["uid"])
+        if user is None:
+            return Response({"detail": "Link di conferma non valido."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if user.is_active:
+            # Re-opening the link (or a mail client prefetching it) must not read
+            # as an error to someone whose account is already usable.
+            return Response({"detail": "Account già attivo: puoi accedere.",
+                             "already_active": True}, status=status.HTTP_200_OK)
+        if not activate(user, data["token"]):
+            return Response({"detail": "Link di conferma non valido o scaduto."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({"token": token.key, "user": UserSerializer(user).data},
+                        status=status.HTTP_200_OK)
+
+
+class ResendVerificationView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ResendVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].strip().lower()
+
+        user = User.objects.filter(email__iexact=email, is_active=False).first()
+        if user is not None:
+            send_verification_email(user)
+        # Always the same answer: differentiating would turn this endpoint into a
+        # way to discover which addresses are registered.
+        return Response({"detail": "Se l'indirizzo è registrato e in attesa di "
+                                   "conferma, ti abbiamo inviato una nuova email."},
+                        status=status.HTTP_200_OK)
+
+
+class GoogleAuthView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = GoogleAuthSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            identity = verify_id_token(serializer.validated_data["credential"])
+            user, created = get_or_create_user(identity)
+        except GoogleAuthError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({"token": token.key, "user": UserSerializer(user).data,
+                         "created": created},
+                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 class LoginView(APIView):
@@ -57,6 +139,17 @@ class LoginView(APIView):
 
         user = authenticate(username=data["username"], password=data["password"])
         if not user:
+            # authenticate() rejects inactive users too, so a correct password on
+            # an unconfirmed account would otherwise read as "wrong password" and
+            # send the user off resetting a password that was never the problem.
+            pending = User.objects.filter(username__iexact=data["username"],
+                                          is_active=False).first()
+            if pending and pending.check_password(data["password"]):
+                return Response(
+                    {"detail": "Account non ancora confermato. Controlla la tua "
+                               "email e apri il link di conferma.",
+                     "email_unconfirmed": True},
+                    status=status.HTTP_403_FORBIDDEN)
             return Response({"detail": "Username o password non corretti."}, status=status.HTTP_401_UNAUTHORIZED)
 
         token, _ = Token.objects.get_or_create(user=user)

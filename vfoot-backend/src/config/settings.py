@@ -261,6 +261,35 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# --- Email + Google sign-in ----------------------------------------------
+# Outbound port 25 is blocked on the VPS, so production sends through a relay on
+# 587 (STARTTLS). In development EMAIL_BACKEND defaults to the console one, so
+# the confirmation flow is fully testable without any mail account.
+EMAIL_BACKEND = os.environ.get(
+    "DJANGO_EMAIL_BACKEND",
+    "django.core.mail.backends.smtp.EmailBackend" if not DEBUG
+    else "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = _env_bool("EMAIL_USE_TLS", True)
+EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "15"))
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL",
+                                    "Vfoot Boosted <no-reply@vfoot.it>")
+
+# Confirmation links point at the SPA, which then calls the verify endpoint.
+VFOOT_FRONTEND_BASE_URL = os.environ.get("VFOOT_FRONTEND_BASE_URL",
+                                         "http://localhost:5173")
+
+# Empty means the Google button is simply not offered; the endpoint then refuses
+# rather than silently accepting unverifiable tokens.
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+
+# How long a confirmation link stays valid (Django reuses this for its own
+# password-reset tokens; 3 days is long enough to survive a spam folder).
+PASSWORD_RESET_TIMEOUT = int(os.environ.get("DJANGO_TOKEN_TIMEOUT", str(60 * 60 * 72)))
+
 # Django only prints request tracebacks when DEBUG is on, so in production a 500
 # is otherwise a blank page with nothing in the journal. Send them to stderr,
 # which systemd captures — `journalctl -u vfoot` then shows the real error.

@@ -61,6 +61,9 @@ from vfoot.api.views import (
     MatchListView,
     MeView,
     RegisterView,
+    ResendVerificationView,
+    VerifyEmailView,
+    GoogleAuthView,
     SaveLineupView,
 )
 
@@ -153,6 +156,10 @@ urlpatterns = [
     path("nominations/<int:nomination_id>/close", AuctionCloseNominationView.as_view(), name="auction-close-nomination"),
     path("players/search", PlayerSearchView.as_view(), name="player-search"),
     path("auth/register", RegisterView.as_view(), name="auth-register"),
+    path("auth/verify-email", VerifyEmailView.as_view(), name="auth-verify-email"),
+    path("auth/resend-verification", ResendVerificationView.as_view(),
+         name="auth-resend-verification"),
+    path("auth/google", GoogleAuthView.as_view(), name="auth-google"),
     path("auth/login", LoginView.as_view(), name="auth-login"),
     path("auth/me", MeView.as_view(), name="auth-me"),
     path("auth/logout", LogoutView.as_view(), name="auth-logout"),
