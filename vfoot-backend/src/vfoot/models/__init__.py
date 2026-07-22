@@ -17,6 +17,8 @@ from vfoot.models.fantasy import (
     FantasyRosterSlot,
     FantasyTeam,
     LeagueMembership,
+    LeaguePlayerRole,
+    OfficeOverride,
 )
 from vfoot.models.heatmap import HeatmapGrid
 from vfoot.models.lineup import SavedLineupSnapshot
@@ -43,6 +45,8 @@ __all__ = [
     "FantasyTeam",
     "HeatmapGrid",
     "LeagueMembership",
+    "LeaguePlayerRole",
+    "OfficeOverride",
     "SavedLineupSnapshot",
     "PlayerZonePresence",
     "Zone",

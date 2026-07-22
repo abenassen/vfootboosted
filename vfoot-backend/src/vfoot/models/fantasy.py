@@ -7,10 +7,43 @@ from realdata.models import CompetitionSeason, Match, Player
 
 
 class FantasyLeague(models.Model):
+    # Game mode, chosen at creation; drives formation rules, scoring engine and
+    # page rendering. "aura" = the innovative zone-occupation/duel mode (default,
+    # the existing behaviour); "classic" = traditional fantacalcio (role-based
+    # formations, score = sum of fantavoti = voto puro + bonus/malus).
+    MODE_AURA = "aura"
+    MODE_CLASSIC = "classic"
+    MODE_CHOICES = [(MODE_AURA, "Aura"), (MODE_CLASSIC, "Classic")]
+
     name = models.CharField(max_length=120)
     owner = models.ForeignKey(User, on_delete=models.PROTECT, related_name="owned_fantasy_leagues")
+    mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_AURA)
     invite_code = models.CharField(max_length=12, unique=True, db_index=True, null=True, blank=True)
     market_open = models.BooleanField(default=True)
+    # Max bench substitutions applied when scoring a matchday (classic: an s.v.
+    # starter is replaced by the first eligible bench player in priority order, up
+    # to this many times). League-configurable by the admin; fantacalcio default 5.
+    max_substitutions = models.PositiveSmallIntegerField(default=5)
+    # Defence modifier (classic): a reward for fielding a strong, deep defence.
+    # Awarded only if AT LEAST 4 defenders START (not if 4 is reached via subs).
+    DEF_BONUS_ADD_OWN = "add_own"
+    DEF_BONUS_SUB_OPP = "subtract_opponent"
+    DEF_BONUS_MODE_CHOICES = [
+        (DEF_BONUS_ADD_OWN, "Aggiunto alla propria squadra"),
+        (DEF_BONUS_SUB_OPP, "Sottratto alla squadra avversaria"),
+    ]
+    defense_bonus_enabled = models.BooleanField(default=True)
+    defense_bonus_mode = models.CharField(
+        max_length=20, choices=DEF_BONUS_MODE_CHOICES, default=DEF_BONUS_ADD_OWN)
+    # Real-world season this fantasy league is played on top of (e.g. Serie A
+    # 2025-26). Competition rounds map to this season's real matchdays.
+    reference_season = models.ForeignKey(
+        CompetitionSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fantasy_leagues",
+    )
     created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self) -> str:
@@ -87,6 +120,10 @@ class FantasyCompetition(models.Model):
 
     starts_at = models.DateField(null=True, blank=True)
     ends_at = models.DateField(null=True, blank=True)
+    # Span over the league's reference-season real matchdays: the competition's
+    # rounds are spread uniformly across [start_matchday, end_matchday].
+    start_matchday = models.IntegerField(null=True, blank=True)
+    end_matchday = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -109,6 +146,9 @@ class CompetitionStage(models.Model):
         default=TYPE_ROUND_ROBIN,
     )
     order_index = models.IntegerField(default=1)
+    # Round-robin only: when true, every pairing is played twice (home/away
+    # swapped), doubling the rounds (andata/ritorno). Ignored for knockout.
+    double_round = models.BooleanField(default=False)
     status = models.CharField(
         max_length=16,
         choices=[(STATUS_DRAFT, "Draft"), (STATUS_ACTIVE, "Active"), (STATUS_DONE, "Done")],
@@ -183,6 +223,91 @@ class FantasyMatchday(models.Model):
         ordering = ["real_matchday", "id"]
 
 
+class OfficeOverride(models.Model):
+    """League-scoped 'voto d'ufficio': substitute a real match's data with an
+    office result when that data is missing/late (typically a postponement).
+
+    Takes PRIORITY over real SofaScore data when the league computes its fantasy
+    scores. Each league decides INDEPENDENTLY — and occasionally — whether to wait
+    for the real data or impose an office result for a given real match; one league
+    overriding a match does not affect another.
+
+    The substitute follows the "abolish roles" design: outfield players receive a
+    global-mean, 90'-normalised zone vector (an average contributor — the spatial
+    equivalent of a flat "6"); goalkeepers, scored on their separate goals-prevented
+    channel, receive a neutral goals-prevented scalar instead. Both are tunable
+    around the mean. The mean is computed at scoring time, so this row only stores
+    the decision + tuning, never frozen numbers.
+    """
+
+    TEMPLATE_NEUTRAL_MEAN = "neutral_mean"
+    TEMPLATE_CHOICES = [(TEMPLATE_NEUTRAL_MEAN, "Neutral mean (6 d'ufficio)")]
+
+    league = models.ForeignKey(FantasyLeague, on_delete=models.CASCADE, related_name="office_overrides")
+    # Context: which fantasy matchday this override belongs to (for listing/UI).
+    fantasy_matchday = models.ForeignKey(
+        FantasyMatchday, on_delete=models.CASCADE, related_name="office_overrides"
+    )
+    # The real match whose data is replaced. Players appearing in this match (per
+    # roster / lineup) get the office substitute instead of their real performance.
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="office_overrides")
+
+    template = models.CharField(max_length=24, choices=TEMPLATE_CHOICES, default=TEMPLATE_NEUTRAL_MEAN)
+    # Outfield tuning: multiplier on the global-mean zone vector (1.0 = exactly
+    # average). >1 rewards, <1 penalises, uniformly across zones.
+    outfield_scale = models.FloatField(default=1.0)
+    # Goalkeeper office value: an explicit goals-prevented scalar. Null => use the
+    # neutral/global-mean goals-prevented at scoring time.
+    gk_goals_prevented = models.FloatField(null=True, blank=True)
+
+    reason = models.CharField(max_length=200, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="created_office_overrides")
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("league", "match")]
+        indexes = [
+            models.Index(fields=["league", "fantasy_matchday"]),
+            models.Index(fields=["match", "is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"OfficeOverride(league={self.league_id}, match={self.match_id})"
+
+
+class LeaguePlayerRole(models.Model):
+    """Frozen per-league 'listone' for classic mode: the role each player holds in
+    THIS league.
+
+    Classic fantacalcio fixes roles at season start and never changes them, even if
+    a player later plays elsewhere on the pitch. So roles are SNAPSHOTTED per league
+    when its listone opens and are immune to later Transfermarkt role changes — a
+    weekly TM re-import refreshes rosters/DOBs but must NOT mutate a started league's
+    roles. The global ``Player.classic_role`` (live from TM) only SEEDS this snapshot;
+    admin overrides live here, scoped to the league.
+    """
+
+    SOURCE_SEED = "seed"      # snapshotted from Player.classic_role (TM-derived)
+    SOURCE_ADMIN = "admin"    # admin override within this league
+    SOURCE_CHOICES = [(SOURCE_SEED, "Seed (TM)"), (SOURCE_ADMIN, "Admin override")]
+
+    league = models.ForeignKey(FantasyLeague, on_delete=models.CASCADE, related_name="player_roles")
+    player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="league_roles")
+    role = models.CharField(max_length=3, choices=Player.CLASSIC_ROLE_CHOICES)
+    source = models.CharField(max_length=8, choices=SOURCE_CHOICES, default=SOURCE_SEED)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("league", "player")]
+        indexes = [models.Index(fields=["league", "role"])]
+
+    def __str__(self) -> str:
+        return f"{self.player_id}={self.role} @league {self.league_id}"
+
+
 class CompetitionTeam(models.Model):
     """Direct participants of a competition (manual or from qualification rules)."""
 
@@ -214,6 +339,10 @@ class CompetitionQualificationRule(models.Model):
     competition = models.ForeignKey(FantasyCompetition, on_delete=models.CASCADE, related_name="qualification_rules")
     source_competition = models.ForeignKey(FantasyCompetition, on_delete=models.CASCADE, related_name="targeted_by_rules")
     source_stage = models.CharField(max_length=12, choices=[(STAGE_HALF, "Halfway"), (STAGE_FINAL, "Final")], default=STAGE_FINAL)
+    # When set, the source table is snapshotted after this round of the source
+    # competition (e.g. "top 5 after round 19"). Takes precedence over
+    # source_stage; source_stage stays as the coarse fallback (halfway/final).
+    source_round = models.IntegerField(null=True, blank=True)
     mode = models.CharField(
         max_length=16,
         choices=[(MODE_TABLE_RANGE, "Table Range"), (MODE_WINNER, "Winner"), (MODE_LOSER, "Loser")],

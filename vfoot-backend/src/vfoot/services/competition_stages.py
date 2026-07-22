@@ -89,6 +89,23 @@ def _generate_round_robin_stage_fixtures(stage: CompetitionStage, seed: int = 42
                 )
             )
 
+    if stage.double_round:
+        # Return leg: same pairings, home/away swapped, rounds continue after
+        # the first leg so the table-after-round-N logic stays linear.
+        offset = len(rounds)
+        for round_no, pairs in enumerate(rounds, start=1):
+            for home_id, away_id in pairs:
+                fixtures.append(
+                    FantasyFixture(
+                        competition=stage.competition,
+                        stage=stage,
+                        round_no=offset + round_no,
+                        leg_no=2,
+                        home_team_id=away_id,
+                        away_team_id=home_id,
+                    )
+                )
+
     FantasyFixture.objects.bulk_create(fixtures, batch_size=500, ignore_conflicts=True)
     return FantasyFixture.objects.filter(stage=stage).count()
 
@@ -211,7 +228,12 @@ def resolve_stage(stage: CompetitionStage, seed: int = 42) -> dict:
 
 
 @transaction.atomic
-def build_default_stage_graph(competition: FantasyCompetition, allow_repechage: bool = False, seed: int = 42) -> dict:
+def build_default_stage_graph(
+    competition: FantasyCompetition,
+    allow_repechage: bool = False,
+    seed: int = 42,
+    double_round: bool = False,
+) -> dict:
     base_entries = list(
         CompetitionTeam.objects.filter(competition=competition)
         .select_related("team")
@@ -229,6 +251,7 @@ def build_default_stage_graph(competition: FantasyCompetition, allow_repechage: 
             name="Regular season",
             stage_type=CompetitionStage.TYPE_ROUND_ROBIN,
             order_index=1,
+            double_round=double_round,
         )
         CompetitionStageParticipant.objects.bulk_create(
             [

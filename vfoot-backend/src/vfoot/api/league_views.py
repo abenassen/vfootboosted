@@ -15,7 +15,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from realdata.models import Match, Player
+from realdata.models import (
+    CompetitionSeason,
+    Match,
+    MatchAppearance,
+    Player,
+    PlayerTeamStint,
+)
 from vfoot.api.league_serializers import (
     AddRosterPlayerSerializer,
     BulkAssignRosterSerializer,
@@ -56,6 +62,7 @@ from vfoot.models import (
     FantasyRosterSlot,
     FantasyTeam,
     LeagueMembership,
+    LeaguePlayerRole,
     SavedLineupSnapshot,
 )
 import os as _os
@@ -71,6 +78,16 @@ from vfoot.services.fantasy_simulation import (
     generate_round_robin_fixtures,
 )
 from vfoot.services.competition_stages import build_default_stage_graph, resolve_stage
+from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic_lineup
+from vfoot.services.classic_pagella import get_reference, pagella_for_match
+from vfoot.services.listone import eligible_player_ids
+from vfoot.services.player_ratings import (
+    latest_market_values, player_values, previous_season_with_data,
+)
+from vfoot.services.match_resolver import matchday_fixtures_by_team
+
+# Frozen listone role (POR/DIF/CEN/ATT) -> frontend lineup taxonomy (GK/DEF/MID/ATT).
+_CLASSIC_ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
 
 
 def _membership_or_404(league: FantasyLeague, user_id: int) -> LeagueMembership:
@@ -92,9 +109,13 @@ class LeagueListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        memberships = LeagueMembership.objects.filter(user=request.user).select_related("league", "team")
+        memberships = (LeagueMembership.objects.filter(user=request.user)
+                       .select_related("league", "team",
+                                       "league__reference_season__competition",
+                                       "league__reference_season__season"))
         data = []
         for m in memberships:
+            season = m.league.reference_season
             data.append(
                 {
                     "league_id": m.league_id,
@@ -103,6 +124,15 @@ class LeagueListCreateView(APIView):
                     "invite_code": m.league.invite_code,
                     "market_open": m.league.market_open,
                     "team_name": m.team.name if hasattr(m, "team") else None,
+                    "reference_season": (
+                        {
+                            "id": season.id,
+                            "name": str(season),
+                            "competition": season.competition.name,
+                            "season": season.season.code,
+                        }
+                        if season else None
+                    ),
                 }
             )
         return Response(data)
@@ -113,7 +143,10 @@ class LeagueListCreateView(APIView):
         s.is_valid(raise_exception=True)
         data = s.validated_data
 
-        league = FantasyLeague.objects.create(name=data["name"], owner=request.user)
+        reference_season = get_object_or_404(
+            CompetitionSeason, id=data["reference_season_id"])
+        league = FantasyLeague.objects.create(
+            name=data["name"], owner=request.user, reference_season=reference_season)
         membership = LeagueMembership.objects.create(
             league=league,
             user=request.user,
@@ -146,7 +179,7 @@ class LeagueJoinView(APIView):
         league = get_object_or_404(FantasyLeague, invite_code=data["invite_code"])
 
         if LeagueMembership.objects.filter(league=league, user=request.user).exists():
-            return Response({"detail": "Already joined."}, status=status.HTTP_200_OK)
+            return Response({"detail": "Sei già iscritto a questa lega."}, status=status.HTTP_200_OK)
 
         membership = LeagueMembership.objects.create(
             league=league,
@@ -177,13 +210,28 @@ class LeagueDetailView(APIView):
         members = LeagueMembership.objects.filter(league=league).select_related("user")
         teams = FantasyTeam.objects.filter(league=league).select_related("manager__user")
 
+        season = league.reference_season
         return Response(
             {
                 "league_id": league.id,
                 "name": league.name,
+                "mode": league.mode,
                 "market_open": league.market_open,
+                "max_substitutions": league.max_substitutions,
+                "defense_bonus_enabled": league.defense_bonus_enabled,
+                "defense_bonus_mode": league.defense_bonus_mode,
                 "invite_code": league.invite_code,
                 "invite_link": f"/join/{league.invite_code}",
+                "reference_season": (
+                    {
+                        "id": season.id,
+                        "name": str(season),
+                        "competition": season.competition.name,
+                        "season": season.season.code,
+                    }
+                    if season
+                    else None
+                ),
                 "members": [
                     {
                         "membership_id": m.id,
@@ -225,7 +273,7 @@ class MemberRoleUpdateView(APIView):
             admin_count = LeagueMembership.objects.filter(league=league, role=LeagueMembership.ROLE_ADMIN).count()
             if admin_count <= 1:
                 return Response(
-                    {"detail": "Cannot remove the last admin from the league."},
+                    {"detail": "Non puoi rimuovere l'ultimo amministratore della lega."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -248,6 +296,132 @@ class MarketToggleView(APIView):
         league.market_open = s.validated_data["is_open"]
         league.save(update_fields=["market_open"])
         return Response({"league_id": league.id, "market_open": league.market_open})
+
+
+class LeagueSettingsUpdateView(APIView):
+    """Admin-editable league settings (currently the max number of bench
+    substitutions applied at scoring time)."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        fields: list[str] = []
+
+        if "max_substitutions" in request.data:
+            try:
+                value = int(request.data.get("max_substitutions"))
+            except (TypeError, ValueError):
+                return Response({"detail": "max_substitutions non valido."}, status=status.HTTP_400_BAD_REQUEST)
+            if not (0 <= value <= 11):
+                return Response({"detail": "max_substitutions deve essere tra 0 e 11."}, status=status.HTTP_400_BAD_REQUEST)
+            league.max_substitutions = value
+            fields.append("max_substitutions")
+
+        if "defense_bonus_enabled" in request.data:
+            league.defense_bonus_enabled = bool(request.data.get("defense_bonus_enabled"))
+            fields.append("defense_bonus_enabled")
+
+        if "defense_bonus_mode" in request.data:
+            mode = request.data.get("defense_bonus_mode")
+            valid = {c[0] for c in FantasyLeague.DEF_BONUS_MODE_CHOICES}
+            if mode not in valid:
+                return Response({"detail": f"defense_bonus_mode deve essere in {sorted(valid)}."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            league.defense_bonus_mode = mode
+            fields.append("defense_bonus_mode")
+
+        if not fields:
+            return Response({"detail": "Nessuna impostazione fornita."}, status=status.HTTP_400_BAD_REQUEST)
+        league.save(update_fields=fields)
+        return Response({
+            "league_id": league.id,
+            "max_substitutions": league.max_substitutions,
+            "defense_bonus_enabled": league.defense_bonus_enabled,
+            "defense_bonus_mode": league.defense_bonus_mode,
+        })
+
+
+class RealSeasonListView(APIView):
+    """Real competition seasons available to use as a league's reference."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from realdata.models import CompetitionSeason
+
+        seasons = (
+            CompetitionSeason.objects.select_related("competition", "season")
+            .annotate(
+                _matchdays=Count(
+                    "matches__matchday",
+                    filter=Q(matches__matchday__isnull=False),
+                    distinct=True,
+                )
+            )
+            .order_by("-season__code", "competition__name")
+        )
+        return Response(
+            [
+                {
+                    "id": cs.id,
+                    "name": str(cs),
+                    "competition": cs.competition.name,
+                    "season": cs.season.code,
+                    "matchdays": int(cs._matchdays or 0),
+                }
+                for cs in seasons
+            ]
+        )
+
+
+class LeagueReferenceSeasonView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        season_id = request.data.get("reference_season_id")
+
+        # IMMUTABLE once set: rosters, frozen listone and the calendar all hang off
+        # the reference season, so changing it mid-life would invalidate them. Only
+        # legacy leagues that never got one can still have it assigned here.
+        if league.reference_season_id is not None:
+            same = (season_id not in (None, "", 0)
+                    and int(season_id) == league.reference_season_id)
+            if not same:
+                return Response(
+                    {"detail": "La stagione di riferimento non è modificabile: "
+                               "rose, listone e calendario dipendono da essa."},
+                    status=status.HTTP_400_BAD_REQUEST)
+        elif season_id in (None, "", 0):
+            return Response({"detail": "Stagione di riferimento obbligatoria."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        else:
+            league.reference_season = get_object_or_404(CompetitionSeason, id=season_id)
+            league.save(update_fields=["reference_season"])
+        season = league.reference_season
+        return Response(
+            {
+                "league_id": league.id,
+                "reference_season": (
+                    {
+                        "id": season.id,
+                        "name": str(season),
+                        "competition": season.competition.name,
+                        "season": season.season.code,
+                    }
+                    if season
+                    else None
+                ),
+            }
+        )
 
 
 class TeamRosterView(APIView):
@@ -561,6 +735,17 @@ class CompetitionTemplateCreateView(APIView):
         )
 
 
+def _result_view(comp: FantasyCompetition) -> str:
+    """Which results view a competition needs: a round-robin → 'classifica' (table),
+    a knockout → 'tabellone' (bracket), a mix of stages → 'risultati' (both)."""
+    types = set(comp.stages.values_list("stage_type", flat=True))
+    if not types:
+        return "tabellone" if comp.competition_type == FantasyCompetition.TYPE_KNOCKOUT else "classifica"
+    if len(types) == 1:
+        return "tabellone" if next(iter(types)) == CompetitionStage.TYPE_KNOCKOUT else "classifica"
+    return "risultati"
+
+
 def _serialize_competition(comp: FantasyCompetition) -> dict:
     participants = list(comp.participants.select_related("team", "team__manager__user"))
     rules = list(comp.qualification_rules.select_related("source_competition"))
@@ -571,6 +756,7 @@ def _serialize_competition(comp: FantasyCompetition) -> dict:
         "competition_id": comp.id,
         "name": comp.name,
         "competition_type": comp.competition_type,
+        "result_view": _result_view(comp),
         "status": comp.status,
         "points": {
             "win": comp.points_win,
@@ -579,6 +765,8 @@ def _serialize_competition(comp: FantasyCompetition) -> dict:
         },
         "starts_at": comp.starts_at.isoformat() if comp.starts_at else None,
         "ends_at": comp.ends_at.isoformat() if comp.ends_at else None,
+        "start_matchday": comp.start_matchday,
+        "end_matchday": comp.end_matchday,
         "participants": [
             {
                 "team_id": p.team_id,
@@ -595,6 +783,7 @@ def _serialize_competition(comp: FantasyCompetition) -> dict:
                 "source_competition_id": r.source_competition_id,
                 "source_competition_name": r.source_competition.name,
                 "source_stage": r.source_stage,
+                "source_round": r.source_round,
                 "mode": r.mode,
                 "rank_from": r.rank_from,
                 "rank_to": r.rank_to,
@@ -629,6 +818,7 @@ def _serialize_stage(stage: CompetitionStage) -> dict:
         "stage_type": stage.stage_type,
         "status": stage.status,
         "order_index": stage.order_index,
+        "double_round": stage.double_round,
         "participants": [
             {
                 "team_id": p.team_id,
@@ -686,6 +876,7 @@ class CompetitionStageBuildDefaultView(APIView):
             comp,
             allow_repechage=data.get("allow_repechage", False),
             seed=data.get("random_seed", 42),
+            double_round=data.get("double_round", False),
         )
         return Response(result, status=status.HTTP_201_CREATED)
 
@@ -707,6 +898,7 @@ class CompetitionStageCreateView(APIView):
             name=data["name"],
             stage_type=data["stage_type"],
             order_index=data.get("order_index", 1),
+            double_round=data.get("double_round", False),
         )
         team_ids = data.get("team_ids") or []
         valid_team_ids = list(FantasyTeam.objects.filter(league=comp.league, id__in=team_ids).values_list("id", flat=True))
@@ -739,12 +931,16 @@ class CompetitionStageDetailUpdateView(APIView):
         data = s.validated_data
 
         changed_fields: list[str] = []
-        for field in ["name", "stage_type", "order_index"]:
+        for field in ["name", "stage_type", "order_index", "double_round"]:
             if field in data:
                 setattr(stage, field, data[field])
                 changed_fields.append(field)
         if changed_fields:
             stage.save(update_fields=changed_fields)
+        # Re-generate fixtures if the leg setting changed and the stage already
+        # has its participants resolved (so toggling andata/ritorno takes effect).
+        if "double_round" in data and "team_ids" not in data:
+            resolve_stage(stage, seed=int(data.get("random_seed", 42)))
 
         if "team_ids" in data:
             team_ids = data.get("team_ids") or []
@@ -965,18 +1161,21 @@ class CompetitionPrizeDeleteView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-def _source_fixtures_for_stage(source_comp: FantasyCompetition, stage: str):
+def _source_fixtures_for_stage(source_comp: FantasyCompetition, stage: str, source_round: int | None = None):
     qs = FantasyFixture.objects.filter(competition=source_comp, status=FantasyFixture.STATUS_FINISHED)
-    if stage == CompetitionQualificationRule.STAGE_HALF:
+    if source_round is not None:
+        # Explicit round cut-off: snapshot the table after this round.
+        qs = qs.filter(round_no__lte=max(1, source_round))
+    elif stage == CompetitionQualificationRule.STAGE_HALF:
         max_round = FantasyFixture.objects.filter(competition=source_comp).order_by("-round_no").values_list("round_no", flat=True).first()
         if max_round:
             qs = qs.filter(round_no__lte=max(1, max_round // 2))
     return qs
 
 
-def _table_ranking_team_ids(source_comp: FantasyCompetition, stage: str) -> list[int]:
+def _table_ranking_team_ids(source_comp: FantasyCompetition, stage: str, source_round: int | None = None) -> list[int]:
     rows: dict[int, dict] = {}
-    fixtures = _source_fixtures_for_stage(source_comp, stage)
+    fixtures = _source_fixtures_for_stage(source_comp, stage, source_round)
     for fx in fixtures:
         for tid in [fx.home_team_id, fx.away_team_id]:
             rows.setdefault(tid, {"pts": 0, "gf": 0.0, "ga": 0.0})
@@ -1000,8 +1199,8 @@ def _table_ranking_team_ids(source_comp: FantasyCompetition, stage: str) -> list
     return [tid for tid, _ in ranking]
 
 
-def _winner_loser_from_source(source_comp: FantasyCompetition, stage: str, mode: str) -> list[int]:
-    ranking = _table_ranking_team_ids(source_comp, stage)
+def _winner_loser_from_source(source_comp: FantasyCompetition, stage: str, mode: str, source_round: int | None = None) -> list[int]:
+    ranking = _table_ranking_team_ids(source_comp, stage, source_round)
     if not ranking:
         return []
     if mode == CompetitionQualificationRule.MODE_WINNER:
@@ -1023,7 +1222,7 @@ def _resolve_rule_participants_and_regenerate(competition: FantasyCompetition) -
     for rule in CompetitionQualificationRule.objects.filter(competition=competition).select_related("source_competition"):
         source = rule.source_competition
         if rule.mode == CompetitionQualificationRule.MODE_TABLE_RANGE:
-            ranking = _table_ranking_team_ids(source, rule.source_stage)
+            ranking = _table_ranking_team_ids(source, rule.source_stage, rule.source_round)
             if not ranking:
                 unresolved_rules += 1
                 continue
@@ -1031,7 +1230,7 @@ def _resolve_rule_participants_and_regenerate(competition: FantasyCompetition) -
             rt = max(rf, rule.rank_to or rf)
             ids = ranking[rf - 1 : rt]
         else:
-            ids = _winner_loser_from_source(source, rule.source_stage, rule.mode)
+            ids = _winner_loser_from_source(source, rule.source_stage, rule.mode, rule.source_round)
             if not ids:
                 unresolved_rules += 1
                 continue
@@ -1042,11 +1241,13 @@ def _resolve_rule_participants_and_regenerate(competition: FantasyCompetition) -
 
     participants = list(CompetitionTeam.objects.filter(competition=competition).values_list("team_id", flat=True))
     fixtures_created = 0
-    if len(participants) >= 2 and (competition.competition_type != FantasyCompetition.TYPE_KNOCKOUT or len(participants) % 2 == 0):
-        if competition.competition_type == FantasyCompetition.TYPE_ROUND_ROBIN:
-            fixtures_created = generate_round_robin_fixtures(competition)
-        else:
-            fixtures_created = generate_knockout_fixtures(competition)
+    if len(participants) >= 2:
+        # Build the full stage graph (bracket + progression rules for knockout,
+        # regular-season stage for round-robin) rather than flat single-round
+        # fixtures — so a rule-fed competition (e.g. cup fed by championship
+        # top-N) gets a proper structure once its participants resolve.
+        result = build_default_stage_graph(competition)
+        fixtures_created = result.get("fixtures_created", 0)
 
     return {
         "competition_id": competition.id,
@@ -1076,7 +1277,33 @@ class CompetitionListView(APIView):
         return Response([_serialize_competition(c) for c in comps])
 
 
-def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None) -> dict:
+def _current_matchday(league: FantasyLeague):
+    """The league's 'current' matchday = the earliest one not yet concluded."""
+    return (
+        FantasyMatchday.objects.filter(league=league)
+        .exclude(status=FantasyMatchday.STATUS_CONCLUDED)
+        .order_by("real_matchday", "id")
+        .first()
+    )
+
+
+def _fixture_phase(fx: FantasyFixture, current_real_md: int | None) -> str:
+    """concluded | current | future | unscheduled — drives the UI badge."""
+    if fx.status == FantasyFixture.STATUS_FINISHED:
+        return "concluded"
+    if fx.fantasy_matchday_id is None:
+        return "unscheduled"
+    real_md = fx.fantasy_matchday.real_matchday
+    if current_real_md is None:
+        return "future"
+    if real_md == current_real_md:
+        return "current"
+    if real_md < current_real_md:
+        return "concluded"
+    return "future"
+
+
+def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_real_md: int | None = None) -> dict:
     return {
         "fixture_id": fx.id,
         "competition_id": fx.competition_id,
@@ -1090,6 +1317,7 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None) -> dict:
         "leg_no": fx.leg_no,
         "kickoff": fx.kickoff.isoformat() if fx.kickoff else None,
         "status": fx.status,
+        "phase": _fixture_phase(fx, current_real_md),
         "home_team": {"team_id": fx.home_team_id, "name": fx.home_team.name},
         "away_team": {"team_id": fx.away_team_id, "name": fx.away_team.name},
         "score": {"home_total": fx.home_total, "away_total": fx.away_total} if fx.status == FantasyFixture.STATUS_FINISHED else None,
@@ -1115,7 +1343,9 @@ class LeagueFixturesView(APIView):
         if competition_id and str(competition_id).isdigit():
             qs = qs.filter(competition_id=int(competition_id))
 
-        items = [_serialize_fixture_row(fx, my_team_id) for fx in qs[:200]]
+        current = _current_matchday(league)
+        current_real_md = current.real_matchday if current else None
+        items = [_serialize_fixture_row(fx, my_team_id, current_real_md) for fx in qs[:200]]
         return Response(items)
 
 
@@ -1153,6 +1383,25 @@ def _pick_real_competition_and_matchdays(starts_at, ends_at):
     return csid, [int(x) for x in matchdays if x is not None]
 
 
+def _reference_matchdays(comp: FantasyCompetition, start_md=None, end_md=None):
+    """Real matchdays available for this competition, taken from the league's
+    reference season within the [start, end] matchday span. Falls back to the
+    legacy date-window inference when the league has no reference season set."""
+    season = comp.league.reference_season
+    if season is None:
+        return _pick_real_competition_and_matchdays(comp.starts_at, comp.ends_at)
+    csid = season.id
+    lo = start_md if start_md is not None else comp.start_matchday
+    hi = end_md if end_md is not None else comp.end_matchday
+    qs = Match.objects.filter(competition_season_id=csid, matchday__isnull=False)
+    if lo is not None:
+        qs = qs.filter(matchday__gte=lo)
+    if hi is not None:
+        qs = qs.filter(matchday__lte=hi)
+    matchdays = list(qs.order_by("matchday").values_list("matchday", flat=True).distinct())
+    return csid, [int(x) for x in matchdays if x is not None]
+
+
 def _current_round_mapping(comp: FantasyCompetition) -> dict[int, int]:
     rows = (
         FantasyFixture.objects.filter(competition=comp, fantasy_matchday__isnull=False)
@@ -1183,20 +1432,18 @@ def _build_uniform_round_mapping(round_nos: list[int], real_matchdays: list[int]
     return mapping
 
 
-def _schedule_preview(comp: FantasyCompetition, starts_at=None, ends_at=None) -> dict:
-    if starts_at is None:
-        starts_at = comp.starts_at
-    if ends_at is None:
-        ends_at = comp.ends_at
+def _schedule_preview(comp: FantasyCompetition, start_md=None, end_md=None) -> dict:
     round_nos = _competition_round_nos(comp)
-    csid, real_matchdays = _pick_real_competition_and_matchdays(starts_at, ends_at)
+    csid, real_matchdays = _reference_matchdays(comp, start_md, end_md)
     uniform = _build_uniform_round_mapping(round_nos, real_matchdays)
     current = _current_round_mapping(comp)
     return {
         "competition_id": comp.id,
         "competition_name": comp.name,
-        "starts_at": starts_at.isoformat() if starts_at else None,
-        "ends_at": ends_at.isoformat() if ends_at else None,
+        "starts_at": comp.starts_at.isoformat() if comp.starts_at else None,
+        "ends_at": comp.ends_at.isoformat() if comp.ends_at else None,
+        "start_matchday": start_md if start_md is not None else comp.start_matchday,
+        "end_matchday": end_md if end_md is not None else comp.end_matchday,
         "rounds": round_nos,
         "available_real_matchdays": real_matchdays,
         "real_competition_season_id": csid,
@@ -1206,12 +1453,28 @@ def _schedule_preview(comp: FantasyCompetition, starts_at=None, ends_at=None) ->
 
 
 @transaction.atomic
-def _schedule_competition_rounds(comp: FantasyCompetition, round_mapping: dict[int, int] | None = None) -> dict:
+def _schedule_competition_rounds(
+    comp: FantasyCompetition,
+    round_mapping: dict[int, int] | None = None,
+    start_md=None,
+    end_md=None,
+) -> dict:
     round_nos = _competition_round_nos(comp)
     if not round_nos:
         return {"competition_id": comp.id, "scheduled_fixtures": 0, "rounds": 0, "real_matchdays": []}
 
-    csid, real_matchdays = _pick_real_competition_and_matchdays(comp.starts_at, comp.ends_at)
+    # Persist the span so later reschedules/previews are consistent.
+    span_fields = []
+    if start_md is not None and start_md != comp.start_matchday:
+        comp.start_matchday = start_md
+        span_fields.append("start_matchday")
+    if end_md is not None and end_md != comp.end_matchday:
+        comp.end_matchday = end_md
+        span_fields.append("end_matchday")
+    if span_fields:
+        comp.save(update_fields=span_fields)
+
+    csid, real_matchdays = _reference_matchdays(comp, start_md, end_md)
     if not csid or not real_matchdays:
         return {"competition_id": comp.id, "scheduled_fixtures": 0, "rounds": len(round_nos), "real_matchdays": []}
 
@@ -1333,16 +1596,25 @@ class LeagueMatchdayListView(APIView):
             .select_related("real_competition_season__competition", "real_competition_season__season", "concluded_by")
             .order_by("real_matchday", "id")
         )
+        current = _current_matchday(league)
+        current_id = current.id if current else None
         payload = []
         for md in rows:
             real_stats = _real_matchday_stats(md.real_competition_season_id, md.real_matchday)
             fx_total = md.fixtures.count()
             fx_finished = md.fixtures.filter(status=FantasyFixture.STATUS_FINISHED).count()
+            if md.status == FantasyMatchday.STATUS_CONCLUDED:
+                phase = "concluded"
+            elif md.id == current_id:
+                phase = "current"
+            else:
+                phase = "future"
             payload.append(
                 {
                     "fantasy_matchday_id": md.id,
                     "league_id": league.id,
                     "status": md.status,
+                    "phase": phase,
                     "real_competition_season": {
                         "id": md.real_competition_season_id,
                         "name": str(md.real_competition_season),
@@ -1373,6 +1645,17 @@ class LeagueMatchdayConcludeView(APIView):
         s = MatchdayConcludeSerializer(data=request.data or {})
         s.is_valid(raise_exception=True)
         force = s.validated_data.get("force", False)
+
+        # Conclude in order: only the current (earliest non-concluded) matchday.
+        current = _current_matchday(league)
+        if md.status != FantasyMatchday.STATUS_CONCLUDED and current and md.id != current.id and not force:
+            return Response(
+                {
+                    "detail": f"Conclude matchdays in order — the current one is real matchday {current.real_matchday}.",
+                    "current_matchday_id": current.id,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         real_stats = _real_matchday_stats(md.real_competition_season_id, md.real_matchday)
         if not real_stats["is_completed"] and not force:
@@ -1482,7 +1765,10 @@ class CompetitionDetailUpdateView(APIView):
         s.is_valid(raise_exception=True)
         data = s.validated_data
 
-        for field in ["name", "status", "points_win", "points_draw", "points_loss", "starts_at", "ends_at"]:
+        for field in [
+            "name", "status", "points_win", "points_draw", "points_loss",
+            "starts_at", "ends_at", "start_matchday", "end_matchday",
+        ]:
             if field in data:
                 setattr(comp, field, data[field])
         comp.save()
@@ -1591,19 +1877,24 @@ class CompetitionScheduleView(APIView):
         s.is_valid(raise_exception=True)
         data = s.validated_data
 
-        changed = False
+        changed = []
         if "starts_at" in data:
             comp.starts_at = data["starts_at"]
-            changed = True
+            changed.append("starts_at")
         if "ends_at" in data:
             comp.ends_at = data["ends_at"]
-            changed = True
+            changed.append("ends_at")
         if changed:
-            comp.save(update_fields=["starts_at", "ends_at"])
+            comp.save(update_fields=changed)
 
-        if not comp.starts_at or not comp.ends_at:
+        start_md = data.get("start_matchday")
+        end_md = data.get("end_matchday")
+
+        # Scheduling needs a real-matchday source: either the league reference
+        # season (preferred) or the legacy date window.
+        if comp.league.reference_season is None and (not comp.starts_at or not comp.ends_at):
             return Response(
-                {"detail": "Competition starts_at and ends_at must be set before scheduling."},
+                {"detail": "Set the league reference season (or competition dates) before scheduling."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         parsed_mapping: dict[int, int] = {}
@@ -1616,7 +1907,9 @@ class CompetitionScheduleView(APIView):
                 except (TypeError, ValueError):
                     continue
                 parsed_mapping[rno] = md
-        result = _schedule_competition_rounds(comp, round_mapping=parsed_mapping or None)
+        result = _schedule_competition_rounds(
+            comp, round_mapping=parsed_mapping or None, start_md=start_md, end_md=end_md
+        )
         return Response(result)
 
 
@@ -1630,9 +1923,7 @@ class CompetitionSchedulePreviewView(APIView):
         s = CompetitionSchedulePreviewSerializer(data=request.data or {})
         s.is_valid(raise_exception=True)
         data = s.validated_data
-        starts_at = data.get("starts_at", comp.starts_at)
-        ends_at = data.get("ends_at", comp.ends_at)
-        return Response(_schedule_preview(comp, starts_at=starts_at, ends_at=ends_at))
+        return Response(_schedule_preview(comp, start_md=data.get("start_matchday"), end_md=data.get("end_matchday")))
 
 
 class CompetitionAddQualificationRuleView(APIView):
@@ -1652,6 +1943,7 @@ class CompetitionAddQualificationRuleView(APIView):
             competition=comp,
             source_competition=source,
             source_stage=data["source_stage"],
+            source_round=data.get("source_round"),
             mode=data["mode"],
             rank_from=data.get("rank_from"),
             rank_to=data.get("rank_to"),
@@ -1664,6 +1956,7 @@ class CompetitionAddQualificationRuleView(APIView):
                 "source_competition_id": source.id,
                 "source_competition_name": source.name,
                 "source_stage": rule.source_stage,
+                "source_round": rule.source_round,
                 "mode": rule.mode,
                 "rank_from": rule.rank_from,
                 "rank_to": rule.rank_to,
@@ -1898,6 +2191,113 @@ class AuctionCloseNominationView(APIView):
         return Response({"nomination_id": nomination.id, "winner_team_id": winner_team_id}, status=status.HTTP_200_OK)
 
 
+def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:
+    """Ranked standings from a list of FINISHED fixtures (with .detail prefetched)."""
+    rows: dict[int, dict] = {}
+    names: dict[int, str] = {}
+
+    def row(team_id: int) -> dict:
+        return rows.setdefault(
+            team_id, {"pts": 0, "played": 0, "w": 0, "d": 0, "l": 0, "gf": 0.0, "ga": 0.0, "score_sum": 0.0}
+        )
+
+    for fx in fixtures:
+        names[fx.home_team_id] = fx.home_team.name
+        names[fx.away_team_id] = fx.away_team.name
+        h, a = row(fx.home_team_id), row(fx.away_team_id)
+        hs, as_ = fx.home_total, fx.away_total
+        h["played"] += 1
+        a["played"] += 1
+        h["gf"] += hs
+        h["ga"] += as_
+        a["gf"] += as_
+        a["ga"] += hs
+        if hs > as_:
+            h["pts"] += pw; a["pts"] += pl; h["w"] += 1; a["l"] += 1
+        elif hs < as_:
+            a["pts"] += pw; h["pts"] += pl; a["w"] += 1; h["l"] += 1
+        else:
+            h["pts"] += pd; a["pts"] += pd; h["d"] += 1; a["d"] += 1
+        detail = getattr(fx, "detail", None)
+        if detail is not None:
+            h["score_sum"] += detail.vfoot_home
+            a["score_sum"] += detail.vfoot_away
+
+    ranked = sorted(rows.items(), key=lambda kv: (kv[1]["pts"], kv[1]["gf"] - kv[1]["ga"], kv[1]["gf"]), reverse=True)
+    return [
+        {
+            "rank": i + 1, "team_id": tid, "team": names.get(tid, str(tid)),
+            "played": r["played"], "wins": r["w"], "draws": r["d"], "losses": r["l"],
+            "goals_for": int(r["gf"]), "goals_against": int(r["ga"]),
+            "goal_diff": int(r["gf"] - r["ga"]), "points": r["pts"],
+            "avg_score_for": round(r["score_sum"] / r["played"], 3) if r["played"] else 0.0,
+        }
+        for i, (tid, r) in enumerate(ranked)
+    ]
+
+
+_KO_ROUND_LABELS = {1: "Finale", 2: "Semifinali", 4: "Quarti di finale", 8: "Ottavi di finale"}
+
+
+def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, pl) -> dict:
+    """One results section: a standings table (round-robin) or a bracket (knockout)."""
+    fixtures = list(fixtures)
+    base = {"name": name, "type": stage_type, "order": order}
+    if stage_type == CompetitionStage.TYPE_KNOCKOUT:
+        by_round: dict[int, list] = {}
+        for f in fixtures:
+            by_round.setdefault(f.round_no, []).append(f)
+        rounds = []
+        for rno in sorted(by_round):
+            fs = by_round[rno]
+            rounds.append({
+                "round_no": rno,
+                "label": _KO_ROUND_LABELS.get(len(fs), f"Turno {rno}"),
+                "fixtures": [_serialize_fixture_row(f, my_team_id, current_md) for f in fs],
+            })
+        base["rounds"] = rounds
+    else:
+        finished = [f for f in fixtures if f.status == FantasyFixture.STATUS_FINISHED]
+        base["standings"] = _compute_standings(finished, pw, pd, pl)
+    return base
+
+
+class CompetitionStructureView(APIView):
+    """Stage-aware results for ONE competition: an ordered list of SECTIONS, each a
+    standings table (round-robin) or a bracket (knockout). A flat competition (no
+    stages) yields a single section from its own type. Handles group+KO cups."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int, competition_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        membership = _membership_or_404(league, request.user.id)
+        my_team_id = membership.team.id if hasattr(membership, "team") else None
+        comp = get_object_or_404(FantasyCompetition, id=competition_id, league=league)
+        current = _current_matchday(league)
+        current_md = current.real_matchday if current else None
+        pw, pd, pl = comp.points_win, comp.points_draw, comp.points_loss
+        rel = ("competition", "stage", "fantasy_matchday", "home_team", "away_team", "detail")
+
+        stages = list(comp.stages.order_by("order_index", "id"))
+        if stages:
+            sections = [
+                _section(s.name, s.stage_type, s.order_index,
+                         s.fixtures.select_related(*rel), my_team_id, current_md, pw, pd, pl)
+                for s in stages
+            ]
+        else:
+            sections = [
+                _section(comp.name, comp.competition_type, 1,
+                         comp.fixtures.select_related(*rel), my_team_id, current_md, pw, pd, pl)
+            ]
+        return Response({
+            "competition_id": comp.id, "name": comp.name,
+            "result_view": _result_view(comp), "sections": sections,
+        })
+
+
 class LeagueStandingsView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -1905,13 +2305,23 @@ class LeagueStandingsView(APIView):
     def get(self, request, league_id: int):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _membership_or_404(league, request.user.id)
-        comp = league.competitions.order_by("id").first()
+        # A standings table is COMPETITION-scoped, not league-scoped. Use the given
+        # competition; default to the first round-robin (a knockout has no table).
+        comp_param = request.query_params.get("competition_id")
+        comp = None
+        if comp_param:
+            comp = league.competitions.filter(id=comp_param).first()
+        if comp is None:
+            comp = (league.competitions.filter(competition_type=FantasyCompetition.TYPE_ROUND_ROBIN)
+                    .order_by("id").first()
+                    or league.competitions.order_by("id").first())
         pw, pd, pl = (comp.points_win, comp.points_draw, comp.points_loss) if comp else (3, 1, 0)
 
         fixtures = (
-            FantasyFixture.objects.filter(competition__league=league, status=FantasyFixture.STATUS_FINISHED)
+            FantasyFixture.objects.filter(status=FantasyFixture.STATUS_FINISHED)
+            .filter(competition=comp if comp else None)
             .select_related("home_team", "away_team", "detail")
-        )
+        ) if comp else FantasyFixture.objects.none()
         rows: dict[int, dict] = {}
         names: dict[int, str] = {}
 
@@ -2067,31 +2477,116 @@ class LeagueTeamLineupView(APIView):
             FantasyRosterSlot.objects.filter(team=team, released_at__isnull=True).select_related("player")
         )
         player_ids = [s.player_id for s in slots]
-        total_matches = Match.objects.values("matchday").distinct().count()
         cal = _vector_calibration()
+
+        # Which season should the playing-time stats describe? The reference season
+        # while it is under way, but BEFORE it starts it has no games at all — and
+        # reporting "poco impiegato" for everybody because nobody has played yet is
+        # simply wrong. In that case fall back to the last season with data.
+        ref_cs = league.reference_season
+        stats_cs, stats_as_of = None, as_of
+        if ref_cs is not None:
+            played_here = MatchAppearance.objects.filter(
+                player_id__in=player_ids,
+                match__competition_season=ref_cs,
+                **({"match__matchday__lt": as_of} if as_of is not None else {}),
+            ).exists()
+            if played_here:
+                stats_cs = ref_cs
+            else:
+                prev = previous_season_with_data(ref_cs)
+                stats_cs, stats_as_of = (prev, None) if prev else (ref_cs, as_of)
+
+        total_matches = (
+            Match.objects.filter(competition_season=stats_cs)
+            .values("matchday").distinct().count()
+            if stats_cs is not None
+            else Match.objects.values("matchday").distinct().count()
+        )
         profiles = player_profiles(
             player_ids,
             total_matches=total_matches,
-            as_of_matchday=as_of,
+            as_of_matchday=stats_as_of,
             params=cal.get("params", {}),
             scales=cal.get("feature_scales", {}),
+            competition_season_id=stats_cs.id if stats_cs is not None else None,
         )
+
+        # Average voto (measured, or estimated from the market): a number a manager
+        # can actually read. The zone-duel "form" stays for aura, where it belongs.
+        values_by_player: dict[int, dict] = {}
+        if ref_cs is not None:
+            # Calibrate on the WHOLE pool, not just this roster: 25 players are too
+            # few an overlap to fit the market->voto relation, which would leave
+            # every newcomer without a value.
+            values_by_player, _pcs, _fit = player_values(
+                ref_cs, latest_market_values(eligible_player_ids(ref_cs.id)))
+
+        # The REAL fixture each player's club plays on this matchday — far more useful
+        # than a zone map when picking a lineup (who plays, against whom, and when).
+        next_match_by_player: dict[int, dict] = {}
+        if ref_cs is not None and as_of is not None:
+            fixtures = matchday_fixtures_by_team(ref_cs.id, as_of)
+            stints = dict(PlayerTeamStint.objects
+                          .filter(player_id__in=player_ids,
+                                  team_season__competition_season=ref_cs,
+                                  end_date__isnull=True)
+                          .values_list("player_id", "team_season_id"))
+            for pid, ts_id in stints.items():
+                m = fixtures.get(ts_id)
+                if m is None:
+                    continue
+                at_home = m.home_team_id == ts_id
+                opp = (m.away_team if at_home else m.home_team).team
+                own = (m.home_team if at_home else m.away_team).team
+                next_match_by_player[pid] = {
+                    "team": own.short_name or own.name,
+                    "opponent": opp.short_name or opp.name,
+                    "home": at_home,
+                    "kickoff": m.kickoff.isoformat() if m.kickoff else None,
+                    "kickoff_provisional": m.kickoff_provisional,
+                    "status": m.status,
+                }
+
+        # In CLASSIC mode the role that governs the formation is the FROZEN listone
+        # role (LeaguePlayerRole), not the spatially-inferred one — classic fantacalcio
+        # pins roles at season start. Fall back to the player's global seed, then to
+        # the spatial guess, so a roster is never roleless.
+        is_classic = league.mode == FantasyLeague.MODE_CLASSIC
+        frozen_roles: dict[int, str] = {}
+        if is_classic:
+            frozen_roles = {
+                lpr.player_id: _CLASSIC_ROLE_TO_LINEUP.get(lpr.role, "MID")
+                for lpr in LeaguePlayerRole.objects.filter(league=league, player_id__in=player_ids)
+            }
+            seed_roles = dict(
+                Player.objects.filter(id__in=player_ids).exclude(classic_role="").values_list("id", "classic_role")
+            )
 
         roster = []
         for s in slots:
             p = profiles.get(s.player_id, {})
+            role = p.get("role", "MID")
+            if is_classic:
+                role = frozen_roles.get(s.player_id) or _CLASSIC_ROLE_TO_LINEUP.get(
+                    seed_roles.get(s.player_id, ""), role
+                )
             roster.append(
                 {
                     "player_id": s.player_id,
                     "name": s.player.short_name or s.player.full_name,
                     "price": s.purchase_price,
-                    "role": p.get("role", "MID"),
+                    "role": role,
                     "avg_col": p.get("avg_col", 0.0),
                     "footprint": p.get("footprint", {}),
                     "appearances": p.get("appearances", 0),
                     "avg_minutes": p.get("avg_minutes", 0.0),
-                    "minutes_label": p.get("minutes_label", "low"),
+                    "minutes_label": p.get("minutes_label", "unknown"),
                     "form": p.get("form", 0.0),
+                    "stats_season": str(stats_cs) if stats_cs is not None else None,
+                    "next_match": next_match_by_player.get(s.player_id),
+                    "value": (values_by_player.get(s.player_id) or {}).get("estimated_value"),
+                    "value_basis": (values_by_player.get(s.player_id) or {}).get("basis"),
                 }
             )
         roster.sort(key=lambda r: (r["avg_col"], -r["price"]))
@@ -2121,7 +2616,15 @@ class LeagueTeamLineupView(APIView):
                 "as_of_matchday": as_of,
                 "prior_matches": (as_of - 1) if as_of is not None else total_matches,
                 "zone_grid": {"cols": 5, "rows": 4, "zone_keys": _zone_grid_keys()},
-                "rules": {"starters": 11, "gk_separate_slot": True},
+                "rules": {
+                    "starters": 11,
+                    "gk_separate_slot": True,
+                    "mode": league.mode,
+                    # classic role constraints (also used client-side to validate);
+                    # null in aura where any shape is legal.
+                    "classic_constraints": CLASSIC_CONSTRAINTS if is_classic else None,
+                },
+                "mode": league.mode,
                 "roster": roster,
                 "saved_lineup": saved_lineup,
             }
@@ -2143,6 +2646,29 @@ class LeagueTeamLineupSaveView(APIView):
         if matchday is None:
             return Response({"detail": "matchday richiesto."}, status=status.HTTP_400_BAD_REQUEST)
         gk = request.data.get("gk_player_id")
+
+        # Classic mode: enforce the role constraints server-side using the FROZEN
+        # listone roles, so a hand-crafted request can't bypass the client validator.
+        if league.mode == FantasyLeague.MODE_CLASSIC:
+            outfield_ids = [int(x) for x in request.data.get("starter_player_ids", []) if x is not None]
+            starter_ids = ([int(gk)] if gk else []) + outfield_ids
+            frozen = {
+                lpr.player_id: _CLASSIC_ROLE_TO_LINEUP.get(lpr.role, "MID")
+                for lpr in LeaguePlayerRole.objects.filter(league=league, player_id__in=starter_ids)
+            }
+            seed = dict(
+                Player.objects.filter(id__in=starter_ids).exclude(classic_role="").values_list("id", "classic_role")
+            )
+            starter_roles = [
+                frozen.get(pid) or _CLASSIC_ROLE_TO_LINEUP.get(seed.get(pid, ""), "MID")
+                for pid in starter_ids
+            ]
+            errors = validate_classic_lineup(starter_roles)
+            if errors:
+                return Response(
+                    {"detail": "Formazione non valida (classic).", "errors": errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # The lineup is referred to a competition; optionally apply it to all the
         # league's competitions at once (same matchday) to streamline.
@@ -2166,3 +2692,210 @@ class LeagueTeamLineupSaveView(APIView):
                 defaults=defaults,
             )
         return Response({"ok": True, "saved_competitions": len([c for c in target_comp_ids if c is not None]) or 1})
+
+
+# -- Real reference-championship calendar & results ---------------------------
+
+
+class LeagueRealFixturesView(APIView):
+    """Calendar + results of the league's REAL reference championship (e.g. Serie
+    A), grouped by matchday. Read model over the Match rows the calendar-sync
+    keeps fresh. Optional ?matchday=N to fetch a single round."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+        cs = league.reference_season
+        if cs is None:
+            return Response({"season": None, "matchdays": []})
+
+        qs = (Match.objects.filter(competition_season=cs)
+              .select_related("home_team__team", "away_team__team")
+              .annotate(_apps=Count("appearances"))
+              .order_by("matchday", "kickoff", "id"))
+        md_param = request.query_params.get("matchday")
+        if md_param:
+            try:
+                qs = qs.filter(matchday=int(md_param))
+            except ValueError:
+                return Response({"detail": "matchday must be an integer"},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+        # SofaScore keeps a postponed fixture AND its rescheduled replay as TWO
+        # events with different ids. Hide a postponed row once a non-postponed
+        # sibling (same teams, i.e. same leg) exists — but keep a genuinely
+        # postponed-and-not-yet-replayed match visible.
+        matches = list(qs)
+        played_legs = {(m.home_team_id, m.away_team_id)
+                       for m in matches if m.status != Match.STATUS_POSTPONED}
+        matches = [m for m in matches
+                   if not (m.status == Match.STATUS_POSTPONED
+                           and (m.home_team_id, m.away_team_id) in played_legs)]
+
+        groups: dict = {}
+        for m in matches:
+            has_detail = (m.status == Match.STATUS_FINISHED and m._apps > 0)
+            item = {
+                "id": m.id,
+                "matchday": m.matchday,
+                "kickoff": m.kickoff.isoformat() if m.kickoff else None,
+                "kickoff_provisional": m.kickoff_provisional,
+                "status": m.status,
+                "home_team": m.home_team.team.name,
+                "away_team": m.away_team.team.name,
+                "home_short": m.home_team.team.short_name or m.home_team.team.name,
+                "away_short": m.away_team.team.short_name or m.away_team.team.name,
+                "home_goals": m.home_goals,
+                "away_goals": m.away_goals,
+                "has_detail": has_detail,
+            }
+            groups.setdefault(m.matchday, []).append(item)
+
+        matchdays = [{"matchday": md, "fixtures": fx}
+                     for md, fx in sorted(groups.items(),
+                                          key=lambda kv: (kv[0] is None, kv[0]))]
+        # A rough "current matchday": the earliest with any non-finished fixture,
+        # else the last one — lets the frontend open on the live round.
+        current = None
+        for g in matchdays:
+            if any(f["status"] != Match.STATUS_FINISHED for f in g["fixtures"]):
+                current = g["matchday"]
+                break
+        if current is None and matchdays:
+            current = matchdays[-1]["matchday"]
+
+        return Response({
+            "season": {"id": cs.id, "name": str(cs),
+                       "competition": cs.competition.name},
+            "current_matchday": current,
+            "matchdays": matchdays,
+        })
+
+
+class LeagueRealMatchDetailView(APIView):
+    """Vote-relevant detail of a single REAL match: the per-player pagella
+    (voto puro + bonus/malus = fantavoto) for both squads, shaped as a classic
+    fixture detail so the frontend ClassicMatchDetail renders it. (Aura zone
+    breakdown enrichment is a planned follow-up.)"""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int, match_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+        cs = league.reference_season
+        match = get_object_or_404(
+            Match.objects.select_related("home_team__team", "away_team__team",
+                                         "competition_season"),
+            id=match_id)
+        if cs is not None and match.competition_season_id != cs.id:
+            raise Http404("Match is not in this league's reference season")
+        if not MatchAppearance.objects.filter(match=match).exists():
+            return Response({"detail": "Nessun dato disponibile per questa partita."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        pag = pagella_for_match(match, get_reference(match.competition_season_id))
+        hg, ag = int(match.home_goals or 0), int(match.away_goals or 0)
+        result = "home" if hg > ag else "away" if ag > hg else "draw"
+        return Response({
+            "mode": "classic",
+            "fixture_id": match.id,
+            "fantasy_round": match.matchday,
+            "real_matchday": match.matchday,
+            "stage": None,
+            "home_team": match.home_team.team.name,
+            "away_team": match.away_team.team.name,
+            "home_goals": hg,
+            "away_goals": ag,
+            "home_total": pag["home"]["total"],
+            "away_total": pag["away"]["total"],
+            "defense_bonus_mode": None,
+            "result": result,
+            "home": pag["home"],
+            "away": pag["away"],
+        })
+
+
+class LeagueChampionshipPlayersView(APIView):
+    """Full player pool of the league's reference championship (the 'listone').
+
+    One row per currently-eligible player (open real-club stint), with role, real
+    club, ownership in THIS league (free agent vs owned + owner), and a value
+    signal (average voto puro from the latest season with data). The frontend does
+    role / free-agent / search filtering and value sorting over this list."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+        cs = league.reference_season
+        if cs is None:
+            return Response({"value_season": None, "players": []})
+
+        pool = eligible_player_ids(cs.id)
+
+        # real club per player (open stint on this season)
+        team_by_player = {}
+        for pid, tname in (PlayerTeamStint.objects
+                           .filter(team_season__competition_season=cs,
+                                   end_date__isnull=True, player_id__in=pool)
+                           .select_related("team_season__team")
+                           .values_list("player_id", "team_season__team__name")):
+            team_by_player[pid] = tname
+
+        # frozen listone role, fallback to the global classic role
+        lpr = dict(LeaguePlayerRole.objects.filter(league=league)
+                   .values_list("player_id", "role"))
+        # ownership in this league
+        owner_by_player = dict(
+            FantasyRosterSlot.objects
+            .filter(team__league=league, released_at__isnull=True)
+            .values_list("player_id", "team__name"))
+
+        # Value blends last season's average with current-season form as the
+        # championship progresses (see player_values).
+        market = latest_market_values(pool)
+        values, prev_cs, fit = player_values(cs, market)
+
+        players = (Player.objects.filter(id__in=pool)
+                   .values("id", "full_name", "short_name", "classic_role"))
+        rows = []
+        for p in players:
+            pid = p["id"]
+            v = values.get(pid)
+            rows.append({
+                "market_value": market.get(pid),
+                "player_id": pid,
+                "name": p["short_name"] or p["full_name"] or str(pid),
+                "role": lpr.get(pid) or p["classic_role"] or "",
+                "team": team_by_player.get(pid),
+                "owned": pid in owner_by_player,
+                "owner": owner_by_player.get(pid),
+                "value": v["value"] if v else None,
+                "estimated_value": v["estimated_value"] if v else None,
+                "value_basis": v["basis"] if v else None,
+                "appearances": v["n_cur"] if v else 0,
+                "prev_appearances": v["n_prev"] if v else 0,
+            })
+        # Default order = the HOMOGENEOUS estimated value, so newcomers rank among
+        # the rated players instead of forming an alphabetical tail. The frontend
+        # also offers the measured-voto-then-market order.
+        rows.sort(key=lambda x: (x["estimated_value"] is None,
+                                 -(x["estimated_value"] or 0),
+                                 -(x["market_value"] or 0), x["name"]))
+        return Response({
+            "value_season": str(prev_cs) if prev_cs else None,
+            "current_season": str(cs),
+            "count": len(rows),
+            # How the market->voto estimate was calibrated (r = fit quality on the
+            # players having both signals), so the UI can be honest about it.
+            "value_fit": ({"intercept": round(fit[0], 3), "slope": round(fit[1], 3),
+                           "r": round(fit[2], 3), "n": fit[3]} if fit else None),
+            "players": rows,
+        })

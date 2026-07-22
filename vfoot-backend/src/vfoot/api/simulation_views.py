@@ -53,5 +53,5 @@ class SimulationFixtureDetailView(_BaseSimulationView):
         except FileNotFoundError:
             return self._missing()
         if detail is None:
-            return Response({"detail": "Fixture not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "Partita non trovata."}, status=status.HTTP_404_NOT_FOUND)
         return Response(detail)

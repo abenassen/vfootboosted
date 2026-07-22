@@ -57,7 +57,7 @@ class LoginView(APIView):
 
         user = authenticate(username=data["username"], password=data["password"])
         if not user:
-            return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({"detail": "Username o password non corretti."}, status=status.HTTP_401_UNAUTHORIZED)
 
         token, _ = Token.objects.get_or_create(user=user)
         return Response({"token": token.key, "user": UserSerializer(user).data}, status=status.HTTP_200_OK)

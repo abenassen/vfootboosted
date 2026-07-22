@@ -4,6 +4,9 @@ from rest_framework import serializers
 class CreateLeagueSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120)
     team_name = serializers.CharField(max_length=120)
+    # The real championship the league is played on. Chosen ONCE at creation and
+    # then immutable: rosters, listone and calendar all depend on it.
+    reference_season_id = serializers.IntegerField()
 
 
 class JoinLeagueSerializer(serializers.Serializer):
@@ -52,22 +55,32 @@ class CompetitionUpdateSerializer(serializers.Serializer):
     points_loss = serializers.IntegerField(required=False)
     starts_at = serializers.DateField(required=False, allow_null=True)
     ends_at = serializers.DateField(required=False, allow_null=True)
+    start_matchday = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    end_matchday = serializers.IntegerField(required=False, allow_null=True, min_value=1)
 
 
 class CompetitionScheduleSerializer(serializers.Serializer):
     starts_at = serializers.DateField(required=False, allow_null=True)
     ends_at = serializers.DateField(required=False, allow_null=True)
+    # Real-matchday span over the league reference season.
+    start_matchday = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    end_matchday = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     round_mapping = serializers.DictField(required=False)
 
 
 class CompetitionSchedulePreviewSerializer(serializers.Serializer):
     starts_at = serializers.DateField(required=False, allow_null=True)
     ends_at = serializers.DateField(required=False, allow_null=True)
+    start_matchday = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    end_matchday = serializers.IntegerField(required=False, allow_null=True, min_value=1)
 
 
 class QualificationRuleCreateSerializer(serializers.Serializer):
     source_competition_id = serializers.IntegerField()
     source_stage = serializers.ChoiceField(choices=["halfway", "final"], default="final")
+    # Optional explicit round cut-off; when given it overrides source_stage
+    # (e.g. "table after round 19"). min 1.
+    source_round = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     mode = serializers.ChoiceField(choices=["table_range", "winner", "loser"])
     rank_from = serializers.IntegerField(required=False, allow_null=True)
     rank_to = serializers.IntegerField(required=False, allow_null=True)
@@ -76,12 +89,14 @@ class QualificationRuleCreateSerializer(serializers.Serializer):
 class CompetitionStageBuildSerializer(serializers.Serializer):
     allow_repechage = serializers.BooleanField(required=False, default=False)
     random_seed = serializers.IntegerField(required=False, default=42)
+    double_round = serializers.BooleanField(required=False, default=False)
 
 
 class CompetitionStageCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120)
     stage_type = serializers.ChoiceField(choices=["round_robin", "knockout"])
     order_index = serializers.IntegerField(required=False, default=1)
+    double_round = serializers.BooleanField(required=False, default=False)
     team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
 
 
@@ -89,6 +104,7 @@ class CompetitionStageUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120, required=False)
     stage_type = serializers.ChoiceField(choices=["round_robin", "knockout"], required=False)
     order_index = serializers.IntegerField(required=False)
+    double_round = serializers.BooleanField(required=False)
     team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
     random_seed = serializers.IntegerField(required=False, default=42)
 
