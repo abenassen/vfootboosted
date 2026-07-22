@@ -42,8 +42,10 @@ def verify_id_token(raw_token: str) -> GoogleIdentity:
         from google.auth.transport import requests as google_requests
         from google.oauth2 import id_token as google_id_token
     except ImportError as exc:  # pragma: no cover - depends on env
-        raise GoogleAuthError(
-            "Dipendenza mancante: pip install google-auth") from exc
+        # Report the ACTUAL missing module: google-auth pulls its HTTP transport
+        # from `requests`, and a generic "install google-auth" message sends you
+        # chasing a package that is already there.
+        raise GoogleAuthError(f"Dipendenza mancante ({exc}).") from exc
 
     try:
         claims = google_id_token.verify_oauth2_token(

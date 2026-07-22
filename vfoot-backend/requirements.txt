@@ -8,3 +8,4 @@ sqlparse==0.5.5
 typing_extensions==4.15.0
 PyMySQL==1.2.0
 google-auth
+requests
