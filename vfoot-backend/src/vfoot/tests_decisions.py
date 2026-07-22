@@ -14,7 +14,7 @@ from vfoot.models import (
 )
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
-    open_role_decisions, resolve,
+    open_role_decisions, resolve, unavailable_players, undecided_player_ids,
 )
 
 
@@ -65,12 +65,22 @@ class DecisionQueueTests(TestCase):
         self.assertEqual(open_role_decisions(self.league), 0)
         self.assertEqual(LeagueDecision.objects.filter(league=self.league).count(), 1)
 
-    def test_market_is_blocked_until_the_queue_is_empty(self):
-        self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
+    def test_only_the_undecided_player_is_in_limbo(self):
+        """Per PLAYER, not per league: a single January signing must not stop
+        everyone else in the league from trading."""
+        ok = self._player("Deciso", method=SeasonPlayerRole.METHOD_TM,
+                          tm_position="centre-back", role="DIF")
+        pending = self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
-        self.assertIsNotNone(market_blocked_reason(self.league))
-        resolve(LeagueDecision.objects.get(league=self.league), "ATT", user=self.admin)
-        self.assertIsNone(market_blocked_reason(self.league))
+
+        self.assertEqual(undecided_player_ids(self.league), {pending.id})
+        self.assertEqual(unavailable_players(self.league, [ok.id]), [])
+        self.assertEqual(len(unavailable_players(self.league, [ok.id, pending.id])), 1)
+        self.assertIsNotNone(market_blocked_reason(self.league))   # avviso, non blocco
+
+        resolve(LeagueDecision.objects.get(league=self.league, player=pending),
+                "ATT", user=self.admin)
+        self.assertEqual(undecided_player_ids(self.league), set())
 
     def test_resolving_writes_the_frozen_league_role_as_an_admin_choice(self):
         p = self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
@@ -148,21 +158,33 @@ class DecisionApiTests(DecisionQueueTests):
         super().setUp()
         self.client = APIClient()
 
-    def test_market_cannot_be_opened_while_decisions_are_pending(self):
+    def test_the_market_opens_even_with_a_player_still_pending(self):
+        """The league keeps working around him; only he waits."""
         self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         self.client.force_authenticate(user=self.admin)
         r = self.client.patch(f"/api/v1/leagues/{self.league.id}/market",
                               {"is_open": True}, format="json")
+        self.assertEqual(r.status_code, 200)
+
+    def test_an_auction_refuses_the_undecided_and_names_them(self):
+        ok = self._player("Deciso", method=SeasonPlayerRole.METHOD_TM,
+                          tm_position="centre-back", role="DIF")
+        pending = self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
+        open_role_decisions(self.league)
+        self.client.force_authenticate(user=self.admin)
+
+        r = self.client.post(f"/api/v1/leagues/{self.league.id}/auctions",
+                             {"player_ids": [ok.id, pending.id]}, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertEqual(r.json()["code"], "pending_decisions")
+        # says WHICH one: a gate that only says "no" cannot be acted on
+        self.assertEqual([p["player_id"] for p in r.json()["players"]], [pending.id])
+        self.assertIn("Esordiente", r.json()["detail"])
 
-        r = self.client.post(
-            f"/api/v1/leagues/{self.league.id}/decisions/accept-all", format="json")
-        self.assertEqual(r.json()["resolved"], 1)
-        r = self.client.patch(f"/api/v1/leagues/{self.league.id}/market",
-                              {"is_open": True}, format="json")
-        self.assertEqual(r.status_code, 200)
+        r = self.client.post(f"/api/v1/leagues/{self.league.id}/auctions",
+                             {"player_ids": [ok.id]}, format="json")
+        self.assertNotEqual(r.status_code, 400)
 
     def test_member_cannot_resolve_but_can_vote_once_consulted(self):
         self._player("Uno", method=SeasonPlayerRole.METHOD_DEFAULT)
@@ -229,21 +251,20 @@ class LateArrivalTests(DecisionQueueTests):
         self.assertIsNotNone(r.json()["blocked_reason"])
 
     def test_opening_the_market_catches_up_with_the_roster_by_itself(self):
-        """A safety net, not the main path: market_open defaults to True, so a
-        league may never toggle it. The roster import is where the catch-up
-        really belongs — see import_transfermarkt_squads."""
+        """Opening the market seeds whoever has arrived since — and opens for
+        them, not against them: the market opens, only the newcomer waits."""
         self.snapshot(self.league)
-        self._player("Arrivato tardi", method=SeasonPlayerRole.METHOD_DEFAULT)
+        late = self._player("Arrivato tardi", method=SeasonPlayerRole.METHOD_DEFAULT)
         self.league.market_open = False
         self.league.save(update_fields=["market_open"])
 
         self.client.force_authenticate(user=self.admin)
         r = self.client.patch(f"/api/v1/leagues/{self.league.id}/market",
                               {"is_open": True}, format="json")
-        self.assertEqual(r.status_code, 400)
-        self.assertEqual(r.json()["code"], "pending_decisions")
+        self.assertEqual(r.status_code, 200)
         self.league.refresh_from_db()
-        self.assertFalse(self.league.market_open)
+        self.assertTrue(self.league.market_open)
+        self.assertEqual(undecided_player_ids(self.league), {late.id})
 
     def test_a_late_arrival_cannot_be_added_to_a_roster_undecided(self):
         """The gate that actually matters, since the market is open by default."""

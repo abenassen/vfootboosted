@@ -82,7 +82,8 @@ from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic
 from vfoot.services.classic_pagella import get_reference, pagella_for_match
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
-    open_role_decisions, resolve as resolve_decision,
+    open_role_decisions, resolve as resolve_decision, unavailable_players,
+    undecided_player_ids,
 )
 from vfoot.services.listone import snapshot_league_listone
 from vfoot.services.listone import eligible_player_ids
@@ -288,15 +289,28 @@ class MemberRoleUpdateView(APIView):
         return Response({"membership_id": target.id, "role": target.role})
 
 
-def _ensure_no_pending_decisions(league):
-    """Guard the money moments. A role settled after the bidding changes what
-    people paid for, so anything that assigns or prices players waits until the
-    listone's open questions are answered. Returns a 400 Response, or None."""
-    reason = market_blocked_reason(league)
-    if reason:
-        return Response({"detail": reason, "code": "pending_decisions"},
-                        status=status.HTTP_400_BAD_REQUEST)
-    return None
+def _ensure_players_decided(league, player_ids):
+    """Guard the money moments, PER PLAYER.
+
+    A role settled after the bidding changes what people paid for, so a player
+    whose role is still an open question cannot be auctioned or put on a roster.
+    But only HE waits: freezing the whole market was tolerable for the opening
+    listone and wrong for the rest of the season, where a single January signing
+    would otherwise stop everyone else from trading.
+
+    Names the players rather than only refusing — a gate that says "no" without
+    saying who is a gate nobody can act on. Returns a 400 Response, or None.
+    """
+    blocked = unavailable_players(league, player_ids)
+    if not blocked:
+        return None
+    names = ", ".join(b["name"] for b in blocked[:6])
+    more = f" e altri {len(blocked) - 6}" if len(blocked) > 6 else ""
+    return Response(
+        {"detail": f"Ruolo ancora da decidere per {names}{more}: "
+                   "non sono disponibili finche' l'amministratore non decide.",
+         "code": "pending_decisions", "players": blocked},
+        status=status.HTTP_400_BAD_REQUEST)
 
 
 class MarketToggleView(APIView):
@@ -315,11 +329,12 @@ class MarketToggleView(APIView):
             # frozen role: seeding him here is what stops a January signing from
             # slipping past the gate and being priced before anyone has agreed
             # what he is. Additive — nothing already decided is touched.
+            # Catch up with the real market. Roles are frozen but the roster is
+            # not, and a player who arrived after the listone was drawn has no
+            # frozen role. Opening the market is NOT refused for it: only the
+            # players still in limbo are, one by one, where they are used.
             if league.mode == FantasyLeague.MODE_CLASSIC:
                 snapshot_league_listone(league)
-            blocked = _ensure_no_pending_decisions(league)
-            if blocked:
-                return blocked
         league.market_open = s.validated_data["is_open"]
         league.save(update_fields=["market_open"])
         return Response({"league_id": league.id, "market_open": league.market_open})
@@ -488,14 +503,13 @@ class TeamRosterAddView(APIView):
         _ensure_admin(league, request.user.id)
         if not league.market_open:
             return Response({"detail": "Market is closed."}, status=status.HTTP_400_BAD_REQUEST)
-        blocked = _ensure_no_pending_decisions(league)
-        if blocked:
-            return blocked
-
         team = get_object_or_404(FantasyTeam, id=team_id, league=league)
         s = AddRosterPlayerSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         data = s.validated_data
+        blocked = _ensure_players_decided(league, [data["player_id"]])
+        if blocked:
+            return blocked
 
         player = get_object_or_404(Player, id=data["player_id"])
 
@@ -517,10 +531,9 @@ class TeamRosterRemoveView(APIView):
         _ensure_admin(league, request.user.id)
         if not league.market_open:
             return Response({"detail": "Market is closed."}, status=status.HTTP_400_BAD_REQUEST)
-        blocked = _ensure_no_pending_decisions(league)
-        if blocked:
-            return blocked
-
+        # No role gate here on purpose: releasing a player never depends on what
+        # his role is, and a player stuck in limbo is exactly one you may want to
+        # let go of.
         team = get_object_or_404(FantasyTeam, id=team_id, league=league)
         s = RemoveRosterPlayerSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -551,6 +564,12 @@ class LeagueRosterBulkAssignView(APIView):
         data = s.validated_data
         assignments = data.get("assignments")
         if assignments:
+            # Same per-player gate as a single add: a bulk import must not be a
+            # side door around a role nobody has agreed on yet.
+            blocked = _ensure_players_decided(
+                league, [r.get("player_id") for r in assignments if r.get("player_id")])
+            if blocked:
+                return blocked
             teams_by_id = {t.id: t for t in FantasyTeam.objects.filter(league=league).select_related("manager__user")}
             teams_by_name = {t.name.lower(): t for t in teams_by_id.values()}
             teams_by_manager = {t.manager.user.username.lower(): t for t in teams_by_id.values()}
@@ -2018,15 +2037,15 @@ class AuctionCreateView(APIView):
     def post(self, request, league_id: int):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _ensure_admin(league, request.user.id)
-        blocked = _ensure_no_pending_decisions(league)
-        if blocked:
-            return blocked
 
         s = CreateAuctionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         data = s.validated_data
 
         player_ids = data["player_ids"]
+        blocked = _ensure_players_decided(league, player_ids)
+        if blocked:
+            return blocked
         players = list(Player.objects.filter(id__in=player_ids).values_list("id", flat=True))
         if not players:
             return Response({"detail": "No valid players provided."}, status=status.HTTP_400_BAD_REQUEST)
@@ -2902,6 +2921,9 @@ class LeagueChampionshipPlayersView(APIView):
 
         players = (Player.objects.filter(id__in=pool)
                    .values("id", "full_name", "short_name", "classic_role"))
+        # Players whose role is still an open question: shown, but marked, so
+        # nobody plans an auction around someone they cannot actually buy.
+        undecided = undecided_player_ids(league)
         rows = []
         for p in players:
             pid = p["id"]
@@ -2914,6 +2936,7 @@ class LeagueChampionshipPlayersView(APIView):
                 "team": team_by_player.get(pid),
                 "owned": pid in owner_by_player,
                 "owner": owner_by_player.get(pid),
+                "role_undecided": pid in undecided,
                 "value": v["value"] if v else None,
                 "estimated_value": v["estimated_value"] if v else None,
                 "value_basis": v["basis"] if v else None,

@@ -265,6 +265,15 @@ function PlayerRow({
           <span className="text-xs text-slate-500">
             di <span className="font-medium text-slate-700">{p.owner}</span>
           </span>
+        ) : p.role_undecided ? (
+          /* Shown rather than hidden: planning an auction around someone you
+             cannot actually buy is worse than seeing why he is unavailable. */
+          <span
+            title="Il suo ruolo attende una decisione dell'amministratore: non è acquistabile finché non viene presa."
+            className="rounded border border-dashed border-amber-400 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+          >
+            Ruolo da decidere
+          </span>
         ) : (
           <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Svincolato</span>
         )}

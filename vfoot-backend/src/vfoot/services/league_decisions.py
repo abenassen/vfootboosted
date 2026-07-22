@@ -90,14 +90,47 @@ def blocking_decisions(league):
                                          status=LeagueDecision.STATUS_OPEN)
 
 
-def market_blocked_reason(league) -> str | None:
-    """Why the market/roster is closed, or None when it may open. Returned to the
-    client verbatim: 'non puoi' without 'perche'' is the worst kind of gate."""
+def undecided_player_ids(league) -> set[int]:
+    """Players in limbo: their role is still an open question, so they cannot be
+    auctioned or put on a roster.
+
+    The gate is per PLAYER, not per league. Freezing the whole market was
+    tolerable for the opening listone and wrong for the rest of the season: a
+    single January signing would otherwise stop everyone from trading. Scoped
+    this way the same mechanism serves all year — a newcomer is simply
+    unavailable until someone says what he is.
+    """
+    return set(blocking_decisions(league)
+               .exclude(player__isnull=True)
+               .values_list("player_id", flat=True))
+
+
+def undecided_notice(league) -> str | None:
+    """What the league should be told, or None when nothing is pending. Not a
+    block: the market stays open, these players do not."""
     n = blocking_decisions(league).count()
     if not n:
         return None
-    return (f"{n} giocatori del listone attendono una decisione sul ruolo. "
-            "Completa le disambiguazioni per aprire il mercato.")
+    return (f"{n} giocatori attendono una decisione sul ruolo e non sono "
+            "disponibili in asta o a roster finche' non e' presa.")
+
+
+def unavailable_players(league, player_ids) -> list:
+    """The subset of ``player_ids`` currently in limbo, with their names, so the
+    caller can say WHICH ones rather than only that something is wrong."""
+    blocked = undecided_player_ids(league) & set(player_ids)
+    if not blocked:
+        return []
+    return [{"player_id": d.player_id,
+             "name": (d.player.short_name or d.player.full_name),
+             "decision_id": d.id}
+            for d in blocking_decisions(league)
+            .filter(player_id__in=blocked).select_related("player")]
+
+
+# Kept as an alias while the notice is still surfaced as a banner.
+def market_blocked_reason(league) -> str | None:
+    return undecided_notice(league)
 
 
 @transaction.atomic

@@ -42,6 +42,9 @@ export interface ChampionshipPlayer {
   role: string; // POR | DIF | CEN | ATT | ''
   team: string | null; // real club
   owned: boolean; // owned by a fantasy team in this league
+  /** His role is still an open question in this league, so he cannot be
+   *  auctioned or added to a roster until the admin decides. */
+  role_undecided?: boolean;
   owner: string | null; // owning fantasy team name, if any
   // Value = avg voto puro, blended: last season's average early on, progressively
   // replaced by current-season form. null when the player has no data anywhere.
