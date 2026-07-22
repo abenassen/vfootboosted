@@ -24,6 +24,7 @@ from vfoot.api.serializers import (
     UserSerializer,
     VerifyEmailSerializer,
 )
+from vfoot.services.auth_tokens import issue_token
 from vfoot.services.email_verification import (
     activate,
     send_verification_email,
@@ -88,7 +89,7 @@ class VerifyEmailView(APIView):
             return Response({"detail": "Link di conferma non valido o scaduto."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        token, _ = Token.objects.get_or_create(user=user)
+        token = issue_token(user)
         return Response({"token": token.key, "user": UserSerializer(user).data},
                         status=status.HTTP_200_OK)
 
@@ -123,7 +124,7 @@ class GoogleAuthView(APIView):
         except GoogleAuthError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
 
-        token, _ = Token.objects.get_or_create(user=user)
+        token = issue_token(user)
         return Response({"token": token.key, "user": UserSerializer(user).data,
                          "created": created},
                         status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
@@ -152,7 +153,7 @@ class LoginView(APIView):
                     status=status.HTTP_403_FORBIDDEN)
             return Response({"detail": "Username o password non corretti."}, status=status.HTTP_401_UNAUTHORIZED)
 
-        token, _ = Token.objects.get_or_create(user=user)
+        token = issue_token(user)
         return Response({"token": token.key, "user": UserSerializer(user).data}, status=status.HTTP_200_OK)
 
 

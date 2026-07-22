@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework.authtoken.models import Token
 
+from vfoot.models import SocialAccount
 from vfoot.services import google_auth
 from vfoot.services.email_verification import token_generator
 from django.utils.encoding import force_bytes
@@ -163,9 +164,9 @@ class GoogleSignInTests(TestCase):
                                     {"credential": "finto"},
                                     content_type="application/json")
 
-    def _identity(self, email="tizio@example.com", verified=True):
+    def _identity(self, email="tizio@example.com", verified=True, subject="sub-123"):
         return google_auth.GoogleIdentity(email=email, email_verified=verified,
-                                          name="Tizio")
+                                          name="Tizio", subject=subject)
 
     def test_new_google_user_is_created_active(self):
         r = self._post(self._identity())
@@ -218,3 +219,92 @@ class GoogleSignInTests(TestCase):
         r = self.client.post(reverse("auth-google"), {"credential": "qualsiasi"},
                              content_type="application/json")
         self.assertEqual(r.status_code, 401)
+
+
+class GoogleIdentityLinkTests(TestCase):
+    """The link must survive a change of Google address, which email matching
+    alone cannot do."""
+
+    def _post(self, identity):
+        with mock.patch("vfoot.api.views.verify_id_token", return_value=identity):
+            return self.client.post(reverse("auth-google"), {"credential": "finto"},
+                                    content_type="application/json")
+
+    def _id(self, email="tizio@example.com", subject="sub-123", verified=True):
+        return google_auth.GoogleIdentity(email=email, email_verified=verified,
+                                          name="Tizio", subject=subject)
+
+    def test_first_sign_in_records_the_subject(self):
+        self._post(self._id())
+        link = SocialAccount.objects.get(provider="google", subject="sub-123")
+        self.assertEqual(link.user.email, "tizio@example.com")
+
+    def test_changed_google_email_still_reaches_the_same_account(self):
+        r1 = self._post(self._id())
+        uid = r1.json()["user"]["id"]
+        # Same Google account, new address: email matching would create a
+        # stranger; the subject must win.
+        r2 = self._post(self._id(email="nuovo-indirizzo@example.com"))
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.json()["user"]["id"], uid)
+        self.assertEqual(User.objects.count(), 1)
+
+    def test_second_google_account_claiming_a_linked_address_is_refused(self):
+        self._post(self._id())  # tizio@example.com linked to sub-123
+        # A different Google account now presents the same address (happens when
+        # an address is reassigned on a custom domain).
+        r = self._post(self._id(email="tizio@example.com", subject="sub-999"))
+        self.assertEqual(r.status_code, 401)
+        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(SocialAccount.objects.count(), 1)
+
+    def test_subject_link_does_not_require_a_verified_email(self):
+        # Already-linked identity: the address was vouched for at link time and
+        # is no longer what identifies the account.
+        self._post(self._id())
+        r = self._post(self._id(verified=False))
+        self.assertEqual(r.status_code, 200)
+
+    def test_one_local_account_per_google_identity(self):
+        self._post(self._id())
+        self._post(self._id())
+        self.assertEqual(
+            SocialAccount.objects.filter(provider="google", subject="sub-123").count(), 1)
+
+    def test_token_without_a_subject_is_refused(self):
+        r = self._post(self._id(subject=""))
+        self.assertEqual(r.status_code, 401)
+        self.assertFalse(User.objects.exists())
+
+
+class LastLoginTests(TestCase):
+    """Token auth bypasses django.contrib.auth.login(), so last_login has to be
+    written explicitly or it stays empty forever."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="tizio", email="t@example.com",
+                                             password="unaPasswordSolida9")
+
+    def test_password_login_stamps_last_login(self):
+        self.assertIsNone(self.user.last_login)
+        self.client.post(reverse("auth-login"),
+                         {"username": "tizio", "password": "unaPasswordSolida9"},
+                         content_type="application/json")
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.last_login)
+
+    def test_google_sign_in_stamps_last_login(self):
+        ident = google_auth.GoogleIdentity(email="t@example.com", email_verified=True,
+                                           name="T", subject="sub-1")
+        with mock.patch("vfoot.api.views.verify_id_token", return_value=ident):
+            self.client.post(reverse("auth-google"), {"credential": "finto"},
+                             content_type="application/json")
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.last_login)
+
+    def test_failed_login_does_not_stamp(self):
+        self.client.post(reverse("auth-login"),
+                         {"username": "tizio", "password": "sbagliata999"},
+                         content_type="application/json")
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.last_login)
