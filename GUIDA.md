@@ -95,3 +95,56 @@ cd vfoot-backend/src
   periodicamente tiene il pool aggiornato.
 - Frontend in modalità `mock` (senza `VITE_API_PROVIDER=backend`): le pagine su dati
   reali (Serie A, Listone, dettaglio partita) mostrano un errore voluto.
+
+---
+
+## 5) Server: configurare l'invio email (Brevo) e Google
+
+Le credenziali vivono SOLO nel `.env` del server, mai nel repo. Da lanciare tu,
+collegato in SSH, sostituendo i valori tra virgolette.
+
+```bash
+ssh root@139.162.144.123
+
+# --- Brevo (SMTP) ---
+cd /srv/vfoot-app
+# rimuove eventuali righe precedenti, poi riscrive
+sed -i '/^DJANGO_EMAIL_BACKEND=/d;/^EMAIL_HOST=/d;/^EMAIL_HOST_USER=/d;/^EMAIL_HOST_PASSWORD=/d' .env
+cat >> .env << 'FINE'
+DJANGO_EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp-relay.brevo.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=IL_TUO_LOGIN_SMTP
+EMAIL_HOST_PASSWORD=LA_TUA_CHIAVE_SMTP
+EMAIL_USE_TLS=true
+FINE
+
+# --- Google (l'ID client NON e' un segreto) ---
+sed -i '/^GOOGLE_OAUTH_CLIENT_ID=/d' .env
+echo 'GOOGLE_OAUTH_CLIENT_ID=xxxxx.apps.googleusercontent.com' >> .env
+
+systemctl restart vfoot
+
+# --- prova che l'invio funziona davvero ---
+cd /srv/vfoot-app/vfoot-backend/src
+runuser -u vfoot -- /srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py shell -c \
+  "from django.core.mail import send_mail; \
+   send_mail('Prova Vfoot', 'Se leggi questo, il relay funziona.', None, ['TUA@EMAIL.IT']); \
+   print('inviata')"
+```
+
+Il **pulsante Google** ha bisogno dell'ID client anche nel frontend, che e'
+compilato: va rifatto il build e ricaricato.
+
+```bash
+# in locale
+cd vfoot-frontend
+VITE_API_PROVIDER=backend VITE_API_BASE_URL=/api/v1 \
+  VITE_GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com npx vite build
+rsync -az --delete dist/ root@139.162.144.123:/srv/vfoot-web/
+ssh root@139.162.144.123 'chown -R vfoot:vfoot /srv/vfoot-web'
+```
+
+Finche' `DJANGO_EMAIL_BACKEND` resta sulla console (stato attuale), la
+registrazione **non** spedisce nulla: il link finisce nel journal, e si legge con
+`journalctl -u vfoot | grep verifica-email`.
