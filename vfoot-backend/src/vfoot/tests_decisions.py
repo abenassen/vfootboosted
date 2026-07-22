@@ -317,3 +317,46 @@ class LateArrivalTests(DecisionQueueTests):
         row = LeaguePlayerRole.objects.get(league=self.league, player=p)
         self.assertEqual(row.role, "ATT")
         self.assertEqual(row.source, LeaguePlayerRole.SOURCE_ADMIN)
+
+
+class UnseenArrivalTests(DecisionQueueTests):
+    """A player who signs between two runs of the role inference.
+
+    He has no SeasonPlayerRole at all, so the criterion has never looked at him.
+    Before this he was seeded straight from Player.classic_role — the raw
+    provider map, under which every winger is a midfielder — silently bypassing
+    both the criterion and the limbo.
+    """
+
+    def _stint_only(self, name, tm_position="left winger", classic_role="CEN"):
+        from realdata.models import Player, PlayerTeamStint
+        p = Player.objects.create(full_name=name, short_name=name,
+                                  classic_role=classic_role)
+        PlayerTeamStint.objects.create(player=p, team_season=self.ts,
+                                       tm_position=tm_position)
+        return p
+
+    def test_an_ambiguous_arrival_goes_to_limbo_not_to_the_raw_provider_map(self):
+        from vfoot.services.listone import snapshot_league_listone
+        p = self._stint_only("Ala Nuova")
+        summary = snapshot_league_listone(self.league)
+
+        self.assertEqual(summary["awaiting_decision"], 1)
+        self.assertEqual(summary["decisions_opened"], 1)
+        self.assertFalse(LeaguePlayerRole.objects.filter(league=self.league,
+                                                         player=p).exists())
+        self.assertEqual(undecided_player_ids(self.league), {p.id})
+        d = LeagueDecision.objects.get(league=self.league, player=p)
+        self.assertIn("Arrivato dopo l'ultimo calcolo", d.rationale)
+        self.assertTrue(d.proposed)   # a proposal to accept, not a blank form
+
+    def test_an_unambiguous_arrival_is_seeded_without_bothering_anyone(self):
+        from vfoot.services.listone import snapshot_league_listone
+        p = self._stint_only("Centrale Nuovo", tm_position="centre-back",
+                             classic_role="DIF")
+        summary = snapshot_league_listone(self.league)
+
+        self.assertEqual(summary["decisions_opened"], 0)
+        self.assertEqual(
+            LeaguePlayerRole.objects.get(league=self.league, player=p).role, "DIF")
+        self.assertEqual(undecided_player_ids(self.league), set())

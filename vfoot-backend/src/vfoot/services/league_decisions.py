@@ -23,7 +23,7 @@ from vfoot.models import (
     LeagueDecision, LeagueDecisionVote, LeagueMembership, LeaguePlayerRole,
     SeasonPlayerRole,
 )
-from vfoot.services.role_inference import TM_AMBIGUOUS
+from vfoot.services.role_inference import TM_AMBIGUOUS, TM_DEFAULT
 
 ROLE_LABELS = {Player.ROLE_GK: "Portiere", Player.ROLE_DEF: "Difensore",
                Player.ROLE_MID: "Centrocampista", Player.ROLE_FWD: "Attaccante"}
@@ -67,12 +67,31 @@ def players_needing_decision(league) -> set[int]:
                   .values_list("player_id", flat=True))
     settled |= set(LeaguePlayerRole.objects.filter(league=league)
                    .values_list("player_id", flat=True))
-    return set(SeasonPlayerRole.objects
-               .filter(competition_season_id=league.reference_season_id,
-                       player_id__in=_roster_player_ids(league) - settled,
-                       tm_position__in=TM_AMBIGUOUS)
-               .exclude(method=SeasonPlayerRole.METHOD_CATEGORY)
-               .values_list("player_id", flat=True))
+    candidates = _roster_player_ids(league) - settled
+    unresolved = set(SeasonPlayerRole.objects
+                     .filter(competition_season_id=league.reference_season_id,
+                             player_id__in=candidates,
+                             tm_position__in=TM_AMBIGUOUS)
+                     .exclude(method=SeasonPlayerRole.METHOD_CATEGORY)
+                     .values_list("player_id", flat=True))
+    # A player who arrived since the last inference run has NO SeasonPlayerRole at
+    # all. Without this he would be seeded straight from Player.classic_role —
+    # the raw provider map, under which every winger is a midfielder — silently
+    # bypassing the criterion and the limbo alike. Ambiguous position and nothing
+    # to resolve it with is exactly the case a human has to answer, whether the
+    # inference has run since he signed or not.
+    from realdata.models import PlayerTeamStint
+    known = set(SeasonPlayerRole.objects
+                .filter(competition_season_id=league.reference_season_id,
+                        player_id__in=candidates)
+                .values_list("player_id", flat=True))
+    unseen = set(PlayerTeamStint.objects
+                 .filter(team_season__competition_season_id=league.reference_season_id,
+                         end_date__isnull=True,
+                         player_id__in=candidates - known,
+                         tm_position__in=TM_AMBIGUOUS)
+                 .values_list("player_id", flat=True))
+    return unresolved | unseen
 
 
 @transaction.atomic
@@ -93,19 +112,38 @@ def open_role_decisions(league, *, opened_by=None) -> int:
     needing = players_needing_decision(league)
     if not needing:
         return 0
-    rows = (SeasonPlayerRole.objects
-            .filter(competition_season_id=league.reference_season_id,
-                    player_id__in=needing)
-            .select_related("player"))
+    inferred = {r.player_id: r for r in SeasonPlayerRole.objects
+                .filter(competition_season_id=league.reference_season_id,
+                        player_id__in=needing)}
+    # Players who signed since the last inference run have no row yet: their
+    # position comes from the roster stint and their proposal from the positional
+    # default. Leaving them out would be worse than seeding them wrongly — they
+    # would have no role AND no question, which is to say they would be invisible.
+    from realdata.models import PlayerTeamStint
+    stint_pos = dict(PlayerTeamStint.objects
+                     .filter(team_season__competition_season_id=league.reference_season_id,
+                             end_date__isnull=True,
+                             player_id__in=needing - set(inferred))
+                     .values_list("player_id", "tm_position"))
+    names = dict(Player.objects.filter(id__in=needing)
+                 .values_list("id", "short_name"))
+    fulls = dict(Player.objects.filter(id__in=needing)
+                 .values_list("id", "full_name"))
     made = []
-    for r in rows:
-        name = r.player.short_name or r.player.full_name
+    for pid in sorted(needing):
+        row = inferred.get(pid)
+        position = row.tm_position if row else stint_pos.get(pid, "")
+        proposed = (row.role_for(league.role_mode) if row
+                    else TM_DEFAULT.get(position, ""))
+        rationale = (METHOD_REASON.get(row.method, "") if row else
+                     "Arrivato dopo l'ultimo calcolo dei ruoli: nessuno storico "
+                     "su cui sciogliere una posizione ambigua.")
+        name = names.get(pid) or fulls.get(pid) or str(pid)
         made.append(LeagueDecision(
-            league=league, kind=LeagueDecision.KIND_PLAYER_ROLE, player_id=r.player_id,
+            league=league, kind=LeagueDecision.KIND_PLAYER_ROLE, player_id=pid,
             title=f"Ruolo di {name}",
-            question=f"Che ruolo assegnare a {name} ({r.tm_position}) nel listone?",
-            options=ROLE_OPTIONS, proposed=r.role_for(league.role_mode),
-            rationale=METHOD_REASON.get(r.method, ""),
+            question=f"Che ruolo assegnare a {name} ({position}) nel listone?",
+            options=ROLE_OPTIONS, proposed=proposed, rationale=rationale,
             blocks_market=True, opened_by=opened_by))
     LeagueDecision.objects.bulk_create(made, ignore_conflicts=True)
     return len(made)
