@@ -3373,3 +3373,38 @@ il client ritenta con backoff esponenziale invece di fallire subito.
 gia' ipotizzata — polling sul **Raspberry di casa** (IP residenziale) che spinge
 i dati verso il server — diventa quella necessaria. Da decidere il meccanismo di
 push (API autenticata vs SSH/rsync). I timer restano deliberatamente fermi.
+
+### Registrazione: conferma via email + login con Google (fatto)
+
+Scelta: **entrambi**. Email obbligatoria e unica, account creato **inattivo**, e
+**nessun token restituito** alla registrazione — consegnare le credenziali
+subito renderebbe la conferma puramente decorativa.
+
+Il link non usa una tabella dedicata: e' derivato dallo stato dell'utente come
+fa Django per il reset password, ma con `is_active` dentro l'hash. Cosi'
+l'attivazione stessa invalida il link: uso singolo senza niente da salvare,
+scadere o ripulire.
+
+Dettagli che cambiano l'esperienza reale:
+- il **login distingue** "non ancora confermato" da "password sbagliata":
+  `authenticate()` rifiuta anche gli utenti inattivi, quindi chi ha la password
+  giusta ma l'email non confermata verrebbe altrimenti mandato a resettare una
+  password che non era il problema;
+- il **reinvio risponde identico** per indirizzi noti e sconosciuti, altrimenti
+  diventerebbe un modo per scoprire chi e' registrato;
+- Google: verifichiamo l'ID token con le chiavi di Google invece di aggiungere
+  un secondo stack di autenticazione (`django-allauth`). Gli indirizzi che Google
+  segnala come **non verificati vengono rifiutati**: accettarli permetterebbe a
+  chiunque di rivendicare un account registrando quell'indirizzo presso un
+  provider che non controlliamo;
+- la pagina `/verifica-email` si difende dal **doppio mount degli effetti** di
+  React, che altrimenti ripeterebbe la POST con un token gia' consumato e
+  mostrerebbe un errore a chi ha appena attivato l'account correttamente.
+
+19 test nuovi (94 in totale, tutti verdi) + flusso completo verificato in
+**produzione**: 403 prima della conferma, 200 alla conferma, 200 al login dopo.
+
+**Da fare**: credenziali SMTP Brevo (per ora sul server il backend email e' la
+console, quindi i link finiscono nel journal e non vengono spediti davvero) e
+`GOOGLE_OAUTH_CLIENT_ID` + `VITE_GOOGLE_CLIENT_ID` (senza, il pulsante Google
+non viene mostrato e l'endpoint rifiuta).
