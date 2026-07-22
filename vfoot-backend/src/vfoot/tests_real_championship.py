@@ -24,7 +24,7 @@ from vfoot.api.league_views import (
     LeagueRealFixturesView,
     LeagueRealMatchDetailView,
 )
-from vfoot.models import FantasyLeague, LeagueMembership
+from vfoot.models import FantasyLeague, LeagueMembership, LeaguePlayerRole
 from vfoot.services.classic_pagella import pagella_for_match
 
 
@@ -224,6 +224,27 @@ class RealChampionshipTests(TestCase):
                     ["starters"] if l["player_id"] == self.df.id)
         self.assertTrue(line["sv"])
         self.assertEqual(line["sv_reason"], "dati_mancanti")
+
+    def test_league_frozen_role_wins_over_the_live_seed(self):
+        """A league fixes its roles when its listone opens; a later Transfermarkt
+        re-import may move Player.classic_role, but the league's pagella must keep
+        agreeing with the league's own listone."""
+        league, _ = self._league()
+        LeaguePlayerRole.objects.create(league=league, player=self.df, role="ATT",
+                                        source=LeaguePlayerRole.SOURCE_SEED)
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=self.df, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=40.0, team_side="home")
+
+        without = next(l for l in pagella_for_match(self.match, self.reference)["home"]
+                       ["starters"] if l["player_id"] == self.df.id)
+        self.assertEqual(without["role"], "DIF")  # the live seed
+
+        within = next(l for l in pagella_for_match(self.match, self.reference,
+                                                   league=league)["home"]["starters"]
+                      if l["player_id"] == self.df.id)
+        self.assertEqual(within["role"], "ATT")   # the league's frozen listone
+        self.assertTrue(within["role_known"])
 
     def _league(self):
         user = User.objects.create_user("mgr", password="x")

@@ -31,6 +31,7 @@ from realdata.models import (
     MatchDisciplinaryEvent,
     Player,
 )
+from vfoot.models import LeaguePlayerRole
 from vfoot.services.classic_rating import build_reference, voto_puro_for_match
 
 CARD_MALUS = {CARD_YELLOW: 0.5, CARD_SECOND_YELLOW: 1.0, CARD_RED: 1.0}
@@ -147,18 +148,33 @@ def _team_detail(starters: list[dict], bench: list[dict]) -> dict:
     }
 
 
-def pagella_for_match(match, reference: dict | None = None) -> dict:
+def pagella_for_match(match, reference: dict | None = None, league=None) -> dict:
     """Full per-team pagella for a real match. Returns {'home': ClassicTeamDetail,
     'away': ClassicTeamDetail}. Only meaningful for a match with imported
-    appearances (a finished, data-loaded fixture)."""
+    appearances (a finished, data-loaded fixture).
+
+    Pass ``league`` whenever the pagella is read INSIDE a league: classic roles are
+    fixed when that league's listone opens and never move again, so its frozen
+    LeaguePlayerRole is the authority. ``Player.classic_role`` is a live seed that
+    the next Transfermarkt import can rewrite — reading it here would let a league's
+    match detail contradict its own listone. The league is tied to one reference
+    season, so its snapshot already carries the season: no per-season role needed.
+    """
     if reference is None:
         reference = get_reference(match.competition_season_id)
 
     vp_rows = {r["player_id"]: r for r in voto_puro_for_match(match, reference)}
     cards = _cards_for_match(match.id)
     apps = list(MatchAppearance.objects.filter(match=match).select_related("player"))
-    roles = dict(Player.objects.filter(id__in=[a.player_id for a in apps])
+    pids = [a.player_id for a in apps]
+    roles = dict(Player.objects.filter(id__in=pids)
                  .values_list("id", "classic_role"))
+    if league is not None:
+        # Frozen roles win. Players with no frozen row (e.g. someone sold before
+        # the listone was drawn up) keep the global seed as a fallback.
+        roles.update(LeaguePlayerRole.objects
+                     .filter(league=league, player_id__in=pids)
+                     .values_list("player_id", "role"))
     hg, ag = int(match.home_goals or 0), int(match.away_goals or 0)
 
     buckets = {"home": {"starters": [], "bench": []},

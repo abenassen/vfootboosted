@@ -2798,7 +2798,8 @@ class LeagueRealMatchDetailView(APIView):
             return Response({"detail": "Nessun dato disponibile per questa partita."},
                             status=status.HTTP_404_NOT_FOUND)
 
-        pag = pagella_for_match(match, get_reference(match.competition_season_id))
+        pag = pagella_for_match(match, get_reference(match.competition_season_id),
+                                league=league)
         hg, ag = int(match.home_goals or 0), int(match.away_goals or 0)
         result = "home" if hg > ag else "away" if ag > hg else "draw"
         return Response({
