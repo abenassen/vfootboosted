@@ -23,6 +23,8 @@ import type {
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueDetail,
+  RealSeasonItem,
+  ReferenceSeason,
   LeagueFixtureItem,
   LeagueMatchdayItem,
   LeagueStandingRow,
@@ -32,6 +34,8 @@ import type {
   TeamRoster,
 } from '../types/league';
 import type { SimFixtureDetail } from '../types/simulation';
+import type { ClassicFixtureDetail } from '../types/classic';
+import type { ChampionshipPlayersResponse, RealFixturesResponse } from '../types/realChampionship';
 import type { SaveTeamLineupRequest, TeamLineupContext } from '../types/lineup';
 
 const DEFAULT_BASE_URL = 'http://localhost:8000/api/v1';
@@ -66,6 +70,73 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Token ${token}` };
 }
 
+/** An API failure carrying the HTTP status and the raw server payload, while its
+ *  ``message`` is a sentence meant for the user. */
+export class ApiError extends Error {
+  status: number;
+  detail: string;
+
+  constructor(status: number, detail: string, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+/** Technical field names -> the label the user sees in the form. */
+const FIELD_LABELS: Record<string, string> = {
+  name: 'Nome',
+  team_name: 'Nome squadra',
+  reference_season_id: 'Campionato di riferimento',
+  invite_code: 'Codice invito',
+  username: 'Username',
+  email: 'Email',
+  password: 'Password',
+  password_confirm: 'Conferma password',
+  competition_id: 'Competizione',
+  matchday: 'Giornata',
+  player_id: 'Giocatore',
+  price: 'Prezzo',
+  max_substitutions: 'Sostituzioni massime',
+  non_field_errors: 'Errore',
+};
+
+/** Turn an HTTP failure into something a person can act on. The backend's own
+ *  ``detail`` is preferred when present (ours are written in Italian for the user);
+ *  otherwise the status decides. */
+function humanMessage(status: number, parsed: any, statusText: string, url = ''): string {
+  const detail =
+    parsed && typeof parsed === 'object' && typeof parsed.detail === 'string'
+      ? parsed.detail
+      : null;
+
+  if (status === 401) {
+    // Decide from the ENDPOINT, not from a stored token: a stale token can linger
+    // in localStorage while the user is in fact just signing in.
+    return /\/auth\/(login|register)$/.test(url)
+      ? 'Username o password non corretti.'
+      : 'Sessione scaduta. Effettua di nuovo l’accesso.';
+  }
+  if (status === 403) return detail ?? 'Non hai i permessi per questa operazione.';
+  if (status === 404) return detail ?? 'Risorsa non trovata.';
+  if (status === 400) {
+    if (detail) return detail;
+    // DRF field errors: {campo: ["messaggio", …]}. The messages themselves already
+    // come back in Italian; only the KEYS are technical, so we label them.
+    if (parsed && typeof parsed === 'object') {
+      const parts = Object.entries(parsed).map(
+        ([field, msgs]) =>
+          `${FIELD_LABELS[field] ?? field}: ${Array.isArray(msgs) ? msgs.join(' ') : String(msgs)}`,
+      );
+      if (parts.length) return parts.join(' · ');
+    }
+    return 'Dati non validi. Controlla i campi e riprova.';
+  }
+  if (status >= 500) return 'Errore del server. Riprova più tardi.';
+  return detail ?? statusText ?? 'Operazione non riuscita.';
+}
+
 async function parseJsonOrThrow(res: Response): Promise<any> {
   const raw = await res.text();
   let parsed: unknown = null;
@@ -80,7 +151,10 @@ async function parseJsonOrThrow(res: Response): Promise<any> {
   if (!res.ok) {
     const details =
       parsed !== null ? (typeof parsed === 'string' ? parsed : JSON.stringify(parsed)) : raw;
-    throw new Error(`API ${res.status}: ${details || res.statusText}`);
+    // Keep the raw payload for debugging, but never show it to the user.
+    console.warn(`API ${res.status} ${res.url}:`, details || res.statusText);
+    throw new ApiError(
+      res.status, details, humanMessage(res.status, parsed, res.statusText, res.url));
   }
 
   if (!raw) return {};
@@ -240,6 +314,21 @@ export async function setMarketStatus(leagueId: number, isOpen: boolean) {
   return parseJsonOrThrow(res);
 }
 
+export interface LeagueSettingsPatch {
+  max_substitutions?: number;
+  defense_bonus_enabled?: boolean;
+  defense_bonus_mode?: 'add_own' | 'subtract_opponent';
+}
+
+export async function updateLeagueSettings(leagueId: number, settings: LeagueSettingsPatch) {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/settings`, {
+    method: 'PATCH',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(settings),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function getTeamRoster(leagueId: number, teamId: number): Promise<TeamRoster> {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/teams/${teamId}/roster`, {
     headers: { Accept: 'application/json', ...authHeaders() },
@@ -336,9 +425,34 @@ export async function deleteCompetition(competitionId: number): Promise<void> {
   await parseJsonOrThrow(res);
 }
 
+export async function getRealSeasons(): Promise<RealSeasonItem[]> {
+  const res = await fetch(`${baseUrl()}/real-seasons`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function setLeagueReferenceSeason(
+  leagueId: number,
+  referenceSeasonId: number | null
+): Promise<{ league_id: number; reference_season: ReferenceSeason | null }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/reference-season`, {
+    method: 'PATCH',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ reference_season_id: referenceSeasonId }),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function scheduleCompetition(
   competitionId: number,
-  payload: { starts_at?: string | null; ends_at?: string | null; round_mapping?: Record<string, number> } = {}
+  payload: {
+    starts_at?: string | null;
+    ends_at?: string | null;
+    start_matchday?: number | null;
+    end_matchday?: number | null;
+    round_mapping?: Record<string, number>;
+  } = {}
 ): Promise<CompetitionScheduleApplyResult> {
   const res = await fetch(`${baseUrl()}/competitions/${competitionId}/schedule`, {
     method: 'POST',
@@ -350,7 +464,12 @@ export async function scheduleCompetition(
 
 export async function previewCompetitionSchedule(
   competitionId: number,
-  payload: { starts_at?: string | null; ends_at?: string | null } = {}
+  payload: {
+    starts_at?: string | null;
+    ends_at?: string | null;
+    start_matchday?: number | null;
+    end_matchday?: number | null;
+  } = {}
 ): Promise<CompetitionSchedulePreview> {
   const res = await fetch(`${baseUrl()}/competitions/${competitionId}/schedule/preview`, {
     method: 'POST',
@@ -458,11 +577,16 @@ export async function deleteCompetitionPrize(prizeId: number): Promise<void> {
   await parseJsonOrThrow(res);
 }
 
-export async function buildDefaultCompetitionStages(competitionId: number, allowRepechage = false, randomSeed = 42) {
+export async function buildDefaultCompetitionStages(
+  competitionId: number,
+  allowRepechage = false,
+  randomSeed = 42,
+  doubleRound = false
+) {
   const res = await fetch(`${baseUrl()}/competitions/${competitionId}/stages/default-build`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ allow_repechage: allowRepechage, random_seed: randomSeed }),
+    body: JSON.stringify({ allow_repechage: allowRepechage, random_seed: randomSeed, double_round: doubleRound }),
   });
   return parseJsonOrThrow(res);
 }
@@ -522,15 +646,64 @@ export async function getLeagueFixtures(leagueId: number, competitionId?: number
   return parseJsonOrThrow(res);
 }
 
-export async function getLeagueStandings(leagueId: number): Promise<{ competition_id: number | null; standings: LeagueStandingRow[] }> {
-  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/standings`, {
+export async function getLeagueStandings(
+  leagueId: number,
+  competitionId?: number,
+): Promise<{ competition_id: number | null; standings: LeagueStandingRow[] }> {
+  const qs = competitionId ? `?competition_id=${competitionId}` : '';
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/standings${qs}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
 }
 
-export async function getFixtureDetail(fixtureId: number | string): Promise<SimFixtureDetail> {
+export async function getCompetitionStructure(
+  leagueId: number,
+  competitionId: number,
+): Promise<import('../types/league').CompetitionStructure> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/competitions/${competitionId}/structure`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getFixtureDetail(
+  fixtureId: number | string,
+): Promise<SimFixtureDetail | ClassicFixtureDetail> {
   const res = await fetch(`${baseUrl()}/fixtures/${fixtureId}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+// Real reference-championship (Serie A) calendar + results.
+export async function getRealFixtures(
+  leagueId: number,
+  matchday?: number,
+): Promise<RealFixturesResponse> {
+  const qs = matchday ? `?matchday=${matchday}` : '';
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/real-fixtures${qs}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+// Vote-relevant detail of a real match (pagella), shaped as a classic fixture.
+export async function getRealMatchDetail(
+  leagueId: number,
+  matchId: number | string,
+): Promise<ClassicFixtureDetail> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/real-matches/${matchId}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+// Full player pool of the league's reference championship (the "listone").
+export async function getChampionshipPlayers(
+  leagueId: number,
+): Promise<ChampionshipPlayersResponse> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/championship-players`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);

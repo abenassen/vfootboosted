@@ -58,6 +58,7 @@ type ApiImpl = {
   getLeagueDetail: typeof backendApi.getLeagueDetail;
   updateMemberRole: typeof backendApi.updateMemberRole;
   setMarketStatus: typeof backendApi.setMarketStatus;
+  updateLeagueSettings: typeof backendApi.updateLeagueSettings;
   getTeamRoster: typeof backendApi.getTeamRoster;
   addRosterPlayer: typeof backendApi.addRosterPlayer;
   removeRosterPlayer: typeof backendApi.removeRosterPlayer;
@@ -67,14 +68,10 @@ type ApiImpl = {
   getCompetitions: (leagueId: number) => Promise<CompetitionItem[]>;
   updateCompetition: (competitionId: number, req: CompetitionUpdateRequest) => Promise<CompetitionItem>;
   deleteCompetition: (competitionId: number) => Promise<void>;
-  scheduleCompetition: (
-    competitionId: number,
-    payload?: { starts_at?: string | null; ends_at?: string | null; round_mapping?: Record<string, number> }
-  ) => Promise<CompetitionScheduleApplyResult>;
-  previewCompetitionSchedule: (
-    competitionId: number,
-    payload?: { starts_at?: string | null; ends_at?: string | null }
-  ) => Promise<CompetitionSchedulePreview>;
+  scheduleCompetition: typeof backendApi.scheduleCompetition;
+  previewCompetitionSchedule: typeof backendApi.previewCompetitionSchedule;
+  getRealSeasons: typeof backendApi.getRealSeasons;
+  setLeagueReferenceSeason: typeof backendApi.setLeagueReferenceSeason;
   addCompetitionRule: (competitionId: number, req: QualificationRuleCreateRequest) => Promise<unknown>;
   resolveCompetitionDependencies: (competitionId: number) => Promise<unknown>;
   getCompetitionStages: (competitionId: number) => Promise<CompetitionStageItem[]>;
@@ -85,7 +82,12 @@ type ApiImpl = {
   getCompetitionPrizes: (competitionId: number) => Promise<CompetitionPrizeItem[]>;
   createCompetitionPrize: (competitionId: number, req: CompetitionPrizeCreateRequest) => Promise<CompetitionPrizeItem>;
   deleteCompetitionPrize: (prizeId: number) => Promise<void>;
-  buildDefaultCompetitionStages: (competitionId: number, allowRepechage?: boolean, randomSeed?: number) => Promise<unknown>;
+  buildDefaultCompetitionStages: (
+    competitionId: number,
+    allowRepechage?: boolean,
+    randomSeed?: number,
+    doubleRound?: boolean
+  ) => Promise<unknown>;
   resolveCompetitionStage: (stageId: number, randomSeed?: number) => Promise<unknown>;
   createAuction: typeof backendApi.createAuction;
   nominateNext: typeof backendApi.nominateNext;
@@ -95,7 +97,11 @@ type ApiImpl = {
   getAuctionState: (auctionId: number) => Promise<AuctionState>;
   getLeagueFixtures: (leagueId: number, competitionId?: number) => Promise<LeagueFixtureItem[]>;
   getLeagueStandings: typeof backendApi.getLeagueStandings;
+  getCompetitionStructure: typeof backendApi.getCompetitionStructure;
   getFixtureDetail: typeof backendApi.getFixtureDetail;
+  getRealFixtures: typeof backendApi.getRealFixtures;
+  getRealMatchDetail: typeof backendApi.getRealMatchDetail;
+  getChampionshipPlayers: typeof backendApi.getChampionshipPlayers;
   getTeamLineup: typeof backendApi.getTeamLineup;
   saveTeamLineup: typeof backendApi.saveTeamLineup;
   syncLeagueMatchdays: (leagueId: number) => Promise<{ fixtures_linked: number; matchdays_touched: number }>;
@@ -121,6 +127,7 @@ export const joinLeague = typedImpl.joinLeague;
 export const getLeagueDetail = typedImpl.getLeagueDetail;
 export const updateMemberRole = typedImpl.updateMemberRole;
 export const setMarketStatus = typedImpl.setMarketStatus;
+export const updateLeagueSettings = typedImpl.updateLeagueSettings;
 export const getTeamRoster = typedImpl.getTeamRoster;
 export const addRosterPlayer = typedImpl.addRosterPlayer;
 export const removeRosterPlayer = typedImpl.removeRosterPlayer;
@@ -132,6 +139,8 @@ export const updateCompetition = typedImpl.updateCompetition;
 export const deleteCompetition = typedImpl.deleteCompetition;
 export const scheduleCompetition = typedImpl.scheduleCompetition;
 export const previewCompetitionSchedule = typedImpl.previewCompetitionSchedule;
+export const getRealSeasons = typedImpl.getRealSeasons;
+export const setLeagueReferenceSeason = typedImpl.setLeagueReferenceSeason;
 export const addCompetitionRule = typedImpl.addCompetitionRule;
 export const resolveCompetitionDependencies = typedImpl.resolveCompetitionDependencies;
 export const getCompetitionStages = typedImpl.getCompetitionStages;
@@ -152,7 +161,11 @@ export const searchPlayers = typedImpl.searchPlayers;
 export const getAuctionState = typedImpl.getAuctionState;
 export const getLeagueFixtures = typedImpl.getLeagueFixtures;
 export const getLeagueStandings = typedImpl.getLeagueStandings;
+export const getCompetitionStructure = typedImpl.getCompetitionStructure;
 export const getFixtureDetail = typedImpl.getFixtureDetail;
+export const getRealFixtures = typedImpl.getRealFixtures;
+export const getRealMatchDetail = typedImpl.getRealMatchDetail;
+export const getChampionshipPlayers = typedImpl.getChampionshipPlayers;
 export const getTeamLineup = typedImpl.getTeamLineup;
 export const saveTeamLineup = typedImpl.saveTeamLineup;
 export const syncLeagueMatchdays = typedImpl.syncLeagueMatchdays;

@@ -5,6 +5,7 @@ export interface LeagueSummary {
   invite_code: string;
   market_open: boolean;
   team_name?: string | null;
+  reference_season?: ReferenceSeason | null;
 }
 
 export interface LeagueMember {
@@ -21,12 +22,28 @@ export interface LeagueTeam {
   manager_username: string;
 }
 
+export interface ReferenceSeason {
+  id: number;
+  name: string;
+  competition: string;
+  season: string;
+}
+
+export interface RealSeasonItem extends ReferenceSeason {
+  matchdays: number;
+}
+
 export interface LeagueDetail {
   league_id: number;
   name: string;
+  mode: 'aura' | 'classic';
   market_open: boolean;
+  max_substitutions: number;
+  defense_bonus_enabled: boolean;
+  defense_bonus_mode: 'add_own' | 'subtract_opponent';
   invite_code: string;
   invite_link: string;
+  reference_season: ReferenceSeason | null;
   members: LeagueMember[];
   teams: LeagueTeam[];
 }
@@ -40,6 +57,8 @@ export interface TeamRoster {
 export interface CreateLeagueRequest {
   name: string;
   team_name: string;
+  // Real championship the league is played on: chosen ONCE at creation, then immutable.
+  reference_season_id: number;
 }
 
 export interface JoinLeagueRequest {
@@ -69,6 +88,7 @@ export interface CompetitionRule {
   source_competition_id: number;
   source_competition_name: string;
   source_stage: 'halfway' | 'final';
+  source_round: number | null;
   mode: 'table_range' | 'winner' | 'loser';
   rank_from: number | null;
   rank_to: number | null;
@@ -84,14 +104,34 @@ export interface CompetitionPrizeItem {
   rank_to: number | null;
 }
 
+export type ResultView = 'classifica' | 'tabellone' | 'risultati';
+
+export interface CompetitionStructure {
+  competition_id: number;
+  name: string;
+  result_view: ResultView;
+  sections: CompetitionSection[];
+}
+
+export interface CompetitionSection {
+  name: string;
+  type: 'round_robin' | 'knockout';
+  order: number;
+  standings?: LeagueStandingRow[];
+  rounds?: { round_no: number; label: string; fixtures: LeagueFixtureItem[] }[];
+}
+
 export interface CompetitionItem {
   competition_id: number;
   name: string;
   competition_type: 'round_robin' | 'knockout';
+  result_view: ResultView;
   status: 'draft' | 'active' | 'done';
   points: { win: number; draw: number; loss: number };
   starts_at: string | null;
   ends_at: string | null;
+  start_matchday: number | null;
+  end_matchday: number | null;
   participants: CompetitionParticipant[];
   qualification_rules: CompetitionRule[];
   prizes: CompetitionPrizeItem[];
@@ -113,6 +153,7 @@ export interface CompetitionStageCreateRequest {
   name: string;
   stage_type: 'round_robin' | 'knockout';
   order_index?: number;
+  double_round?: boolean;
   team_ids?: number[];
 }
 
@@ -120,6 +161,7 @@ export interface CompetitionStageUpdateRequest {
   name?: string;
   stage_type?: 'round_robin' | 'knockout';
   order_index?: number;
+  double_round?: boolean;
   team_ids?: number[];
 }
 
@@ -160,6 +202,7 @@ export interface CompetitionStageItem {
   stage_type: 'round_robin' | 'knockout';
   status: 'draft' | 'active' | 'done';
   order_index: number;
+  double_round: boolean;
   participants: CompetitionParticipant[];
   rules_in: CompetitionStageRuleIn[];
   fixtures: { total: number; finished: number };
@@ -173,6 +216,8 @@ export interface CompetitionUpdateRequest {
   points_loss?: number;
   starts_at?: string | null;
   ends_at?: string | null;
+  start_matchday?: number | null;
+  end_matchday?: number | null;
 }
 
 export interface CompetitionSchedulePreview {
@@ -180,6 +225,8 @@ export interface CompetitionSchedulePreview {
   competition_name: string;
   starts_at: string | null;
   ends_at: string | null;
+  start_matchday: number | null;
+  end_matchday: number | null;
   rounds: number[];
   available_real_matchdays: number[];
   real_competition_season_id: number | null;
@@ -198,6 +245,7 @@ export interface CompetitionScheduleApplyResult {
 export interface QualificationRuleCreateRequest {
   source_competition_id: number;
   source_stage: 'halfway' | 'final';
+  source_round?: number | null;
   mode: 'table_range' | 'winner' | 'loser';
   rank_from?: number;
   rank_to?: number;
@@ -254,6 +302,7 @@ export interface LeagueFixtureItem {
   leg_no: number;
   kickoff: string | null;
   status: 'scheduled' | 'live' | 'finished';
+  phase: 'concluded' | 'current' | 'future' | 'unscheduled';
   home_team: { team_id: number; name: string };
   away_team: { team_id: number; name: string };
   score: { home_total: number; away_total: number } | null;
@@ -264,6 +313,7 @@ export interface LeagueMatchdayItem {
   fantasy_matchday_id: number;
   league_id: number;
   status: 'planned' | 'concluded';
+  phase: 'concluded' | 'current' | 'future';
   real_competition_season: {
     id: number;
     name: string;

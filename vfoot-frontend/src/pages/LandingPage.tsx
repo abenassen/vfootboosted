@@ -2,6 +2,7 @@ import { FormEvent, useMemo, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { Badge, Button, Card } from '../components/ui';
 import { apiProvider } from '../api';
+import { ApiError } from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
 import logo from '../assets/logo.png';
 
@@ -35,7 +36,17 @@ export default function LandingPage() {
       }
       navigate('/home', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Operazione non riuscita.');
+      // ApiError already carries a message written for the user; a bare TypeError
+      // here means fetch never reached the server (backend down / wrong address).
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof TypeError
+            ? 'Impossibile contattare il server. Verifica che sia avviato e riprova.'
+            : err instanceof Error
+              ? err.message
+              : 'Operazione non riuscita.',
+      );
     } finally {
       setPending(false);
     }

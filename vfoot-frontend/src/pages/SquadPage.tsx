@@ -2,7 +2,7 @@ import { Card, SectionTitle, Badge } from '../components/ui';
 import { useAsync } from '../utils/useAsync';
 import { getTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
-import type { PlayerRole } from '../types/lineup';
+import type { PlayerRole, MinutesLabel } from '../types/lineup';
 
 const ROLE_LABEL: Record<PlayerRole, string> = { GK: 'POR', DEF: 'DIF', MID: 'CEN', ATT: 'ATT' };
 const ROLE_CHIP: Record<PlayerRole, string> = {
@@ -67,7 +67,10 @@ export default function SquadPage() {
   );
 }
 
-function MinutesBadge({ label }: { label: 'high' | 'medium' | 'low' }) {
+function MinutesBadge({ label }: { label: MinutesLabel }) {
+  // 'unknown' = no games to judge from (pre-season): say nothing rather than
+  // labelling everybody as rarely used.
+  if (label === 'unknown') return null;
   if (label === 'high') return <Badge tone="green">titolare abituale</Badge>;
   if (label === 'medium') return <Badge tone="slate">spesso impiegato</Badge>;
   return <Badge tone="amber">poco impiegato</Badge>;

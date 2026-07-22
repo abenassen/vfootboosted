@@ -17,12 +17,16 @@ export default function LeagueSwitcher({ compact }: { compact?: boolean }) {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className={compact ? 'flex w-full items-center gap-2' : 'flex items-center gap-2'}>
       {!compact && selectedLeague ? <Badge tone="slate">{selectedLeague.role}</Badge> : null}
       <select
         value={selectedLeagueId ?? ''}
         onChange={(e) => setSelectedLeagueId(e.target.value ? Number(e.target.value) : null)}
-        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm"
+        className={
+          compact
+            ? 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm'
+            : 'rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm'
+        }
         aria-label="Selettore lega"
       >
         {leagues.map((l) => (

@@ -1,6 +1,12 @@
 // Real per-team lineup context (GET /leagues/<id>/lineup) and save payload.
 export type PlayerRole = 'GK' | 'DEF' | 'MID' | 'ATT';
-export type MinutesLabel = 'high' | 'medium' | 'low';
+export type MinutesLabel = 'high' | 'medium' | 'low' | 'unknown';
+export type LeagueMode = 'aura' | 'classic';
+
+export interface ClassicConstraints {
+  starters: number;
+  per_role: Record<PlayerRole, { min: number; max: number }>;
+}
 
 export interface TeamLineupPlayer {
   player_id: number;
@@ -13,6 +19,19 @@ export interface TeamLineupPlayer {
   avg_minutes: number;
   minutes_label: MinutesLabel;
   form: number; // expected per-match contribution from recent form
+  // Season the playing-time stats describe (the previous one before kick-off).
+  stats_season?: string | null;
+  // The REAL championship fixture this player's club plays on this matchday.
+  value?: number | null;       // media voto (misurata o stimata) — leggibile
+  value_basis?: string | null;
+  next_match?: {
+    team: string;              // il club del giocatore
+    opponent: string;
+    home: boolean;
+    kickoff: string | null;
+    kickoff_provisional: boolean;
+    status: string;
+  } | null;
 }
 
 export interface TeamLineupContext {
@@ -24,7 +43,13 @@ export interface TeamLineupContext {
   as_of_matchday: number | null; // data cutoff (only matches before it count)
   prior_matches: number;
   zone_grid: { cols: number; rows: number; zone_keys: string[] };
-  rules: { starters: number; gk_separate_slot: boolean };
+  rules: {
+    starters: number;
+    gk_separate_slot: boolean;
+    mode: LeagueMode;
+    classic_constraints: ClassicConstraints | null;
+  };
+  mode: LeagueMode;
   roster: TeamLineupPlayer[];
   saved_lineup: {
     gk_player_id: number | null;

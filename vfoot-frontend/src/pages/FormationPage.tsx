@@ -3,7 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import { getTeamLineup, saveTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
-import type { PlayerRole, TeamLineupContext, TeamLineupPlayer } from '../types/lineup';
+import type {
+  ClassicConstraints,
+  PlayerRole,
+  TeamLineupContext,
+  TeamLineupPlayer,
+} from '../types/lineup';
 
 const XI = 11; // starters incl. exactly one goalkeeper
 
@@ -14,7 +19,92 @@ const ROLE_CHIP: Record<PlayerRole, string> = {
   MID: 'bg-emerald-500',
   ATT: 'bg-orange-500',
 };
-const ROLE_ORDER: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 };
+const ROLE_ORDER: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 }; // P, D, C, A
+
+// Mirror of vfoot/services/formation_rules.validate_classic_lineup — the server
+// validates identically; this is the live UI guide. Returns Italian violations.
+function validateClassic(roles: PlayerRole[], c: ClassicConstraints): string[] {
+  const errs: string[] = [];
+  if (roles.length !== c.starters) errs.push(`Servono esattamente ${c.starters} titolari (ne hai ${roles.length}).`);
+  const cnt: Record<PlayerRole, number> = { GK: 0, DEF: 0, MID: 0, ATT: 0 };
+  roles.forEach((r) => (cnt[r] += 1));
+  if (cnt.GK !== 1) errs.push(cnt.GK === 0 ? 'Manca il portiere.' : 'Un solo portiere fra i titolari.');
+  if (cnt.DEF < c.per_role.DEF.min) errs.push(`Almeno ${c.per_role.DEF.min} difensori (ne hai ${cnt.DEF}).`);
+  if (cnt.ATT < c.per_role.ATT.min) errs.push(`Almeno ${c.per_role.ATT.min} attaccante (ne hai ${cnt.ATT}).`);
+  if (cnt.ATT > c.per_role.ATT.max) errs.push(`Al massimo ${c.per_role.ATT.max} attaccanti (ne hai ${cnt.ATT}).`);
+  (['DEF', 'MID'] as PlayerRole[]).forEach((role) => {
+    if (cnt[role] > c.per_role[role].max)
+      errs.push(`Meno di 6 ${ROLE_LABEL[role]} (${c.per_role[role].max} max, ne hai ${cnt[role]}).`);
+  });
+  return errs;
+}
+
+// Bench player_ids in priority order: honour `seed` first (saved/explicit order),
+// then append any remaining non-starter roster player (role order P/D/C/A, best form
+// first) so nobody is ever dropped from the payload.
+function orderBench(roster: TeamLineupPlayer[], starterIds: number[], seed: number[]): number[] {
+  const starterSet = new Set(starterIds);
+  const cand = new Map(roster.filter((p) => !starterSet.has(p.player_id)).map((p) => [p.player_id, p]));
+  const out: number[] = [];
+  for (const id of seed) {
+    if (cand.has(id) && !out.includes(id)) out.push(id);
+  }
+  const rest = [...cand.values()]
+    .filter((p) => !out.includes(p.player_id))
+    .sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form);
+  return [...out, ...rest.map((p) => p.player_id)];
+}
+
+// Kick-off of the real fixture; the provider ships a placeholder time until the
+// slot is actually assigned, so we say so rather than showing a made-up hour.
+function fmtKickoff(nm: { kickoff: string | null; kickoff_provisional: boolean }): string {
+  if (!nm.kickoff || nm.kickoff_provisional) return 'orario da definire';
+  return new Date(nm.kickoff).toLocaleString('it-IT', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// "Inter - Monza": the real fixture in home-away order, so the player's own club is
+// visible too, not just the opponent.
+function fixtureLabel(nm: { team: string; opponent: string; home: boolean }): string {
+  return nm.home ? `${nm.team} - ${nm.opponent}` : `${nm.opponent} - ${nm.team}`;
+}
+
+function PlayerDetails({ p }: { p: TeamLineupPlayer }) {
+  const nm = p.next_match;
+  return (
+    <span className="mt-1 block rounded-lg bg-slate-50 px-2 py-1 text-[11px] text-slate-600">
+      {nm ? (
+        <span className="block">
+          {nm.home ? (
+            <>
+              <b className="text-slate-800">{nm.team}</b> - {nm.opponent}
+            </>
+          ) : (
+            <>
+              {nm.opponent} - <b className="text-slate-800">{nm.team}</b>
+            </>
+          )}
+          <span className="text-slate-400"> · {fmtKickoff(nm)}</span>
+        </span>
+      ) : null}
+      {p.minutes_label === 'unknown' ? (
+        <span className="block text-slate-400">nessuno storico di impiego</span>
+      ) : (
+        <span className="block">
+          {p.appearances} pres · {p.avg_minutes}′ medi
+          {p.minutes_label === 'low' ? <Badge tone="amber"> poco impiegato</Badge> : null}
+          {p.minutes_label === 'high' ? <Badge tone="green"> titolare abituale</Badge> : null}
+        </span>
+      )}
+      {p.stats_season ? <span className="block text-slate-400">dati: {p.stats_season}</span> : null}
+    </span>
+  );
+}
 
 export default function FormationPage() {
   const { selectedLeagueId } = useLeagueContext();
@@ -27,6 +117,9 @@ export default function FormationPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [starterIds, setStarterIds] = useState<number[]>([]);
+  // Explicit, ordered bench = substitution priority. Always stored (even in Aura,
+  // where the substitute is the best available and order only breaks ties).
+  const [benchOrder, setBenchOrder] = useState<number[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [allComps, setAllComps] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -88,12 +181,14 @@ export default function FormationPage() {
           return;
         }
         const saved = d.saved_lineup;
+        let starters: number[];
         if (saved && (saved.gk_player_id || saved.starter_player_ids.length)) {
-          const ids = [...(saved.gk_player_id ? [saved.gk_player_id] : []), ...saved.starter_player_ids];
-          setStarterIds(ids.slice(0, XI));
+          starters = [...(saved.gk_player_id ? [saved.gk_player_id] : []), ...saved.starter_player_ids].slice(0, XI);
         } else {
-          setStarterIds(suggest(d.roster));
+          starters = suggest(d.roster);
         }
+        setStarterIds(starters);
+        setBenchOrder(orderBench(d.roster, starters, saved?.bench_player_ids ?? []));
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -110,17 +205,45 @@ export default function FormationPage() {
   if (loading && !ctx) return <div className="text-sm text-slate-500">Caricamento formazione…</div>;
   if (error || !ctx) return <div className="text-sm text-red-600">Errore: {error ?? '…'}</div>;
 
+  const isClassic = ctx.mode === 'classic';
+  const constraints = ctx.rules.classic_constraints;
+
+  // Toggling a player keeps the ordered bench in sync: a demoted starter joins the
+  // bench at the LOWEST priority (end); a promoted bench player leaves it.
   const toggleStarter = (id: number) => {
-    setStarterIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= XI ? s : [...s, id]));
+    if (starterIds.includes(id)) {
+      setStarterIds((s) => s.filter((x) => x !== id));
+      setBenchOrder((b) => (b.includes(id) ? b : [...b, id]));
+    } else {
+      if (starterIds.length >= XI) return;
+      setStarterIds((s) => [...s, id]);
+      setBenchOrder((b) => b.filter((x) => x !== id));
+    }
   };
 
+  const moveBench = (id: number, dir: -1 | 1) => {
+    setBenchOrder((b) => {
+      const i = b.indexOf(id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= b.length) return b;
+      const next = [...b];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  };
+
+  const starterRoles = starterIds.map((id) => byId.get(id)?.role).filter((r): r is PlayerRole => !!r);
+  const classicErrors = isClassic && constraints ? validateClassic(starterRoles, constraints) : [];
   const gkOk = gkStarters.length === 1;
-  const canSave = starterIds.length === XI && gkOk;
+  const canSave = starterIds.length === XI && gkOk && classicErrors.length === 0;
+
   const onSave = async () => {
     if (!canSave || !selectedLeagueId || matchday == null) return;
     setSaving(true);
     try {
-      const benchIds = ctx.roster.map((p) => p.player_id).filter((id) => !starterIds.includes(id));
+      // Send the bench in PRIORITY order (substitution order); append any roster
+      // player not yet placed so nobody is dropped from the payload.
+      const benchIds = orderBench(ctx.roster, starterIds, benchOrder);
       const res = await saveTeamLineup(selectedLeagueId, {
         matchday,
         competition: allComps ? null : competition,
@@ -140,7 +263,8 @@ export default function FormationPage() {
 
   const byRole = (a: TeamLineupPlayer, b: TeamLineupPlayer) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form;
   const starters = ctx.roster.filter((p) => starterIds.includes(p.player_id)).sort(byRole);
-  const bench = ctx.roster.filter((p) => !starterIds.includes(p.player_id)).sort(byRole);
+  const benchIds = orderBench(ctx.roster, starterIds, benchOrder);
+  const bench = benchIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
   const compName = ctx.competitions.find((c) => c.competition_id === competition)?.name;
 
   return (
@@ -148,16 +272,31 @@ export default function FormationPage() {
       <Card className="p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <SectionTitle>Formazione · {ctx.team.name}</SectionTitle>
+            <div className="flex items-center gap-2">
+              <SectionTitle>Formazione · {ctx.team.name}</SectionTitle>
+              <Badge tone={isClassic ? 'blue' : 'green'}>{isClassic ? 'Classic' : 'Aura'}</Badge>
+            </div>
             <div className="mt-1 text-sm text-slate-600">
               {compName ? <>Competizione <b>{compName}</b> · </> : null}
               titolari {starterIds.length}/{XI}
-              {gkStarters.length !== 1 ? (
+              {!isClassic && gkStarters.length !== 1 ? (
                 <span className="ml-2 font-semibold text-rose-600">
                   {gkStarters.length === 0 ? '· manca il portiere' : '· un solo portiere consentito'}
                 </span>
               ) : null}
             </div>
+            {isClassic ? (
+              <div className="mt-1 text-[11px] text-slate-500">
+                Vincoli: 1 portiere · almeno 3 difensori · 1–3 attaccanti · meno di 6 per reparto · 11 totali.
+              </div>
+            ) : null}
+            {isClassic && classicErrors.length ? (
+              <ul className="mt-1 list-disc pl-4 text-[11px] font-semibold text-rose-600">
+                {classicErrors.map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+              </ul>
+            ) : null}
             {ctx.as_of_matchday != null ? (
               <div className="mt-1 text-[11px] text-amber-600">
                 Giornata {ctx.as_of_matchday} · dati aggiornati alla giornata {ctx.as_of_matchday - 1} (
@@ -210,7 +349,7 @@ export default function FormationPage() {
         <Card className="self-start p-4 lg:sticky lg:top-4">
           <SectionTitle>La squadra in campo</SectionTitle>
           <div className="mt-1 text-[11px] text-slate-400">
-            Posizione attesa di ogni titolare (dai dati storici). Il portiere ha il bordo ambra. Clicca un giocatore per
+            {isClassic ? 'Schieramento per ruolo.' : 'Posizione attesa di ogni titolare (dai dati storici).'} Il portiere ha il bordo ambra. Clicca un giocatore per
             vederne le zone d'influenza (in giallo).
           </div>
           <PitchLineup
@@ -219,6 +358,7 @@ export default function FormationPage() {
             gkId={gkId}
             selectedId={selected}
             onSelect={(id) => setSelected((s) => (s === id ? null : id))}
+            regular={isClassic}
           />
         </Card>
 
@@ -243,9 +383,16 @@ export default function FormationPage() {
             {starters.length === 0 ? <div className="py-2 text-sm text-slate-400">Nessun titolare selezionato.</div> : null}
           </div>
 
-          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Panchina</div>
+          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Panchina · ordine = priorità sostituzioni
+          </div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
+            {isClassic
+              ? 'Entra il primo panchinaro in lista che ha un voto e mantiene la formazione valida.'
+              : 'In Aura il sostituto è il migliore disponibile; l’ordine conta solo a parità.'}
+          </div>
           <div className="divide-y">
-            {bench.map((p) => (
+            {bench.map((p, i) => (
               <RosterRow
                 key={p.player_id}
                 p={p}
@@ -253,8 +400,14 @@ export default function FormationPage() {
                 selected={selected === p.player_id}
                 onSelect={() => setSelected((s) => (s === p.player_id ? null : p.player_id))}
                 onToggle={() => toggleStarter(p.player_id)}
+                order={i + 1}
+                canUp={i > 0}
+                canDown={i < bench.length - 1}
+                onMoveUp={() => moveBench(p.player_id, -1)}
+                onMoveDown={() => moveBench(p.player_id, 1)}
               />
             ))}
+            {bench.length === 0 ? <div className="py-2 text-sm text-slate-400">Panchina vuota.</div> : null}
           </div>
         </Card>
       </div>
@@ -268,16 +421,29 @@ function RosterRow({
   selected,
   onSelect,
   onToggle,
+  order,
+  canUp,
+  canDown,
+  onMoveUp,
+  onMoveDown,
 }: {
   p: TeamLineupPlayer;
   isStarter: boolean;
   selected: boolean;
   onSelect: () => void;
   onToggle: () => void;
+  order?: number;
+  canUp?: boolean;
+  canDown?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   return (
     <div className={`flex items-center justify-between gap-2 py-2 ${selected ? 'bg-slate-50' : ''}`}>
       <button onClick={onSelect} className="flex min-w-0 items-center gap-2 text-left">
+        {order != null ? (
+          <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-400">{order}</span>
+        ) : null}
         <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[p.role]}`}>
           {ROLE_LABEL[p.role]}
         </span>
@@ -285,26 +451,55 @@ function RosterRow({
           <span className={`block truncate text-sm font-semibold ${selected ? 'text-slate-900 underline' : 'text-slate-800'}`}>
             {p.name}
           </span>
-          <span className="text-[11px] text-slate-500">
-            {p.avg_minutes}′ medi · rend. atteso{' '}
-            <b className={p.form >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{p.form.toFixed(2)}</b>
-            {p.minutes_label === 'low' ? <Badge tone="amber"> poco impiegato</Badge> : null}
+          <span className="block text-[11px] text-slate-500">
+            {typeof p.value === 'number' ? (
+              <>
+                media voto <b className="text-slate-700">{p.value.toFixed(2)}</b>
+                {p.value_basis === 'stimato' ? <span className="text-slate-400"> (stimata)</span> : null}
+              </>
+            ) : (
+              <span className="text-slate-400">nessuno storico</span>
+            )}
+            {p.next_match ? <span className="text-slate-400"> · {fixtureLabel(p.next_match)}</span> : null}
           </span>
+          {selected ? <PlayerDetails p={p} /> : null}
         </span>
       </button>
-      <div className="flex shrink-0 overflow-hidden rounded-lg border border-slate-200 text-[11px] font-semibold">
-        <button
-          onClick={onToggle}
-          className={isStarter ? 'bg-slate-900 px-3 py-1 text-white' : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'}
-        >
-          Titolare
-        </button>
-        <button
-          onClick={onToggle}
-          className={!isStarter ? 'bg-slate-500 px-3 py-1 text-white' : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'}
-        >
-          Panca
-        </button>
+      <div className="flex shrink-0 items-center gap-1">
+        {order != null ? (
+          <div className="flex flex-col overflow-hidden rounded border border-slate-200 text-slate-500">
+            <button
+              onClick={onMoveUp}
+              disabled={!canUp}
+              className="px-1.5 text-[9px] leading-tight hover:bg-slate-100 disabled:opacity-30"
+              title="Alza priorità"
+            >
+              ▲
+            </button>
+            <button
+              onClick={onMoveDown}
+              disabled={!canDown}
+              className="px-1.5 text-[9px] leading-tight hover:bg-slate-100 disabled:opacity-30"
+              title="Abbassa priorità"
+            >
+              ▼
+            </button>
+          </div>
+        ) : null}
+        <div className="flex overflow-hidden rounded-lg border border-slate-200 text-[11px] font-semibold">
+          <button
+            onClick={onToggle}
+            className={isStarter ? 'bg-slate-900 px-3 py-1 text-white' : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'}
+          >
+            Titolare
+          </button>
+          <button
+            onClick={onToggle}
+            className={!isStarter ? 'bg-slate-500 px-3 py-1 text-white' : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'}
+          >
+            Panca
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -347,12 +542,14 @@ function PitchLineup({
   gkId,
   selectedId,
   onSelect,
+  regular = false,
 }: {
   starterIds: number[];
   byId: Map<number, TeamLineupPlayer>;
   gkId: number | null;
   selectedId: number | null;
   onSelect: (id: number) => void;
+  regular?: boolean;
 }) {
   // Lay the XI out as formation lines: depth (x) from each player's expected
   // column, width (y) spread within their role line so dots never pile up
@@ -362,6 +559,36 @@ function PitchLineup({
   // central players stay central — attackers are no longer flung to the flanks).
   const ROLE_X: Record<PlayerRole, number> = { GK: 8, DEF: 30, MID: 53, ATT: 76 };
   const TYPICAL_COL: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 };
+  // CLASSIC: only the coarse role matters, so lay the XI out as a tidy formation —
+  // one line per role, players spread evenly across it. The real spatial position is
+  // an aura concern and only adds noise here.
+  if (regular) {
+    const lines: PlayerRole[] = ['GK', 'DEF', 'MID', 'ATT'];
+    const byRole = new Map<PlayerRole, TeamLineupPlayer[]>(lines.map((r) => [r, []]));
+    starterIds
+      .map((id) => byId.get(id))
+      .filter((p): p is TeamLineupPlayer => !!p)
+      .forEach((p) => byRole.get(p.role)?.push(p));
+    const regularDots = lines.flatMap((role) => {
+      const group = byRole.get(role) ?? [];
+      return group.map((p, i) => ({
+        p,
+        left: ROLE_X[role],
+        top: 50 + (i - (group.length - 1) / 2) * Math.min(26, 76 / Math.max(group.length, 1)),
+        isGk: p.player_id === gkId,
+      }));
+    });
+    const selRegular = selectedId != null ? byId.get(selectedId) : null;
+    return (
+      <PitchCanvas
+        dots={regularDots}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        footprint={selRegular?.footprint ?? null}
+      />
+    );
+  }
+
   const dots = starterIds
     .map((id) => byId.get(id))
     .filter((p): p is TeamLineupPlayer => !!p)
@@ -403,7 +630,30 @@ function PitchLineup({
   }
 
   const sel = selectedId != null ? byId.get(selectedId) : null;
-  const selMax = sel ? Math.max(0.0001, ...Object.values(sel.footprint)) : 1;
+  return (
+    <PitchCanvas
+      dots={dots}
+      selectedId={selectedId}
+      onSelect={onSelect}
+      footprint={sel?.footprint ?? null}
+    />
+  );
+}
+
+// The pitch itself: markings, the selected player's influence zones, and the dots.
+// Shared by the spatial (aura) and the regular-formation (classic) layouts.
+function PitchCanvas({
+  dots,
+  selectedId,
+  onSelect,
+  footprint,
+}: {
+  dots: { p: TeamLineupPlayer; left: number; top: number; isGk: boolean }[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+  footprint: Record<string, number> | null;
+}) {
+  const selMax = footprint ? Math.max(0.0001, ...Object.values(footprint)) : 1;
   return (
     <div className="relative mt-3 aspect-[7/5] w-full overflow-hidden rounded-xl border border-green-700/40 bg-gradient-to-r from-green-600 to-green-500 shadow-inner">
       {/* pitch markings */}
@@ -413,8 +663,8 @@ function PitchLineup({
       <div className="pointer-events-none absolute left-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/40" />
       <div className="pointer-events-none absolute right-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/40" />
       {/* predicted influence zones of the selected player */}
-      {sel
-        ? Object.entries(sel.footprint).map(([z, share]) => {
+      {footprint
+        ? Object.entries(footprint).map(([z, share]) => {
             const m = /^Z_(\d+)_(\d+)$/.exec(z);
             if (!m) return null;
             const c = Number(m[1]);
@@ -443,7 +693,7 @@ function PitchLineup({
           onClick={() => onSelect(p.player_id)}
           className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
           style={{ left: `${left}%`, top: `${top}%` }}
-          title={`${p.name} · rend. atteso ${p.form.toFixed(2)}`}
+          title={p.name}
         >
           <span
             className={`flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold text-white shadow-md ${DOT_COLOR[p.role]} ${

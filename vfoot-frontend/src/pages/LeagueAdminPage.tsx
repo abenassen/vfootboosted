@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   addRosterPlayer,
   buildDefaultCompetitionStages,
@@ -20,6 +20,7 @@ import {
   getCompetitions,
   getLeagueDetail,
   getLeagueMatchdays,
+  getRealSeasons,
   getTeamRoster,
   importRosterCsv,
   joinLeague,
@@ -30,6 +31,7 @@ import {
   scheduleCompetition,
   searchPlayers,
   setMarketStatus,
+  updateLeagueSettings,
   updateCompetitionStage,
   updateCompetition,
   updateMemberRole,
@@ -45,6 +47,7 @@ import type {
   LeagueDetail,
   LeagueMatchdayItem,
   PlayerSearchItem,
+  RealSeasonItem,
   TeamRoster,
 } from '../types/league';
 
@@ -63,9 +66,13 @@ export default function LeagueAdminPage() {
   const [league, setLeague] = useState<LeagueDetail | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [roster, setRoster] = useState<TeamRoster | null>(null);
+  const [maxSubsDraft, setMaxSubsDraft] = useState<number | null>(null);
 
   const [createName, setCreateName] = useState('');
   const [createTeam, setCreateTeam] = useState('');
+  // Reference season is mandatory at creation and immutable afterwards.
+  const [createSeasonId, setCreateSeasonId] = useState<number | ''>('');
+  const [realSeasons, setRealSeasons] = useState<RealSeasonItem[]>([]);
   const [joinCode, setJoinCode] = useState('');
   const [joinTeam, setJoinTeam] = useState('');
 
@@ -177,7 +184,9 @@ export default function LeagueAdminPage() {
   async function loadLeagueDetail(leagueId: number) {
     const d = await getLeagueDetail(leagueId);
     setLeague(d);
-    if (d.teams.length && !selectedTeamId) {
+    // Pick the first team when none is selected OR when the selected team belongs
+    // to a previously-viewed league (otherwise the roster load 404s on switch).
+    if (d.teams.length && !d.teams.some((t) => t.team_id === selectedTeamId)) {
       setSelectedTeamId(d.teams[0].team_id);
     }
   }
@@ -230,6 +239,16 @@ export default function LeagueAdminPage() {
     if (tab === 'league') setActiveTab('league');
     if (tab === 'user') setActiveTab('user');
   }, [searchParams]);
+
+  // Seasons available as a league's reference championship (for the create form).
+  useEffect(() => {
+    void getRealSeasons()
+      .then((s) => {
+        setRealSeasons(s);
+        setCreateSeasonId((cur) => (cur === '' && s.length ? s[0].id : cur));
+      })
+      .catch(() => setRealSeasons([]));
+  }, []);
 
   useEffect(() => {
     if (!selectedLeagueId) {
@@ -321,8 +340,13 @@ export default function LeagueAdminPage() {
 
   useEffect(() => {
     if (!selectedLeagueId || !selectedTeamId) return;
+    // Only load once the league detail for THIS league is in and the selected team
+    // actually belongs to it — avoids a 404 with a team_id left over from another
+    // league while the new detail is still loading.
+    if (league?.league_id !== selectedLeagueId) return;
+    if (!league.teams.some((t) => t.team_id === selectedTeamId)) return;
     void loadRoster(selectedLeagueId, selectedTeamId).catch((e) => setMsg(`Errore roster: ${e.message}`));
-  }, [selectedLeagueId, selectedTeamId]);
+  }, [selectedLeagueId, selectedTeamId, league]);
 
   useEffect(() => {
     if (!selectedLeagueId || playerQuery.trim().length < 2) {
@@ -401,8 +425,9 @@ export default function LeagueAdminPage() {
   }
 
   function concludeDisabledReason(md: LeagueMatchdayItem): string | null {
-    if (md.status === 'concluded') return 'Gia conclusa';
-    if (!md.real_completion.is_completed) return 'Giornata reale non completata';
+    if (md.phase === 'concluded') return 'Già conclusa';
+    if (md.phase === 'future') return 'Concludi prima la giornata attuale';
+    if (!md.real_completion.is_completed) return 'Giornata reale non ancora completata';
     if (md.fixtures.total === 0) return 'Nessuna fixture fantasy associata';
     return null;
   }
@@ -514,24 +539,11 @@ export default function LeagueAdminPage() {
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <SectionTitle>Administration</SectionTitle>
-        <div className="mt-2 text-sm text-slate-600">Separazione tra gestione utente e gestione della lega.</div>
-
-        <div className="mt-4 inline-flex rounded-xl bg-slate-100 p-1">
-          <button
-            type="button"
-            onClick={() => setActiveTab('user')}
-            className={activeTab === 'user' ? 'rounded-lg bg-white px-3 py-2 text-sm font-semibold' : 'px-3 py-2 text-sm font-semibold text-slate-600'}
-          >
-            User Admin
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('league')}
-            className={activeTab === 'league' ? 'rounded-lg bg-white px-3 py-2 text-sm font-semibold' : 'px-3 py-2 text-sm font-semibold text-slate-600'}
-          >
-            League Admin
-          </button>
+        <SectionTitle>{activeTab === 'user' ? 'User Admin' : 'League Admin'}</SectionTitle>
+        <div className="mt-2 text-sm text-slate-600">
+          {activeTab === 'user'
+            ? 'Profilo utente e gestione delle tue leghe.'
+            : `Gestione della lega selezionata${selectedLeague ? ` · ${selectedLeague.name}` : ''}.`}
         </div>
 
         {msg ? (
@@ -575,7 +587,12 @@ export default function LeagueAdminPage() {
                 onSubmit={(e: FormEvent) => {
                   e.preventDefault();
                   void run(async () => {
-                    const res = await createLeague({ name: createName, team_name: createTeam });
+                    if (createSeasonId === '') throw new Error('Seleziona il campionato di riferimento.');
+                    const res = await createLeague({
+                      name: createName,
+                      team_name: createTeam,
+                      reference_season_id: createSeasonId,
+                    });
                     setMsg(`Lega creata. Invite code: ${res.invite_code}`);
                     setCreateName('');
                     setCreateTeam('');
@@ -586,6 +603,23 @@ export default function LeagueAdminPage() {
               >
                 <input className="w-full rounded-xl border px-3 py-2" placeholder="Nome lega" value={createName} onChange={(e) => setCreateName(e.target.value)} required />
                 <input className="w-full rounded-xl border px-3 py-2" placeholder="Nome tua squadra" value={createTeam} onChange={(e) => setCreateTeam(e.target.value)} required />
+                <select
+                  className="w-full rounded-xl border px-3 py-2"
+                  value={createSeasonId}
+                  onChange={(e) => setCreateSeasonId(e.target.value ? Number(e.target.value) : '')}
+                  required
+                >
+                  <option value="">Campionato di riferimento…</option>
+                  {realSeasons.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-xs text-slate-500">
+                  Il campionato di riferimento non è modificabile dopo la creazione: rose, listone e
+                  calendario dipendono da esso.
+                </div>
                 <Button type="submit" disabled={busy}>Crea</Button>
               </form>
             </Card>
@@ -682,6 +716,83 @@ export default function LeagueAdminPage() {
                   >
                     {league.market_open ? 'Chiudi mercato' : 'Apri mercato'}
                   </Button>
+                </div>
+                <div className="space-y-3 rounded-xl border px-3 py-2">
+                  <div className="font-semibold">Opzioni partita</div>
+                  <div>
+                    <label className="flex items-center gap-2 text-sm">
+                      <span>Sostituzioni massime per giornata</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={11}
+                        defaultValue={league.max_substitutions}
+                        key={`maxsub-${league.league_id}-${league.max_substitutions}`}
+                        onChange={(e) => setMaxSubsDraft(Number(e.target.value))}
+                        className="w-16 rounded-lg border px-2 py-1 text-sm"
+                      />
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          void run(async () => {
+                            if (!league) return;
+                            const v = maxSubsDraft ?? league.max_substitutions;
+                            await updateLeagueSettings(league.league_id, { max_substitutions: v });
+                            await loadLeagueDetail(league.league_id);
+                            setMsg(`Sostituzioni massime impostate a ${v}.`);
+                          })
+                        }
+                      >
+                        Salva
+                      </Button>
+                    </label>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      Un titolare senza voto viene rimpiazzato dal primo panchinaro utile, fino a questo numero.
+                    </div>
+                  </div>
+                  <div className="border-t pt-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={league.defense_bonus_enabled}
+                        onChange={(e) =>
+                          void run(async () => {
+                            if (!league) return;
+                            await updateLeagueSettings(league.league_id, { defense_bonus_enabled: e.target.checked });
+                            await loadLeagueDetail(league.league_id);
+                            setMsg(`Modificatore difesa ${e.target.checked ? 'attivato' : 'disattivato'}.`);
+                          })
+                        }
+                      />
+                      <span>Modificatore difesa</span>
+                    </label>
+                    <label className="mt-2 flex items-center gap-2 text-sm">
+                      <span>Applicazione</span>
+                      <select
+                        value={league.defense_bonus_mode}
+                        disabled={!league.defense_bonus_enabled}
+                        onChange={(e) =>
+                          void run(async () => {
+                            if (!league) return;
+                            await updateLeagueSettings(league.league_id, {
+                              defense_bonus_mode: e.target.value as 'add_own' | 'subtract_opponent',
+                            });
+                            await loadLeagueDetail(league.league_id);
+                            setMsg('Applicazione modificatore difesa aggiornata.');
+                          })
+                        }
+                        className="rounded-lg border px-2 py-1 text-sm disabled:opacity-50"
+                      >
+                        <option value="add_own">Aggiunto alla propria squadra</option>
+                        <option value="subtract_opponent">Sottratto alla squadra avversaria</option>
+                      </select>
+                    </label>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      Premia chi schiera ≥4 difensori titolari: media dei 3 migliori difensori + portiere (voti
+                      puri) → bonus a fasce.
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <div className="font-semibold">Membri</div>
@@ -951,9 +1062,22 @@ export default function LeagueAdminPage() {
                     </div>
                   </Card>
 
+                  <Link
+                    to="/league-admin/competitions/new"
+                    className="flex items-center justify-between rounded-2xl bg-slate-900 p-4 text-white transition hover:bg-slate-800"
+                  >
+                    <div>
+                      <div className="text-sm font-bold">✨ Crea competizione (flusso guidato)</div>
+                      <div className="text-xs text-slate-300">
+                        Template Campionato/Coppa, andata-ritorno, e qualificazione da un'altra competizione.
+                      </div>
+                    </div>
+                    <span className="text-lg">→</span>
+                  </Link>
+
                   <div className="grid gap-4 lg:grid-cols-2">
                     <Card className="p-4 lg:col-span-2">
-                      <SectionTitle>1. Seleziona O Crea Competizione</SectionTitle>
+                      <SectionTitle>1. Seleziona O Crea Competizione (avanzato)</SectionTitle>
                       <div className="mt-2 text-xs text-slate-500">Usa il menu per aprire una competizione esistente oppure scegli "Nuova competizione".</div>
                       <select
                         className="mt-3 w-full rounded-xl border px-3 py-2 text-sm"
@@ -1501,41 +1625,48 @@ export default function LeagueAdminPage() {
               ) : null}
 
               {leagueTab === 'matchdays' ? (
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <Card className="p-4">
-                    <SectionTitle>Conclusione Giornate</SectionTitle>
-                    <div className="mt-2 text-xs text-slate-500">
-                      Le giornate fantasy vengono allineate automaticamente dal backend in base ai match reali associati alle fixture.
-                    </div>
-                  </Card>
-
-                  <Card className="p-4">
-                    <SectionTitle>Giornate Fantasy</SectionTitle>
-                    <div className="mt-2 max-h-[520px] space-y-2 overflow-auto text-sm">
-                      {matchdays.length ? (
-                        matchdays.map((md) => {
-                          const disabledReason = concludeDisabledReason(md);
-                          const canConclude = !disabledReason;
-                          return (
-                            <div key={md.fantasy_matchday_id} className="rounded-xl border p-3">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-semibold">
-                                  {md.real_competition_season.competition} · Giornata {md.real_matchday}
-                                </span>
-                                <Badge tone={md.status === 'concluded' ? 'green' : 'slate'}>{md.status}</Badge>
-                                <Badge tone={md.real_completion.is_completed ? 'green' : 'amber'}>
-                                  reale {md.real_completion.completed}/{md.real_completion.total}
-                                </Badge>
-                              </div>
-                              <div className="mt-1 text-xs text-slate-600">
-                                Fixture fantasy: {md.fixtures.finished}/{md.fixtures.total}
-                                {md.concluded_by ? ` · conclusa da ${md.concluded_by}` : ''}
-                              </div>
-                              {disabledReason ? <div className="mt-1 text-xs text-amber-700">{disabledReason}</div> : null}
+                <Card className="p-4">
+                  <SectionTitle>Giornate — progressione della lega</SectionTitle>
+                  <div className="mt-1 text-xs text-slate-500">
+                    La lega avanza una giornata alla volta. Concludi la giornata <b>attuale</b> per calcolare i punteggi:
+                    diventerà <span className="text-green-700">conclusa</span> e la successiva passerà ad attuale.
+                  </div>
+                  <div className="mt-3 space-y-2 text-sm">
+                    {matchdays.length ? (
+                      matchdays.map((md) => {
+                        const disabledReason = concludeDisabledReason(md);
+                        const canConclude = !disabledReason;
+                        const phaseChip =
+                          md.phase === 'concluded'
+                            ? { tone: 'green' as const, label: 'Conclusa' }
+                            : md.phase === 'current'
+                            ? { tone: 'amber' as const, label: 'Attuale' }
+                            : { tone: 'slate' as const, label: 'Futura' };
+                        const frame =
+                          md.phase === 'current'
+                            ? 'border-amber-300 bg-amber-50'
+                            : md.phase === 'concluded'
+                            ? 'border-slate-100 bg-white'
+                            : 'border-slate-100 bg-slate-50 opacity-70';
+                        return (
+                          <div key={md.fantasy_matchday_id} className={'rounded-xl border p-3 ' + frame}>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold">
+                                {md.real_competition_season.competition} · Giornata {md.real_matchday}
+                              </span>
+                              <Badge tone={phaseChip.tone}>{phaseChip.label}</Badge>
+                              <Badge tone={md.real_completion.is_completed ? 'green' : 'amber'}>
+                                reale {md.real_completion.completed}/{md.real_completion.total}
+                              </Badge>
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600">
+                              Fixture fantasy: {md.fixtures.finished}/{md.fixtures.total}
+                              {md.concluded_by ? ` · conclusa da ${md.concluded_by}` : ''}
+                            </div>
+                            {md.phase === 'current' ? (
                               <div className="mt-2">
                                 <Button
                                   size="sm"
-                                  variant="secondary"
                                   aria-label={`Concludi giornata ${md.real_matchday}`}
                                   disabled={!canConclude || busy}
                                   onClick={() =>
@@ -1548,18 +1679,23 @@ export default function LeagueAdminPage() {
                                     })
                                   }
                                 >
-                                  Concludi giornata
+                                  Concludi giornata attuale
                                 </Button>
+                                {disabledReason ? (
+                                  <span className="ml-2 text-xs text-amber-700">{disabledReason}</span>
+                                ) : null}
                               </div>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="text-slate-500">Nessuna giornata fantasy disponibile al momento.</div>
-                      )}
-                    </div>
-                  </Card>
-                </div>
+                            ) : null}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-slate-500">
+                        Nessuna giornata: crea una competizione e mappala sulle giornate reali (tab Competizioni).
+                      </div>
+                    )}
+                  </div>
+                </Card>
               ) : null}
 
               {leagueTab === 'auction' ? (

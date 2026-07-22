@@ -10,6 +10,7 @@ import LeagueMatchDetailPage from './pages/LeagueMatchDetailPage';
 import CompetitionPage from './pages/CompetitionPage';
 import MarketPage from './pages/MarketPage';
 import LeagueAdminPage from './pages/LeagueAdminPage';
+import CompetitionCreatePage from './pages/CompetitionCreatePage';
 import SimulationOverviewPage from './pages/SimulationOverviewPage';
 import SimulationMatchesPage from './pages/SimulationMatchesPage';
 import SimulationMatchDetailPage from './pages/SimulationMatchDetailPage';
@@ -17,6 +18,11 @@ import NotFoundPage from './pages/NotFoundPage';
 import LandingPage from './pages/LandingPage';
 import { useAuth } from './auth/AuthContext';
 import { LeagueProvider } from './league/LeagueContext';
+import { CompetitionProvider } from './league/CompetitionContext';
+import ClassificaPage from './pages/ClassificaPage';
+import RealChampionshipPage from './pages/RealChampionshipPage';
+import RealMatchDetailPage from './pages/RealMatchDetailPage';
+import ListonePage from './pages/ListonePage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -33,7 +39,9 @@ export default function App() {
         element={
           <RequireAuth>
             <LeagueProvider>
-              <AppShell />
+              <CompetitionProvider>
+                <AppShell />
+              </CompetitionProvider>
             </LeagueProvider>
           </RequireAuth>
         }
@@ -43,10 +51,15 @@ export default function App() {
         <Route path="squad" element={<SquadPage />} />
         <Route path="squad/formation" element={<FormationPage />} />
         <Route path="matches" element={<MatchesPage />} />
+        <Route path="standings" element={<ClassificaPage />} />
         <Route path="matches/:matchId" element={<LeagueMatchDetailPage />} />
+        <Route path="serie-a" element={<RealChampionshipPage />} />
+        <Route path="serie-a/:matchId" element={<RealMatchDetailPage />} />
+        <Route path="listone" element={<ListonePage />} />
         <Route path="competitions/:competitionId" element={<CompetitionPage />} />
         <Route path="market" element={<MarketPage />} />
         <Route path="league-admin" element={<LeagueAdminPage />} />
+        <Route path="league-admin/competitions/new" element={<CompetitionCreatePage />} />
         <Route path="simulation" element={<SimulationOverviewPage />} />
         <Route path="simulation/matches" element={<SimulationMatchesPage />} />
         <Route path="simulation/matches/:fixtureId" element={<SimulationMatchDetailPage />} />

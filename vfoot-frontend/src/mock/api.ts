@@ -173,6 +173,7 @@ export async function getLeagueFixtures(_leagueId: number, _competitionId?: numb
       leg_no: 1,
       kickoff: null,
       status: 'scheduled',
+      phase: 'current',
       home_team: { team_id: 11, name: 'Mock Team' },
       away_team: { team_id: 12, name: 'Mock Team 2' },
       score: null,
@@ -186,6 +187,7 @@ export async function getLeagueFixtures(_leagueId: number, _competitionId?: numb
       leg_no: 1,
       kickoff: null,
       status: 'finished',
+      phase: 'concluded',
       home_team: { team_id: 12, name: 'Mock Team 2' },
       away_team: { team_id: 11, name: 'Mock Team' },
       score: { home_total: 67.5, away_total: 69.2 },
@@ -207,6 +209,7 @@ export async function getLeagues(): Promise<LeagueSummary[]> {
     invite_code: l.invite_code,
     market_open: l.market_open,
     team_name: l.teams[0]?.name ?? null,
+    reference_season: null,
   }));
 }
 
@@ -216,9 +219,14 @@ export async function createLeague(req: CreateLeagueRequest) {
   const league: LeagueDetail = {
     league_id: id,
     name: req.name,
+    mode: 'aura',
     market_open: true,
+    max_substitutions: 5,
+    defense_bonus_enabled: true,
+    defense_bonus_mode: 'add_own',
     invite_code: `MOCK${id}`,
     invite_link: `/join/MOCK${id}`,
+    reference_season: null,
     members: [{ membership_id: id * 10 + 1, user_id: 1, username: 'mock-admin', role: 'admin' }],
     teams: [{ team_id: id * 10 + 1, name: req.team_name, manager_user_id: 1, manager_username: 'mock-admin' }]
   };
@@ -259,6 +267,14 @@ export async function setMarketStatus(leagueId: number, isOpen: boolean) {
   if (!l) throw new Error('League not found.');
   l.market_open = isOpen;
   return { league_id: leagueId, market_open: isOpen };
+}
+
+export async function updateLeagueSettings(
+  leagueId: number,
+  settings: { max_substitutions?: number; defense_bonus_enabled?: boolean; defense_bonus_mode?: string },
+) {
+  await sleep(80);
+  return { league_id: leagueId, ...settings };
 }
 
 export async function getTeamRoster(_leagueId: number, teamId: number): Promise<TeamRoster> {
@@ -304,11 +320,14 @@ export async function getCompetitions(_leagueId: number): Promise<CompetitionIte
     {
       competition_id: 1,
       name: 'Campionato Mock',
+      result_view: 'classifica',
       competition_type: 'round_robin',
       status: 'active',
       points: { win: 3, draw: 1, loss: 0 },
       starts_at: null,
       ends_at: null,
+      start_matchday: null,
+      end_matchday: null,
       participants: [],
       qualification_rules: [],
       prizes: [],
@@ -322,6 +341,7 @@ export async function updateCompetition(competitionId: number, req: CompetitionU
   return {
     competition_id: competitionId,
     name: req.name ?? 'Campionato Mock',
+    result_view: 'classifica',
     competition_type: 'round_robin',
     status: req.status ?? 'active',
     points: {
@@ -331,6 +351,8 @@ export async function updateCompetition(competitionId: number, req: CompetitionU
     },
     starts_at: req.starts_at ?? null,
     ends_at: req.ends_at ?? null,
+    start_matchday: req.start_matchday ?? null,
+    end_matchday: req.end_matchday ?? null,
     participants: [],
     qualification_rules: [],
     prizes: [],
@@ -367,6 +389,8 @@ export async function previewCompetitionSchedule(
     competition_name: 'Campionato Mock',
     starts_at: payload.starts_at ?? null,
     ends_at: payload.ends_at ?? null,
+    start_matchday: null,
+    end_matchday: null,
     rounds: [1, 2, 3],
     available_real_matchdays: [24, 25, 26, 27],
     real_competition_season_id: 1,
@@ -395,6 +419,7 @@ export async function getCompetitionStages(_competitionId: number): Promise<Comp
       stage_type: 'round_robin',
       status: 'active',
       order_index: 1,
+      double_round: false,
       participants: [],
       rules_in: [],
       fixtures: { total: 6, finished: 2 },
@@ -414,6 +439,7 @@ export async function createCompetitionStage(
     stage_type: req.stage_type,
     status: 'draft',
     order_index: req.order_index ?? 1,
+    double_round: req.double_round ?? false,
     participants: [],
     rules_in: [],
     fixtures: { total: 0, finished: 0 },
@@ -432,6 +458,7 @@ export async function updateCompetitionStage(
     stage_type: req.stage_type ?? 'round_robin',
     status: 'draft',
     order_index: req.order_index ?? 1,
+    double_round: req.double_round ?? false,
     participants: [],
     rules_in: [],
     fixtures: { total: 0, finished: 0 },
@@ -566,6 +593,7 @@ export async function getLeagueMatchdays(_leagueId: number): Promise<LeagueMatch
       fantasy_matchday_id: 1,
       league_id: 1,
       status: 'planned',
+      phase: 'current',
       real_competition_season: {
         id: 1,
         name: 'Serie A 2025-2026',
@@ -598,7 +626,12 @@ export async function concludeLeagueMatchday(
   };
 }
 
-export async function getLeagueStandings(_leagueId: number): Promise<{ competition_id: number | null; standings: [] }> {
+export async function getCompetitionStructure(_leagueId: number, competitionId: number) {
+  await sleep(80);
+  return { competition_id: competitionId, name: 'Mock', result_view: 'classifica' as const, sections: [] };
+}
+
+export async function getLeagueStandings(_leagueId: number, _competitionId?: number): Promise<{ competition_id: number | null; standings: [] }> {
   await sleep(80);
   return { competition_id: null, standings: [] };
 }
@@ -606,6 +639,24 @@ export async function getLeagueStandings(_leagueId: number): Promise<{ competiti
 export async function getFixtureDetail(_fixtureId: number | string): Promise<never> {
   await sleep(80);
   throw new Error('Dettaglio partita disponibile solo con il backend reale.');
+}
+
+export async function getRealFixtures(_leagueId: number, _matchday?: number): Promise<never> {
+  await sleep(80);
+  throw new Error('Calendario Serie A disponibile solo con il backend reale.');
+}
+
+export async function getRealMatchDetail(
+  _leagueId: number,
+  _matchId: number | string,
+): Promise<never> {
+  await sleep(80);
+  throw new Error('Dettaglio partita disponibile solo con il backend reale.');
+}
+
+export async function getChampionshipPlayers(_leagueId: number): Promise<never> {
+  await sleep(80);
+  throw new Error('Listone disponibile solo con il backend reale.');
 }
 
 export async function getTeamLineup(_leagueId: number, _matchday?: number): Promise<never> {
