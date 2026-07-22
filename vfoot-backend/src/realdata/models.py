@@ -309,6 +309,12 @@ class PlayerTeamStint(models.Model):
 
     transfer_kind = models.CharField(max_length=20, blank=True, default="")  # "loan", "permanent", ...
 
+    # Raw provider position for THIS season's squad entry ("left winger", ...).
+    # Kept per stint, not on Player: a position is a fact about a season, and the
+    # role inference must be able to read the season it is reasoning about without
+    # reaching back into the scrape cache.
+    tm_position = models.CharField(max_length=40, blank=True, default="")
+
     class Meta:
         indexes = [models.Index(fields=["player", "team_season"]),
                    models.Index(fields=["team_season", "start_date"])]

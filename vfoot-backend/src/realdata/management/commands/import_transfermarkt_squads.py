@@ -382,13 +382,23 @@ class Command(BaseCommand):
                             player=player, source=PROVIDER_TM, alias=tm_id)
                         stint, made = PlayerTeamStint.objects.get_or_create(
                             player=player, team_season=ts,
-                            defaults={"start_date": as_of})
+                            defaults={"start_date": as_of,
+                                      "tm_position": pos_norm})
                         if made:
                             stats["stints"] += 1
-                        elif stint.end_date is not None:
-                            # a previously-departed player is back in this squad
-                            stint.end_date = None
-                            stint.save(update_fields=["end_date"])
+                        else:
+                            fields = []
+                            if stint.end_date is not None:
+                                # a previously-departed player is back in this squad
+                                stint.end_date = None
+                                fields.append("end_date")
+                            # Keep the season's position current: the role inference
+                            # reads it from here rather than from the scrape cache.
+                            if stint.tm_position != pos_norm:
+                                stint.tm_position = pos_norm
+                                fields.append("tm_position")
+                            if fields:
+                                stint.save(update_fields=fields)
                     if player.id is not None:  # unsaved (dry-run create) -> skip
                         seen_pairs.add((player.id, ts.id))
                     tm_alias[tm_id] = player

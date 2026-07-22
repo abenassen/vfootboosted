@@ -44,6 +44,17 @@ class FantasyLeague(models.Model):
         blank=True,
         related_name="fantasy_leagues",
     )
+    # Which role policy this league's listone was frozen under. "mitigated" lets an
+    # unambiguous Transfermarkt position win; "data" lets the measured playing
+    # style decide for everyone (a full-back who plays as a winger becomes an
+    # attacker). Chosen when the listone opens and then fixed, like the reference
+    # season: changing it mid-season would re-shuffle roles under the managers.
+    ROLE_MODE_MITIGATED = "mitigated"
+    ROLE_MODE_DATA = "data"
+    ROLE_MODE_CHOICES = [(ROLE_MODE_MITIGATED, "Mitigata (priorita' Transfermarkt)"),
+                         (ROLE_MODE_DATA, "Pura dai dati")]
+    role_mode = models.CharField(max_length=10, choices=ROLE_MODE_CHOICES,
+                                 default=ROLE_MODE_MITIGATED)
     created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self) -> str:
@@ -306,6 +317,54 @@ class LeaguePlayerRole(models.Model):
 
     def __str__(self) -> str:
         return f"{self.player_id}={self.role} @league {self.league_id}"
+
+
+class SeasonPlayerRole(models.Model):
+    """Roles computed for a SEASON's squads, before any league freezes them.
+
+    Sits between the raw providers and ``LeaguePlayerRole``: the inference is
+    expensive and season-wide (it clusters every player at once), while a league's
+    listone is a cheap snapshot of one of the two variants. Recomputing per league
+    would be wasteful and, worse, could hand two leagues different roles from the
+    same evidence.
+
+    Both variants are stored, not just the chosen one, so a league can be created
+    under either policy without re-running anything — and so the two can be
+    compared and audited after the fact.
+    """
+
+    METHOD_CATEGORY = "category"   # measured: we know how he played
+    METHOD_TM = "tm"               # provider position, unambiguous
+    METHOD_DEFAULT = "default"     # no data: positional fallback
+    METHOD_UNKNOWN = "unknown"
+    METHOD_CHOICES = [(METHOD_CATEGORY, "Categoria misurata"), (METHOD_TM, "Posizione TM"),
+                      (METHOD_DEFAULT, "Default posizionale"), (METHOD_UNKNOWN, "Ignoto")]
+
+    competition_season = models.ForeignKey(CompetitionSeason, on_delete=models.CASCADE,
+                                           related_name="player_roles")
+    player = models.ForeignKey(Player, on_delete=models.CASCADE,
+                               related_name="season_roles")
+    # Human-readable playing style ("ala offensiva"), empty when unmeasured.
+    category = models.CharField(max_length=40, blank=True, default="")
+    # How firmly he belongs to that category (co-association with its core).
+    # Low values are what the admin is asked to review, not silently accepted.
+    confidence = models.FloatField(default=0.0)
+    role_data = models.CharField(max_length=3, blank=True, default="")
+    role_mitigated = models.CharField(max_length=3, blank=True, default="")
+    method = models.CharField(max_length=10, choices=METHOD_CHOICES,
+                              default=METHOD_UNKNOWN)
+    tm_position = models.CharField(max_length=40, blank=True, default="")
+    computed_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = [("competition_season", "player")]
+        indexes = [models.Index(fields=["competition_season", "method"])]
+
+    def role_for(self, mode: str) -> str:
+        return self.role_data if mode == "data" else self.role_mitigated
+
+    def __str__(self) -> str:
+        return f"{self.player_id}@{self.competition_season_id}: {self.role_mitigated}"
 
 
 class CompetitionTeam(models.Model):
