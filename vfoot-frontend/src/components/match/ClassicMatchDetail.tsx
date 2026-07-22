@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Card, SectionTitle } from '../ui';
 import { MatchScoreHeader, type MatchHeaderVM } from './MatchScoreHeader';
@@ -165,10 +166,14 @@ function TeamColumn({ name, team }: { name: string; team: ClassicTeamDetail }) {
 }
 
 function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: number; bench?: boolean }) {
+  const [open, setOpen] = useState(false);
   const played = !p.sv && p.fantavoto != null;
+  const why = p.explanation;
+  const hasWhy = !!why && (why.positives.length > 0 || why.negatives.length > 0);
   // a benched player who never entered and has no vote is greyed out
   const inactive = bench && !p.entered && !played;
   return (
+    <>
     <div className={`flex items-center justify-between gap-2 py-1.5 ${inactive ? 'opacity-50' : ''}`}>
       <div className="flex min-w-0 items-center gap-2">
         {order != null ? (
@@ -200,6 +205,14 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
               <span className="text-slate-500">↓ esce · entra {p.replaced_by.name}</span>
             ) : p.entered && p.entered_for ? (
               <span className="font-semibold text-emerald-600">▲ entra per {p.entered_for.name}</span>
+            ) : hasWhy ? (
+              <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                {open ? 'nascondi' : 'perché questo voto?'}
+              </button>
             ) : null}
           </span>
         </span>
@@ -237,6 +250,36 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
           </>
         )}
       </div>
+    </div>
+    {open && why ? <WhyThisVote why={why} /> : null}
+    </>
+  );
+}
+
+/** The breakdown behind a voto puro. Each line is in VOTE POINTS relative to the
+ *  average player in the same role, which is the only comparison that means
+ *  anything: a defender who made the usual number of clearances did nothing
+ *  worth mentioning. */
+function WhyThisVote({ why }: { why: NonNullable<ClassicPlayerLine['explanation']> }) {
+  const row = (e: { label: string; points: number }, tone: string) => (
+    <div key={e.label} className="flex items-baseline justify-between gap-3">
+      <span className="text-slate-600">{e.label}</span>
+      <span className={`shrink-0 font-mono text-[11px] font-semibold ${tone}`}>
+        {e.points > 0 ? '+' : ''}
+        {e.points.toFixed(2)}
+      </span>
+    </div>
+  );
+  return (
+    <div className="mb-2 ml-8 rounded-xl bg-slate-50 px-3 py-2 text-[12px]">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        Scarto dalla media del ruolo, in punti di voto
+      </div>
+      <div className="space-y-0.5">
+        {why.positives.map((e) => row(e, 'text-emerald-700'))}
+        {why.negatives.map((e) => row(e, 'text-rose-700'))}
+      </div>
+      {why.note ? <div className="mt-1.5 text-[11px] text-slate-500">{why.note}</div> : null}
     </div>
   );
 }

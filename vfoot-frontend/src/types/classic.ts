@@ -33,6 +33,15 @@ export interface ClassicPlayerLine {
   malus: number; // own goal -2, pen miss -3, card, GK -1/goal conceded
   fantavoto: number | null; // voto_puro + bonus - malus
   events: ClassicPlayerEvents;
+  /** Why the voto puro came out where it did, in vote points against the average
+   *  player in the same role. Absent for s.v. — explaining a vote that does not
+   *  exist would mean inventing one. */
+  explanation?: {
+    positives: { key: string; label: string; points: number }[];
+    negatives: { key: string; label: string; points: number }[];
+    note: string;
+  };
+  explanation_text?: string;
   entered: boolean; // bench player who came in
   entered_for: ClassicPlayerRef | null;
   replaced_by: ClassicPlayerRef | null; // starter who was substituted

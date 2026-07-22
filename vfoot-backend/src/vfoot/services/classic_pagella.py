@@ -32,7 +32,11 @@ from realdata.models import (
     Player,
 )
 from vfoot.models import LeaguePlayerRole
-from vfoot.services.classic_rating import build_reference, voto_puro_for_match
+from vfoot.services.classic_rating import (
+    build_reference, defensive_exposure, voto_puro_for_match,
+    _minutes_map, _per_match_player_totals,
+)
+from vfoot.services.vote_explanation import explain, role_average_terms, to_sentence
 
 CARD_MALUS = {CARD_YELLOW: 0.5, CARD_SECOND_YELLOW: 1.0, CARD_RED: 1.0}
 ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
@@ -69,6 +73,33 @@ def get_reference(competition_season_id: int) -> dict:
     return data
 
 
+def get_role_averages(competition_season_id: int) -> dict:
+    """Per-role average contribution of each feature — the yardstick a vote
+    explanation is read against. Season-wide and expensive, so it is cached under
+    the same data version as the reference and refreshes when a match is
+    finalized."""
+    key = (f"vfoot:role_term_averages:{competition_season_id}:"
+           f"{data_version(competition_season_id)}")
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    match_ids = list(Match.objects
+                     .filter(competition_season_id=competition_season_id)
+                     .values_list("id", flat=True))
+    totals = _per_match_player_totals(match_ids)
+    minutes = _minutes_map(match_ids)
+    exposure = defensive_exposure(match_ids, minutes)
+    roles = dict(Player.objects.exclude(classic_role="")
+                 .values_list("id", "classic_role"))
+    rows = [(roles[pid], feats, minutes.get((mid, pid), 0),
+             exposure.get((mid, pid), 0.0))
+            for (mid, pid), feats in totals.items()
+            if roles.get(pid) and minutes.get((mid, pid), 0) > 0]
+    data = role_average_terms(rows)
+    cache.set(key, data, None)
+    return data
+
+
 def _cards_for_match(match_id: int) -> dict[int, dict]:
     cards: dict[int, dict] = defaultdict(
         lambda: {"yellow": 0, "red": 0, "second_yellow": 0, "malus": 0.0})
@@ -83,7 +114,7 @@ def _cards_for_match(match_id: int) -> dict[int, dict]:
 
 
 def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
-          cards: dict, conceded: int) -> dict:
+          cards: dict, conceded: int, explanation: dict | None = None) -> dict:
     pid = app.player_id
     c = cards.get(pid, {})
     card_malus = c.get("malus", 0.0)
@@ -118,6 +149,11 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
         return {**base, "sv": True, "sv_reason": "impiego_insufficiente",
                 "voto_puro": None, "bonus": 0.0, "malus": 0.0, "fantavoto": None}
     base["sv_reason"] = None
+    # Why this vote. Only for a rated player: explaining a vote that does not
+    # exist would be inventing one.
+    if explanation is not None:
+        base["explanation"] = explanation
+        base["explanation_text"] = to_sentence(explanation)
     vp = float(row["voto_puro"])
     bonus = 3.0 * app.goals + 1.0 * app.assists
     # A keeper also carries the classic -1 per goal conceded. This does NOT double
@@ -148,7 +184,8 @@ def _team_detail(starters: list[dict], bench: list[dict]) -> dict:
     }
 
 
-def pagella_for_match(match, reference: dict | None = None, league=None) -> dict:
+def pagella_for_match(match, reference: dict | None = None, league=None,
+                      averages: dict | None = None) -> dict:
     """Full per-team pagella for a real match. Returns {'home': ClassicTeamDetail,
     'away': ClassicTeamDetail}. Only meaningful for a match with imported
     appearances (a finished, data-loaded fixture).
@@ -164,6 +201,11 @@ def pagella_for_match(match, reference: dict | None = None, league=None) -> dict
         reference = get_reference(match.competition_season_id)
 
     vp_rows = {r["player_id"]: r for r in voto_puro_for_match(match, reference)}
+    if averages is None:
+        averages = get_role_averages(match.competition_season_id)
+    feats = _per_match_player_totals([match.id])
+    mins = _minutes_map([match.id])
+    exposures = defensive_exposure([match.id], mins)
     cards = _cards_for_match(match.id)
     apps = list(MatchAppearance.objects.filter(match=match).select_related("player"))
     pids = [a.player_id for a in apps]
@@ -181,7 +223,14 @@ def pagella_for_match(match, reference: dict | None = None, league=None) -> dict
                "away": {"starters": [], "bench": []}}
     for a in apps:
         conceded = ag if a.side == "home" else hg
-        line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded)
+        key = (match.id, a.player_id)
+        row = vp_rows.get(a.player_id)
+        why = None
+        if row and row.get("rated") and key in feats:
+            why = explain(row.get("role") or roles.get(a.player_id, ""), feats[key],
+                          mins.get(key, 0), reference, averages,
+                          exposures.get(key, 0.0))
+        line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded, why)
         buckets[a.side]["starters" if a.is_starter else "bench"].append(line)
 
     return {
