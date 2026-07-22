@@ -95,8 +95,16 @@ class CompetitionSeason(models.Model):
     # rounds could be useful later (matchday indexing)
     num_rounds = models.IntegerField(null=True, blank=True)
 
+    # Provider identity of this specific edition. For SofaScore this is the
+    # season id (e.g. 95836 for Serie A 2026/27) — resolved once, by name, at
+    # league-creation time, and then STABLE. The calendar-sync and per-match
+    # scrapers key off this instead of a hardcoded id.
+    external_source = models.CharField(max_length=50, blank=True, default="")
+    external_id = models.CharField(max_length=100, blank=True, default="")
+
     class Meta:
         unique_together = [("competition", "season")]
+        indexes = [models.Index(fields=["external_source", "external_id"])]
 
     def __str__(self):
         return self.name or f"{self.competition} {self.season}"
@@ -144,6 +152,38 @@ class Player(models.Model):
     external_source = models.CharField(max_length=50, blank=True, default="")
     external_id = models.CharField(max_length=100, blank=True, default="")
 
+    # Fixed goalkeeper tag from the authoritative roster source (Transfermarkt
+    # position == "Goalkeeper"). Kept as a stored flag, NOT inferred from match
+    # data: a keeper who has never played (new signing / unused sub) must still be
+    # recognisable for the formation's one-GK constraint, and box-share inference
+    # is fragile in rare/extreme cases. Goalkeepers are scored on a separate
+    # channel (goals-prevented), never via zone vectors.
+    is_goalkeeper = models.BooleanField(default=False)
+
+    # Canonical fantasy role for "classic" mode leagues: POR/DIF/CEN/ATT. Stored
+    # on the player (not provider-namespaced) because the formation validator and
+    # scorer need ONE resolved role, and the fantasy role is a convention — Lega
+    # role tables diverge from real positions (wingers especially) and admins may
+    # override — not a pure provider fact. POR is kept in sync with is_goalkeeper.
+    ROLE_GK = "POR"
+    ROLE_DEF = "DIF"
+    ROLE_MID = "CEN"
+    ROLE_FWD = "ATT"
+    CLASSIC_ROLE_CHOICES = [
+        (ROLE_GK, "Portiere"),
+        (ROLE_DEF, "Difensore"),
+        (ROLE_MID, "Centrocampista"),
+        (ROLE_FWD, "Attaccante"),
+    ]
+    classic_role = models.CharField(
+        max_length=3, choices=CLASSIC_ROLE_CHOICES, blank=True, default="")
+
+    # Where classic_role came from. "admin" overrides are preserved across TM
+    # re-imports (same non-clobber rule as date_of_birth corrections).
+    ROLE_SOURCE_TM = "transfermarkt"
+    ROLE_SOURCE_ADMIN = "admin"
+    role_source = models.CharField(max_length=16, blank=True, default="")
+
     avatar = models.ImageField(upload_to="player_avatars/", null=True, blank=True)
 
     class Meta:
@@ -171,16 +211,49 @@ class PlayerAlias(models.Model):
 
 
 class Match(models.Model):
+    # Lifecycle status, mirrored from the provider's event status. `postponed`
+    # is the one that drives league behaviour: a postponed real match can leave a
+    # fantasy matchday without data, so a league either waits or imposes an
+    # OfficeOverride. `live` enables a provisional (non-final) estimate.
+    STATUS_SCHEDULED = "scheduled"
+    STATUS_LIVE = "live"
+    STATUS_FINISHED = "finished"
+    STATUS_POSTPONED = "postponed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_SCHEDULED, "Scheduled"),
+        (STATUS_LIVE, "Live"),
+        (STATUS_FINISHED, "Finished"),
+        (STATUS_POSTPONED, "Postponed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
     competition_season = models.ForeignKey(CompetitionSeason, on_delete=models.CASCADE, related_name="matches")
 
     matchday = models.IntegerField(null=True, blank=True)  # giornata
     kickoff = models.DateTimeField(null=True, blank=True)
+    # True while the provider still ships a PLACEHOLDER kickoff (whole round shares
+    # one identical timestamp, exact slot not yet assigned). The scheduler must NOT
+    # open a live-poll window on a provisional kickoff; it waits for confirmation.
+    kickoff_provisional = models.BooleanField(default=False)
 
     home_team = models.ForeignKey(TeamSeason, on_delete=models.PROTECT, related_name="home_matches")
     away_team = models.ForeignKey(TeamSeason, on_delete=models.PROTECT, related_name="away_matches")
 
     home_goals = models.IntegerField(null=True, blank=True)
     away_goals = models.IntegerField(null=True, blank=True)
+
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_SCHEDULED)
+    # True only once the COMPLETE scoring data (shotmap + per-player heatmaps +
+    # statistics) is present AND has stopped changing after full-time. A finished
+    # match is not necessarily scoreable-as-final until SofaScore stabilises it;
+    # this flag is what lets a fantasy matchday be computed as definitive.
+    data_ready = models.BooleanField(default=False)
+    data_checked_at = models.DateTimeField(null=True, blank=True)
+    # When the match was FIRST observed as finished (full time). The scheduler
+    # measures the +15min / +1h finalization windows from this, so it must be the
+    # real observed FT, not an estimate from kickoff + nominal duration.
+    finished_at = models.DateTimeField(null=True, blank=True)
 
     external_source = models.CharField(max_length=50, blank=True, default="")
     external_id = models.CharField(max_length=100, blank=True, default="")
@@ -189,7 +262,8 @@ class Match(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=["competition_season", "matchday"]),
-                   models.Index(fields=["external_source", "external_id"])]
+                   models.Index(fields=["external_source", "external_id"]),
+                   models.Index(fields=["status", "data_ready"])]
 
     def __str__(self):
         return f"{self.home_team} vs {self.away_team} ({self.competition_season})"
@@ -208,6 +282,10 @@ class MatchAppearance(models.Model):
 
     minutes_played = models.IntegerField(default=0)
     is_starter = models.BooleanField(default=False)
+    # Per-player scoring events (bonus/malus inputs). Populated from the provider's
+    # lineup statistics at import time; cards live in MatchDisciplinaryEvent.
+    goals = models.IntegerField(default=0)
+    assists = models.IntegerField(default=0)
 
     class Meta:
         unique_together = [("match", "player")]
@@ -234,6 +312,39 @@ class PlayerTeamStint(models.Model):
     class Meta:
         indexes = [models.Index(fields=["player", "team_season"]),
                    models.Index(fields=["team_season", "start_date"])]
+
+
+class PlayerMarketValue(models.Model):
+    """Market valuation of a player from an EXTERNAL provider (e.g. Transfermarkt).
+
+    Modelled as provenanced external data, not a bare field on Player: a market
+    value belongs to a provider and to a moment in time (it is re-quoted as the
+    market moves), so this is a small time series. The latest row per
+    (player, provider) is the current valuation.
+
+    It is deliberately NOT a performance rating — it is used as a secondary signal
+    for players we have no on-pitch history for (newcomers), never as a substitute
+    for a voto.
+    """
+    player = models.ForeignKey(Player, on_delete=models.CASCADE,
+                               related_name="market_values")
+    provider = models.CharField(max_length=50)  # e.g. "transfermarkt"
+    provider_player_id = models.CharField(max_length=100, blank=True, default="")
+
+    value_eur = models.BigIntegerField(null=True, blank=True)  # normalized amount
+    currency = models.CharField(max_length=8, default="EUR")
+    raw_value = models.CharField(max_length=32, blank=True, default="")  # "€3.50m"
+    as_of = models.DateField()
+
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = [("player", "provider", "as_of")]
+        indexes = [models.Index(fields=["provider", "as_of"]),
+                   models.Index(fields=["player", "provider"])]
+
+    def __str__(self):
+        return f"{self.player_id} {self.raw_value or self.value_eur} ({self.provider} {self.as_of})"
 
 
 class DataIngestionManifest(models.Model):
