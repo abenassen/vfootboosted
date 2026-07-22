@@ -81,11 +81,18 @@ def _cards_for_match(match_id: int) -> dict[int, dict]:
     return cards
 
 
-def _line(app: MatchAppearance, role: str, vp_rows: dict,
+def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
           cards: dict, conceded: int) -> dict:
     pid = app.player_id
     c = cards.get(pid, {})
     card_malus = c.get("malus", 0.0)
+    row = vp_rows.get(pid)
+    # Prefer the role the rating layer actually SCORED him as: when the Player row
+    # carries no classic_role it may have inferred one (a keeper gives himself
+    # away through his gk_* features). Falling straight back to "CEN" used to put
+    # a keeper in midfield and cost him the -1/goal conceded.
+    role = declared_role or (row or {}).get("role") or ""
+    role_known = bool(declared_role) or bool((row or {}).get("role_known"))
     lrole = ROLE_TO_LINEUP.get(role, "MID")
     events = {"goals": app.goals, "assists": app.assists,
               "yellow": c.get("yellow", 0),
@@ -93,16 +100,23 @@ def _line(app: MatchAppearance, role: str, vp_rows: dict,
               "own_goals": 0}
     base = {"player_id": pid,
             "name": app.player.short_name or app.player.full_name or str(pid),
-            "role": role or "CEN", "lineup_role": lrole,
+            "role": role or "CEN", "role_known": role_known,
+            "lineup_role": lrole,
             "minutes": app.minutes_played, "entered": False,
             "entered_for": None, "replaced_by": None, "events": events}
 
     # Voto puro from the heuristic. Keepers now have their OWN channel (anchored on
     # goals prevented), so they are no longer pinned to a flat baseline.
-    row = vp_rows.get(pid)
-    if not row or not row.get("rated") or row.get("voto_puro") is None:
-        return {**base, "sv": True, "voto_puro": None,
+    # s.v. has exactly two legitimate causes, and they are NOT the same thing:
+    # too little football played, or no data at all for this match. Say which —
+    # an unexplained s.v. on a player who scored reads as a scoring bug.
+    if row is None:
+        return {**base, "sv": True, "sv_reason": "dati_mancanti", "voto_puro": None,
                 "bonus": 0.0, "malus": 0.0, "fantavoto": None}
+    if not row.get("rated") or row.get("voto_puro") is None:
+        return {**base, "sv": True, "sv_reason": "impiego_insufficiente",
+                "voto_puro": None, "bonus": 0.0, "malus": 0.0, "fantavoto": None}
+    base["sv_reason"] = None
     vp = float(row["voto_puro"])
     bonus = 3.0 * app.goals + 1.0 * app.assists
     # A keeper also carries the classic -1 per goal conceded. This does NOT double

@@ -174,8 +174,18 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
         {order != null ? (
           <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-400">{order}</span>
         ) : null}
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[p.role]}`}>
+        {/* A guessed role is drawn hollow with a '?': showing it solid would state
+            as fact something we inferred because his squad data is incomplete. */}
+        <span
+          title={p.role_known === false ? 'Ruolo non disponibile: stimato dai dati della partita' : undefined}
+          className={
+            p.role_known === false
+              ? 'rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-500'
+              : `rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[p.role]}`
+          }
+        >
           {ROLE_LABEL[p.role]}
+          {p.role_known === false ? '?' : ''}
         </span>
         <span className="min-w-0">
           <span className={`block truncate text-sm font-semibold text-slate-800 ${p.replaced_by ? 'line-through opacity-60' : ''}`}>
@@ -197,7 +207,23 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
 
       <div className="flex shrink-0 items-center gap-2 text-right">
         {p.sv ? (
-          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">S.V.</span>
+          // 'dati mancanti' is not a verdict on the player — say so, rather than
+          // letting a gap in our data read as "he did nothing".
+          p.sv_reason === 'dati_mancanti' ? (
+            <span
+              title="Nessun dato disponibile per questo giocatore in questa partita"
+              className="rounded border border-dashed border-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-amber-600"
+            >
+              n.d.
+            </span>
+          ) : (
+            <span
+              title="Senza voto: impiego insufficiente"
+              className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-500"
+            >
+              S.V.
+            </span>
+          )
         ) : (
           <>
             <span className="text-[11px] text-slate-500">{fmt(p.voto_puro ?? 0)}</span>

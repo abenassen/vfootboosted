@@ -129,10 +129,42 @@ EXTRAP_FLOOR_MINUTES = 55
 # replaces him), not a 6. Involvement is proxied by ball touches. Both tunable.
 MIN_MINUTES_RATED = 15
 MIN_TOUCHES_RATED = 12
+# Above this many minutes, minutes ALONE decide: the touch count is a proxy for
+# "was he involved enough to judge", and that question only makes sense for a
+# cameo. Anyone who is on the pitch this long has been judged by every pagella
+# that exists, however little he saw of the ball — he gets a LOW vote, not no
+# vote. Without this, 119 appearances a season (four of them full 90') were
+# declared unrated purely on a touch count.
+ALWAYS_RATED_MINUTES = 20
+
+# Reference bucket for a player we could rate but whose ROLE we don't know (his
+# Player row has no classic_role because the squad import never matched him).
+# See ``resolve_role``: s.v. is a statement about the PLAYER'S MATCH, so a hole in
+# our master data must never be dressed up as one.
+POOLED_OUTFIELD = "_OUTFIELD"
+
+
+def resolve_role(classic_role: str, totals: dict, is_goalkeeper: bool) -> tuple[str, bool]:
+    """(role, role_is_known) for scoring purposes.
+
+    Returns the declared classic_role when we have one. When we don't, we do NOT
+    give up: a keeper is identifiable from his own match data (only keepers
+    produce ``gk_*`` features), and any other player can still be scored on the
+    outfield index against the pooled outfield reference. The second element says
+    whether the role is declared, so callers can flag an estimate as such instead
+    of presenting it as fact.
+    """
+    if classic_role:
+        return classic_role, True
+    if is_goalkeeper or any(k.startswith("gk_") for k in totals):
+        return Player.ROLE_GK, False
+    return "", False
 
 
 def is_rated(minutes: int, totals: dict) -> bool:
     """Whether a player goes 'a voto' (vs senza voto) given minutes + involvement."""
+    if minutes >= ALWAYS_RATED_MINUTES:
+        return True
     return (minutes >= MIN_MINUTES_RATED
             and totals.get("touches", 0.0) >= MIN_TOUCHES_RATED)
 
@@ -247,6 +279,17 @@ def build_reference(competition_season_id: int, *, pooled_std: bool = False) -> 
         var = sum((x - mean) ** 2 for x in vals) / n if n > 1 else 0.0
         ref[role] = {"mean": mean, "std": math.sqrt(var) or 1.0, "n": n}
 
+    # Bucket for players whose role we don't know: pool every OUTFIELD sample
+    # (keepers excluded — their index lives on a different scale entirely). Less
+    # precise than the right role bucket, but a real vote beats a fake s.v.
+    outfield = [x for role, vals in samples.items() if role != Player.ROLE_GK
+                for x in vals]
+    if outfield:
+        n = len(outfield)
+        mean = sum(outfield) / n
+        var = sum((x - mean) ** 2 for x in outfield) / n if n > 1 else 0.0
+        ref[POOLED_OUTFIELD] = {"mean": mean, "std": math.sqrt(var) or 1.0, "n": n}
+
     if pooled_std:
         residuals = [x - ref[role]["mean"] for role, vals in samples.items()
                      for x in vals]
@@ -258,9 +301,9 @@ def build_reference(competition_season_id: int, *, pooled_std: bool = False) -> 
     return ref
 
 
-def _vote_from_index(index: float, role: str, minutes: int, reference: dict,
+def _vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
                      spread_k: float = VOTE_SPREAD_K) -> float:
-    r = reference.get(role)
+    r = reference.get(ref_key)
     if not r:
         return VOTE_CENTER
     z = (index - r["mean"]) / r["std"]
@@ -275,37 +318,45 @@ def _vote_from_index(index: float, role: str, minutes: int, reference: dict,
 
 def voto_puro_for_match(match, reference: dict,
                         spread_k: float = VOTE_SPREAD_K) -> list[dict]:
-    """Per-outfield-player voto puro for one match. List of dicts with components.
+    """Per-player voto puro for one match. List of dicts with components.
 
     Players below the rating threshold get ``rated=False`` and ``voto_puro=None``
     (senza voto). Goalkeepers are included, scored on the GK channel.
+
+    A player with no declared role is NOT skipped: he is scored against the
+    pooled outfield reference (or the GK one if his features give him away) and
+    flagged ``role_known=False``. Dropping him used to render as s.v., which is a
+    verdict on his performance — so a goalscorer could be shown as unrated.
     """
     totals = _per_match_player_totals([match.id])
     minutes = _minutes_map([match.id])
-    roles = dict(Player.objects.exclude(classic_role="")
-                 .values_list("id", "classic_role"))
+    roles = dict(Player.objects.values_list("id", "classic_role"))
+    keepers = dict(Player.objects.values_list("id", "is_goalkeeper"))
     names = dict(Player.objects.values_list("id", "short_name"))
     full = dict(Player.objects.values_list("id", "full_name"))
 
     results = []
     for (mid, pid), feats in totals.items():
-        role = roles.get(pid)
-        if not role:
-            continue
         mins = minutes.get((mid, pid), 0)
         if mins <= 0:
             continue
+        role, role_known = resolve_role(roles.get(pid) or "", feats,
+                                        bool(keepers.get(pid)))
         idx = index_for_role(role, feats, mins)
+        # An inferred KEEPER still belongs in the keeper distribution — his own
+        # features identified him. Only an unknown outfielder needs the pool.
+        ref_key = role if role else POOLED_OUTFIELD
         rated = is_rated(mins, feats)
         results.append({
             "player_id": pid,
             "name": names.get(pid) or full.get(pid) or str(pid),
             "role": role,
+            "role_known": role_known,
             "minutes": mins,
             "touches": round(feats.get("touches", 0.0), 1),
             "index": round(idx, 2),
             "rated": rated,
-            "voto_puro": (_vote_from_index(idx, role, mins, reference, spread_k)
+            "voto_puro": (_vote_from_index(idx, ref_key, mins, reference, spread_k)
                           if rated else None),
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))

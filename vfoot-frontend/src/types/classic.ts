@@ -24,7 +24,10 @@ export interface ClassicPlayerLine {
   role: ClassicRole;
   lineup_role: ClassicLineupRole;
   minutes: number;
+  role_known?: boolean; // false => role GUESSED (squad data incomplete for him)
   sv: boolean; // senza voto: didn't play / not rated
+  // Why he is s.v. — 'dati_mancanti' is OUR gap, not a judgement on the player.
+  sv_reason?: 'dati_mancanti' | 'impiego_insufficiente' | null;
   voto_puro: number | null;
   bonus: number; // goal +3, assist +1, pen save +3
   malus: number; // own goal -2, pen miss -3, card, GK -1/goal conceded

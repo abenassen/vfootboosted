@@ -145,6 +145,86 @@ class RealChampionshipTests(TestCase):
         self.assertTrue(gk_line["sv"])
         self.assertIsNone(gk_line["fantavoto"])
 
+    def test_unknown_role_is_still_rated(self):
+        """A hole in our squad data must never surface as 'senza voto'.
+
+        Regression: players the Transfermarkt import failed to match had an empty
+        classic_role, the rating layer skipped them, and the pagella rendered that
+        as s.v. — so a goalscorer who played an hour was shown as unrated, and
+        three whole promoted sides were wiped out."""
+        nameless = Player.objects.create(full_name="No Role", short_name="N. Role")
+        MatchAppearance.objects.create(match=self.match, player=nameless,
+                                       team_season=self.home_ts, side="home",
+                                       minutes_played=61, is_starter=True, goals=1)
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=nameless, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=53.0, team_side="home")
+
+        line = next(l for l in pagella_for_match(self.match, self.reference)["home"]
+                    ["starters"] if l["player_id"] == nameless.id)
+        self.assertFalse(line["sv"])
+        self.assertIsNotNone(line["voto_puro"])
+        self.assertEqual(line["bonus"], 3.0)  # his goal is counted
+        # ...but the guessed role is reported as a guess, not as fact.
+        self.assertFalse(line["role_known"])
+
+    def test_unknown_role_keeper_recognised_from_his_own_features(self):
+        """A keeper without a declared role must not be scored as a midfielder:
+        that silently costs him the -1 per goal conceded."""
+        nameless = Player.objects.create(full_name="No Role GK", short_name="N. GK")
+        MatchAppearance.objects.create(match=self.match, player=nameless,
+                                       team_season=self.away_ts, side="away",
+                                       minutes_played=90, is_starter=True)
+        for key, val in (("touches", 30.0), ("gk_saves", 4.0)):
+            PlayerZoneFeature.objects.create(
+                match=self.match, player=nameless, provider="sofascore",
+                feature_key=key, zone_key="z0101", value=val, team_side="away")
+
+        line = next(l for l in pagella_for_match(self.match, self.reference)["away"]
+                    ["starters"] if l["player_id"] == nameless.id)
+        self.assertEqual(line["role"], "POR")
+        self.assertFalse(line["role_known"])
+        self.assertEqual(line["malus"], 1.0)  # the one home goal he conceded
+
+    def test_long_appearance_is_rated_regardless_of_touches(self):
+        """The touch threshold judges whether a CAMEO was involved enough. Applied
+        to a player who was on the pitch for most of the match it produced absurd
+        s.v. — including four full 90' appearances in a single season."""
+        quiet = Player.objects.create(full_name="Quiet One", short_name="Q. One",
+                                      classic_role="ATT")
+        MatchAppearance.objects.create(match=self.match, player=quiet,
+                                       team_season=self.home_ts, side="home",
+                                       minutes_played=90, is_starter=True)
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=quiet, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=8.0, team_side="home")
+
+        line = next(l for l in pagella_for_match(self.match, self.reference)["home"]
+                    ["starters"] if l["player_id"] == quiet.id)
+        self.assertFalse(line["sv"])
+
+    def test_short_uninvolved_cameo_is_still_senza_voto(self):
+        """The counterpart: the touch gate must keep working where it belongs."""
+        cameo = Player.objects.create(full_name="Cameo One", short_name="C. One",
+                                      classic_role="ATT")
+        MatchAppearance.objects.create(match=self.match, player=cameo,
+                                       team_season=self.home_ts, side="home",
+                                       minutes_played=18, is_starter=False)
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=cameo, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=4.0, team_side="home")
+
+        line = next(l for l in pagella_for_match(self.match, self.reference)["home"]
+                    ["bench"] if l["player_id"] == cameo.id)
+        self.assertTrue(line["sv"])
+        self.assertEqual(line["sv_reason"], "impiego_insufficiente")
+
+    def test_sv_distinguishes_missing_data_from_little_football(self):
+        line = next(l for l in pagella_for_match(self.match, self.reference)["home"]
+                    ["starters"] if l["player_id"] == self.df.id)
+        self.assertTrue(line["sv"])
+        self.assertEqual(line["sv_reason"], "dati_mancanti")
+
     def _league(self):
         user = User.objects.create_user("mgr", password="x")
         league = FantasyLeague.objects.create(
