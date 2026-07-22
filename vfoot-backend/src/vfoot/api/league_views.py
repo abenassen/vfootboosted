@@ -80,6 +80,10 @@ from vfoot.services.fantasy_simulation import (
 from vfoot.services.competition_stages import build_default_stage_graph, resolve_stage
 from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic_lineup
 from vfoot.services.classic_pagella import get_reference, pagella_for_match
+from vfoot.services.league_decisions import (
+    accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
+    open_role_decisions, resolve as resolve_decision,
+)
 from vfoot.services.listone import eligible_player_ids
 from vfoot.services.player_ratings import (
     latest_market_values, player_values, previous_season_with_data,
@@ -283,6 +287,17 @@ class MemberRoleUpdateView(APIView):
         return Response({"membership_id": target.id, "role": target.role})
 
 
+def _ensure_no_pending_decisions(league):
+    """Guard the money moments. A role settled after the bidding changes what
+    people paid for, so anything that assigns or prices players waits until the
+    listone's open questions are answered. Returns a 400 Response, or None."""
+    reason = market_blocked_reason(league)
+    if reason:
+        return Response({"detail": reason, "code": "pending_decisions"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    return None
+
+
 class MarketToggleView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -293,6 +308,10 @@ class MarketToggleView(APIView):
         _ensure_admin(league, request.user.id)
         s = MarketToggleSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        if s.validated_data["is_open"]:
+            blocked = _ensure_no_pending_decisions(league)
+            if blocked:
+                return blocked
         league.market_open = s.validated_data["is_open"]
         league.save(update_fields=["market_open"])
         return Response({"league_id": league.id, "market_open": league.market_open})
@@ -461,6 +480,9 @@ class TeamRosterAddView(APIView):
         _ensure_admin(league, request.user.id)
         if not league.market_open:
             return Response({"detail": "Market is closed."}, status=status.HTTP_400_BAD_REQUEST)
+        blocked = _ensure_no_pending_decisions(league)
+        if blocked:
+            return blocked
 
         team = get_object_or_404(FantasyTeam, id=team_id, league=league)
         s = AddRosterPlayerSerializer(data=request.data)
@@ -487,6 +509,9 @@ class TeamRosterRemoveView(APIView):
         _ensure_admin(league, request.user.id)
         if not league.market_open:
             return Response({"detail": "Market is closed."}, status=status.HTTP_400_BAD_REQUEST)
+        blocked = _ensure_no_pending_decisions(league)
+        if blocked:
+            return blocked
 
         team = get_object_or_404(FantasyTeam, id=team_id, league=league)
         s = RemoveRosterPlayerSerializer(data=request.data)
@@ -1985,6 +2010,9 @@ class AuctionCreateView(APIView):
     def post(self, request, league_id: int):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _ensure_admin(league, request.user.id)
+        blocked = _ensure_no_pending_decisions(league)
+        if blocked:
+            return blocked
 
         s = CreateAuctionSerializer(data=request.data)
         s.is_valid(raise_exception=True)

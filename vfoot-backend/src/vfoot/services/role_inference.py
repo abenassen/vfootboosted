@@ -75,10 +75,13 @@ TM_DETERMINISTIC = {
 TM_AMBIGUOUS = {"left winger", "right winger", "left midfield", "right midfield",
                 "second striker"}
 
-# Fallback when a player has no usable history (a newcomer). Deliberately the
-# modal outcome of OUR OWN criterion for that position, not an inherited
-# convention, so the defaults re-derive themselves every season.
-TM_DEFAULT = {"left winger": Player.ROLE_FWD, "right winger": Player.ROLE_FWD,
+# Fallback when a player has no usable history (a newcomer), pending a human
+# decision. Deliberately CONSERVATIVE rather than modal: most wingers we measure
+# turn out to be wide attackers, but an unknown winger is far more often a squad
+# filler than a starter, and defaulting him to attacker inflates the one pool the
+# auction is most sensitive to (it would add ~40 attackers to a 660-man listone).
+# Midfield is the choice that costs least if it is wrong.
+TM_DEFAULT = {"left winger": Player.ROLE_MID, "right winger": Player.ROLE_MID,
               "left midfield": Player.ROLE_DEF, "right midfield": Player.ROLE_DEF,
               "second striker": Player.ROLE_FWD}
 

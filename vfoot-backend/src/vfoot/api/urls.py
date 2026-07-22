@@ -67,7 +67,28 @@ from vfoot.api.views import (
     SaveLineupView,
 )
 
+from vfoot.api.decision_views import (
+    LeagueDecisionAcceptAllView,
+    LeagueDecisionConsultView,
+    LeagueDecisionListView,
+    LeagueDecisionRefreshView,
+    LeagueDecisionResolveView,
+    LeagueDecisionVoteView,
+)
+
 urlpatterns = [
+    path("leagues/<int:league_id>/decisions", LeagueDecisionListView.as_view(),
+         name="league-decisions"),
+    path("leagues/<int:league_id>/decisions/accept-all",
+         LeagueDecisionAcceptAllView.as_view(), name="league-decisions-accept-all"),
+    path("leagues/<int:league_id>/decisions/refresh",
+         LeagueDecisionRefreshView.as_view(), name="league-decisions-refresh"),
+    path("leagues/<int:league_id>/decisions/<int:decision_id>/vote",
+         LeagueDecisionVoteView.as_view(), name="league-decision-vote"),
+    path("leagues/<int:league_id>/decisions/<int:decision_id>/resolve",
+         LeagueDecisionResolveView.as_view(), name="league-decision-resolve"),
+    path("leagues/<int:league_id>/decisions/<int:decision_id>/consult",
+         LeagueDecisionConsultView.as_view(), name="league-decision-consult"),
     path("leagues", LeagueListCreateView.as_view(), name="league-list-create"),
     path("leagues/join", LeagueJoinView.as_view(), name="league-join"),
     path("leagues/<int:league_id>", LeagueDetailView.as_view(), name="league-detail"),

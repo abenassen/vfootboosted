@@ -22,6 +22,7 @@ from vfoot.models.fantasy import (
     SeasonPlayerRole,
     OfficeOverride,
 )
+from vfoot.models.decisions import LeagueDecision, LeagueDecisionVote
 from vfoot.models.heatmap import HeatmapGrid
 from vfoot.models.lineup import SavedLineupSnapshot
 from vfoot.models.presence import PlayerZonePresence, ZoneDuel
@@ -50,6 +51,8 @@ __all__ = [
     "LeagueMembership",
     "LeaguePlayerRole",
     "SeasonPlayerRole",
+    "LeagueDecision",
+    "LeagueDecisionVote",
     "OfficeOverride",
     "SavedLineupSnapshot",
     "PlayerZonePresence",
