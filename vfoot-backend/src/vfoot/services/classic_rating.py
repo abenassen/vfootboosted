@@ -52,6 +52,18 @@ TOTAL_WEIGHTS = {
     "shots_on_target": 0.25,
     "shots": 0.15,
     "errors_led_to_goal": -1.50,  # decisive error (heavy)
+    # Conceding a penalty hands over roughly 0.78 expected goals through a clear
+    # individual foul, and — unlike a missed penalty — carries NO fantacalcio
+    # malus, so the base vote is the only place it can register at all. Below the
+    # error that concedes a goal, because a penalty is not yet a goal.
+    "penalties_conceded": -1.20,
+    # Winning one is the mirror image and equally unrewarded: the bonus goes to
+    # whoever converts, never to the player who earned it.
+    "penalties_won": 0.80,
+    # Rare interventions that prevent a near-certain goal. Kept as impact totals,
+    # not per-90: their value does not scale with how long you played.
+    "clearances_off_line": 0.80,
+    "last_man_tackle": 0.60,
     # An error that let the opponent SHOOT, without a goal following. Anchored at
     # a third of the error-that-conceded, which is both the intuitive expected
     # cost (a chance handed to an opponent converts roughly one time in three)
@@ -80,6 +92,25 @@ TOTAL_WEIGHTS = {
 # big_chance_created are the three heaviest positive terms.
 PER90_WEIGHTS = {
     "dribbles_won": 0.25,
+    # The losing side of the contests we already reward. Without it a defender who
+    # won 5 duels out of 6 scored exactly like one who won 5 out of 20: we were
+    # treating a RATE as a count, and against the provider's own rating the rate
+    # tracks performance better than the count (+0.387 vs +0.348). Mirroring the
+    # +0.20 on duels won lets the index respond to the rate while still keeping
+    # volume, which a bare ratio would throw away — and a ratio over three duels
+    # is noise anyway.
+    "duels_lost": -0.20,
+    # Being dribbled past is a subset of duels lost (verified: 0 violations in
+    # 8659 appearances), so this is deliberate EXTRA weight, not new evidence —
+    # getting beaten one-on-one is worse than losing a shoulder-to-shoulder. It is
+    # also the individual defensive failure our features could not see at all,
+    # which is what made "no recorded error" such a poor proxy for "no fault".
+    "dribbled_past": -0.15,
+    # Also a subset of accuratePass (weight 0.02): the claim is not that these are
+    # extra passes but that a pass played in the opponent half is worth more than
+    # one played in your own. This is the progression signal the deleted
+    # passes_into_box and progressive_passes were reaching for and never had.
+    "passes_opp_half": 0.05,
     "touches_in_box": 0.10,
     "duels_won": 0.20,
     "interceptions": 0.30,
