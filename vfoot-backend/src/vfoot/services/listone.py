@@ -51,6 +51,13 @@ def snapshot_league_listone(league, *, reset: bool = False) -> dict:
     seeded = {r.player_id: r.role_for(league.role_mode)
               for r in SeasonPlayerRole.objects.filter(competition_season_id=cs_id)
               if r.role_for(league.role_mode)}
+    # Players the inference cannot settle get NO seeded role at all: they are in
+    # limbo until a human answers, and a frozen row would be an answer. Keeping
+    # the two states distinct is what lets "has a frozen role" mean "settled" —
+    # which in turn is what stops a later recomputation from reopening a question
+    # about someone who has since been bought.
+    from vfoot.services.league_decisions import players_needing_decision
+    undecidable = players_needing_decision(league)
     # Seed roles only for currently-eligible players (open stint). Departed players
     # keep any existing frozen row (history) but get no NEW seed row.
     players = list(Player.objects.filter(id__in=eligible_player_ids(cs_id)))
@@ -58,12 +65,16 @@ def snapshot_league_listone(league, *, reset: bool = False) -> dict:
                 for r in LeaguePlayerRole.objects.filter(league=league)}
 
     summary = {"roster": len(players), "created": 0, "reset": 0,
-               "preserved_admin": 0, "kept_seed": 0, "skipped_no_role": 0}
+               "preserved_admin": 0, "kept_seed": 0, "skipped_no_role": 0,
+               "awaiting_decision": 0}
 
     for p in players:
         seed = seeded.get(p.id) or p.classic_role
         row = existing.get(p.id)
         if row is None:
+            if p.id in undecidable:
+                summary["awaiting_decision"] = summary.get("awaiting_decision", 0) + 1
+                continue
             if not seed:
                 summary["skipped_no_role"] += 1
                 continue

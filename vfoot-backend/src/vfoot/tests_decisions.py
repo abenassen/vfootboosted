@@ -283,6 +283,29 @@ class LateArrivalTests(DecisionQueueTests):
         self.assertEqual(r.status_code, 400)
         self.assertEqual(r.json().get("code"), "pending_decisions")
 
+    def test_a_frozen_role_is_never_reopened_by_a_recompute(self):
+        """A player on a roster was bought, so he had a role when he was paid
+        for. A recomputation of the season roles must not be able to drag him
+        back into limbo and leave a squad holding someone unusable.
+
+        Reproduced before the fix: a player seeded automatically as ATT, whose
+        SeasonPlayerRole later stopped being measurable, acquired an open
+        decision while his frozen role sat there intact."""
+        p = self._player("Misurato", method=SeasonPlayerRole.METHOD_CATEGORY)
+        self.snapshot(self.league)
+        self.assertEqual(LeagueDecision.objects.filter(league=self.league).count(), 0)
+        frozen = LeaguePlayerRole.objects.get(league=self.league, player=p).role
+
+        # the season roles are recomputed and he is no longer measurable
+        SeasonPlayerRole.objects.filter(player=p).update(
+            method=SeasonPlayerRole.METHOD_DEFAULT, category="", confidence=0.0)
+        self.snapshot(self.league)
+
+        self.assertEqual(LeagueDecision.objects.filter(league=self.league).count(), 0)
+        self.assertEqual(undecided_player_ids(self.league), set())
+        self.assertEqual(
+            LeaguePlayerRole.objects.get(league=self.league, player=p).role, frozen)
+
     def test_refreshing_never_disturbs_a_role_already_settled(self):
         p = self._player("Deciso", method=SeasonPlayerRole.METHOD_DEFAULT)
         self.snapshot(self.league)

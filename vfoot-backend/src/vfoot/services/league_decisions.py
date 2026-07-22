@@ -50,6 +50,31 @@ def _roster_player_ids(league) -> set[int]:
                .values_list("player_id", flat=True))
 
 
+def players_needing_decision(league) -> set[int]:
+    """Roster players our criterion cannot settle: the provider position is
+    genuinely ambiguous AND there is no play data to resolve it.
+
+    Excludes anyone already SETTLED in this league — an open or answered
+    decision, or a frozen role. A role, once settled, does not become an open
+    question again: a squad must never find itself holding a player who had a
+    perfectly good role when he was paid for.
+    """
+    if league.reference_season_id is None:
+        return set()
+    settled = set(LeagueDecision.objects
+                  .filter(league=league, kind=LeagueDecision.KIND_PLAYER_ROLE)
+                  .exclude(status=LeagueDecision.STATUS_CANCELLED)
+                  .values_list("player_id", flat=True))
+    settled |= set(LeaguePlayerRole.objects.filter(league=league)
+                   .values_list("player_id", flat=True))
+    return set(SeasonPlayerRole.objects
+               .filter(competition_season_id=league.reference_season_id,
+                       player_id__in=_roster_player_ids(league) - settled,
+                       tm_position__in=TM_AMBIGUOUS)
+               .exclude(method=SeasonPlayerRole.METHOD_CATEGORY)
+               .values_list("player_id", flat=True))
+
+
 @transaction.atomic
 def open_role_decisions(league, *, opened_by=None) -> int:
     """Create the blocking decisions for this league's unresolvable players.
@@ -57,19 +82,20 @@ def open_role_decisions(league, *, opened_by=None) -> int:
     Idempotent: a decision already open (or already resolved) for a player is left
     alone, so re-seeding a listone never duplicates the queue or re-opens a
     question the admin has already answered.
+
+    And a player who ALREADY HAS A FROZEN ROLE is never asked about again, whatever
+    a later recomputation of the season roles may say. That is what freezing
+    means. Without this a recompute could drag a player who had been seeded
+    automatically — and possibly bought since — back into limbo, leaving a squad
+    holding someone who had a perfectly good role when he was paid for. A role,
+    once settled in a league, does not become an open question again.
     """
-    if league.reference_season_id is None:
+    needing = players_needing_decision(league)
+    if not needing:
         return 0
-    roster = _roster_player_ids(league)
-    settled = set(LeagueDecision.objects
-                  .filter(league=league, kind=LeagueDecision.KIND_PLAYER_ROLE)
-                  .exclude(status=LeagueDecision.STATUS_CANCELLED)
-                  .values_list("player_id", flat=True))
     rows = (SeasonPlayerRole.objects
             .filter(competition_season_id=league.reference_season_id,
-                    player_id__in=roster - settled,
-                    tm_position__in=TM_AMBIGUOUS)
-            .exclude(method=SeasonPlayerRole.METHOD_CATEGORY)
+                    player_id__in=needing)
             .select_related("player"))
     made = []
     for r in rows:

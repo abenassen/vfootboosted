@@ -531,9 +531,10 @@ class TeamRosterRemoveView(APIView):
         _ensure_admin(league, request.user.id)
         if not league.market_open:
             return Response({"detail": "Market is closed."}, status=status.HTTP_400_BAD_REQUEST)
-        # No role gate here on purpose: releasing a player never depends on what
-        # his role is, and a player stuck in limbo is exactly one you may want to
-        # let go of.
+        # No role gate here: releasing a player never depends on his role. Nor
+        # should the case arise — anyone on a roster was bought, so he had a role
+        # at the time, and a role settled in a league never becomes an open
+        # question again (see open_role_decisions).
         team = get_object_or_404(FantasyTeam, id=team_id, league=league)
         s = RemoveRosterPlayerSerializer(data=request.data)
         s.is_valid(raise_exception=True)
