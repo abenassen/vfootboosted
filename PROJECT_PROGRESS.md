@@ -3412,7 +3412,34 @@ Dettagli che cambiano l'esperienza reale:
 19 test nuovi (94 in totale, tutti verdi) + flusso completo verificato in
 **produzione**: 403 prima della conferma, 200 alla conferma, 200 al login dopo.
 
-**Da fare**: credenziali SMTP Brevo (per ora sul server il backend email e' la
-console, quindi i link finiscono nel journal e non vengono spediti davvero) e
-`GOOGLE_OAUTH_CLIENT_ID` + `VITE_GOOGLE_CLIENT_ID` (senza, il pulsante Google
-non viene mostrato e l'endpoint rifiuta).
+**Invio email: FATTO e verificato end-to-end** (22/07). Relay Brevo su
+`smtp-relay.brevo.com:587`, dominio `vfoot.it` **autenticato via DNS**.
+
+Il percorso non e' stato immediato e vale la pena ricordarne il motivo: il relay
+rispondeva `250 OK: queued`, che significa solo "preso in carico", **non**
+"consegnato". Le email sparivano dentro Brevo perche' il dominio non era
+autorizzato. Un mio test intermedio con mittente `@gmail.com` ha peggiorato le
+cose invece di isolarle: un messaggio che dichiara `gmail.com` ma parte dai
+server Sendinblue ha SPF/DKIM disallineati rispetto al dominio dichiarato, cioe'
+esattamente il profilo di una email contraffatta — Gmail faceva bene a scartarlo.
+
+La soluzione, unica possibile: autenticare il dominio nel DNS. Il DNS di
+`vfoot.it` sta su **Linode** (ns1-5.linode.com), non su register.it. Sette
+record: 2 CNAME DKIM (chiave ospitata da Brevo, cosi' possono ruotarla senza
+toccare il nostro DNS), 1 TXT `brevo-code` come **prova di possesso** del
+dominio, 1 TXT `_dmarc` con `p=none` (monitora, non bloccare: una politica
+restrittiva su una configurazione non collaudata farebbe scartare le nostre
+stesse email), 3 CNAME per il sottodominio brandizzato `em`. Nota: **non** usare
+`mail` come sottodominio brandizzato, e' gia' il record MX del dominio.
+
+I due TXT hanno impiegato ~30 minuti a comparire mentre i CNAME erano gia' vivi;
+il serial SOA di Linode resta fermo al 2021 e **non e' un indicatore affidabile**
+della pubblicazione — bisogna interrogare i record veri.
+
+Verificato sul campo: registrazione reale -> email ricevuta in posta in arrivo da
+`no-reply@vfoot.it` -> link aperto -> account attivato -> accesso riuscito.
+
+**Da fare**: `GOOGLE_OAUTH_CLIENT_ID` + `VITE_GOOGLE_CLIENT_ID` (senza, il
+pulsante Google non viene mostrato e l'endpoint rifiuta). Schermata di consenso
+gia' impostata su "Esterno"; ricordarsi di **pubblicare l'app in produzione**,
+altrimenti funziona solo per gli utenti di prova (max 100).
