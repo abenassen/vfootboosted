@@ -140,7 +140,8 @@ compilato: va rifatto il build e ricaricato.
 # in locale
 cd vfoot-frontend
 VITE_API_PROVIDER=backend VITE_API_BASE_URL=/api/v1 \
-  VITE_GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com npx vite build
+  VITE_GOOGLE_CLIENT_ID=989229675760-6jhl2l8hootj02j3urbm2c68soia67i8.apps.googleusercontent.com \
+  npx vite build
 rsync -az --delete dist/ root@139.162.144.123:/srv/vfoot-web/
 ssh root@139.162.144.123 'chown -R vfoot:vfoot /srv/vfoot-web'
 ```
