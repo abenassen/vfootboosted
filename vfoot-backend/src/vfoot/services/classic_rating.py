@@ -51,6 +51,15 @@ TOTAL_WEIGHTS = {
     "shots_on_target": 0.25,
     "shots": 0.15,
     "errors_led_to_goal": -1.50,  # decisive error (heavy)
+    # An error that let the opponent SHOOT, without a goal following. Anchored at
+    # a third of the error-that-conceded, which is both the intuitive expected
+    # cost (a chance handed to an opponent converts roughly one time in three)
+    # and the empirical optimum: swept against a full season of real pagelle,
+    # -0.50 maximised agreement both overall (0.4593 -> 0.4627) and on the 327
+    # affected player-matches (0.4882 -> 0.5113), with heavier weights doing
+    # worse. The two features barely overlap (7 player-matches in a season), so
+    # this does not double-count the conceded goal.
+    "errors_led_to_shot": -0.50,
     "big_chance_missed": -0.80,   # squandering an easy chance > the xG positioning credit
 }
 
@@ -99,6 +108,11 @@ GK_TOTAL_WEIGHTS = {
     "gk_goals_prevented": 2.50,   # SIGNED: negative when he underperforms the xG faced
     "gk_penalty_saves": 1.00,
     "errors_led_to_goal": -1.50,
+    # Same event, same anchor as the outfield channel (which already shares the
+    # -1.50 above). Calibrated on outfield players — keeper errors of this kind
+    # are too rare in one season to fit separately — so it rides on the symmetry,
+    # not on its own evidence.
+    "errors_led_to_shot": -0.50,
 }
 GK_PER90_WEIGHTS = {
     "gk_saves_inside_box": 0.35,
