@@ -196,7 +196,10 @@ VFOOT_CHROMIUM_PATH = os.environ.get("VFOOT_CHROMIUM_PATH", "") or None
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
-        'LOCATION': str(BASE_DIR / '.django_cache'),
+        # Keep this OUT of the checkout in production: a cache written inside the
+        # repo ends up owned by whoever last ran a management command, and the
+        # service user then cannot read it.
+        'LOCATION': os.environ.get("DJANGO_CACHE_DIR", str(BASE_DIR / '.django_cache')),
         'TIMEOUT': None,
         'OPTIONS': {'MAX_ENTRIES': 500},
     }
@@ -257,3 +260,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Django only prints request tracebacks when DEBUG is on, so in production a 500
+# is otherwise a blank page with nothing in the journal. Send them to stderr,
+# which systemd captures — `journalctl -u vfoot` then shows the real error.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {"format": "[{asctime}] {levelname} {name}: {message}", "style": "{"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
+}
