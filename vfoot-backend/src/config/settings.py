@@ -150,6 +150,26 @@ else:
         }
     }
 
+# Behind a TLS-terminating reverse proxy, Django must be told the original scheme,
+# otherwise it believes every request is plain HTTP and secure cookies never stick.
+# All of this is enabled only when DJANGO_SECURE=true (production), so local HTTP
+# development is unaffected.
+_SECURE = _env_bool("DJANGO_SECURE", not DEBUG)
+if _SECURE:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    # nginx already redirects http->https; this makes Django refuse to be served
+    # over plain HTTP even if the proxy config were changed by mistake.
+    SECURE_SSL_REDIRECT = _env_bool("DJANGO_SSL_REDIRECT", True)
+    # Start HSTS short: a long max-age is hard to undo if TLS ever breaks.
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "3600"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+    CSRF_TRUSTED_ORIGINS = [
+        f"https://{h}" for h in ALLOWED_HOSTS if h not in {"localhost", "127.0.0.1"}
+    ]
+
 # How often a LIVE match may be re-scraped, in minutes. The scheduler tick can run
 # every minute, but each match is polled at most this often — this is the knob that
 # adapts scraping intensity to the machine (a small VPS driving a headless browser
