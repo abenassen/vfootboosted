@@ -33,9 +33,9 @@ from realdata.services.calendar_sync import (
 
 
 def _default_cache_dir() -> Path:
-    # repo_root/historical-data/serie-a/sofascore/cache (same as import_sofascore)
-    return (Path(__file__).resolve().parents[5]
-            / "historical-data" / "serie-a" / "sofascore" / "cache")
+    # Same cache as import_sofascore. Driven by settings so the server can keep it
+    # outside the checkout (VFOOT_DATA_DIR).
+    return Path(settings.VFOOT_SOFASCORE_CACHE)
 
 
 class Command(BaseCommand):

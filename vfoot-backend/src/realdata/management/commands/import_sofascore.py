@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from realdata.services.sofascore_adapter import (
@@ -57,10 +58,14 @@ class Command(BaseCommand):
                             help="Seconds to wait before every request (throttle).")
         parser.add_argument("--list-seasons", action="store_true",
                             help="Print the valid SofaScore seasons for Serie A and exit.")
+        parser.add_argument("--cache-dir", type=str, default=None,
+                            help="Override the SofaScore cache directory; defaults "
+                                 "to settings.VFOOT_SOFASCORE_CACHE.")
 
     def handle(self, *args, **options):
-        cache_dir = (Path(__file__).resolve().parents[5]
-                     / "historical-data" / "serie-a" / "sofascore" / "cache")
+        # On the server the cache lives outside the checkout (VFOOT_DATA_DIR), so
+        # a redeploy never has to move 1.5 GB of scraped JSON around.
+        cache_dir = Path(options["cache_dir"] or settings.VFOOT_SOFASCORE_CACHE)
         try:
             client = SofaScoreClient(
                 cache_dir=cache_dir,
