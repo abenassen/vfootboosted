@@ -1,6 +1,12 @@
 import * as backendApi from './backend';
 import * as mockApi from '../mock/api';
-import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
+import type {
+  AuthResponse,
+  AuthUser,
+  LoginRequest,
+  RegisterRequest,
+  RegisterResponse,
+} from '../types/auth';
 import type {
   AuctionState,
   CompetitionItem,
@@ -44,7 +50,7 @@ const impl = apiProvider === 'backend' ? backendApi : mockApi;
 
 type ApiImpl = {
   hasStoredSession: () => boolean;
-  register: (req: RegisterRequest) => Promise<AuthResponse>;
+  register: (req: RegisterRequest) => Promise<RegisterResponse>;
   login: (req: LoginRequest) => Promise<AuthResponse>;
   getCurrentUser: () => Promise<AuthUser>;
   logout: () => Promise<void>;

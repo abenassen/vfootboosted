@@ -1,5 +1,11 @@
 import type { LineupContextResponse, MatchDetailResponse, MatchListItem, SaveLineupRequest, SaveLineupResponse } from '../types/contracts';
-import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
+import type {
+  AuthResponse,
+  AuthUser,
+  LoginRequest,
+  RegisterRequest,
+  RegisterResponse,
+} from '../types/auth';
 import type {
   AuctionState,
   CompetitionItem,
@@ -76,17 +82,20 @@ export function hasStoredSession(): boolean {
   return !!window.localStorage.getItem(MOCK_SESSION_KEY);
 }
 
-export async function register(req: RegisterRequest): Promise<AuthResponse> {
+export async function register(req: RegisterRequest): Promise<RegisterResponse> {
   await sleep(250);
   const users = readUsers();
   if (users.some((u) => u.username === req.username)) {
     throw new Error('Username already exists.');
   }
-  users.push({ username: req.username, email: req.email ?? '', password: req.password });
+  // Mirrors the real backend: the account exists but is NOT signed in, because
+  // in production it stays inactive until the emailed link is opened.
+  users.push({ username: req.username, email: req.email, password: req.password });
   writeUsers(users);
-  const user = toAuthUser(req.username, req.email ?? '');
-  setSession(user);
-  return { token: `mock-token-${req.username}`, user };
+  return {
+    detail: "Ti abbiamo inviato un'email di conferma. Apri il link per attivare l'account.",
+    email: req.email,
+  };
 }
 
 export async function login(req: LoginRequest): Promise<AuthResponse> {

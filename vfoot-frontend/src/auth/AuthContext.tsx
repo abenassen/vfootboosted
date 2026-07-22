@@ -1,13 +1,22 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getCurrentUser, hasStoredSession, login as apiLogin, logout as apiLogout, register as apiRegister } from '../api';
-import type { AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
+import type {
+  AuthUser,
+  LoginRequest,
+  RegisterRequest,
+  RegisterResponse,
+} from '../types/auth';
 
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
   login: (req: LoginRequest) => Promise<void>;
-  register: (req: RegisterRequest) => Promise<void>;
+  /** Resolves with the backend's message; does NOT sign the user in. */
+  register: (req: RegisterRequest) => Promise<RegisterResponse>;
   logout: () => Promise<void>;
+  /** Re-read the session from the stored token — used after email confirmation
+   *  or a Google sign-in, which obtain a token outside of login(). */
+  refresh: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -40,8 +49,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const register = useCallback(async (req: RegisterRequest) => {
-    const res = await apiRegister(req);
-    setUser(res.user);
+    // Intentionally no setUser: the account stays unusable until the emailed
+    // link is opened, so pretending to be logged in here would be a lie.
+    return apiRegister(req);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (!hasStoredSession()) {
+      setUser(null);
+      return;
+    }
+    try {
+      setUser(await getCurrentUser());
+    } catch {
+      setUser(null);
+    }
   }, []);
 
   const logout = useCallback(async () => {
@@ -56,8 +78,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       register,
       logout,
+      refresh,
     }),
-    [login, loading, logout, register, user]
+    [login, loading, logout, refresh, register, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

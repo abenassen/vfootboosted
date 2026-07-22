@@ -16,6 +16,7 @@ import SimulationMatchesPage from './pages/SimulationMatchesPage';
 import SimulationMatchDetailPage from './pages/SimulationMatchDetailPage';
 import NotFoundPage from './pages/NotFoundPage';
 import LandingPage from './pages/LandingPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
 import { useAuth } from './auth/AuthContext';
 import { LeagueProvider } from './league/LeagueContext';
 import { CompetitionProvider } from './league/CompetitionContext';
@@ -35,6 +36,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/verifica-email" element={<VerifyEmailPage />} />
       <Route
         element={
           <RequireAuth>

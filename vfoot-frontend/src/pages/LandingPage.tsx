@@ -2,15 +2,16 @@ import { FormEvent, useMemo, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { Badge, Button, Card } from '../components/ui';
 import { apiProvider } from '../api';
-import { ApiError } from '../api/backend';
+import { ApiError, googleSignIn, resendVerification } from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 import logo from '../assets/logo.png';
 
 type Mode = 'login' | 'register';
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const { user, login, register } = useAuth();
+  const { user, login, register, refresh } = useAuth();
 
   const [mode, setMode] = useState<Mode>('login');
   const [username, setUsername] = useState('');
@@ -19,6 +20,10 @@ export default function LandingPage() {
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // Set when the backend says the password was right but the address was never
+  // confirmed — the one case where offering "resend" is actually useful.
+  const [unconfirmed, setUnconfirmed] = useState<string | null>(null);
 
   const ctaLabel = useMemo(() => (mode === 'login' ? 'Accedi' : 'Crea account'), [mode]);
 
@@ -27,15 +32,22 @@ export default function LandingPage() {
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    setNotice(null);
+    setUnconfirmed(null);
     setPending(true);
     try {
       if (mode === 'login') {
         await login({ username, password });
+        navigate('/home', { replace: true });
       } else {
-        await register({ username, email, password, password_confirm: passwordConfirm });
+        // No navigation: the account is not usable until the link is opened.
+        const res = await register({ username, email, password, password_confirm: passwordConfirm });
+        setNotice(res.detail);
+        setPassword('');
+        setPasswordConfirm('');
       }
-      navigate('/home', { replace: true });
     } catch (err) {
+      if (err instanceof ApiError && err.status === 403) setUnconfirmed(username);
       // ApiError already carries a message written for the user; a bare TypeError
       // here means fetch never reached the server (backend down / wrong address).
       setError(
@@ -49,6 +61,33 @@ export default function LandingPage() {
       );
     } finally {
       setPending(false);
+    }
+  }
+
+  async function onGoogleCredential(credential: string) {
+    setError(null);
+    setNotice(null);
+    setUnconfirmed(null);
+    setPending(true);
+    try {
+      await googleSignIn(credential);
+      await refresh();
+      navigate('/home', { replace: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Accesso con Google non riuscito.');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function onResend() {
+    setError(null);
+    try {
+      const res = await resendVerification(email);
+      setNotice(res.detail);
+      setUnconfirmed(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Invio non riuscito.');
     }
   }
 
@@ -137,9 +176,13 @@ export default function LandingPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    required
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-sky-200 focus:ring"
                     placeholder="tu@email.com"
                   />
+                  <div className="mt-1 text-xs text-slate-500">
+                    Ti invieremo un link per confermare l’indirizzo.
+                  </div>
                 </label>
               ) : null}
 
@@ -170,11 +213,51 @@ export default function LandingPage() {
               ) : null}
 
               {error ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</div> : null}
+              {notice ? (
+                <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+                  {notice}
+                </div>
+              ) : null}
+
+              {unconfirmed ? (
+                <div className="space-y-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <div className="font-medium">
+                    Non hai ricevuto l’email? Inserisci il tuo indirizzo e te la rimandiamo.
+                  </div>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full rounded-lg border border-amber-300 px-3 py-1.5 outline-none"
+                    placeholder="tu@email.com"
+                  />
+                  <button
+                    type="button"
+                    onClick={onResend}
+                    disabled={!email}
+                    className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                  >
+                    Rimanda l’email di conferma
+                  </button>
+                </div>
+              ) : null}
 
               <Button type="submit" disabled={pending}>
                 {pending ? 'Attendere…' : ctaLabel}
               </Button>
             </form>
+
+            <div className="mt-4">
+              <div className="mb-3 flex items-center gap-3 text-xs text-slate-400">
+                <div className="h-px flex-1 bg-slate-200" />
+                oppure
+                <div className="h-px flex-1 bg-slate-200" />
+              </div>
+              <GoogleSignInButton
+                onCredential={onGoogleCredential}
+                text={mode === 'register' ? 'signup_with' : 'signin_with'}
+              />
+            </div>
           </Card>
         </div>
       </div>

@@ -5,7 +5,15 @@ import type {
   SaveLineupRequest,
   SaveLineupResponse,
 } from '../types/contracts';
-import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '../types/auth';
+import type {
+  AuthResponse,
+  AuthUser,
+  LoginRequest,
+  RegisterRequest,
+  RegisterResponse,
+  VerifyEmailRequest,
+  VerifyEmailResponse,
+} from '../types/auth';
 import type {
   AuctionState,
   CompetitionItem,
@@ -119,6 +127,7 @@ function humanMessage(status: number, parsed: any, statusText: string, url = '')
       : 'Sessione scaduta. Effettua di nuovo l’accesso.';
   }
   if (status === 403) return detail ?? 'Non hai i permessi per questa operazione.';
+  if (status === 429) return detail ?? 'Troppi tentativi. Riprova tra qualche minuto.';
   if (status === 404) return detail ?? 'Risorsa non trovata.';
   if (status === 400) {
     if (detail) return detail;
@@ -166,29 +175,45 @@ export function hasStoredSession(): boolean {
   return !!getToken();
 }
 
-export async function register(req: RegisterRequest): Promise<AuthResponse> {
-  const res = await fetch(`${baseUrl()}/auth/register`, {
+function jsonPost(path: string, body: unknown): Promise<Response> {
+  return fetch(`${baseUrl()}${path}`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(req),
+    body: JSON.stringify(body),
   });
+}
+
+/** No token is stored here on purpose: the account is not usable until confirmed. */
+export async function register(req: RegisterRequest): Promise<RegisterResponse> {
+  const res = await jsonPost('/auth/register', req);
+  return (await parseJsonOrThrow(res)) as RegisterResponse;
+}
+
+export async function verifyEmail(req: VerifyEmailRequest): Promise<VerifyEmailResponse> {
+  const res = await jsonPost('/auth/verify-email', req);
+  const data = (await parseJsonOrThrow(res)) as VerifyEmailResponse;
+  // Only a first, successful confirmation hands back credentials.
+  if (data.token) setToken(data.token);
+  return data;
+}
+
+export async function resendVerification(email: string): Promise<{ detail: string }> {
+  const res = await jsonPost('/auth/resend-verification', { email });
+  return (await parseJsonOrThrow(res)) as { detail: string };
+}
+
+export async function googleSignIn(credential: string): Promise<AuthResponse> {
+  const res = await jsonPost('/auth/google', { credential });
   const data = (await parseJsonOrThrow(res)) as AuthResponse;
   setToken(data.token);
   return data;
 }
 
 export async function login(req: LoginRequest): Promise<AuthResponse> {
-  const res = await fetch(`${baseUrl()}/auth/login`, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(req),
-  });
+  const res = await jsonPost('/auth/login', req);
   const data = (await parseJsonOrThrow(res)) as AuthResponse;
   setToken(data.token);
   return data;
