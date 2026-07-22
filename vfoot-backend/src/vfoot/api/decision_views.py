@@ -17,8 +17,9 @@ from vfoot.models import (
 )
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
-    open_role_decisions, resolve,
+    resolve,
 )
+from vfoot.services.listone import snapshot_league_listone
 
 
 def _membership(league, user_id):
@@ -151,7 +152,15 @@ class LeagueDecisionAcceptAllView(APIView):
 
 
 class LeagueDecisionRefreshView(APIView):
-    """Re-scan the listone for players that still need a human decision."""
+    """Bring the listone up to date with the real market, and re-open whatever
+    that turns up.
+
+    A league's roles are frozen, but its ROSTER is not: a January signing, or
+    anyone who arrives after the auction, has no frozen role at all — and until
+    this runs, the pagella quietly falls back to the global seed for him and no
+    decision is ever raised. The snapshot is additive, so existing rows (admin
+    overrides included) are untouched; only the newcomers are seeded.
+    """
 
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -161,6 +170,8 @@ class LeagueDecisionRefreshView(APIView):
         if not _is_admin(league, request.user.id):
             return Response({"detail": "Solo l'amministratore."},
                             status=status.HTTP_403_FORBIDDEN)
-        n = open_role_decisions(league, opened_by=request.user)
-        return Response({"opened": n,
+        summary = snapshot_league_listone(league)
+        return Response({"seeded": summary.get("created", 0),
+                         "opened": summary.get("decisions_opened", 0),
+                         "roster": summary.get("roster", 0),
                          "blocked_reason": market_blocked_reason(league)})

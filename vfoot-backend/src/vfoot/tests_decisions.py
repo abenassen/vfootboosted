@@ -195,3 +195,81 @@ class DecisionApiTests(DecisionQueueTests):
         self.assertTrue(body["is_admin"])
         self.assertEqual(len(body["decisions"]), 1)
         self.assertIsNotNone(body["blocked_reason"])
+
+
+class LateArrivalTests(DecisionQueueTests):
+    """Roles are frozen; the roster is not.
+
+    A player signed after the listone was drawn — a January arrival, or anyone
+    bought once the auction is over — had no frozen role at all, so the pagella
+    silently fell back to the global seed for him and no decision was ever
+    raised. He walked straight past the gate the rest of the flow depends on.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        from vfoot.services.listone import snapshot_league_listone
+        self.snapshot = snapshot_league_listone
+
+    def test_a_late_arrival_is_seeded_and_can_block_the_market(self):
+        self._player("Titolare", method=SeasonPlayerRole.METHOD_TM,
+                     tm_position="centre-back", role="DIF")
+        self.snapshot(self.league)
+        self.assertIsNone(market_blocked_reason(self.league))
+
+        # ...the January window opens and an unclassifiable winger arrives.
+        self._player("Arrivato a gennaio", method=SeasonPlayerRole.METHOD_DEFAULT)
+
+        self.client.force_authenticate(user=self.admin)
+        r = self.client.post(f"/api/v1/leagues/{self.league.id}/decisions/refresh",
+                             format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["opened"], 1)
+        self.assertIsNotNone(r.json()["blocked_reason"])
+
+    def test_opening_the_market_catches_up_with_the_roster_by_itself(self):
+        """A safety net, not the main path: market_open defaults to True, so a
+        league may never toggle it. The roster import is where the catch-up
+        really belongs — see import_transfermarkt_squads."""
+        self.snapshot(self.league)
+        self._player("Arrivato tardi", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self.league.market_open = False
+        self.league.save(update_fields=["market_open"])
+
+        self.client.force_authenticate(user=self.admin)
+        r = self.client.patch(f"/api/v1/leagues/{self.league.id}/market",
+                              {"is_open": True}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["code"], "pending_decisions")
+        self.league.refresh_from_db()
+        self.assertFalse(self.league.market_open)
+
+    def test_a_late_arrival_cannot_be_added_to_a_roster_undecided(self):
+        """The gate that actually matters, since the market is open by default."""
+        self.snapshot(self.league)
+        p = self._player("Arrivato tardi", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self.snapshot(self.league)
+        from vfoot.models import FantasyTeam
+        team = FantasyTeam.objects.create(
+            league=self.league,
+            manager=LeagueMembership.objects.get(league=self.league, user=self.admin),
+            name="Squadra")
+        self.client.force_authenticate(user=self.admin)
+        r = self.client.post(
+            f"/api/v1/leagues/{self.league.id}/teams/{team.id}/roster/add",
+            {"player_id": p.id, "price": 10}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json().get("code"), "pending_decisions")
+
+    def test_refreshing_never_disturbs_a_role_already_settled(self):
+        p = self._player("Deciso", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self.snapshot(self.league)
+        resolve(LeagueDecision.objects.get(league=self.league, player=p), "ATT",
+                user=self.admin)
+
+        self.snapshot(self.league)
+        self.assertEqual(LeagueDecision.objects.filter(league=self.league).count(), 1)
+        row = LeaguePlayerRole.objects.get(league=self.league, player=p)
+        self.assertEqual(row.role, "ATT")
+        self.assertEqual(row.source, LeaguePlayerRole.SOURCE_ADMIN)

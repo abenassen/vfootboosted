@@ -84,6 +84,7 @@ from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
     open_role_decisions, resolve as resolve_decision,
 )
+from vfoot.services.listone import snapshot_league_listone
 from vfoot.services.listone import eligible_player_ids
 from vfoot.services.player_ratings import (
     latest_market_values, player_values, previous_season_with_data,
@@ -309,6 +310,13 @@ class MarketToggleView(APIView):
         s = MarketToggleSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         if s.validated_data["is_open"]:
+            # Catch up with the real market first. Roles are frozen but the roster
+            # is not, and a player who arrived after the listone was drawn has no
+            # frozen role: seeding him here is what stops a January signing from
+            # slipping past the gate and being priced before anyone has agreed
+            # what he is. Additive — nothing already decided is touched.
+            if league.mode == FantasyLeague.MODE_CLASSIC:
+                snapshot_league_listone(league)
             blocked = _ensure_no_pending_decisions(league)
             if blocked:
                 return blocked

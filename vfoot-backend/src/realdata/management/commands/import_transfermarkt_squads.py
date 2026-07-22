@@ -458,6 +458,25 @@ class Command(BaseCommand):
         self.stdout.write(f"DOB corrections from TM      : {s['dob_fixed']}")
         self.stdout.write(f"Goalkeeper tags set/changed  : {s['gk_tagged']}")
         self.stdout.write(f"Classic roles set/changed    : {s['role_set']}")
+        if not dry:
+            # The rosters just moved, so every classic league playing on this
+            # season has a listone that no longer matches reality. Roles stay
+            # frozen — the snapshot is additive — but a player who arrived today
+            # gets seeded now instead of silently falling back to the global seed
+            # the first time someone opens his pagella.
+            from vfoot.models import FantasyLeague
+            from vfoot.services.listone import snapshot_league_listone
+            seeded = opened = leagues = 0
+            for league in FantasyLeague.objects.filter(
+                    mode=FantasyLeague.MODE_CLASSIC, reference_season=cs):
+                summary = snapshot_league_listone(league)
+                leagues += 1
+                seeded += summary.get("created", 0)
+                opened += summary.get("decisions_opened", 0)
+            if leagues:
+                self.stdout.write(
+                    f"Listoni aggiornati           : {leagues} leghe, "
+                    f"{seeded} ruoli seminati, {opened} decisioni aperte")
         if s["unmapped_position"]:
             self.stdout.write(self.style.WARNING(
                 f"POSIZIONI TM NON MAPPATE      : {s['unmapped_position']} giocatori "
