@@ -169,12 +169,6 @@ function DecisionRow({
       {/* Why we are asking. A queue that says "decide" without saying why reads as
           an obstacle rather than as a question. */}
       {d.rationale ? <div className="mt-1 text-xs text-slate-500">{d.rationale}</div> : null}
-      {d.options.some((o) => o.sample) ? (
-        <div className="mt-0.5 text-[11px] text-slate-400">
-          Le percentuali dicono come sono risultati i giocatori nella stessa posizione
-          che abbiamo potuto misurare ({d.options.find((o) => o.sample)?.sample} casi).
-        </div>
-      ) : null}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {d.options.map((o) => {
@@ -193,14 +187,6 @@ function DecisionRow({
             >
               {o.label}
               {o.value === d.proposed ? <span className="ml-1 text-[10px] opacity-70">proposto</span> : null}
-              {/* What comparable players turned out to be. A bare "proposto"
-                  presents a coin flip as a judgement; the split says how much of
-                  a guess it is. */}
-              {o.sample ? (
-                <span className="ml-1 text-[10px] opacity-70">
-                  · {Math.round((o.share ?? 0) * 100)}%
-                </span>
-              ) : null}
               {votes > 0 ? <span className="ml-1 text-[10px] font-bold opacity-90">· {votes} voti</span> : null}
             </button>
           );

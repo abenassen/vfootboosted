@@ -41,45 +41,6 @@ METHOD_REASON = {
 }
 
 
-def position_outcomes(competition_season_id: int) -> dict:
-    """{tm_position: {role: share}} among the players we COULD measure.
-
-    An ambiguous position is ambiguous by a measurable amount: of the left
-    wingers we managed to classify, close to half came out attackers and half
-    midfielders. Offering the admin a bare "proposta: Centrocampista" presents
-    that coin flip as a judgement. Showing the split says how much of a guess the
-    proposal really is, using the only evidence we have — the players in the same
-    position whose football we could actually see.
-    """
-    counts: dict[str, dict[str, int]] = {}
-    for position, role in (SeasonPlayerRole.objects
-                           .filter(competition_season_id=competition_season_id,
-                                   method=SeasonPlayerRole.METHOD_CATEGORY,
-                                   tm_position__in=TM_AMBIGUOUS)
-                           .exclude(role_data="")
-                           .values_list("tm_position", "role_data")):
-        counts.setdefault(position, {})
-        counts[position][role] = counts[position].get(role, 0) + 1
-    return {position: {"total": sum(by_role.values()), "roles": dict(by_role)}
-            for position, by_role in counts.items() if sum(by_role.values())}
-
-
-def _options_for(position: str, outcomes: dict) -> list:
-    """The admissible roles, each carrying how often players in this position
-    turned out to be that, when we could tell — and on how many cases.
-
-    The count is not decoration: "75%" out of four players and out of forty are
-    different statements, and only one of them is worth acting on.
-    """
-    stats = outcomes.get(position)
-    if not stats:
-        return [dict(option) for option in ROLE_OPTIONS]
-    total = stats["total"]
-    return [{**option, "share": round(stats["roles"].get(option["value"], 0) / total, 3),
-             "sample": total}
-            for option in ROLE_OPTIONS]
-
-
 def _roster_player_ids(league) -> set[int]:
     """Players a league can actually field, i.e. its reference season's squads."""
     from realdata.models import PlayerTeamStint
@@ -164,7 +125,6 @@ def open_role_decisions(league, *, opened_by=None) -> int:
                              end_date__isnull=True,
                              player_id__in=needing - set(inferred))
                      .values_list("player_id", "tm_position"))
-    outcomes = position_outcomes(league.reference_season_id)
     names = dict(Player.objects.filter(id__in=needing)
                  .values_list("id", "short_name"))
     fulls = dict(Player.objects.filter(id__in=needing)
@@ -183,8 +143,7 @@ def open_role_decisions(league, *, opened_by=None) -> int:
             league=league, kind=LeagueDecision.KIND_PLAYER_ROLE, player_id=pid,
             title=f"Ruolo di {name}",
             question=f"Che ruolo assegnare a {name} ({position}) nel listone?",
-            options=_options_for(position, outcomes), proposed=proposed,
-            rationale=rationale,
+            options=ROLE_OPTIONS, proposed=proposed, rationale=rationale,
             blocks_market=True, opened_by=opened_by))
     LeagueDecision.objects.bulk_create(made, ignore_conflicts=True)
     return len(made)
