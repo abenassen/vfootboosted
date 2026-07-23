@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getCompetitions, getLeagueDetail, getLeagueStandings } from '../api';
+import { getCompetitions, getLeagueDetail } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
-import type { CompetitionItem, LeagueDetail, LeagueStandingRow } from '../types/league';
+import type { CompetitionItem, LeagueDetail } from '../types/league';
 
 const COMP_TYPE_LABEL: Record<string, string> = { round_robin: 'Campionato', knockout: 'Coppa' };
 
@@ -22,9 +22,6 @@ export default function LeaguePage() {
   const [detail, setDetail] = useState<LeagueDetail | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionItem[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
-  // Standings give each participant's record (wins etc). Competition-scoped, so
-  // we take the first one; pre-season every row is simply zeroed.
-  const [standings, setStandings] = useState<Record<number, LeagueStandingRow>>({});
 
   useEffect(() => {
     setSelectedTeamId(null);
@@ -38,16 +35,6 @@ export default function LeaguePage() {
     void getCompetitions(selectedLeagueId)
       .then(setCompetitions)
       .catch(() => setCompetitions([]));
-  }, [selectedLeagueId]);
-
-  useEffect(() => {
-    if (!selectedLeagueId) {
-      setStandings({});
-      return;
-    }
-    void getLeagueStandings(selectedLeagueId)
-      .then((res) => setStandings(Object.fromEntries(res.standings.map((r) => [r.team_id, r]))))
-      .catch(() => setStandings({}));
   }, [selectedLeagueId]);
 
   if (!leagues.length) {
@@ -132,7 +119,7 @@ export default function LeaguePage() {
         <div className="mt-1 text-[11px] text-slate-400">Clicca un partecipante per vederne il rendimento e aprirne la rosa.</div>
         <div className="mt-2 divide-y">
           {detail.teams.map((t, i) => {
-            const row = standings[t.team_id];
+            const rec = t.record;
             const selected = selectedTeamId === t.team_id;
             return (
               <div key={t.team_id}>
@@ -145,24 +132,25 @@ export default function LeaguePage() {
                     <span className="font-semibold">{t.name}</span>
                   </span>
                   <span className="flex items-center gap-3 text-slate-500">
-                    {row ? <span className="text-xs">{row.points} pt</span> : null}
+                    {rec && rec.played > 0 ? (
+                      <span className="text-xs tabular-nums">{rec.wins}V {rec.draws}N {rec.losses}P</span>
+                    ) : null}
                     <span>{t.manager_username}</span>
                   </span>
                 </button>
                 {selected ? (
                   <div className="mb-2 ml-7 rounded-xl border border-slate-100 bg-slate-50 p-3">
-                    <div className="text-sm font-semibold text-slate-800">{t.name}</div>
                     <div className="text-xs text-slate-500">Manager: {t.manager_username}</div>
-                    {row && row.played > 0 ? (
-                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-slate-600">
-                        <span>Posizione: <b className="text-slate-800">{row.rank}º</b></span>
-                        <span>Vittorie: <b className="text-emerald-700">{row.wins}</b></span>
-                        <span>Pareggi: <b>{row.draws}</b></span>
-                        <span>Sconfitte: <b className="text-rose-700">{row.losses}</b></span>
-                        <span>Punti: <b className="text-slate-800">{row.points}</b></span>
+                    {rec && rec.played > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-slate-600">
+                        <span>Vittorie: <b className="text-emerald-700">{rec.wins}</b></span>
+                        <span>Pareggi: <b>{rec.draws}</b></span>
+                        <span>Sconfitte: <b className="text-rose-700">{rec.losses}</b></span>
+                        <span>Gol: <b className="text-slate-800">{rec.goals_for}</b>-<b className="text-slate-800">{rec.goals_against}</b></span>
+                        <span className="text-slate-400">su tutte le competizioni</span>
                       </div>
                     ) : (
-                      <div className="mt-1 text-[12px] text-slate-400">Il campionato non è ancora iniziato.</div>
+                      <div className="mt-1 text-[12px] text-slate-400">Nessuna partita ancora disputata.</div>
                     )}
                     <Link
                       to={`/teams/${t.team_id}`}

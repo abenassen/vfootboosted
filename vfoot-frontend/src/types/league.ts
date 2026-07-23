@@ -15,11 +15,22 @@ export interface LeagueMember {
   role: 'admin' | 'manager';
 }
 
+export interface TeamRecord {
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goals_for: number;
+  goals_against: number;
+}
+
 export interface LeagueTeam {
   team_id: number;
   name: string;
   manager_user_id: number;
   manager_username: string;
+  // W/D/L and goals aggregated across ALL competitions (no single table exists).
+  record?: TeamRecord;
 }
 
 export interface ReferenceSeason {

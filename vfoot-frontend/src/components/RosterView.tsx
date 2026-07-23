@@ -1,5 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, SectionTitle, Badge } from './ui';
+import { getLeagueDetail } from '../api';
+import { useAuth } from '../auth/AuthContext';
+import { useLeagueContext } from '../league/LeagueContext';
+import type { LeagueTeam } from '../types/league';
 import type { PlayerRole, MinutesLabel, TeamLineupContext, TeamLineupPlayer } from '../types/lineup';
 
 // The structured roster: grouped by role, a spending summary, and a clickable
@@ -33,6 +38,7 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
 
   return (
     <div className="space-y-4">
+      <TeamSwitcher currentTeamId={data.team.team_id} ownTeamId={data.is_own ? data.team.team_id : null} />
       {budget ? (
         <Card className="p-4">
           <div className="grid grid-cols-3 gap-2">
@@ -80,6 +86,51 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
   );
 }
 
+/** A scrollable strip of every participant, so the rosters can be browsed one from
+ *  another without going back to the League page — the manager's own team routes to
+ *  /squad, the others to /teams/:id. Answers the ask for tab/swipe navigation. */
+function TeamSwitcher({ currentTeamId }: { currentTeamId: number; ownTeamId: number | null }) {
+  const { selectedLeagueId } = useLeagueContext();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [teams, setTeams] = useState<LeagueTeam[]>([]);
+
+  useEffect(() => {
+    if (!selectedLeagueId) return;
+    let alive = true;
+    void getLeagueDetail(selectedLeagueId)
+      .then((d) => alive && setTeams(d.teams))
+      .catch(() => setTeams([]));
+    return () => {
+      alive = false;
+    };
+  }, [selectedLeagueId]);
+
+  // Which chip routes to /squad: the team the current user manages.
+  const ownId = teams.find((t) => t.manager_user_id === user?.id)?.team_id ?? null;
+
+  if (teams.length < 2) return null;
+  return (
+    <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+      {teams.map((t) => {
+        const active = t.team_id === currentTeamId;
+        const dest = t.team_id === ownId ? '/squad' : `/teams/${t.team_id}`;
+        return (
+          <button
+            key={t.team_id}
+            onClick={() => navigate(dest)}
+            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+              active ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            {t.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Stat({ label, value, tone = 'slate' }: { label: string; value: number; tone?: 'slate' | 'rose' | 'emerald' }) {
   const color = tone === 'rose' ? 'text-rose-700' : tone === 'emerald' ? 'text-emerald-700' : 'text-slate-900';
   return (
@@ -103,9 +154,13 @@ function PlayerRow({ p, open, onToggle }: { p: TeamLineupPlayer; open: boolean; 
             <div className="truncate text-xs text-slate-500">{p.real_team ?? '—'}</div>
           </div>
         </div>
+        {/* Fixed columns: the price sits in its own right-aligned slot so a missing
+            usage badge (a newcomer with no history) never shifts it out of line. */}
         <div className="flex shrink-0 items-center gap-2">
-          <span className="font-mono text-sm font-bold text-slate-700">€{p.price}</span>
-          <MinutesBadge label={p.minutes_label} />
+          <span className="w-12 text-right font-mono text-sm font-bold text-slate-700">€{p.price}</span>
+          <span className="hidden w-28 text-right sm:block">
+            <MinutesBadge label={p.minutes_label} />
+          </span>
         </div>
       </button>
       {open ? <PlayerDetail p={p} /> : null}
@@ -123,7 +178,10 @@ function PlayerDetail({ p }: { p: TeamLineupPlayer }) {
     <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[12px]">
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
         <Field label="Squadra" value={p.real_team ?? '—'} />
-        <Field label="Da titolare" value={`${p.starts} su ${p.appearances} conv.`} />
+        <Field
+          label="Da titolare"
+          value={p.starts != null ? `${p.starts} su ${p.appearances} conv.` : `${p.appearances} conv.`}
+        />
         <Field label="Minuti medi" value={`${p.avg_minutes}′`} />
         <Field label="Media voto" value={vote ?? '—'} hint={p.value_basis === 'estimate' ? 'stimata' : undefined} />
       </div>

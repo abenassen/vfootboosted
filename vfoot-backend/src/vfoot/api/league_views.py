@@ -215,6 +215,7 @@ class LeagueDetailView(APIView):
 
         members = LeagueMembership.objects.filter(league=league).select_related("user")
         teams = FantasyTeam.objects.filter(league=league).select_related("manager__user")
+        records = _league_wide_records(league)
 
         season = league.reference_season
         return Response(
@@ -253,11 +254,52 @@ class LeagueDetailView(APIView):
                         "name": t.name,
                         "manager_user_id": t.manager.user_id,
                         "manager_username": t.manager.user.username,
+                        # Record aggregated across ALL competitions, not one chosen
+                        # implicitly: a league has no single table, so points and
+                        # rank would be a lie. Wins/draws/losses and goals for/against
+                        # are the format-agnostic summary that always makes sense.
+                        "record": records.get(t.id, {"played": 0, "wins": 0, "draws": 0,
+                                                     "losses": 0, "goals_for": 0,
+                                                     "goals_against": 0}),
                     }
                     for t in teams
                 ],
             }
         )
+
+
+def _league_wide_records(league) -> dict:
+    """Per-team W/D/L and goals across EVERY competition in the league.
+
+    A league is a set of competitions of possibly different shapes (championship,
+    knockout), with no designated one — so a per-competition table read out of
+    context (points, rank) misleads. This sums finished fixtures league-wide, and
+    reports goals rather than points, which mean the same thing in every format.
+    ``home_total``/``away_total`` on a fixture ARE the goals (the readable score);
+    the fantasy vote total lives on the detail as ``vfoot_home``. So the goals are
+    those fields directly — no threshold conversion, which would double-count."""
+    rec: dict[int, dict] = {}
+
+    def row(tid: int) -> dict:
+        return rec.setdefault(tid, {"played": 0, "wins": 0, "draws": 0, "losses": 0,
+                                    "goals_for": 0, "goals_against": 0})
+
+    for fx in (FantasyFixture.objects
+               .filter(competition__league=league, status=FantasyFixture.STATUS_FINISHED)
+               .values_list("home_team_id", "away_team_id", "home_total", "away_total")):
+        htid, atid, ht, at = fx
+        hg, ag = int(round(ht)), int(round(at))
+        h, a = row(htid), row(atid)
+        h["played"] += 1; a["played"] += 1
+        h["goals_for"] += hg; h["goals_against"] += ag
+        a["goals_for"] += ag; a["goals_against"] += hg
+        if ht > at:
+            h["wins"] += 1; a["losses"] += 1
+        elif ht < at:
+            a["wins"] += 1; h["losses"] += 1
+        else:
+            h["draws"] += 1; a["draws"] += 1
+    return rec
 
 
 class MemberRoleUpdateView(APIView):
