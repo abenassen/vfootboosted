@@ -54,7 +54,8 @@ from vfoot.models import (
     LeaguePlayerRole,
     SavedLineupSnapshot,
 )
-from vfoot.services.classic_rating import build_reference, voto_puro_for_match
+from vfoot.services.classic_rating import build_reference
+from vfoot.services.classic_pagella import get_role_averages, pagella_for_match
 from vfoot.services.defense_bonus import compute_defense_bonus
 from vfoot.services.formation_rules import is_legal_classic
 from vfoot.services.lineup_substitution import apply_classic_substitutions
@@ -71,7 +72,7 @@ GOAL_THRESHOLDS = (66.0, 72.0, 78.0, 84.0, 90.0, 96.0)
 CUP_TEAMS = 8
 CUP_ROUNDS = [("Quarti di finale", 24), ("Semifinali", 30), ("Finale", 36)]
 SV_BASELINE = 6.0
-GK_BASELINE = 6.0
+
 SIDE_HOME, SIDE_AWAY = "home", "away"
 CARD_MALUS = {"yellow": 0.5, "second_yellow": 1.0, "red": 1.0}  # ammonizione/espulsione
 
@@ -146,21 +147,36 @@ class Command(BaseCommand):
         return out, played
 
     def _maps(self, cs_id):
+        # Voto puro AND its explanation come from the shared pagella_for_match, the
+        # same code the real-championship view uses — so a league fixture and the
+        # Serie A match behind it agree, the keeper is scored on his own channel
+        # (not a flat baseline), and every player carries the "why this vote"
+        # breakdown. The seed keeps only its own bonus/malus that the DB-only
+        # pagella cannot see: own goals, penalty misses and saves, read from cache.
         ref = build_reference(cs_id)
-        vp, rated = {}, set()
+        averages = get_role_averages(cs_id)
+        vp, rated, expl = {}, set(), {}
         for m in Match.objects.filter(competition_season_id=cs_id):
             if m.matchday is None:
                 continue
-            for row in voto_puro_for_match(m, ref):
-                if row["rated"]:
-                    vp[(m.matchday, row["player_id"])] = float(row["voto_puro"])
-                    rated.add((m.matchday, row["player_id"]))
+            pag = pagella_for_match(m, ref, averages=averages)
+            for side in ("home", "away"):
+                for group in ("starters", "bench"):
+                    for line in pag[side][group]:
+                        key = (m.matchday, line["player_id"])
+                        if line["sv"] or line["voto_puro"] is None:
+                            continue
+                        vp[key] = float(line["voto_puro"])
+                        rated.add(key)
+                        if line.get("explanation"):
+                            expl[key] = {"explanation": line["explanation"],
+                                         "explanation_text": line.get("explanation_text")}
         evt = self._event_map(cs_id)
         gk_conceded, gk_played = self._gk_conceded(cs_id)
         cards = self._cards_map(cs_id)
         ga = self._goals_assists_map(cs_id)
-        return {"vp": vp, "rated": rated, "evt": evt, "cards": cards, "ga": ga,
-                "gk_conceded": gk_conceded, "gk_played": gk_played}
+        return {"vp": vp, "rated": rated, "expl": expl, "evt": evt, "cards": cards,
+                "ga": ga, "gk_conceded": gk_conceded, "gk_played": gk_played}
 
     def _goals_assists_map(self, cs_id):
         """(matchday, player_id) -> (goals, assists), from the DB (MatchAppearance)."""
@@ -209,23 +225,22 @@ class Command(BaseCommand):
         base = {"player_id": pid, "name": p["name"], "role": role, "lineup_role": lrole,
                 "minutes": e.get("minutes", 0), "entered": False, "entered_for": None,
                 "replaced_by": None, "events": events}
-        if role == "POR":
-            if (md, pid) not in maps["gk_played"]:
-                return {**base, "sv": True, "voto_puro": None, "bonus": 0.0, "malus": 0.0,
-                        "fantavoto": None}
-            bonus = 3 * e.get("pen_save", 0)
-            malus = 2 * e.get("own_goals", 0) + 1 * maps["gk_conceded"].get((md, pid), 0) + card_malus
-            fv = GK_BASELINE + bonus - malus
-            return {**base, "sv": False, "voto_puro": GK_BASELINE,
-                    "bonus": float(bonus), "malus": float(malus), "fantavoto": round(fv, 1)}
+        why = maps["expl"].get((md, pid), {})
         if (md, pid) not in maps["rated"]:
             return {**base, "sv": True, "voto_puro": None, "bonus": 0.0, "malus": 0.0,
                     "fantavoto": None}
         vp = maps["vp"][(md, pid)]
-        bonus = 3 * goals + 1 * assists
-        malus = 2 * e.get("own_goals", 0) + 3 * e.get("pen_miss", 0) + card_malus
+        if role == "POR":
+            # Keeper: voto puro from the GK channel (in vp), the -1/goal conceded in
+            # the malus layer, plus own goals and penalty saves from cache.
+            bonus = 3 * e.get("pen_save", 0)
+            malus = 2 * e.get("own_goals", 0) + maps["gk_conceded"].get((md, pid), 0) + card_malus
+        else:
+            bonus = 3 * goals + 1 * assists
+            malus = 2 * e.get("own_goals", 0) + 3 * e.get("pen_miss", 0) + card_malus
         return {**base, "sv": False, "voto_puro": round(vp, 1),
-                "bonus": float(bonus), "malus": float(malus), "fantavoto": round(vp + bonus - malus, 1)}
+                "bonus": float(bonus), "malus": float(malus),
+                "fantavoto": round(vp + bonus - malus, 1), **why}
 
     def _score_team(self, starters, bench, md, maps, max_subs):
         roles = {p["player_id"]: ROLE_TO_LINEUP[p["role"]] for p in starters + bench}

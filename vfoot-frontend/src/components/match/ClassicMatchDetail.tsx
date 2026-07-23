@@ -205,14 +205,6 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
               <span className="text-slate-500">↓ esce · entra {p.replaced_by.name}</span>
             ) : p.entered && p.entered_for ? (
               <span className="font-semibold text-emerald-600">▲ entra per {p.entered_for.name}</span>
-            ) : hasWhy ? (
-              <button
-                type="button"
-                onClick={() => setOpen((v) => !v)}
-                className="text-slate-400 hover:text-slate-700"
-              >
-                {open ? 'nascondi' : 'perché questo voto?'}
-              </button>
             ) : null}
           </span>
         </span>
@@ -239,7 +231,21 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
           )
         ) : (
           <>
-            <span className="text-[11px] text-slate-500">{fmt(p.voto_puro ?? 0)}</span>
+            {/* The voto puro itself opens the breakdown — it is the number the
+                explanation is about, so nothing else needs to say so. A dotted
+                underline is the only hint; plain when there is nothing to show. */}
+            {hasWhy ? (
+              <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                title="Mostra il dettaglio del voto"
+                className="text-[11px] text-slate-500 underline decoration-dotted underline-offset-2 hover:text-slate-800"
+              >
+                {fmt(p.voto_puro ?? 0)}
+              </button>
+            ) : (
+              <span className="text-[11px] text-slate-500">{fmt(p.voto_puro ?? 0)}</span>
+            )}
             {p.bonus > 0 ? <span className="text-[11px] font-semibold text-emerald-600">+{fmt(p.bonus)}</span> : null}
             {p.malus > 0 ? <span className="text-[11px] font-semibold text-rose-600">−{fmt(p.malus)}</span> : null}
             <span
