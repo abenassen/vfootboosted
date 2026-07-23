@@ -122,27 +122,32 @@ Everything is staged and **disabled**. Turn it on at launch.
   (`/var/lib/vfoot-egress/`, `/var/cache/sofascore`). Unit:
   `vfoot-egress-refill.{service,timer}` tops the pool up.
 
-### Install the units (disabled)
+The **DB-aware wiring IS built** (`realdata/services/live_ingest.py` + `egress_client.py`,
+wired into `tick` and `sync_calendar --egress`, tested in `tests_live_pipeline`). The
+tick decides which matches are due (DB calendar), warms them through the egress via a
+narrow sudo bridge, then reads the warm cache with the existing offline import.
+
+### Install the units + the sudo bridge (disabled)
 ```sh
-scp deploy/systemd/vfoot-tm-poll.{service,timer} \
-    deploy/systemd/vfoot-egress-refill.{service,timer} \
-    root@139.162.144.123:/etc/systemd/system/
-ssh root@139.162.144.123 'systemctl daemon-reload'   # NOTE: do NOT enable yet
+scp deploy/systemd/*.{service,timer} root@139.162.144.123:/etc/systemd/system/
+scp deploy/egress/vfoot-egress root@139.162.144.123:/usr/local/sbin/vfoot-egress
+scp deploy/egress/vfoot-egress.sudoers root@139.162.144.123:/tmp/vfoot-egress.sudoers
+ssh root@139.162.144.123 '
+  chmod 0755 /usr/local/sbin/vfoot-egress
+  install -m 0440 /tmp/vfoot-egress.sudoers /etc/sudoers.d/vfoot-egress
+  visudo -cf /etc/sudoers.d/vfoot-egress            # validate
+  systemctl daemon-reload'                          # do NOT enable yet
 ```
+The `vfoot-calendar.service` runs `sync_calendar --egress --year <YY/YY> --season-id <id>`;
+`vfoot-tick.service` runs `tick` (it finds the due matches from the DB itself).
 
 ### Enable at launch
 ```sh
 ssh root@139.162.144.123 '
-  systemctl enable --now vfoot-tm-poll.timer          # listone stays current
+  systemctl enable --now vfoot-tm-poll.timer          # listone stays current (TM)
   systemctl enable --now vfoot-egress-refill.timer    # keeps the IP pool full
-  systemctl enable --now vfoot-tick.timer             # live/finalization (once wired)
-  systemctl enable --now vfoot-calendar.timer'        # calendar sync (once wired)
+  systemctl enable --now vfoot-calendar.timer         # Loop A: calendar via egress
+  systemctl enable --now vfoot-tick.timer'            # Loop B: live/finalization
 ```
-
-### STILL TO BUILD before enabling tick/calendar
-The **DB-aware wiring** of the SofaScore live pipeline (ROADMAP §2, "struttura del
-polling"): `sync_calendar` + `tick` decide WHICH match ids to fetch (from the DB
-calendar), call the egress via a narrow `sudoers` rule
-(`sudo … sofascore_egress.py fetch --match-ids …`, which writes cache), then `import`
-reads the cache into the DB. Until this exists, leave `vfoot-tick`/`-calendar` off;
-`vfoot-tm-poll` and `vfoot-egress-refill` are independent and safe to enable.
+`vfoot-tm-poll` and `vfoot-egress-refill` are independent and can be enabled anytime;
+`vfoot-calendar`/`vfoot-tick` need the sudo bridge above.

@@ -56,6 +56,10 @@ class Command(BaseCommand):
                             help="Use only the on-disk cache (no network). "
                                  "Requires --season-id if the seasons list "
                                  "isn't cached.")
+        parser.add_argument("--egress", action="store_true",
+                            help="Warm the schedule through the root SofaScore "
+                                 "egress (Surfshark netns), then read it offline. "
+                                 "The production transport on the Linode.")
         parser.add_argument("--browser", action="store_true",
                             help="Use the Playwright browser transport (passes "
                                  "Cloudflare) instead of the plain client.")
@@ -103,6 +107,15 @@ class Command(BaseCommand):
         if options["offline"] and options["season_id"] is None:
             self.stdout.write(self.style.WARNING(
                 "--offline without --season-id: relying on a cached seasons list."))
+
+        if options["egress"]:
+            # Warm the whole fixture list through the tunnel, then read it offline.
+            from realdata.services import egress_client
+            self.stdout.write(f"Warming schedule {options['year']} via egress…")
+            if not egress_client.warm_schedule(options["year"]):
+                raise CommandError("egress could not warm the schedule (blocked / "
+                                   "no good exit IP). Nothing synced.")
+            options["browser"] = False   # read the warm cache with the plain client
 
         client = self._build_client(options)
         try:

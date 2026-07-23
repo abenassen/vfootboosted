@@ -244,12 +244,11 @@ def _demote(servers: list[dict], ip: str) -> None:
     save_pool(servers)
 
 
-def fetch(match_ids: str, kind: str, cache_dir: Path, max_rotations: int) -> int:
-    """Fetch the given match ids through a good pooled IP, rotating on a block.
-
-    The match ids come from the DB-aware caller (calendar/scheduler) — this side
-    only decides WHICH exit IP to use, never WHICH matches. Self-validating: a
-    clean run confirms the IP (last_ok bumped), a block demotes it and rotates."""
+def _warm(worker_args: list[str], cache_dir: Path, max_rotations: int) -> int:
+    """Run the fetch worker (with the given args) through a good pooled IP, rotating
+    on a block. This side only decides WHICH exit IP to use, never WHAT to fetch —
+    the caller (calendar/scheduler) passes the worker args. Self-validating: a clean
+    run confirms the IP (last_ok bumped), a block demotes it and rotates."""
     priv, addr = _client_identity()
     cache_dir.mkdir(parents=True, exist_ok=True)
     servers = load_pool()
@@ -277,8 +276,7 @@ def fetch(match_ids: str, kind: str, cache_dir: Path, max_rotations: int) -> int
                 print("  no handshake; demoting + rotating.")
                 _demote(servers, ip); continue
             r = _run(["ip", "netns", "exec", NS, VENV_PY, str(WORKER),
-                      "--match-ids", match_ids, "--kind", kind,
-                      "--cache-dir", str(cache_dir)])
+                      *worker_args, "--cache-dir", str(cache_dir)])
             sys.stdout.write(r.stdout)
             if r.returncode == 0:
                 srv["last_ok"] = _now(); srv["fail_count"] = 0
@@ -293,6 +291,14 @@ def fetch(match_ids: str, kind: str, cache_dir: Path, max_rotations: int) -> int
         finally:
             netns_down()
     print("exhausted rotations."); return 3
+
+
+def fetch(match_ids: str, kind: str, cache_dir: Path, max_rotations: int) -> int:
+    return _warm(["--match-ids", match_ids, "--kind", kind], cache_dir, max_rotations)
+
+
+def schedule(year: str, cache_dir: Path, max_rotations: int) -> int:
+    return _warm(["--schedule-year", year], cache_dir, max_rotations)
 
 
 def status() -> None:
@@ -332,6 +338,10 @@ def main() -> None:
     f.add_argument("--kind", choices=["live", "final"], default="final")
     f.add_argument("--cache-dir", default=str(CACHE_DIR))
     f.add_argument("--max-rotations", type=int, default=6)
+    sc = sub.add_parser("schedule", help="warm a season's fixture list (for calendar sync)")
+    sc.add_argument("--year", required=True, help="season year, e.g. 26/27")
+    sc.add_argument("--cache-dir", default=str(CACHE_DIR))
+    sc.add_argument("--max-rotations", type=int, default=6)
     args = ap.parse_args()
 
     if os.geteuid() != 0:
@@ -344,6 +354,8 @@ def main() -> None:
         probe_one(args.ip, args.pubkey)
     elif args.cmd == "fetch":
         sys.exit(fetch(args.match_ids, args.kind, Path(args.cache_dir), args.max_rotations))
+    elif args.cmd == "schedule":
+        sys.exit(schedule(args.year, Path(args.cache_dir), args.max_rotations))
 
 
 if __name__ == "__main__":

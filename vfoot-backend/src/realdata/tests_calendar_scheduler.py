@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from io import StringIO
+from unittest import mock
 
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
@@ -220,25 +221,29 @@ class TickCommandTests(TestCase):
         call_command("tick", "--now", iso, stdout=StringIO())
 
     def test_full_finalization_lifecycle(self):
+        # This asserts the tick's STATE MACHINE (stamp FT, +15m/+1h), so the ingest
+        # is mocked to succeed — the ingest itself is covered in tests_live_pipeline.
         ft = datetime(2026, 8, 22, 15, 45, tzinfo=UTC)
         m = self._match(status=Match.STATUS_FINISHED, kickoff=ft - timedelta(hours=2))
 
-        # first tick at FT: stamps finished_at, not yet ready
-        self._tick(ft.isoformat())
-        m.refresh_from_db()
-        self.assertEqual(m.finished_at, ft)
-        self.assertFalse(m.data_ready)
+        with mock.patch("realdata.services.live_ingest.finalize", return_value=True), \
+             mock.patch("realdata.services.live_ingest.poll_live", return_value=True):
+            # first tick at FT: stamps finished_at, not yet ready
+            self._tick(ft.isoformat())
+            m.refresh_from_db()
+            self.assertEqual(m.finished_at, ft)
+            self.assertFalse(m.data_ready)
 
-        # +16min: first finalization check runs, still not confirmed
-        self._tick((ft + timedelta(minutes=16)).isoformat())
-        m.refresh_from_db()
-        self.assertIsNotNone(m.data_checked_at)
-        self.assertFalse(m.data_ready)
+            # +16min: first finalization check runs, still not confirmed
+            self._tick((ft + timedelta(minutes=16)).isoformat())
+            m.refresh_from_db()
+            self.assertIsNotNone(m.data_checked_at)
+            self.assertFalse(m.data_ready)
 
-        # +61min: confirmation promotes to data_ready
-        self._tick((ft + timedelta(minutes=61)).isoformat())
-        m.refresh_from_db()
-        self.assertTrue(m.data_ready)
+            # +61min: confirmation promotes to data_ready
+            self._tick((ft + timedelta(minutes=61)).isoformat())
+            m.refresh_from_db()
+            self.assertTrue(m.data_ready)
 
     def test_dry_run_mutates_nothing(self):
         m = self._match(status=Match.STATUS_FINISHED)

@@ -1,0 +1,8 @@
+[Unit]
+Description=Vfoot sync calendario campionato reale (Loop A, via egress)
+[Service]
+Type=oneshot
+User=vfoot
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+# --year/--season-id vanno aggiornati al rollover di stagione (26/27 = id 95836).
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py sync_calendar --egress --year 26/27 --season-id 95836

@@ -25,6 +25,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone as djtz
 
 from realdata.models import Match
+from realdata.services import live_ingest
 from realdata.services.match_scheduler import candidate_matches, plan_tick
 
 
@@ -48,19 +49,6 @@ class Command(BaseCommand):
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
-
-    # -- scrape hooks (stubbed in Phase 1) ---------------------------------
-
-    def _scrape_live(self, match, now):
-        # TODO(ingestion phase): scrape live stats/incidents; update status,
-        # goals, and set finished_at when the provider flips to finished.
-        self.stdout.write(f"  [live-poll] {match} — would scrape provisional data")
-
-    def _scrape_final(self, match, now, *, confirm: bool):
-        # TODO(ingestion phase): scrape the full final data set (shotmap +
-        # heatmaps + per-player stats + incidents) and compute definitive votes.
-        tag = "confirm" if confirm else "check"
-        self.stdout.write(f"  [final-{tag}] {match} — would scrape final data")
 
     # -- main --------------------------------------------------------------
 
@@ -87,27 +75,45 @@ class Command(BaseCommand):
                 m.finished_at = now
                 m.save(update_fields=["finished_at"])
 
-        # 2) Live polling (stamp it, so the cadence above can be honoured).
+        # 2) Live polling: warm + update status/score (honours the per-match
+        #    cadence via data_checked_at). Only stamp checked on a real warm, so a
+        #    blocked egress simply retries next tick.
         for m in plan.live_poll:
-            self._scrape_live(m, now)
-            if not dry:
+            if dry:
+                self.stdout.write(f"  [live-poll] {m} — would warm+update")
+                continue
+            if live_ingest.poll_live(m):
                 m.data_checked_at = now
                 m.save(update_fields=["data_checked_at"])
+                self.stdout.write(
+                    f"  [live-poll] {m} — {m.status} {m.home_goals}-{m.away_goals}")
+            else:
+                self.stdout.write(f"  [live-poll] {m} — egress blocked; will retry")
 
-        # 3) Finalization: +15min provisional-final re-scrape.
+        # 3) Finalization: +15min provisional-final import.
         for m in plan.final_check:
-            self._scrape_final(m, now, confirm=False)
-            if not dry:
+            if dry:
+                self.stdout.write(f"  [final-check] {m} — would warm+import")
+                continue
+            if live_ingest.finalize(m):
                 m.data_checked_at = now
                 m.save(update_fields=["data_checked_at"])
+                self.stdout.write(f"  [final-check] {m} — imported (provisional)")
+            else:
+                self.stdout.write(f"  [final-check] {m} — egress blocked; will retry")
 
-        # 4) Finalization: +1h confirmation -> data_ready.
+        # 4) Finalization: +1h confirmation -> data_ready (official).
         for m in plan.final_confirm:
-            self._scrape_final(m, now, confirm=True)
-            if not dry:
+            if dry:
+                self.stdout.write(f"  [final-confirm] {m} — would warm+import -> data_ready")
+                continue
+            if live_ingest.finalize(m):
                 m.data_checked_at = now
                 m.data_ready = True
                 m.save(update_fields=["data_checked_at", "data_ready"])
+                self.stdout.write(f"  [final-confirm] {m} — data_ready")
+            else:
+                self.stdout.write(f"  [final-confirm] {m} — egress blocked; will retry")
 
         if not dry:
             self.stdout.write(self.style.SUCCESS("  applied"))

@@ -1,0 +1,7 @@
+# Install as /etc/sudoers.d/vfoot-egress  (validate: visudo -cf this file, mode 0440)
+#
+# The unprivileged app user `vfoot` (running the tick / calendar sync) may run ONLY
+# the fixed egress wrapper as root — nothing else. This is the single narrow bridge
+# across the privilege boundary: the app decides WHICH matches to fetch, the root
+# egress does the netns + WireGuard networking and warms the shared cache.
+vfoot ALL=(root) NOPASSWD: /usr/local/sbin/vfoot-egress

@@ -1,0 +1,7 @@
+[Unit]
+Description=Vfoot scheduler tick (live/finalizzazione partite via egress)
+[Service]
+Type=oneshot
+User=vfoot
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py tick

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Fixed entry point that the unprivileged `vfoot` user is allowed to run as root
+# via sudo (see vfoot-egress.sudoers). It runs the SofaScore egress, which needs
+# root for the netns + WireGuard tunnel. Args pass straight through
+# (fetch / schedule / refill / status / probe). Install at /usr/local/sbin/vfoot-egress.
+exec /srv/vfoot-app/vfoot-backend/.venv/bin/python \
+     /srv/vfoot-app/vfoot-backend/egress/sofascore_egress.py "$@"
