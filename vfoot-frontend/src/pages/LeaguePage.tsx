@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getCompetitions, getLeagueDetail, getTeamRoster } from '../api';
+import { getCompetitions, getLeagueDetail, getLeagueStandings } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
-import type { CompetitionItem, LeagueDetail, TeamRoster } from '../types/league';
+import type { CompetitionItem, LeagueDetail, LeagueStandingRow } from '../types/league';
 
 const COMP_TYPE_LABEL: Record<string, string> = { round_robin: 'Campionato', knockout: 'Coppa' };
 
@@ -22,7 +22,9 @@ export default function LeaguePage() {
   const [detail, setDetail] = useState<LeagueDetail | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionItem[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
-  const [roster, setRoster] = useState<TeamRoster | null>(null);
+  // Standings give each participant's record (wins etc). Competition-scoped, so
+  // we take the first one; pre-season every row is simply zeroed.
+  const [standings, setStandings] = useState<Record<number, LeagueStandingRow>>({});
 
   useEffect(() => {
     setSelectedTeamId(null);
@@ -39,14 +41,14 @@ export default function LeaguePage() {
   }, [selectedLeagueId]);
 
   useEffect(() => {
-    if (!selectedLeagueId || selectedTeamId == null) {
-      setRoster(null);
+    if (!selectedLeagueId) {
+      setStandings({});
       return;
     }
-    void getTeamRoster(selectedLeagueId, selectedTeamId)
-      .then(setRoster)
-      .catch(() => setRoster(null));
-  }, [selectedLeagueId, selectedTeamId]);
+    void getLeagueStandings(selectedLeagueId)
+      .then((res) => setStandings(Object.fromEntries(res.standings.map((r) => [r.team_id, r]))))
+      .catch(() => setStandings({}));
+  }, [selectedLeagueId]);
 
   if (!leagues.length) {
     return (
@@ -127,44 +129,53 @@ export default function LeaguePage() {
 
       <Card className="p-4">
         <SectionTitle>Partecipanti</SectionTitle>
-        <div className="mt-1 text-[11px] text-slate-400">Clicca una squadra per vederne la rosa.</div>
+        <div className="mt-1 text-[11px] text-slate-400">Clicca un partecipante per vederne il rendimento e aprirne la rosa.</div>
         <div className="mt-2 divide-y">
-          {detail.teams.map((t, i) => (
-            <button
-              key={t.team_id}
-              onClick={() => setSelectedTeamId((cur) => (cur === t.team_id ? null : t.team_id))}
-              className={`flex w-full items-center justify-between py-2 text-left text-sm ${
-                selectedTeamId === t.team_id ? 'bg-slate-50' : ''
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <span className="w-5 font-semibold text-slate-400">{i + 1}</span>
-                <span className="font-semibold">{t.name}</span>
-              </span>
-              <span className="text-slate-500">{t.manager_username}</span>
-            </button>
-          ))}
-        </div>
-        {roster ? (
-          <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-slate-800">{roster.team_name} · rosa</div>
-              <span className="text-xs text-slate-500">
-                {roster.players.length} giocatori · valore {roster.players.reduce((s, p) => s + p.price, 0)}
-              </span>
-            </div>
-            <div className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
-              {[...roster.players]
-                .sort((a, b) => b.price - a.price)
-                .map((p) => (
-                  <div key={p.player_id} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-700">{p.name}</span>
-                    <span className="font-mono text-xs text-slate-500">{p.price}</span>
+          {detail.teams.map((t, i) => {
+            const row = standings[t.team_id];
+            const selected = selectedTeamId === t.team_id;
+            return (
+              <div key={t.team_id}>
+                <button
+                  onClick={() => setSelectedTeamId((cur) => (cur === t.team_id ? null : t.team_id))}
+                  className={`flex w-full items-center justify-between py-2 text-left text-sm ${selected ? 'bg-slate-50' : ''}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="w-5 font-semibold text-slate-400">{i + 1}</span>
+                    <span className="font-semibold">{t.name}</span>
+                  </span>
+                  <span className="flex items-center gap-3 text-slate-500">
+                    {row ? <span className="text-xs">{row.points} pt</span> : null}
+                    <span>{t.manager_username}</span>
+                  </span>
+                </button>
+                {selected ? (
+                  <div className="mb-2 ml-7 rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="text-sm font-semibold text-slate-800">{t.name}</div>
+                    <div className="text-xs text-slate-500">Manager: {t.manager_username}</div>
+                    {row && row.played > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-slate-600">
+                        <span>Posizione: <b className="text-slate-800">{row.rank}º</b></span>
+                        <span>Vittorie: <b className="text-emerald-700">{row.wins}</b></span>
+                        <span>Pareggi: <b>{row.draws}</b></span>
+                        <span>Sconfitte: <b className="text-rose-700">{row.losses}</b></span>
+                        <span>Punti: <b className="text-slate-800">{row.points}</b></span>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-[12px] text-slate-400">Il campionato non è ancora iniziato.</div>
+                    )}
+                    <Link
+                      to={`/teams/${t.team_id}`}
+                      className="mt-2 inline-flex rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+                    >
+                      Vedi la rosa completa →
+                    </Link>
                   </div>
-                ))}
-            </div>
-          </div>
-        ) : null}
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       </Card>
 
       <Card className="p-4">

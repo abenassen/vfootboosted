@@ -37,7 +37,8 @@ export interface TeamLineupPlayer {
 }
 
 export interface TeamLineupContext {
-  team: { team_id: number; name: string };
+  team: { team_id: number; name: string; manager?: string };
+  is_own?: boolean;
   competitions: { competition_id: number; name: string }[];
   competition: number | null; // the competition this lineup refers to
   budget?: { initial: number; spent: number; remaining: number; by_role: Record<string, number> };

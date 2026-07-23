@@ -2472,9 +2472,14 @@ def _vector_calibration() -> dict:
 
 
 class LeagueTeamLineupView(APIView):
-    """Real lineup context for the requesting user's team: its roster with
-    spatial profiles (role/footprint/minutes), the league matchdays, and the
-    saved lineup for the chosen matchday."""
+    """Real lineup context for a team: its roster with spatial profiles
+    (role/footprint/minutes), the league matchdays, and — for the caller's OWN
+    team — the saved lineup for the chosen matchday.
+
+    With ``?team_id=`` any league member can read ANOTHER participant's structured
+    roster (the same view the Squad page renders), so squads are no longer only
+    visible in the flat name+price list. The saved lineup is withheld for other
+    people's teams: the roster is public within the league, the chosen XI is not."""
 
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -2482,9 +2487,18 @@ class LeagueTeamLineupView(APIView):
     def get(self, request, league_id: int):
         league = get_object_or_404(FantasyLeague, id=league_id)
         membership = _membership_or_404(league, request.user.id)
-        team = getattr(membership, "team", None)
+        own_team = getattr(membership, "team", None)
+
+        team_param = request.query_params.get("team_id")
+        if team_param:
+            # Any member may see any team in the league — but only the roster, and
+            # the client is told whose team it is and whether it is the caller's.
+            team = get_object_or_404(FantasyTeam, id=team_param, league=league)
+        else:
+            team = own_team
         if team is None:
             return Response({"detail": "Nessuna squadra associata in questa lega."}, status=status.HTTP_404_NOT_FOUND)
+        is_own = own_team is not None and team.id == own_team.id
 
         # A lineup is referred to a COMPETITION (a set of league fixtures mapped to
         # real matchdays). Default to the first competition; its matchdays come
@@ -2675,7 +2689,9 @@ class LeagueTeamLineupView(APIView):
 
         return Response(
             {
-                "team": {"team_id": team.id, "name": team.name},
+                "team": {"team_id": team.id, "name": team.name,
+                         "manager": team.manager.user.username},
+                "is_own": is_own,
                 "competitions": [{"competition_id": c["id"], "name": c["name"]} for c in competitions],
                 "competition": competition_id,
                 "matchdays": matchdays,
@@ -2704,7 +2720,7 @@ class LeagueTeamLineupView(APIView):
                 "stats_is_reference": bool(stats_cs is not None
                                            and ref_cs is not None
                                            and stats_cs.id == ref_cs.id),
-                "saved_lineup": saved_lineup,
+                "saved_lineup": saved_lineup if is_own else None,
             }
         )
 

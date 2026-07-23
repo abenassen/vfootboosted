@@ -739,10 +739,12 @@ export async function getTeamLineup(
   leagueId: number,
   matchday?: number | null,
   competition?: number | null,
+  teamId?: number | null,
 ): Promise<TeamLineupContext> {
   const params = new URLSearchParams();
   if (matchday != null) params.set('matchday', String(matchday));
   if (competition != null) params.set('competition', String(competition));
+  if (teamId != null) params.set('team_id', String(teamId));
   const q = params.toString() ? `?${params.toString()}` : '';
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/lineup${q}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
