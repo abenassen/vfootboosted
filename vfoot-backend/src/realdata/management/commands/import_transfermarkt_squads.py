@@ -137,6 +137,10 @@ class Command(BaseCommand):
         parser.add_argument("--as-of", default=None,
                             help="ISO date for new stints' start and departures' end "
                                  "(default: today).")
+        parser.add_argument("--min-map-score", type=float, default=0.0,
+                            help="Abort if any TM club maps to a TeamSeason below "
+                                 "this name-similarity score (default 0 = off; the "
+                                 "poller sets a real threshold for unattended runs).")
         parser.add_argument("--min-squad", type=int, default=15,
                             help="Completeness guard: if any mapped club has fewer "
                                  "than this many players, skip closing departures "
@@ -266,11 +270,25 @@ class Command(BaseCommand):
         if unmapped:
             raise CommandError(f"Could not map TM clubs: {unmapped}")
         self.stdout.write("Club mapping:")
+        low = []
         for c in sorted(tm_clubs, key=lambda c: mapping[c["id"]][1]):
             ts, sc = mapping[c["id"]]
             flag = "  <-- low" if sc < 0.6 else ""
+            if sc < opts["min_map_score"]:
+                low.append((c["name"], ts.team.name, sc))
             self.stdout.write(f"  TM '{c['name']}' -> '{ts.team.name}' "
                               f"[{sc:.2f}]{flag}")
+        # Greedy one-to-one pairs every club regardless of score, so a bad name
+        # match is a LOW score, not an unmapped club. A human reading the report
+        # catches "Pisa -> Monza [0.22]"; an unattended poll must refuse it rather
+        # than import the wrong roster. Off by default (--min-map-score 0) to keep
+        # the manual command's behaviour; the poller passes a real threshold.
+        if low:
+            raise CommandError(
+                "Club mapping below --min-map-score "
+                f"{opts['min_map_score']}: "
+                + "; ".join(f"TM '{a}' -> '{b}' [{s:.2f}]" for a, b, s in low)
+                + ". Refusing to import (likely a name mismatch).")
 
         ss_players = list(Player.objects.filter(external_source=PROVIDER_SOFASCORE))
         by_dob, by_name = self._build_indices(ss_players)

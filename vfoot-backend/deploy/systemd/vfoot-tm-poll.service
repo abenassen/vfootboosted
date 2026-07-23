@@ -1,0 +1,7 @@
+[Unit]
+Description=Vfoot polling rose Transfermarkt (aggiorna listone + ruoli congelati)
+[Service]
+Type=oneshot
+User=vfoot
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py poll_transfermarkt

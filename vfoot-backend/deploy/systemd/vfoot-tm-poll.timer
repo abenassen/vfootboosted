@@ -1,0 +1,12 @@
+[Unit]
+Description=Polling Transfermarkt due volte al giorno (mercato)
+[Timer]
+# Le rose TM cambiano lentamente: due passate al giorno bastano, e sono utili
+# soprattutto a mercato aperto (agosto/gennaio). Lo scrape e' leggero (~21
+# richieste), quindi si lascia attivo tutto l'anno. Il jitter evita di colpire
+# TM allo stesso secondo esatto; Persistent recupera un run saltato (server giu').
+OnCalendar=*-*-* 06,18:00:00
+RandomizedDelaySec=20m
+Persistent=true
+[Install]
+WantedBy=timers.target
