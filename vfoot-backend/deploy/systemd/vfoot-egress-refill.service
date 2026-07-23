@@ -1,0 +1,9 @@
+[Unit]
+Description=Vfoot egress: refill the pool of good Surfshark exit IPs for SofaScore
+[Service]
+Type=oneshot
+# root: brings WireGuard tunnels up in a netns (host route untouched). Writes only
+# the pool file + cache, never the DB. See vfoot-backend/egress/.
+User=root
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/egress
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python sofascore_egress.py refill --target 6 --max-probes 20 --delay 3

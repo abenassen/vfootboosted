@@ -1,0 +1,10 @@
+[Unit]
+Description=Rinfresca il pool di IP-uscita SofaScore alcune volte al giorno
+[Timer]
+# The pool self-heals from real scraping (a 403 demotes an IP), so this is just a
+# safety top-up so it never runs dry between matches. Keep it modest.
+OnCalendar=*-*-* 03,09,15,21:00:00
+RandomizedDelaySec=15m
+Persistent=true
+[Install]
+WantedBy=timers.target

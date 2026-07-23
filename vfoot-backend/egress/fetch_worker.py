@@ -12,10 +12,16 @@ Exit codes let the root orchestrator react:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
-from sofascore_client import SofaScoreClient, SofaScoreBlocked
+# sofascore_client lives in the app tree (src/realdata/services); make it importable
+# whether this worker sits next to a copy (the /root test dir) or in the repo's
+# egress/ dir. Python already put THIS dir on sys.path[0]; add the services dir too.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__),
+                                "..", "src", "realdata", "services"))
+from sofascore_client import SofaScoreClient, SofaScoreBlocked  # noqa: E402
 
 
 def _minutes(row: dict) -> int:

@@ -38,7 +38,9 @@ from pathlib import Path
 
 # --- config -----------------------------------------------------------------
 HERE = Path(__file__).resolve().parent
-POOL_FILE = Path(os.environ.get("SOFA_POOL", HERE / "sofa_pool.json"))
+# Pool + cache live OUTSIDE the repo tree (this file is deployed inside it): writing
+# state into the checkout would dirty it and fight the next git pull. Overridable.
+POOL_FILE = Path(os.environ.get("SOFA_POOL", "/var/lib/vfoot-egress/sofa_pool.json"))
 CLIENT_CONF = Path(os.environ.get("SOFA_WG_CONF", "/etc/wireguard/surfshark_wg.conf"))
 PROBE = Path(os.environ.get("SOFA_PROBE", HERE / "sofa_probe_netns.py"))
 WORKER = Path(os.environ.get("SOFA_WORKER", HERE / "fetch_worker.py"))
@@ -186,6 +188,7 @@ def load_pool() -> list[dict]:
 
 
 def save_pool(servers: list[dict]) -> None:
+    POOL_FILE.parent.mkdir(parents=True, exist_ok=True)
     POOL_FILE.write_text(json.dumps({"updated": _now(), "servers": servers}, indent=2))
 
 
