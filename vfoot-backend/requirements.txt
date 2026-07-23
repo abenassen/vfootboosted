@@ -9,3 +9,11 @@ typing_extensions==4.15.0
 PyMySQL==1.2.0
 google-auth
 requests
+# role inference (consensus k-means) — imported at app startup, so a HARD dep
+numpy==2.4.6
+# data-sourcing scrapers: Transfermarkt (httpx + BeautifulSoup) and SofaScore
+# (curl_cffi for TLS impersonation). Command-time deps, not needed to boot the app.
+httpx
+beautifulsoup4
+lxml
+curl_cffi
