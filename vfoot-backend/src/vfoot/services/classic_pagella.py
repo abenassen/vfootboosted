@@ -37,6 +37,7 @@ from vfoot.services.classic_rating import (
     _minutes_map, _per_match_player_totals,
 )
 from vfoot.services.vote_explanation import explain, role_average_terms, to_sentence
+from vfoot.services.vote_reference import fixed_reference, fixed_role_averages
 
 CARD_MALUS = {CARD_YELLOW: 0.5, CARD_SECOND_YELLOW: 1.0, CARD_RED: 1.0}
 ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
@@ -61,9 +62,16 @@ def data_version(competition_season_id: int) -> str:
 
 
 def get_reference(competition_season_id: int) -> dict:
-    """Per-season voto-puro reference (per-role mean/std). Version-cached, so it
-    survives restarts and is shared across workers, and refreshes automatically
-    when new matches are finalized."""
+    """The per-role (mean, std) the voto puro is z-scored against.
+
+    Prefers the FIXED calibration frozen on a completed season: a reference that
+    moved with the season in progress has no value on matchday 1 and makes a 6
+    mean different things over time. Falls back to computing it from the given
+    season only when no calibration file exists yet, so a fresh checkout still
+    works — with the live-drift caveat that fix exists to remove."""
+    fixed = fixed_reference()
+    if fixed is not None:
+        return fixed
     key = f"vfoot:voto_reference:{competition_season_id}:{data_version(competition_season_id)}"
     hit = cache.get(key)
     if hit is not None:
@@ -77,12 +85,26 @@ def get_role_averages(competition_season_id: int) -> dict:
     """Per-role average contribution of each feature — the yardstick a vote
     explanation is read against. Season-wide and expensive, so it is cached under
     the same data version as the reference and refreshes when a match is
-    finalized."""
+    finalized. Prefers the FIXED calibration for the same reason get_reference
+    does: the explanation must subtract the same mean the vote does, so if the
+    vote is on a frozen scale the explanation has to be too."""
+    fixed = fixed_role_averages()
+    if fixed is not None:
+        return fixed
     key = (f"vfoot:role_term_averages:{competition_season_id}:"
            f"{data_version(competition_season_id)}")
     hit = cache.get(key)
     if hit is not None:
         return hit
+    data = compute_role_averages(competition_season_id)
+    cache.set(key, data, None)
+    return data
+
+
+def compute_role_averages(competition_season_id: int) -> dict:
+    """Per-role average contribution of each feature, over one season's rated
+    appearances. The building block behind both the cached live path and the
+    frozen calibration; kept separate so both use exactly the same computation."""
     match_ids = list(Match.objects
                      .filter(competition_season_id=competition_season_id)
                      .values_list("id", flat=True))
@@ -93,7 +115,7 @@ def get_role_averages(competition_season_id: int) -> dict:
                  .values_list("id", "classic_role"))
     # SAME filter as build_reference (>= MIN_MINUTES_REFERENCE and rated): the
     # explanation subtracts this mean, the vote subtracts build_reference's, and
-    # if the two sets differ the breakdown cannot sum to the vote. It did differ.
+    # if the two sets differ the breakdown cannot sum to the vote.
     from vfoot.services.classic_rating import MIN_MINUTES_REFERENCE, is_rated
     rows = [(roles[pid], feats, minutes.get((mid, pid), 0),
              exposure.get((mid, pid), 0.0))
@@ -101,9 +123,7 @@ def get_role_averages(competition_season_id: int) -> dict:
             if roles.get(pid)
             and minutes.get((mid, pid), 0) >= MIN_MINUTES_REFERENCE
             and is_rated(minutes.get((mid, pid), 0), feats)]
-    data = role_average_terms(rows)
-    cache.set(key, data, None)
-    return data
+    return role_average_terms(rows)
 
 
 def _cards_for_match(match_id: int) -> dict[int, dict]:
