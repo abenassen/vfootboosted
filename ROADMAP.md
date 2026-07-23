@@ -126,12 +126,21 @@ IP dedicato da comprare.**
   timestamp cambiato → riconcilia il calendario nel DB. Il caso 4 rende il tick
   **auto-correttivo** sui rinvii dell'ultimo secondo (quelli che il Loop A perde).
 
-**Da costruire (richiede il deploy del codice corrente):** il lato DB-aware.
-`sync_calendar` + `tick`/`match_scheduler` decidono QUALI match servono e invocano
-l'egress con la lista di id via una regola `sudoers` stretta
-(`sudo egress fetch --match-ids …`); poi l'`import` (non privilegiato) legge la
-cache e scrive nel DB. Più: refill periodico (timer systemd) per non far svuotare
-il pool, e il rientro degli endpoint negli stub `_scrape_live`/`_scrape_final`.
+**Lato DB-aware COSTRUITO (23/07/2026), validato in produzione, DISABILITATO.**
+`realdata/services/live_ingest.py` + `egress_client.py`, agganciati a `tick` e a
+`sync_calendar --egress` (test in `tests_live_pipeline`). `tick` decide QUALI match
+sono dovuti (calendario DB), l'egress scalda la cache attraverso il ponte `sudo`
+stretto (`/usr/local/sbin/vfoot-egress`, sudoers `vfoot`→root), poi il codice
+OFFLINE esistente la legge: `poll_live` aggiorna stato/punteggio/kickoff (riusa la
+mappa di `calendar_sync`, cattura fine-partita e rinvii last-second); `finalize`
+scalda il set completo + `ingest_sofascore_season` → `data_ready`. Lo stato avanza
+solo su warm riuscito (egress bloccato ⇒ ritenta al tick dopo). Validato sul Linode:
+ponte `sudo` ok, `schedule 26/27` scaldato via tunnel nella cache reale.
+
+Unità systemd tutte staged e **spente**: `vfoot-tm-poll`, `vfoot-egress-refill`
+(indipendenti, accendibili subito), `vfoot-calendar` (Loop A, `--egress`),
+`vfoot-tick` (Loop B). Al lancio: `systemctl enable --now` (vedi `deploy/DEPLOY.md`).
+Resta solo da **rendere operativo** (accendere i timer) al go-live.
 
 ---
 
