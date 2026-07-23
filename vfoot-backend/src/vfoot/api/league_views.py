@@ -2619,6 +2619,15 @@ class LeagueTeamLineupView(APIView):
                 Player.objects.filter(id__in=player_ids).exclude(classic_role="").values_list("id", "classic_role")
             )
 
+        # Real club each player belongs to, in the season the stats come from — so a
+        # player row can name his team, not just his fantasy price.
+        real_team = dict(PlayerTeamStint.objects
+                         .filter(player_id__in=player_ids,
+                                 team_season__competition_season=stats_cs,
+                                 end_date__isnull=True)
+                         .values_list("player_id", "team_season__team__name")) \
+            if stats_cs is not None else {}
+
         roster = []
         for s in slots:
             p = profiles.get(s.player_id, {})
@@ -2636,8 +2645,10 @@ class LeagueTeamLineupView(APIView):
                     "avg_col": p.get("avg_col", 0.0),
                     "footprint": p.get("footprint", {}),
                     "appearances": p.get("appearances", 0),
+                    "starts": p.get("starts", 0),
                     "avg_minutes": p.get("avg_minutes", 0.0),
                     "minutes_label": p.get("minutes_label", "unknown"),
+                    "real_team": real_team.get(s.player_id),
                     "form": p.get("form", 0.0),
                     "stats_season": str(stats_cs) if stats_cs is not None else None,
                     "next_match": next_match_by_player.get(s.player_id),
@@ -2682,9 +2693,30 @@ class LeagueTeamLineupView(APIView):
                 },
                 "mode": league.mode,
                 "roster": roster,
+                # Spending summary: a fixed 500 budget (as used elsewhere), what
+                # this squad cost, and per-role breakdown — so the manager reads
+                # where his money went without adding it up by hand.
+                "budget": _roster_budget(roster),
+                # Which season the appearances/minutes/label describe. The client
+                # must say so: pre-season these are LAST year's, and a silent
+                # "poco impiegato" from stale data is exactly the confusion to avoid.
+                "stats_season": str(stats_cs) if stats_cs is not None else None,
+                "stats_is_reference": bool(stats_cs is not None
+                                           and ref_cs is not None
+                                           and stats_cs.id == ref_cs.id),
                 "saved_lineup": saved_lineup,
             }
         )
+
+
+def _roster_budget(roster: list) -> dict:
+    initial = 500
+    spent = sum(r["price"] for r in roster)
+    by_role: dict[str, int] = {}
+    for r in roster:
+        by_role[r["role"]] = by_role.get(r["role"], 0) + r["price"]
+    return {"initial": initial, "spent": spent, "remaining": max(0, initial - spent),
+            "by_role": by_role}
 
 
 class LeagueTeamLineupSaveView(APIView):

@@ -15,9 +15,11 @@ export interface TeamLineupPlayer {
   role: PlayerRole;
   avg_col: number;
   footprint: Record<string, number>;
-  appearances: number;
+  appearances: number;   // convocazioni (panchine incluse), non partite giocate
+  starts: number;        // presenze da titolare
   avg_minutes: number;
   minutes_label: MinutesLabel;
+  real_team?: string | null;  // il club reale del giocatore
   form: number; // expected per-match contribution from recent form
   // Season the playing-time stats describe (the previous one before kick-off).
   stats_season?: string | null;
@@ -38,6 +40,9 @@ export interface TeamLineupContext {
   team: { team_id: number; name: string };
   competitions: { competition_id: number; name: string }[];
   competition: number | null; // the competition this lineup refers to
+  budget?: { initial: number; spent: number; remaining: number; by_role: Record<string, number> };
+  stats_season?: string | null;      // stagione da cui vengono presenze/minuti/etichetta
+  stats_is_reference?: boolean;      // true = campionato in corso; false = stagione precedente
   matchdays: number[];
   matchday: number;
   as_of_matchday: number | null; // data cutoff (only matches before it count)
