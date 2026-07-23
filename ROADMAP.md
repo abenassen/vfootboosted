@@ -33,30 +33,93 @@ l'intero mercato: accettabile al listone iniziale, sbagliato a gennaio, dove un
 singolo acquisto avrebbe congelato tutta la lega. Il blocco **per-giocatore**
 rende lo stesso meccanismo valido tutto l'anno.
 
-**Aperto.** Con quale cadenza gira il polling TM, e da dove. Lo scraping
-Transfermarkt non è quello di SofaScore e potrebbe funzionare dal Linode: va
-verificato prima di progettarci sopra.
+**Risolto (23/07/2026): TM gira dal Linode.** La sonda
+`realdata/scripts/probe_transfermarkt.py` (o l'equivalente `curl`) dà dall'IP
+Linode `139.162.144.123` esattamente lo stesso esito dell'IP residenziale —
+`200`, tabella rosa presente, zero challenge. TM è un origin nginx puro senza
+anti-bot, quindi **non** eredita il blocco di SofaScore. Il polling del listone
+può stare interamente sul server: niente IP residenziale né Raspberry per questa
+parte.
+
+**Fatto: orchestrazione + cadenza.** `manage.py poll_transfermarkt` fa scrape
+fresco + import in un colpo, pensato per girare non presidiato. Modello corretto:
+il **listone resta LIVE** (stint aperte/chiuse dal mercato reale a ogni import); a
+congelarsi sono solo le **attribuzioni di ruolo per-lega** (`LeaguePlayerRole`,
+snapshot additivo — i nuovi arrivi vengono seminati, i ruoli esistenti non
+derivano mai). Cadenza: **due volte al giorno** (unità `vfoot-tm-poll` in
+`deploy/systemd/`), lasciata attiva tutto l'anno perché lo scrape è leggero;
+l'utilità è massima a mercato aperto (ago/gen).
+
+Tre presidi aggiunti per l'esecuzione non presidiata (innocui a mano, pericolosi
+in automatico): scrape sempre fresco (lo scraper standalone salta la cache), la
+stagione TM è **derivata** dalla `CompetitionSeason` così non possono divergere
+(altrimenti si confronta la rosa di una stagione contro le stint di un'altra →
+partenze fantasma), e si rifiutano sia le chiusure-partenza quando lo scrape è
+incompleto (un club mancante farebbe risultare "partita" tutta la sua rosa) sia
+le mappature-club sotto `--min-map-score` (un promosso mal accoppiato importerebbe
+la rosa sbagliata).
+
+**Dipendenza:** il job va deployato col codice corrente — produzione è ferma a
+`03b099b` e non ha `poll_transfermarkt`.
 
 ---
 
-## 2. Polling dati partite: capire cosa blocca davvero
+## 2. Polling dati partite: RISOLTO — Surfshark in netns sul Linode
 
-**Quel che sappiamo.** SofaScore risponde 403 dal Linode. La VPN Surfshark non
-risolve: l'uscita è Datacamp Limited, cioè un altro hosting. Il Raspberry ha
-fallito **da un IP dove il laptop riusciva**, e questo è il dato che cambia la
-diagnosi: se lo stesso indirizzo funziona da una macchina e non dall'altra, il
-discriminante non è (solo) l'IP.
+**Diagnosi corretta (23/07/2026).** Il blocco NON è per classe di IP: è un
+**Cloudflare managed challenge per reputazione del SINGOLO IP**, variabile per-IP e
+nel tempo. L'IP del Linode è bruciato (403); molti IP hosting Surfshark passano
+tranquillamente. Verificato via `curl_cffi` (impersonate chrome): dall'uscita
+Surfshark `84.17.58.201` (DataCamp, `hosting=True`) TUTTI gli endpoint tornano 200.
 
-**Ipotesi da verificare per prima.** Un challenge "non sono un robot" che scatta
-sul browser automatizzato. Se è così, un IP dedicato a pagamento **non
-risolverebbe nulla** — ed è il motivo per cui va verificato prima di comprarlo.
+**Confermato che risolve dal Linode.** WireGuard Surfshark in un **network
+namespace** sul Linode → l'uscita è l'IP del server Surfshark (non del Linode), e
+SofaScore torna 200 su tutti gli endpoint (lineups/shotmap/incidents/heatmap + www).
+Il netns isola il tunnel: SSH e l'app sul server restano sulla rotta normale. Quindi
+il polling partite gira interamente lato server, come TM — **niente Raspberry, niente
+IP dedicato da comprare.**
 
-**Come verificarlo.** Catturare la risposta effettiva (status, corpo, cookie di
-challenge) da: laptop a mano, laptop con Playwright, Raspberry con Playwright,
-stesso IP. La differenza fra la seconda e la terza isola la causa. Serve una
-sessione con l'utente; lo script si può preparare prima.
+**Strumenti pronti (in scratchpad + `/root/` sul Linode):**
+- `sofa_vpn_sweep.sh` — sweep netns dal laptop che mappa i server Surfshark che
+  passano (sequenziale/ripartibile per non innescare il rate-limit handshake), →
+  `sofa_vpn_pool.json`. Tasso di successo osservato ~21%, `PASS` concentrati in
+  Europa occ. (IT/UK/ES/CH) + qualche USA.
+- `linode_sofa_vpn_test.sh` + `sofa_probe_full.py` — validazione sul Linode (fatta).
+- Chiave client Surfshark in `/etc/wireguard/surfshark_wg.conf` (laptop e Linode);
+  `wireguard-tools` installato sul Linode.
 
-**Non fare** finché l'ipotesi non è verificata: comprare l'IP dedicato.
+**Egress layer COSTRUITO e testato (23/07/2026)** — `vfoot-backend/egress/`
+(standalone, stdlib; sul Linode in `/root/egress/`, isolato dall'app congelata):
+- `sofascore_egress.py` — pool auto-rinfrescante di IP-uscita buoni. Sorgenti vive:
+  catalogo Surfshark + DNS dei cluster (per seguire la rotazione IP) + sonda
+  SofaScore. Comandi: `refill` (scopre candidati, pinna e sonda, tiene i PASS),
+  `status`, `probe`, `fetch`. Testato: da 420 candidati costruisce un pool; `fetch`
+  di una partita reale scarica lineups/shotmap/incidents/heatmap nel cache dal
+  Linode via l'IP del pool, con rotazione+declassamento al blocco (auto-validante).
+- `fetch_worker.py` — gira DENTRO il netns; riceve match id (mai dal DB), scalda la
+  cache; exit 3 = bloccato → l'orchestratore ruota IP.
+- Chiave Surfshark DEDICATA al Linode in `/etc/wireguard/surfshark_wg.conf` (l'uso
+  personale della VPN non interferisce). `wireguard-tools` installato.
+
+**Struttura del polling (concordata).** Due loop distinti, non uno:
+- **Loop A — sync calendario** (cadenza grossa: poche volte/die, più denso i giorni
+  di gara). Via egress scarica lo schedule stagione → riconcilia il calendario DB
+  (partite/orari/rinvii/stato). Risponde a "quali match e quando". Prende i rinvii
+  *programmati*.
+- **Loop B — tick** (ogni 1-2 min). NON ri-scarica la lista: legge il DB + orologio e
+  agisce solo sui match in finestra live/finalizzazione. Ciclo per-match
+  **stato-prima**: (1) fetch leggero stato `/event/{id}`; (2) `inprogress` → dati
+  live; (3) `finished` → stampa `finished_at` → finalizzazione +15m (provvisorio) e
+  +1h (conferma → `data_ready=True`, ufficiale); (4) `notstarted/postponed` con
+  timestamp cambiato → riconcilia il calendario nel DB. Il caso 4 rende il tick
+  **auto-correttivo** sui rinvii dell'ultimo secondo (quelli che il Loop A perde).
+
+**Da costruire (richiede il deploy del codice corrente):** il lato DB-aware.
+`sync_calendar` + `tick`/`match_scheduler` decidono QUALI match servono e invocano
+l'egress con la lista di id via una regola `sudoers` stretta
+(`sudo egress fetch --match-ids …`); poi l'`import` (non privilegiato) legge la
+cache e scrive nel DB. Più: refill periodico (timer systemd) per non far svuotare
+il pool, e il rientro degli endpoint negli stub `_scrape_live`/`_scrape_final`.
 
 ---
 

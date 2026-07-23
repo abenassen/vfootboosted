@@ -1,0 +1,66 @@
+"""Per-match SofaScore fetch — runs INSIDE the egress netns (so it exits via the
+pinned Surfshark IP). It is handed a list of match ids (the DB-aware caller
+decided which; this worker never touches the DB) and warms their cache.
+
+Exit codes let the root orchestrator react:
+  0  = all requested matches fetched (or already cached)
+  3  = SofaScore blocked this IP  -> orchestrator should rotate to another IP
+  1  = other error
+
+  python fetch_worker.py --match-ids 123,456 --kind final --cache-dir /var/cache/sofa
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from sofascore_client import SofaScoreClient, SofaScoreBlocked
+
+
+def _minutes(row: dict) -> int:
+    try:
+        return int(float(row.get("minutesPlayed") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def fetch_match(client: SofaScoreClient, mid: int, kind: str) -> None:
+    # Live: the evolving, cheap endpoints (no heatmaps mid-match). Final: the full
+    # set incl. per-player heatmaps, which only make sense once the match is over.
+    stats = client.player_stats_records(mid)
+    client.incidents_records(mid)
+    if kind == "final":
+        client.shots_records(mid)
+        for row in stats:
+            pid = row.get("id")
+            if pid is not None and _minutes(row) > 0:
+                client.heatmap(mid, int(pid))
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--match-ids", required=True, help="comma-separated match ids")
+    ap.add_argument("--kind", choices=["live", "final"], default="final")
+    ap.add_argument("--cache-dir", required=True)
+    ap.add_argument("--delay", type=float, default=1.5)
+    args = ap.parse_args()
+
+    ids = [int(x) for x in args.match_ids.split(",") if x.strip()]
+    client = SofaScoreClient(Path(args.cache_dir), min_delay=args.delay,
+                             max_retries=1, logger=print)
+    try:
+        for mid in ids:
+            fetch_match(client, mid, args.kind)
+            print(f"fetched {mid} ({args.kind})")
+    except SofaScoreBlocked as exc:
+        print(f"BLOCKED: {exc}")
+        return 3
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: {type(exc).__name__}: {exc}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
