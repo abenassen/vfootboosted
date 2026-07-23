@@ -169,7 +169,7 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
   const [open, setOpen] = useState(false);
   const played = !p.sv && p.fantavoto != null;
   const why = p.explanation;
-  const hasWhy = !!why && (why.positives.length > 0 || why.negatives.length > 0);
+  const hasWhy = !!why && (why.contributions.length > 0 || why.other_count > 0);
   // a benched player who never entered and has no vote is greyed out
   const inactive = bench && !p.entered && !played;
   return (
@@ -262,28 +262,41 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
   );
 }
 
-/** The breakdown behind a voto puro. Each line is in VOTE POINTS relative to the
- *  average player in the same role, which is the only comparison that means
- *  anything: a defender who made the usual number of clearances did nothing
- *  worth mentioning. */
+/** The breakdown behind a voto puro, laid out so it ADDS UP: it starts from the
+ *  role average and every slice moves it, ending on the vote itself — so the
+ *  number can actually be derived from the rows, not just illustrated. */
 function WhyThisVote({ why }: { why: NonNullable<ClassicPlayerLine['explanation']> }) {
-  const row = (e: { label: string; points: number }, tone: string) => (
-    <div key={e.label} className="flex items-baseline justify-between gap-3">
-      <span className="text-slate-600">{e.label}</span>
-      <span className={`shrink-0 font-mono text-[11px] font-semibold ${tone}`}>
-        {e.points > 0 ? '+' : ''}
-        {e.points.toFixed(2)}
+  const fmtPts = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(2)}`;
+  const line = (label: string, pts: number, key?: string) => (
+    <div key={key ?? label} className="flex items-baseline justify-between gap-3">
+      <span className="text-slate-600">{label}</span>
+      <span className={`shrink-0 font-mono text-[11px] font-semibold ${pts >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+        {fmtPts(pts)}
       </span>
     </div>
   );
   return (
     <div className="mb-2 ml-8 rounded-xl bg-slate-50 px-3 py-2 text-[12px]">
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        Scarto dalla media del ruolo, in punti di voto
+      <div className="mb-1 flex items-baseline justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        <span>Come nasce il voto puro</span>
+        <span>{why.minutes}′ giocati</span>
       </div>
       <div className="space-y-0.5">
-        {why.positives.map((e) => row(e, 'text-emerald-700'))}
-        {why.negatives.map((e) => row(e, 'text-rose-700'))}
+        <div className="flex items-baseline justify-between gap-3 text-slate-500">
+          <span>Media del ruolo</span>
+          <span className="shrink-0 font-mono text-[11px] font-semibold">{why.base.toFixed(1)}</span>
+        </div>
+        {why.contributions.map((c) => line(c.label, c.points))}
+        {why.other_count > 0 ? line(`altre ${why.other_count} voci minori`, why.other_points, '__other') : null}
+        <div className="mt-1 flex items-baseline justify-between gap-3 border-t border-slate-200 pt-1 font-semibold text-slate-800">
+          <span>Voto puro</span>
+          <span className="shrink-0 font-mono">
+            {why.voto.toFixed(1)}
+            {Math.abs(why.subtotal - why.voto) >= 0.05 ? (
+              <span className="ml-1 text-[10px] font-normal text-slate-400">({why.subtotal.toFixed(2)} arrotondato)</span>
+            ) : null}
+          </span>
+        </div>
       </div>
       {why.note ? <div className="mt-1.5 text-[11px] text-slate-500">{why.note}</div> : null}
     </div>

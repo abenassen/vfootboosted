@@ -6,6 +6,10 @@ from django.test import SimpleTestCase
 from vfoot.services.vote_explanation import (
     COUNT, EVENT, LABELS, QUANTIFIERS, explain, role_average_terms, to_sentence,
 )
+from vfoot.services.classic_rating import (
+    VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, SHRINKAGE_MINUTES,
+    index_for_role,
+)
 
 
 class VoteExplanationTests(SimpleTestCase):
@@ -59,10 +63,34 @@ class VoteExplanationTests(SimpleTestCase):
         for entry in e["positives"]:
             self.assertLess(abs(entry["points"]), 7.0)   # a vote-sized number
 
+    def test_the_breakdown_adds_up_to_the_vote(self):
+        """The whole point: 6 + shown slices + other == subtotal, and the subtotal
+        rounds to the vote the scorer produces. Previously the explanation
+        subtracted a different role mean than the vote, so the two never met."""
+        average = self._averages("DIF", {"duels_won": 12.0, "clearances": 8.0,
+                                         "touches": 60.0, "key_passes": 1.0})
+        feats = {"duels_won": 30.0, "clearances": 20.0, "touches": 90.0,
+                 "key_passes": 4.0, "interceptions": 5.0}
+        e = explain("DIF", feats, 90, self.REFERENCE, average)
+        shown = e["base"] + sum(c["points"] for c in e["contributions"]) + e["other_points"]
+        self.assertAlmostEqual(shown, e["subtotal"], places=2)
+
+        # the explanation's vote matches the scorer's, computed independently
+        idx = index_for_role("DIF", feats, 90)
+        z = (idx - self.REFERENCE["DIF"]["mean"]) / self.REFERENCE["DIF"]["std"]
+        w = 90 / (90 + SHRINKAGE_MINUTES)
+        raw = max(VOTE_MIN, min(VOTE_MAX, VOTE_CENTER + VOTE_SPREAD_K * w * z))
+        self.assertAlmostEqual(e["voto"], round(raw * 2) / 2, places=2)
+
+    def test_reports_minutes_played(self):
+        average = self._averages("DIF", {"touches": 60.0})
+        e = explain("DIF", {"touches": 60.0}, 47, self.REFERENCE, average)
+        self.assertEqual(e["minutes"], 47)
+
     def test_a_short_appearance_says_so(self):
         average = self._averages("DIF", {"touches": 60.0})
         e = explain("DIF", {"touches": 20.0}, 15, self.REFERENCE, average)
-        self.assertIn("giocato poco", e["note"])
+        self.assertIn("pochi minuti", e["note"])
         self.assertEqual(explain("DIF", {"touches": 60.0}, 90,
                                  self.REFERENCE, average)["note"], "")
 

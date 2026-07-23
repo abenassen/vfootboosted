@@ -91,10 +91,16 @@ def get_role_averages(competition_season_id: int) -> dict:
     exposure = defensive_exposure(match_ids, minutes)
     roles = dict(Player.objects.exclude(classic_role="")
                  .values_list("id", "classic_role"))
+    # SAME filter as build_reference (>= MIN_MINUTES_REFERENCE and rated): the
+    # explanation subtracts this mean, the vote subtracts build_reference's, and
+    # if the two sets differ the breakdown cannot sum to the vote. It did differ.
+    from vfoot.services.classic_rating import MIN_MINUTES_REFERENCE, is_rated
     rows = [(roles[pid], feats, minutes.get((mid, pid), 0),
              exposure.get((mid, pid), 0.0))
             for (mid, pid), feats in totals.items()
-            if roles.get(pid) and minutes.get((mid, pid), 0) > 0]
+            if roles.get(pid)
+            and minutes.get((mid, pid), 0) >= MIN_MINUTES_REFERENCE
+            and is_rated(minutes.get((mid, pid), 0), feats)]
     data = role_average_terms(rows)
     cache.set(key, data, None)
     return data

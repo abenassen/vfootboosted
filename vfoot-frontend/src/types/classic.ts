@@ -37,8 +37,15 @@ export interface ClassicPlayerLine {
    *  player in the same role. Absent for s.v. — explaining a vote that does not
    *  exist would mean inventing one. */
   explanation?: {
-    positives: { key: string; label: string; points: number }[];
-    negatives: { key: string; label: string; points: number }[];
+    /** The named slices, largest first, in vote points. */
+    contributions: { label: string; points: number }[];
+    base: number;            // where every vote starts: the role average (6)
+    other_points: number;    // the long tail of small slices, folded into one
+    other_count: number;
+    subtotal: number;        // base + contributions + other, before rounding
+    voto: number;            // the voto puro, subtotal rounded to the half
+    minutes: number;
+    low_minutes: boolean;
     note: string;
   };
   explanation_text?: string;

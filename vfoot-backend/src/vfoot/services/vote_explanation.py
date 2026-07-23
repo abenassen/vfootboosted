@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from vfoot.services.classic_rating import (
     DEF_EXPOSURE_WEIGHT, EXTRAP_FLOOR_MINUTES, GK_PER90_WEIGHTS, GK_TOTAL_WEIGHTS,
-    PER90_WEIGHTS, SHRINKAGE_MINUTES, SIGNED_FEATURES, TOTAL_WEIGHTS, VOTE_SPREAD_K,
-    _compress, _compress_signed,
+    PER90_WEIGHTS, SHRINKAGE_MINUTES, SIGNED_FEATURES, TOTAL_WEIGHTS, VOTE_CENTER,
+    VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, _compress, _compress_signed,
 )
 from realdata.models import Player
 
@@ -164,43 +164,79 @@ def role_average_terms(rows) -> dict:
 
 def explain(role: str, totals: dict, minutes: int, reference: dict,
             averages: dict, exposure: float = 0.0, *, top: int = 3) -> dict:
-    """Why this vote, in vote points against the average player in the role.
+    """Why this vote, decomposed so it ADDS UP to the vote.
 
-    Returns {"positives": [...], "negatives": [...], "note": str}, each entry
-    {"key", "label", "points"}. Empty when the player has no measured terms.
+    The vote is 6 + spread * shrink * (index - role_mean) / std. Every feature is
+    a slice of that (index - role_mean), so once converted to vote points the
+    slices sum to (vote - 6) exactly — as long as the yardstick the explanation
+    subtracts is the SAME role mean the vote uses. It was not: the vote's mean
+    came from build_reference (players over the minutes threshold), the
+    explanation's from every appearance, and the two disagreed, so the numbers
+    could never reconcile. get_role_averages now filters to match.
+
+    Returns an additive breakdown: ``base`` (6), the largest ``contributions`` in
+    vote points, an ``other`` bucket folding the long tail of small ones, and the
+    resulting ``voto`` — so 6 + contributions + other rounds to the vote. A short
+    appearance shrinks every slice toward zero (little evidence), which is why a
+    cameo's terms are all small: that is the honest reason, not a rounding quirk.
     """
     terms = _terms(role, totals, minutes, exposure)
-    if not terms:
-        return {"positives": [], "negatives": [], "note": ""}
-
     ref = reference.get(role)
+    if not terms or not ref or not ref.get("std"):
+        return {"positives": [], "negatives": [], "contributions": [],
+                "base": VOTE_CENTER, "other_points": 0.0, "other_count": 0,
+                "minutes": minutes, "low_minutes": False, "note": ""}
+
     mean_terms = averages.get(role, {})
-    # Index units -> vote points, the same transformation the vote itself uses:
-    # a 1-unit move of the index is VOTE_SPREAD_K / std of a vote, shrunk for a
-    # short appearance exactly as the vote is shrunk.
     weight = minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0
-    per_unit = (VOTE_SPREAD_K * weight / ref["std"]) if ref and ref.get("std") else 0.0
+    per_unit = VOTE_SPREAD_K * weight / ref["std"]
 
     scored = []
     for key in set(terms) | set(mean_terms):
         delta = terms.get(key, 0.0) - mean_terms.get(key, 0.0)
-        points = delta * per_unit
-        if abs(points) < 0.05:      # below the vote's own resolution: noise
-            continue
-        phrase = _phrase(role, key, delta, totals.get(key, 0.0)
-                         if key != "_exposure" else exposure)
-        if not phrase:
-            continue
-        scored.append({"key": key, "label": phrase, "points": round(points, 2)})
+        phrase = _phrase(role, key, delta,
+                         (totals.get(key, 0.0) if key != "_exposure" else exposure))
+        scored.append((delta * per_unit, key, phrase))
 
-    scored.sort(key=lambda e: e["points"], reverse=True)
-    positives = [e for e in scored if e["points"] > 0][:top]
-    negatives = [e for e in scored if e["points"] < 0][-top:][::-1]
-    note = ""
-    if minutes < SHRINKAGE_MINUTES * 2:
-        note = ("Ha giocato poco: il voto e' stato avvicinato al 6 perche' "
-                "l'evidenza e' scarsa.")
-    return {"positives": positives, "negatives": negatives, "note": note}
+    # The subtotal is the vote's OWN raw value, computed exactly as the scorer
+    # computes it (index z-scored against the reference mean), not re-derived from
+    # the sum of slices — otherwise float drift near a rounding boundary would let
+    # the explanation show a different vote than the one on the row. The "other"
+    # line then absorbs whatever the shown slices don't account for, so the visible
+    # numbers still reconcile to this subtotal.
+    index = sum(terms.values())
+    z = (index - ref["mean"]) / ref["std"]
+    subtotal = max(VOTE_MIN, min(VOTE_MAX, VOTE_CENTER + VOTE_SPREAD_K * weight * z))
+    voto = round(subtotal * 2) / 2
+
+    named = [(pts, ph) for pts, _, ph in scored if ph and abs(pts) >= 0.05]
+    named.sort(key=lambda x: x[0], reverse=True)
+    positives = [x for x in named[:top] if x[0] > 0]
+    negatives = [x for x in (named[-top:][::-1]) if x[0] < 0]
+    shown = positives + negatives
+
+    def entry(pts, label):
+        return {"label": label, "points": round(pts, 2)}
+
+    contributions = [entry(pts, ph) for pts, ph in shown]
+    shown_rounded = sum(c["points"] for c in contributions)
+    other_points = round(subtotal - VOTE_CENTER - shown_rounded, 2)
+    low = minutes < SHRINKAGE_MINUTES * 2
+    note = ("Con pochi minuti giocati ogni voce pesa meno: il voto resta piu' "
+            "vicino al 6.") if low else ""
+    return {
+        "positives": [entry(p, ph) for p, ph in positives],
+        "negatives": [entry(p, ph) for p, ph in negatives],
+        "contributions": contributions,
+        "base": VOTE_CENTER,
+        "other_points": other_points,
+        "other_count": max(0, len(scored) - len(shown)),
+        "subtotal": round(subtotal, 2),
+        "voto": voto,
+        "minutes": minutes,
+        "low_minutes": low,
+        "note": note,
+    }
 
 
 def to_sentence(explanation: dict) -> str:
