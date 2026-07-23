@@ -9,6 +9,7 @@ import MatchesPage from './pages/MatchesPage';
 import LeagueMatchDetailPage from './pages/LeagueMatchDetailPage';
 import CompetitionPage from './pages/CompetitionPage';
 import MarketPage from './pages/MarketPage';
+import AuctionRoomPage from './pages/AuctionRoomPage';
 import LeagueAdminPage from './pages/LeagueAdminPage';
 import CompetitionCreatePage from './pages/CompetitionCreatePage';
 import NotFoundPage from './pages/NotFoundPage';
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="listone" element={<ListonePage />} />
         <Route path="competitions/:competitionId" element={<CompetitionPage />} />
         <Route path="market" element={<MarketPage />} />
+        <Route path="auction" element={<AuctionRoomPage />} />
         <Route path="decisioni" element={<DecisionsPage />} />
         <Route path="league-admin" element={<LeagueAdminPage />} />
         <Route path="league-admin/competitions/new" element={<CompetitionCreatePage />} />

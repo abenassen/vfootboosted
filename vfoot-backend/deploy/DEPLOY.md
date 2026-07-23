@@ -73,6 +73,37 @@ curl -s -o /dev/null -w '%{http_code}\n' https://vfoot.it/api/v1/auth/me   # 401
 ssh root@139.162.144.123 'journalctl -u vfoot --since "2 min ago" | grep -i error'  # empty
 ```
 
+## Live auction WebSocket (first deploy that ships it)
+
+The auction room is real-time over `wss://vfoot.it/ws/auctions/<id>/`. One-time setup:
+
+1. **Deps** — `pip install -r requirements.txt` now pulls `channels`, `daphne`,
+   `channels-redis`, `websockets`. `websockets` is what lets **uvicorn** serve the
+   WS handshake; without it the upgrade is refused.
+2. **`.env`** — set `REDIS_URL=redis://127.0.0.1:6379/1` (Redis already runs on the
+   box). Without it the channel layer falls back to in-memory, which does NOT fan
+   out across uvicorn workers, so bids wouldn't reach other watchers. If `vfoot.service`
+   runs more than one worker, `REDIS_URL` is mandatory.
+3. **nginx** — the `/ws` location must forward the upgrade, not just proxy_pass:
+
+   ```nginx
+   location /ws/ {
+     proxy_pass http://127.0.0.1:8000;
+     proxy_http_version 1.1;
+     proxy_set_header Upgrade $http_upgrade;
+     proxy_set_header Connection "upgrade";
+     proxy_set_header Host $host;
+     proxy_read_timeout 3600s;   # auctions are long-lived
+   }
+   ```
+4. **Verify** after restart:
+   ```sh
+   curl -s -o /dev/null -w '%{http_code}\n' \
+     -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+     -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: x==' \
+     https://vfoot.it/ws/auctions/1/    # 101/400/403 (a reachable WS), NOT 502
+   ```
+
 ## Rollback
 
 Restore from the backup made in step 2:

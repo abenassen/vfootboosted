@@ -271,17 +271,19 @@ export default function AppShell() {
         </main>
       </div>
 
-      {/* Mobile tab bar — current league only */}
+      {/* Mobile tab bar — current league only. Too many items to share one row on a
+          phone, so it scrolls horizontally with fixed-width, non-wrapping items
+          (labels stay legible instead of overlapping). */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-white">
         <div
-          className="grid"
-          style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}
+          className="flex overflow-x-auto"
+          style={{ scrollbarWidth: 'none' }}
         >
           {nav.map((it) => {
             const manual = leagueAdminActive(location.search, location.pathname, it.to);
             const cls = (active: boolean) =>
               clsx(
-                'flex flex-col items-center justify-center py-2 text-[11px] font-semibold',
+                'flex shrink-0 basis-[20%] flex-col items-center justify-center gap-1 whitespace-nowrap px-1 py-2 text-[11px] font-semibold',
                 it.scope === 'competition'
                   ? active ? color.text700 : color.text400
                   : active ? 'text-slate-900' : 'text-slate-500'

@@ -16,7 +16,9 @@ import type {
   VerifyEmailResponse,
 } from '../types/auth';
 import type {
+  ActiveAuctionInfo,
   AuctionState,
+  ClassicRole,
   CompetitionItem,
   CompetitionScheduleApplyResult,
   CompetitionSchedulePreview,
@@ -626,40 +628,77 @@ export async function resolveCompetitionStage(stageId: number, randomSeed = 42) 
   return parseJsonOrThrow(res);
 }
 
-export async function createAuction(leagueId: number, playerIds: number[], randomSeed = 42) {
-  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/auctions`, {
+function auctionPost(path: string, body: Record<string, unknown> = {}) {
+  return fetch(`${baseUrl()}${path}`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ player_ids: playerIds, random_seed: randomSeed }),
+    body: JSON.stringify(body),
+  }).then(parseJsonOrThrow);
+}
+
+export async function createAuction(leagueId: number, playerIds?: number[]) {
+  return auctionPost(`/leagues/${leagueId}/auctions`, playerIds?.length ? { player_ids: playerIds } : {});
+}
+
+export async function getActiveAuction(leagueId: number): Promise<ActiveAuctionInfo> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/active-auction`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
 }
 
-export async function nominateNext(auctionId: number) {
-  const res = await fetch(`${baseUrl()}/auctions/${auctionId}/nominate-next`, {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({}),
-  });
-  return parseJsonOrThrow(res);
+export type NominateMode = 'manual' | 'random' | 'random_role';
+
+export async function nominatePlayer(
+  auctionId: number,
+  opts: { mode: NominateMode; player_id?: number; role?: ClassicRole },
+) {
+  return auctionPost(`/auctions/${auctionId}/nominate`, opts);
 }
 
-export async function placeBid(nominationId: number, amount: number) {
-  const res = await fetch(`${baseUrl()}/nominations/${nominationId}/bid`, {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ amount }),
-  });
-  return parseJsonOrThrow(res);
+export async function assignPlayer(auctionId: number, playerId: number, teamId: number, price: number) {
+  return auctionPost(`/auctions/${auctionId}/assign`, { player_id: playerId, team_id: teamId, price });
+}
+
+export async function placeBid(nominationId: number, amount: number, teamId?: number) {
+  return auctionPost(`/nominations/${nominationId}/bid`, teamId ? { amount, team_id: teamId } : { amount });
 }
 
 export async function closeNomination(nominationId: number) {
-  const res = await fetch(`${baseUrl()}/nominations/${nominationId}/close`, {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({}),
-  });
-  return parseJsonOrThrow(res);
+  return auctionPost(`/nominations/${nominationId}/close`);
+}
+
+export async function cancelNomination(nominationId: number) {
+  return auctionPost(`/nominations/${nominationId}/cancel`);
+}
+
+export async function revertNomination(nominationId: number) {
+  return auctionPost(`/nominations/${nominationId}/revert`);
+}
+
+export async function voidBid(bidId: number) {
+  return auctionPost(`/bids/${bidId}/void`);
+}
+
+export async function undoLastAuctionAction(auctionId: number) {
+  return auctionPost(`/auctions/${auctionId}/undo-last`);
+}
+
+export async function closeAuctionSession(auctionId: number) {
+  return auctionPost(`/auctions/${auctionId}/close-session`);
+}
+
+/** ws(s):// URL for the live auction room, carrying the DRF token in the query string. */
+export function auctionSocketUrl(auctionId: number): string {
+  const token = getToken() ?? '';
+  // Strip the API suffix; in production baseUrl is RELATIVE ('/api/v1' -> ''), so
+  // derive scheme+host from the current page (WebSocket needs an absolute URL).
+  let httpBase = baseUrl().replace(/\/api\/v1$/, '');
+  if (!/^https?:\/\//i.test(httpBase) && typeof window !== 'undefined') {
+    httpBase = `${window.location.protocol}//${window.location.host}${httpBase}`;
+  }
+  const wsBase = httpBase.replace(/^http/i, 'ws');
+  return `${wsBase}/ws/auctions/${auctionId}/?token=${encodeURIComponent(token)}`;
 }
 
 export async function getLeagueFixtures(leagueId: number, competitionId?: number): Promise<LeagueFixtureItem[]> {

@@ -24,6 +24,7 @@ from realdata.models import (
 )
 from vfoot.api.league_serializers import (
     AddRosterPlayerSerializer,
+    AuctionAssignSerializer,
     BulkAssignRosterSerializer,
     CompetitionStageBuildSerializer,
     CompetitionStageCreateSerializer,
@@ -40,6 +41,7 @@ from vfoot.api.league_serializers import (
     JoinLeagueSerializer,
     MarketToggleSerializer,
     MatchdayConcludeSerializer,
+    NominateSerializer,
     PlaceBidSerializer,
     QualificationRuleCreateSerializer,
     RemoveRosterPlayerSerializer,
@@ -47,6 +49,7 @@ from vfoot.api.league_serializers import (
 )
 from vfoot.models import (
     AuctionBid,
+    AuctionEvent,
     AuctionNomination,
     AuctionSession,
     CompetitionQualificationRule,
@@ -65,6 +68,10 @@ from vfoot.models import (
     LeaguePlayerRole,
     SavedLineupSnapshot,
 )
+from vfoot.services.auction_engine import (
+    ROLES as AUCTION_ROLES, check_purchase, league_role_map, player_role, team_budgets,
+)
+from vfoot.services.auction_realtime import broadcast_auction
 import os as _os
 from functools import lru_cache as _lru_cache
 
@@ -152,7 +159,11 @@ class LeagueListCreateView(APIView):
         reference_season = get_object_or_404(
             CompetitionSeason, id=data["reference_season_id"])
         league = FantasyLeague.objects.create(
-            name=data["name"], owner=request.user, reference_season=reference_season)
+            name=data["name"], owner=request.user, reference_season=reference_season,
+            mode=data.get("mode", FantasyLeague.MODE_AURA),
+            initial_budget=data.get("initial_budget", 1000),
+            slots_gk=data.get("slots_gk", 3), slots_def=data.get("slots_def", 8),
+            slots_mid=data.get("slots_mid", 8), slots_fwd=data.get("slots_fwd", 6))
         membership = LeagueMembership.objects.create(
             league=league,
             user=request.user,
@@ -227,6 +238,14 @@ class LeagueDetailView(APIView):
                 "max_substitutions": league.max_substitutions,
                 "defense_bonus_enabled": league.defense_bonus_enabled,
                 "defense_bonus_mode": league.defense_bonus_mode,
+                "initial_budget": league.initial_budget,
+                "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
+                                 "CEN": league.slots_mid, "ATT": league.slots_fwd},
+                "roster_size": league.roster_size(),
+                # Once an auction has been created the economy is frozen (editing it
+                # would rewrite what was paid); the settings page uses this to lock.
+                "auction_started": league.auction_sessions.exclude(
+                    status=AuctionSession.STATUS_DRAFT).exists(),
                 "invite_code": league.invite_code,
                 "invite_link": f"/join/{league.invite_code}",
                 "reference_season": (
@@ -418,6 +437,27 @@ class LeagueSettingsUpdateView(APIView):
             league.defense_bonus_mode = mode
             fields.append("defense_bonus_mode")
 
+        # Auction economy (budget + roster slots). Frozen once an auction started:
+        # a mid-auction change would rewrite the affordability of bids already made.
+        econ_keys = {"initial_budget", "slots_gk", "slots_def", "slots_mid", "slots_fwd"}
+        if econ_keys & set(request.data.keys()):
+            if league.auction_sessions.exclude(status=AuctionSession.STATUS_DRAFT).exists():
+                return Response(
+                    {"detail": "L'asta e' gia' iniziata: budget e slot non sono piu' modificabili."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            for key, lo in (("initial_budget", 1), ("slots_gk", 0), ("slots_def", 0),
+                            ("slots_mid", 0), ("slots_fwd", 0)):
+                if key in request.data:
+                    try:
+                        value = int(request.data.get(key))
+                    except (TypeError, ValueError):
+                        return Response({"detail": f"{key} non valido."}, status=status.HTTP_400_BAD_REQUEST)
+                    if value < lo:
+                        return Response({"detail": f"{key} deve essere >= {lo}."},
+                                        status=status.HTTP_400_BAD_REQUEST)
+                    setattr(league, key, value)
+                    fields.append(key)
+
         if not fields:
             return Response({"detail": "Nessuna impostazione fornita."}, status=status.HTTP_400_BAD_REQUEST)
         league.save(update_fields=fields)
@@ -426,6 +466,9 @@ class LeagueSettingsUpdateView(APIView):
             "max_substitutions": league.max_substitutions,
             "defense_bonus_enabled": league.defense_bonus_enabled,
             "defense_bonus_mode": league.defense_bonus_mode,
+            "initial_budget": league.initial_budget,
+            "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
+                             "CEN": league.slots_mid, "ATT": league.slots_fwd},
         })
 
 
@@ -2072,6 +2115,225 @@ class CompetitionResolveDependenciesView(APIView):
         return Response(result)
 
 
+# ==========================================================================
+# Auction room
+# ==========================================================================
+#
+# The REST endpoints are the single write path (auth + transaction here); each
+# mutation records an append-only AuctionEvent and then nudges the WebSocket room
+# so every watcher re-fetches this exact state. The legality of every purchase is
+# enforced by services/auction_engine.py, at bid time AND again at close time.
+
+def _team_for_membership(m: LeagueMembership) -> FantasyTeam | None:
+    return FantasyTeam.objects.filter(manager=m).first()
+
+
+def _player_label(player: Player) -> str:
+    return player.short_name or player.full_name
+
+
+def _record_auction_event(session, event_type, actor, payload, nomination=None):
+    return AuctionEvent.objects.create(
+        session=session, nomination=nomination, event_type=event_type,
+        actor=actor, payload=payload)
+
+
+def _called_player_ids(session) -> set[int]:
+    """Players no longer in the pool: currently up for auction (open) or already
+    assigned (closed). A cancelled nomination returns its player to the pool."""
+    return set(
+        AuctionNomination.objects.filter(
+            session=session,
+            status__in=[AuctionNomination.STATUS_OPEN, AuctionNomination.STATUS_CLOSED],
+        ).values_list("player_id", flat=True))
+
+
+def _pool_remaining_ids(session) -> list[int]:
+    called = _called_player_ids(session)
+    return [pid for pid in (session.nomination_order or []) if pid not in called]
+
+
+def _open_nomination(session):
+    return (AuctionNomination.objects
+            .filter(session=session, status=AuctionNomination.STATUS_OPEN)
+            .select_related("player", "nominator__user").first())
+
+
+def _top_bid(nomination):
+    return (nomination.bids.filter(is_void=False)
+            .order_by("-amount", "created_at").first())
+
+
+def _serialize_auction_state(session) -> dict:
+    league = session.league
+    budgets = team_budgets(league)
+    teams = list(FantasyTeam.objects.filter(league=league).select_related("manager__user"))
+    team_by_membership = {t.manager_id: t for t in teams}
+
+    pool = _pool_remaining_ids(session)
+    pool_roles = league_role_map(league, pool)
+    remaining_by_role = {r: 0 for r in AUCTION_ROLES}
+    for pid in pool:
+        r = pool_roles.get(pid)
+        if r in remaining_by_role:
+            remaining_by_role[r] += 1
+
+    # Open nomination detail, incl. per-team affordability for THIS player's role.
+    open_nom = _open_nomination(session)
+    open_payload = None
+    if open_nom:
+        role = player_role(league, open_nom.player)
+        top = _top_bid(open_nom)
+        top_amount = top.amount if top else 0
+        min_next = top_amount + 1 if top else 1
+        top_team = team_by_membership.get(top.bidder_id) if top else None
+        bids = list(open_nom.bids.filter(is_void=False)
+                    .select_related("bidder__user").order_by("-amount", "created_at")[:25])
+        options = []
+        for tb in budgets.values():
+            mb = tb.max_bid_for_role(role) if role else 0
+            options.append({
+                "team_id": tb.team_id, "team_name": tb.team_name,
+                "max_bid": mb, "eligible": mb >= min_next,
+            })
+        open_payload = {
+            "nomination_id": open_nom.id,
+            "player_id": open_nom.player_id,
+            "player_name": _player_label(open_nom.player),
+            "player_role": role,
+            "call_mode": open_nom.call_mode,
+            "nominator": open_nom.nominator.user.username,
+            "top_bid": top_amount,
+            "top_bidder_team_id": top_team.id if top_team else None,
+            "top_bidder_team_name": top_team.name if top_team else None,
+            "min_next_bid": min_next,
+            "bids": [{
+                "bid_id": b.id,
+                "team_id": (team_by_membership.get(b.bidder_id).id
+                            if team_by_membership.get(b.bidder_id) else None),
+                "team_name": (team_by_membership.get(b.bidder_id).name
+                              if team_by_membership.get(b.bidder_id) else None),
+                "manager": b.bidder.user.username,
+                "amount": b.amount,
+            } for b in bids],
+            "team_options": options,
+        }
+
+    # History of nominations (incl. cancelled) for the room log.
+    nominations = list(
+        AuctionNomination.objects.filter(session=session)
+        .select_related("player", "nominator__user", "closed_winner_team")
+        .order_by("-created_at")[:40])
+    rows = [{
+        "nomination_id": n.id, "status": n.status,
+        "player_id": n.player_id, "player_name": _player_label(n.player),
+        "call_mode": n.call_mode, "nominator": n.nominator.user.username,
+        "winner_team_id": n.closed_winner_team_id,
+        "winner_team_name": n.closed_winner_team.name if n.closed_winner_team_id else None,
+        "winning_amount": n.winning_amount,
+    } for n in nominations]
+
+    events = list(AuctionEvent.objects.filter(session=session)
+                  .select_related("actor")[:40])
+    feed = [{
+        "id": e.id, "type": e.event_type,
+        "actor": e.actor.username if e.actor_id else None,
+        "payload": e.payload, "created_at": e.created_at.isoformat(),
+    } for e in events]
+
+    team_budgets_out = [{
+        "team_id": tb.team_id, "team_name": tb.team_name,
+        "manager_username": tb.manager_username,
+        "initial_budget": tb.initial_budget,
+        "spent_budget": tb.spent, "available_budget": tb.remaining,
+        "slots": tb.slots, "slots_remaining_total": tb.slots_remaining_total,
+        "max_bid_any": tb.max_bid_any,
+    } for tb in budgets.values()]
+
+    return {
+        "auction_id": session.id, "name": session.name, "status": session.status,
+        "league_id": league.id,
+        "roster_slots": league.roster_quota(),
+        "initial_budget": league.initial_budget,
+        "pool_total": len(session.nomination_order or []),
+        "pool_remaining": len(pool),
+        "remaining_by_role": remaining_by_role,
+        "open_nomination": open_payload,
+        "recent_nominations": rows,
+        "events": feed,
+        "team_budgets": team_budgets_out,
+    }
+
+
+# --- Mutating helpers (shared by explicit endpoints and undo-last) ---------
+
+def _void_bid(bid, actor):
+    if bid.is_void:
+        raise ValueError("Offerta gia' annullata.")
+    nom = bid.nomination
+    bid.is_void = True
+    bid.save(update_fields=["is_void"])
+    _record_auction_event(
+        nom.session, AuctionEvent.TYPE_BID_VOIDED, actor,
+        {"bid_id": bid.id, "amount": bid.amount, "player_name": _player_label(nom.player)},
+        nomination=nom)
+    return {"bid_id": bid.id}
+
+
+def _cancel_nomination(nom, actor):
+    if nom.status != AuctionNomination.STATUS_OPEN:
+        raise ValueError("La chiamata non e' aperta.")
+    nom.bids.filter(is_void=False).update(is_void=True)
+    nom.status = AuctionNomination.STATUS_CANCELLED
+    nom.save(update_fields=["status"])
+    _record_auction_event(
+        nom.session, AuctionEvent.TYPE_NOMINATION_CANCELLED, actor,
+        {"player_name": _player_label(nom.player)}, nomination=nom)
+    return {"nomination_id": nom.id}
+
+
+def _revert_assignment(nom, actor):
+    if nom.status != AuctionNomination.STATUS_CLOSED:
+        raise ValueError("La chiamata non e' assegnata.")
+    team_name = nom.closed_winner_team.name if nom.closed_winner_team_id else None
+    amount = nom.winning_amount
+    if nom.roster_slot_id:
+        FantasyRosterSlot.objects.filter(id=nom.roster_slot_id).delete()
+    # Reopen so the player can be re-auctioned; keep his (now un-void) bids so the
+    # room can simply re-close, or the admin can cancel/re-assign.
+    nom.bids.update(is_void=False)
+    nom.roster_slot = None
+    nom.closed_winner_team = None
+    nom.winning_amount = None
+    nom.status = AuctionNomination.STATUS_OPEN
+    nom.save(update_fields=["roster_slot", "closed_winner_team", "winning_amount", "status"])
+    _record_auction_event(
+        nom.session, AuctionEvent.TYPE_ASSIGNMENT_REVERTED, actor,
+        {"player_name": _player_label(nom.player), "team_name": team_name, "amount": amount},
+        nomination=nom)
+    return {"nomination_id": nom.id}
+
+
+class LeagueActiveAuctionView(APIView):
+    """Discover the league's live auction (if any) — used by the room entry point."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        m = _membership_or_404(league, request.user.id)
+        session = (AuctionSession.objects
+                   .filter(league=league, status=AuctionSession.STATUS_ACTIVE)
+                   .order_by("-created_at").first())
+        return Response({
+            "auction_id": session.id if session else None,
+            "status": session.status if session else None,
+            "is_admin": m.role == LeagueMembership.ROLE_ADMIN,
+            "mode": league.mode,
+        })
+
+
 class AuctionCreateView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -2081,71 +2343,48 @@ class AuctionCreateView(APIView):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _ensure_admin(league, request.user.id)
 
+        # The auction economy (budget/slots/roles) is a classic-mode concept; aura
+        # is deliberately not finalised for the auction yet.
+        if league.mode != FantasyLeague.MODE_CLASSIC:
+            return Response(
+                {"detail": "L'asta e' disponibile solo per le leghe in modalita' classic."},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        existing = AuctionSession.objects.filter(
+            league=league, status=AuctionSession.STATUS_ACTIVE).first()
+        if existing:
+            return Response(
+                {"auction_id": existing.id, "detail": "Un'asta e' gia' in corso."},
+                status=status.HTTP_200_OK)
+
         s = CreateAuctionSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         data = s.validated_data
 
-        player_ids = data["player_ids"]
+        # Pool = the players passed in, or the whole frozen listone by default.
+        if data.get("player_ids"):
+            player_ids = data["player_ids"]
+        else:
+            player_ids = list(LeaguePlayerRole.objects.filter(league=league)
+                              .values_list("player_id", flat=True))
+        if not player_ids:
+            return Response(
+                {"detail": "Listone vuoto: congela prima il listone della lega."},
+                status=status.HTTP_400_BAD_REQUEST)
+
         blocked = _ensure_players_decided(league, player_ids)
         if blocked:
             return blocked
         players = list(Player.objects.filter(id__in=player_ids).values_list("id", flat=True))
-        if not players:
-            return Response({"detail": "No valid players provided."}, status=status.HTTP_400_BAD_REQUEST)
-
-        rng = Random(data["random_seed"])
-        rng.shuffle(players)
 
         session = AuctionSession.objects.create(
-            league=league,
-            name=data["name"],
-            status=AuctionSession.STATUS_ACTIVE,
-            nomination_order=players,
-            nomination_index=0,
-            created_by=request.user,
-        )
-
-        return Response({"auction_id": session.id, "players": len(players)}, status=status.HTTP_201_CREATED)
-
-
-class AuctionNominateNextView(APIView):
-    authentication_classes = [TokenAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request, auction_id: int):
-        session = get_object_or_404(AuctionSession, id=auction_id)
-        league = session.league
-        m = _membership_or_404(league, request.user.id)
-
-        if session.status != AuctionSession.STATUS_ACTIVE:
-            return Response({"detail": "Auction is not active."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Ensure there isn't already an open nomination
-        open_nom = AuctionNomination.objects.filter(session=session, status=AuctionNomination.STATUS_OPEN).first()
-        if open_nom:
-            return Response({"detail": "There is already an open nomination.", "nomination_id": open_nom.id}, status=status.HTTP_200_OK)
-
-        if session.nomination_index >= len(session.nomination_order):
-            session.status = AuctionSession.STATUS_CLOSED
-            session.save(update_fields=["status"])
-            return Response({"detail": "No more players to nominate."}, status=status.HTTP_200_OK)
-
-        player_id = session.nomination_order[session.nomination_index]
-        player = get_object_or_404(Player, id=player_id)
-
-        nom = AuctionNomination.objects.create(session=session, player=player, nominator=m)
-        session.nomination_index += 1
-        session.save(update_fields=["nomination_index"])
-
-        return Response(
-            {
-                "nomination_id": nom.id,
-                "player_id": player.id,
-                "player_name": player.short_name or player.full_name,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+            league=league, name=data["name"], status=AuctionSession.STATUS_ACTIVE,
+            nomination_order=players, nomination_index=0, created_by=request.user)
+        _record_auction_event(session, AuctionEvent.TYPE_SESSION_CREATED, request.user,
+                              {"name": session.name, "pool": len(players)})
+        broadcast_auction(session.id)
+        return Response({"auction_id": session.id, "players": len(players)},
+                        status=status.HTTP_201_CREATED)
 
 
 class AuctionStateView(APIView):
@@ -2155,83 +2394,78 @@ class AuctionStateView(APIView):
     def get(self, request, auction_id: int):
         session = get_object_or_404(AuctionSession, id=auction_id)
         _membership_or_404(session.league, request.user.id)
+        return Response(_serialize_auction_state(session))
 
-        open_nom = (
-            AuctionNomination.objects.filter(session=session, status=AuctionNomination.STATUS_OPEN)
-            .select_related("player", "nominator__user")
-            .first()
-        )
 
-        next_player = None
-        if session.nomination_index < len(session.nomination_order):
-            pid = session.nomination_order[session.nomination_index]
-            p = Player.objects.filter(id=pid).first()
-            if p:
-                next_player = {"player_id": p.id, "name": p.short_name or p.full_name}
+class AuctionNominateView(APIView):
+    """Put a player up for auction, in one of three admin-chosen ways: pick him
+    manually, draw one at random, or draw one at random within a role."""
 
-        nominations = list(
-            AuctionNomination.objects.filter(session=session)
-            .select_related("player", "nominator__user", "closed_winner_team")
-            .order_by("-created_at")[:30]
-        )
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
-        spent_by_team: dict[int, int] = {}
-        rows = []
-        for n in nominations:
-            top = n.bids.order_by("-amount", "created_at").first()
-            top_amount = top.amount if top else 0
-            if n.status == AuctionNomination.STATUS_CLOSED and n.closed_winner_team_id and top_amount > 0:
-                spent_by_team[n.closed_winner_team_id] = spent_by_team.get(n.closed_winner_team_id, 0) + top_amount
+    @transaction.atomic
+    def post(self, request, auction_id: int):
+        session = get_object_or_404(AuctionSession, id=auction_id)
+        league = session.league
+        m = _ensure_admin(league, request.user.id)
 
-            rows.append(
-                {
-                    "nomination_id": n.id,
-                    "status": n.status,
-                    "player_id": n.player_id,
-                    "player_name": n.player.short_name or n.player.full_name,
-                    "nominator": n.nominator.user.username,
-                    "top_bid": top_amount,
-                    "winner_team_id": n.closed_winner_team_id,
-                    "winner_team_name": n.closed_winner_team.name if n.closed_winner_team_id else None,
-                }
-            )
+        if session.status != AuctionSession.STATUS_ACTIVE:
+            return Response({"detail": "L'asta non e' attiva."}, status=status.HTTP_400_BAD_REQUEST)
+        if _open_nomination(session):
+            return Response({"detail": "C'e' gia' un giocatore in chiamata: chiudilo o annullalo prima."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-        teams = FantasyTeam.objects.filter(league=session.league).select_related("manager__user")
-        initial_budget = 500
-        budgets = []
-        for t in teams:
-            spent = spent_by_team.get(t.id, 0)
-            budgets.append(
-                {
-                    "team_id": t.id,
-                    "team_name": t.name,
-                    "manager_username": t.manager.user.username,
-                    "initial_budget": initial_budget,
-                    "spent_budget": spent,
-                    "available_budget": max(0, initial_budget - spent),
-                }
-            )
+        s = NominateSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        data = s.validated_data
+        mode = data["mode"]
 
-        return Response(
-            {
-                "auction_id": session.id,
-                "name": session.name,
-                "status": session.status,
-                "nomination_index": session.nomination_index,
-                "nomination_total": len(session.nomination_order),
-                "next_player": next_player,
-                "open_nomination": {
-                    "nomination_id": open_nom.id,
-                    "player_id": open_nom.player_id,
-                    "player_name": open_nom.player.short_name or open_nom.player.full_name,
-                    "nominator": open_nom.nominator.user.username,
-                }
-                if open_nom
-                else None,
-                "recent_nominations": rows,
-                "team_budgets": budgets,
-            }
-        )
+        pool = _pool_remaining_ids(session)
+        if not pool:
+            session.status = AuctionSession.STATUS_CLOSED
+            session.save(update_fields=["status"])
+            _record_auction_event(session, AuctionEvent.TYPE_SESSION_CLOSED, request.user,
+                                  {"reason": "pool_empty"})
+            broadcast_auction(session.id)
+            return Response({"detail": "Tutti i giocatori sono stati chiamati."},
+                            status=status.HTTP_200_OK)
+
+        if mode == "manual":
+            player_id = data["player_id"]
+            if player_id not in pool:
+                return Response({"detail": "Giocatore non disponibile (gia' chiamato o fuori dal listone)."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            call_mode = AuctionNomination.CALL_MANUAL
+        else:
+            candidates = pool
+            if mode == "random_role":
+                role = data["role"]
+                roles = league_role_map(league, pool)
+                candidates = [pid for pid in pool if roles.get(pid) == role]
+                if not candidates:
+                    return Response({"detail": f"Nessun giocatore disponibile per il ruolo {role}."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                call_mode = AuctionNomination.CALL_RANDOM_ROLE
+            else:
+                call_mode = AuctionNomination.CALL_RANDOM
+            seed = data.get("random_seed")
+            rng = Random(seed) if seed is not None else Random()
+            player_id = rng.choice(candidates)
+
+        player = get_object_or_404(Player, id=player_id)
+        nom = AuctionNomination.objects.create(
+            session=session, player=player, nominator=m, call_mode=call_mode)
+        _record_auction_event(
+            session, AuctionEvent.TYPE_NOMINATED, request.user,
+            {"player_name": _player_label(player), "player_id": player.id,
+             "call_mode": call_mode, "role": player_role(league, player)},
+            nomination=nom)
+        broadcast_auction(session.id)
+        return Response({
+            "nomination_id": nom.id, "player_id": player.id,
+            "player_name": _player_label(player), "call_mode": call_mode,
+        }, status=status.HTTP_201_CREATED)
 
 
 class AuctionPlaceBidView(APIView):
@@ -2240,53 +2474,300 @@ class AuctionPlaceBidView(APIView):
 
     @transaction.atomic
     def post(self, request, nomination_id: int):
-        nomination = get_object_or_404(AuctionNomination, id=nomination_id)
+        nomination = get_object_or_404(
+            AuctionNomination.objects.select_related("player", "session__league"),
+            id=nomination_id)
         if nomination.status != AuctionNomination.STATUS_OPEN:
-            return Response({"detail": "Nomination is closed."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "La chiamata e' chiusa."}, status=status.HTTP_400_BAD_REQUEST)
 
-        m = _membership_or_404(nomination.session.league, request.user.id)
+        league = nomination.session.league
+        m = _membership_or_404(league, request.user.id)
+        is_admin = m.role == LeagueMembership.ROLE_ADMIN
 
         s = PlaceBidSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         amount = s.validated_data["amount"]
 
-        top = nomination.bids.order_by("-amount", "created_at").first()
+        # Bidder team: normally the caller's own; an admin may bid for another team
+        # (verbal auctions where managers call out their raises).
+        team_id = s.validated_data.get("team_id")
+        if team_id and is_admin:
+            team = get_object_or_404(FantasyTeam, id=team_id, league=league)
+            bidder = team.manager
+        else:
+            team = _team_for_membership(m)
+            bidder = m
+            if team is None:
+                return Response({"detail": "Non hai una squadra in questa lega."},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+        top = _top_bid(nomination)
         min_required = (top.amount + 1) if top else 1
         if amount < min_required:
-            return Response({"detail": f"Bid must be >= {min_required}"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": f"L'offerta deve essere almeno {min_required}."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-        bid = AuctionBid.objects.create(nomination=nomination, bidder=m, amount=amount)
+        # Legality: role slot free + at least 1 credit reserved per other open slot.
+        role = player_role(league, nomination.player)
+        legality = check_purchase(league, team.id, role, amount)
+        if not legality.ok:
+            return Response({"detail": legality.reason, "max_bid": legality.max_bid},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        bid = AuctionBid.objects.create(nomination=nomination, bidder=bidder, amount=amount)
+        _record_auction_event(
+            nomination.session, AuctionEvent.TYPE_BID, request.user,
+            {"bid_id": bid.id, "player_name": _player_label(nomination.player),
+             "team_name": team.name, "team_id": team.id, "amount": amount,
+             "by_admin": is_admin and bool(team_id)},
+            nomination=nomination)
+        broadcast_auction(nomination.session_id)
         return Response({"bid_id": bid.id, "amount": bid.amount}, status=status.HTTP_201_CREATED)
 
 
 class AuctionCloseNominationView(APIView):
+    """Assign the open player to the best bid (or, with no bid, refuse — use cancel)."""
+
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request, nomination_id: int):
-        nomination = get_object_or_404(AuctionNomination, id=nomination_id)
-        _ensure_admin(nomination.session.league, request.user.id)
+        nomination = get_object_or_404(
+            AuctionNomination.objects.select_related("player", "session__league"),
+            id=nomination_id)
+        league = nomination.session.league
+        _ensure_admin(league, request.user.id)
 
         if nomination.status == AuctionNomination.STATUS_CLOSED:
-            return Response({"detail": "Already closed."}, status=status.HTTP_200_OK)
+            return Response({"detail": "Gia' assegnato."}, status=status.HTTP_200_OK)
+        if nomination.status != AuctionNomination.STATUS_OPEN:
+            return Response({"detail": "La chiamata non e' aperta."}, status=status.HTTP_400_BAD_REQUEST)
 
-        top = nomination.bids.order_by("-amount", "created_at").first()
-        winner_team_id = None
-        if top:
-            winner_team = top.bidder.team
-            winner_team_id = winner_team.id
-            FantasyRosterSlot.objects.create(
-                team=winner_team,
-                player=nomination.player,
-                purchase_price=top.amount,
-            )
-            nomination.closed_winner_team = winner_team
+        top = _top_bid(nomination)
+        if not top:
+            return Response(
+                {"detail": "Nessuna offerta: usa 'Annulla chiamata' per rimettere il giocatore in lista."},
+                status=status.HTTP_400_BAD_REQUEST)
 
+        winner_team = _team_for_membership(top.bidder)
+        if winner_team is None:
+            return Response({"detail": "La squadra vincente non esiste piu'."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        role = player_role(league, nomination.player)
+        legality = check_purchase(league, winner_team.id, role, top.amount)
+        if not legality.ok:
+            return Response({"detail": f"Assegnazione non valida: {legality.reason}"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        slot = FantasyRosterSlot.objects.create(
+            team=winner_team, player=nomination.player, purchase_price=top.amount)
         nomination.status = AuctionNomination.STATUS_CLOSED
-        nomination.save(update_fields=["status", "closed_winner_team"])
+        nomination.closed_winner_team = winner_team
+        nomination.winning_amount = top.amount
+        nomination.roster_slot = slot
+        nomination.save(update_fields=["status", "closed_winner_team", "winning_amount", "roster_slot"])
+        _record_auction_event(
+            nomination.session, AuctionEvent.TYPE_ASSIGNED, request.user,
+            {"player_name": _player_label(nomination.player), "team_name": winner_team.name,
+             "team_id": winner_team.id, "amount": top.amount, "via": "bid"},
+            nomination=nomination)
+        broadcast_auction(nomination.session_id)
+        return Response({"nomination_id": nomination.id, "winner_team_id": winner_team.id,
+                         "amount": top.amount}, status=status.HTTP_200_OK)
 
-        return Response({"nomination_id": nomination.id, "winner_team_id": winner_team_id}, status=status.HTTP_200_OK)
+
+class AuctionAssignView(APIView):
+    """Admin direct-assign shortcut: hand a player to a team at a fixed price, no
+    bidding. For in-person / verbal auctions. Still fully legality-checked."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, auction_id: int):
+        session = get_object_or_404(AuctionSession, id=auction_id)
+        league = session.league
+        m = _ensure_admin(league, request.user.id)
+
+        if session.status != AuctionSession.STATUS_ACTIVE:
+            return Response({"detail": "L'asta non e' attiva."}, status=status.HTTP_400_BAD_REQUEST)
+
+        s = AuctionAssignSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        data = s.validated_data
+        player = get_object_or_404(Player, id=data["player_id"])
+        team = get_object_or_404(FantasyTeam, id=data["team_id"], league=league)
+        price = data["price"]
+
+        # Player must be available: either currently up for auction, or still in pool.
+        open_for_player = AuctionNomination.objects.filter(
+            session=session, player=player, status=AuctionNomination.STATUS_OPEN).first()
+        if open_for_player is None and player.id not in _pool_remaining_ids(session):
+            return Response({"detail": "Giocatore non disponibile (gia' assegnato o fuori dal listone)."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        role = player_role(league, player)
+        legality = check_purchase(league, team.id, role, price)
+        if not legality.ok:
+            return Response({"detail": legality.reason, "max_bid": legality.max_bid},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        slot = FantasyRosterSlot.objects.create(team=team, player=player, purchase_price=price)
+        if open_for_player is not None:
+            open_for_player.bids.filter(is_void=False).update(is_void=True)
+            nom = open_for_player
+            nom.call_mode = AuctionNomination.CALL_ASSIGN
+        else:
+            nom = AuctionNomination(session=session, player=player, nominator=m,
+                                    call_mode=AuctionNomination.CALL_ASSIGN)
+        nom.status = AuctionNomination.STATUS_CLOSED
+        nom.closed_winner_team = team
+        nom.winning_amount = price
+        nom.roster_slot = slot
+        nom.save()
+        _record_auction_event(
+            session, AuctionEvent.TYPE_ASSIGNED, request.user,
+            {"player_name": _player_label(player), "team_name": team.name,
+             "team_id": team.id, "amount": price, "via": "assign"},
+            nomination=nom)
+        broadcast_auction(session.id)
+        return Response({"nomination_id": nom.id, "winner_team_id": team.id, "amount": price},
+                        status=status.HTTP_201_CREATED)
+
+
+class AuctionCancelNominationView(APIView):
+    """Withdraw the open player without assigning — he returns to the pool (undo a
+    wrong nomination)."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, nomination_id: int):
+        nomination = get_object_or_404(
+            AuctionNomination.objects.select_related("player", "session__league"),
+            id=nomination_id)
+        _ensure_admin(nomination.session.league, request.user.id)
+        try:
+            _cancel_nomination(nomination, request.user)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        broadcast_auction(nomination.session_id)
+        return Response({"nomination_id": nomination.id, "status": nomination.status})
+
+
+class AuctionRevertNominationView(APIView):
+    """Undo a completed purchase: refund the credits, free the slot, reopen the
+    player for auction."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, nomination_id: int):
+        nomination = get_object_or_404(
+            AuctionNomination.objects.select_related("player", "session__league"),
+            id=nomination_id)
+        _ensure_admin(nomination.session.league, request.user.id)
+        try:
+            _revert_assignment(nomination, request.user)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        broadcast_auction(nomination.session_id)
+        return Response({"nomination_id": nomination.id, "status": nomination.status})
+
+
+class AuctionVoidBidView(APIView):
+    """Undo a mistaken bid (admin)."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, bid_id: int):
+        bid = get_object_or_404(
+            AuctionBid.objects.select_related("nomination__session__league"), id=bid_id)
+        _ensure_admin(bid.nomination.session.league, request.user.id)
+        try:
+            _void_bid(bid, request.user)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        broadcast_auction(bid.nomination.session_id)
+        return Response({"bid_id": bid.id, "is_void": bid.is_void})
+
+
+class AuctionUndoLastView(APIView):
+    """Undo the last state-changing action in the room (bid / nomination / purchase)."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, auction_id: int):
+        session = get_object_or_404(AuctionSession, id=auction_id)
+        _ensure_admin(session.league, request.user.id)
+
+        # Walk back over events, skipping ones that are themselves undos or that
+        # refer to state already reverted, to find the last undoable action.
+        UNDOABLE = {
+            AuctionEvent.TYPE_BID, AuctionEvent.TYPE_NOMINATED, AuctionEvent.TYPE_ASSIGNED,
+        }
+        for event in AuctionEvent.objects.filter(session=session)[:50]:
+            if event.event_type not in UNDOABLE:
+                continue
+            try:
+                if event.event_type == AuctionEvent.TYPE_BID:
+                    bid = AuctionBid.objects.filter(
+                        id=event.payload.get("bid_id"), is_void=False).first()
+                    if not bid:
+                        continue
+                    _void_bid(bid, request.user)
+                    result = {"undone": "bid", "bid_id": bid.id}
+                elif event.event_type == AuctionEvent.TYPE_NOMINATED:
+                    if not event.nomination_id:
+                        continue
+                    nom = AuctionNomination.objects.get(id=event.nomination_id)
+                    if nom.status != AuctionNomination.STATUS_OPEN:
+                        continue
+                    _cancel_nomination(nom, request.user)
+                    result = {"undone": "nomination", "nomination_id": nom.id}
+                else:  # ASSIGNED
+                    if not event.nomination_id:
+                        continue
+                    nom = AuctionNomination.objects.get(id=event.nomination_id)
+                    if nom.status != AuctionNomination.STATUS_CLOSED:
+                        continue
+                    _revert_assignment(nom, request.user)
+                    result = {"undone": "assignment", "nomination_id": nom.id}
+            except ValueError:
+                continue
+            broadcast_auction(session.id)
+            return Response(result, status=status.HTTP_200_OK)
+
+        return Response({"detail": "Nessuna azione da annullare."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AuctionCloseSessionView(APIView):
+    """End the auction (admin). Any open nomination is cancelled first."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, auction_id: int):
+        session = get_object_or_404(AuctionSession, id=auction_id)
+        _ensure_admin(session.league, request.user.id)
+        open_nom = _open_nomination(session)
+        if open_nom:
+            _cancel_nomination(open_nom, request.user)
+        session.status = AuctionSession.STATUS_CLOSED
+        session.save(update_fields=["status"])
+        _record_auction_event(session, AuctionEvent.TYPE_SESSION_CLOSED, request.user,
+                              {"reason": "manual"})
+        broadcast_auction(session.id)
+        return Response({"auction_id": session.id, "status": session.status})
 
 
 def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:

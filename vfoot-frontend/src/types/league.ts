@@ -268,6 +268,14 @@ export interface PlayerSearchItem {
   full_name: string;
 }
 
+export type ClassicRole = 'POR' | 'DIF' | 'CEN' | 'ATT';
+
+export interface AuctionSlotCount {
+  quota: number;
+  filled: number;
+  remaining: number;
+}
+
 export interface AuctionTeamBudget {
   team_id: number;
   team_name: string;
@@ -275,29 +283,82 @@ export interface AuctionTeamBudget {
   initial_budget: number;
   spent_budget: number;
   available_budget: number;
+  slots: Record<ClassicRole, AuctionSlotCount>;
+  slots_remaining_total: number;
+  max_bid_any: number;
+}
+
+export interface AuctionBidState {
+  bid_id: number;
+  team_id: number | null;
+  team_name: string | null;
+  manager: string;
+  amount: number;
+}
+
+export interface AuctionTeamOption {
+  team_id: number;
+  team_name: string;
+  max_bid: number;
+  eligible: boolean;
+}
+
+export interface AuctionOpenNomination {
+  nomination_id: number;
+  player_id: number;
+  player_name: string;
+  player_role: ClassicRole | null;
+  call_mode: string;
+  nominator: string;
+  top_bid: number;
+  top_bidder_team_id: number | null;
+  top_bidder_team_name: string | null;
+  min_next_bid: number;
+  bids: AuctionBidState[];
+  team_options: AuctionTeamOption[];
 }
 
 export interface AuctionNominationState {
   nomination_id: number;
-  status: 'open' | 'closed';
+  status: 'open' | 'closed' | 'cancelled';
   player_id: number;
   player_name: string;
+  call_mode: string;
   nominator: string;
-  top_bid: number;
   winner_team_id: number | null;
   winner_team_name: string | null;
+  winning_amount: number | null;
+}
+
+export interface AuctionEventItem {
+  id: number;
+  type: string;
+  actor: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface AuctionState {
   auction_id: number;
   name: string;
   status: 'draft' | 'active' | 'closed';
-  nomination_index: number;
-  nomination_total: number;
-  next_player: { player_id: number; name: string } | null;
-  open_nomination: { nomination_id: number; player_id: number; player_name: string; nominator: string } | null;
+  league_id: number;
+  roster_slots: Record<ClassicRole, number>;
+  initial_budget: number;
+  pool_total: number;
+  pool_remaining: number;
+  remaining_by_role: Record<ClassicRole, number>;
+  open_nomination: AuctionOpenNomination | null;
   recent_nominations: AuctionNominationState[];
+  events: AuctionEventItem[];
   team_budgets: AuctionTeamBudget[];
+}
+
+export interface ActiveAuctionInfo {
+  auction_id: number | null;
+  status: string | null;
+  is_admin: boolean;
+  mode: 'aura' | 'classic';
 }
 
 export interface LeagueFixtureItem {

@@ -55,6 +55,10 @@ if not DEBUG and SECRET_KEY == "django-insecure-dev-only-key":
 # Application definition
 
 INSTALLED_APPS = [
+    # Channels must come before staticfiles so its runserver command takes over
+    # (dev), and is what serves the auction WebSocket in production under uvicorn.
+    "daphne",
+    "channels",
     # Django
     "realdata",
     "vfoot",
@@ -117,6 +121,23 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+# Channel layer for the live auction WebSocket. Production points at the Redis that
+# already runs on the box (set REDIS_URL, e.g. redis://127.0.0.1:6379/1); with no
+# REDIS_URL we use the in-memory layer, which is correct for a single-process dev
+# server and for the test-suite (no external dependency), but does NOT fan out
+# across multiple worker processes — so production MUST set REDIS_URL.
+_REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+if _REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [_REDIS_URL]},
+        }
+    }
+else:
+    CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 
 
 # Database

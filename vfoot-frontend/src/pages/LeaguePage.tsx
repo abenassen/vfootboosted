@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getCompetitions, getLeagueDetail } from '../api';
+import { getActiveAuction, getCompetitions, getLeagueDetail } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
-import type { CompetitionItem, LeagueDetail } from '../types/league';
+import type { ActiveAuctionInfo, CompetitionItem, LeagueDetail } from '../types/league';
 
 const COMP_TYPE_LABEL: Record<string, string> = { round_robin: 'Campionato', knockout: 'Coppa' };
 
@@ -22,9 +22,11 @@ export default function LeaguePage() {
   const [detail, setDetail] = useState<LeagueDetail | null>(null);
   const [competitions, setCompetitions] = useState<CompetitionItem[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
+  const [auction, setAuction] = useState<ActiveAuctionInfo | null>(null);
 
   useEffect(() => {
     setSelectedTeamId(null);
+    setAuction(null);
     if (!selectedLeagueId) {
       setDetail(null);
       return;
@@ -35,6 +37,9 @@ export default function LeaguePage() {
     void getCompetitions(selectedLeagueId)
       .then(setCompetitions)
       .catch(() => setCompetitions([]));
+    void getActiveAuction(selectedLeagueId)
+      .then(setAuction)
+      .catch(() => setAuction(null));
   }, [selectedLeagueId]);
 
   if (!leagues.length) {
@@ -79,6 +84,39 @@ export default function LeaguePage() {
           </Link>
         </div>
       </Card>
+
+      {auction?.auction_id ? (
+        <Card className="border-2 border-green-300 bg-green-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Badge tone="green">Live</Badge>
+                <span className="font-bold">Asta in corso</span>
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                {auction.is_admin
+                  ? 'Sei il banditore: entra per chiamare i giocatori e aggiudicare.'
+                  : 'Entra per seguire l’asta e rilanciare in tempo reale.'}
+              </div>
+            </div>
+            <Link to="/auction">
+              <Button>Entra nella sala asta →</Button>
+            </Link>
+          </div>
+        </Card>
+      ) : auction?.is_admin && auction.mode === 'classic' ? (
+        <Card className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <SectionTitle className="!mb-0">Asta</SectionTitle>
+              <div className="mt-1 text-sm text-slate-600">Non hai ancora avviato l’asta iniziale della lega.</div>
+            </div>
+            <Link to="/auction">
+              <Button variant="secondary">Vai all’asta</Button>
+            </Link>
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="p-4">
         <SectionTitle>Competizioni</SectionTitle>

@@ -8,7 +8,9 @@ import type {
   RegisterResponse,
 } from '../types/auth';
 import type {
+  ActiveAuctionInfo,
   AuctionState,
+  ClassicRole,
   CompetitionItem,
   CompetitionPrizeCreateRequest,
   CompetitionPrizeItem,
@@ -522,17 +524,30 @@ export async function resolveCompetitionStage(stageId: number, _randomSeed = 42)
   return { stage_id: stageId, resolved_rule_participants: 2, unresolved_rules: 0, fixtures_created: 1 };
 }
 
-export async function createAuction(_leagueId: number, playerIds: number[]) {
+export async function createAuction(_leagueId: number, playerIds?: number[]) {
   await sleep(100);
-  return { auction_id: 1, players: playerIds.length };
+  return { auction_id: 1, players: playerIds?.length ?? 0 };
 }
 
-export async function nominateNext(_auctionId: number) {
+export async function getActiveAuction(_leagueId: number): Promise<ActiveAuctionInfo> {
+  await sleep(40);
+  return { auction_id: 1, status: 'active', is_admin: true, mode: 'classic' };
+}
+
+export async function nominatePlayer(
+  _auctionId: number,
+  _opts: { mode: 'manual' | 'random' | 'random_role'; player_id?: number; role?: ClassicRole },
+) {
   await sleep(80);
-  return { nomination_id: 1, player_id: 1, player_name: 'Mock Player' };
+  return { nomination_id: 1, player_id: 1, player_name: 'Mock Player', call_mode: _opts.mode };
 }
 
-export async function placeBid(_nominationId: number, amount: number) {
+export async function assignPlayer(_auctionId: number, _playerId: number, teamId: number, price: number) {
+  await sleep(80);
+  return { nomination_id: 1, winner_team_id: teamId, amount: price };
+}
+
+export async function placeBid(_nominationId: number, amount: number, _teamId?: number) {
   await sleep(60);
   return { bid_id: 1, amount };
 }
@@ -540,6 +555,35 @@ export async function placeBid(_nominationId: number, amount: number) {
 export async function closeNomination(_nominationId: number) {
   await sleep(80);
   return { nomination_id: 1, winner_team_id: 1 };
+}
+
+export async function cancelNomination(_nominationId: number) {
+  await sleep(60);
+  return { nomination_id: 1, status: 'cancelled' };
+}
+
+export async function revertNomination(_nominationId: number) {
+  await sleep(60);
+  return { nomination_id: 1, status: 'open' };
+}
+
+export async function voidBid(bidId: number) {
+  await sleep(40);
+  return { bid_id: bidId, is_void: true };
+}
+
+export async function undoLastAuctionAction(_auctionId: number) {
+  await sleep(60);
+  return { undone: 'bid' };
+}
+
+export async function closeAuctionSession(auctionId: number) {
+  await sleep(60);
+  return { auction_id: auctionId, status: 'closed' };
+}
+
+export function auctionSocketUrl(auctionId: number): string {
+  return `ws://mock/ws/auctions/${auctionId}/`;
 }
 
 export async function searchPlayers(q: string): Promise<PlayerSearchItem[]> {
@@ -554,39 +598,50 @@ export async function searchPlayers(q: string): Promise<PlayerSearchItem[]> {
 
 export async function getAuctionState(auctionId: number): Promise<AuctionState> {
   await sleep(90);
+  const slots = (filled: Partial<Record<ClassicRole, number>>) => ({
+    POR: { quota: 3, filled: filled.POR ?? 0, remaining: 3 - (filled.POR ?? 0) },
+    DIF: { quota: 8, filled: filled.DIF ?? 0, remaining: 8 - (filled.DIF ?? 0) },
+    CEN: { quota: 8, filled: filled.CEN ?? 0, remaining: 8 - (filled.CEN ?? 0) },
+    ATT: { quota: 6, filled: filled.ATT ?? 0, remaining: 6 - (filled.ATT ?? 0) },
+  });
   return {
     auction_id: auctionId,
-    name: 'Mock Auction',
+    name: 'Asta mock',
     status: 'active',
-    nomination_index: 3,
-    nomination_total: 60,
-    next_player: { player_id: 104, name: 'M. Thuram' },
-    open_nomination: { nomination_id: 7, player_id: 103, player_name: 'N. Barella', nominator: 'mock-admin' },
+    league_id: 1,
+    roster_slots: { POR: 3, DIF: 8, CEN: 8, ATT: 6 },
+    initial_budget: 1000,
+    pool_total: 60,
+    pool_remaining: 57,
+    remaining_by_role: { POR: 6, DIF: 20, CEN: 20, ATT: 11 },
+    open_nomination: {
+      nomination_id: 7,
+      player_id: 103,
+      player_name: 'N. Barella',
+      player_role: 'CEN',
+      call_mode: 'random',
+      nominator: 'mock-admin',
+      top_bid: 18,
+      top_bidder_team_id: 12,
+      top_bidder_team_name: 'Mock Team 2',
+      min_next_bid: 19,
+      bids: [{ bid_id: 1, team_id: 12, team_name: 'Mock Team 2', manager: 'mock-user', amount: 18 }],
+      team_options: [
+        { team_id: 11, team_name: 'Mock Team', max_bid: 934, eligible: true },
+        { team_id: 12, team_name: 'Mock Team 2', max_bid: 958, eligible: true },
+      ],
+    },
     recent_nominations: [
-      {
-        nomination_id: 7,
-        status: 'open',
-        player_id: 103,
-        player_name: 'N. Barella',
-        nominator: 'mock-admin',
-        top_bid: 18,
-        winner_team_id: null,
-        winner_team_name: null,
-      },
-      {
-        nomination_id: 6,
-        status: 'closed',
-        player_id: 102,
-        player_name: 'R. Leao',
-        nominator: 'mock-user',
-        top_bid: 42,
-        winner_team_id: 11,
-        winner_team_name: 'Mock Team',
-      },
+      { nomination_id: 7, status: 'open', player_id: 103, player_name: 'N. Barella', call_mode: 'random', nominator: 'mock-admin', winner_team_id: null, winner_team_name: null, winning_amount: null },
+      { nomination_id: 6, status: 'closed', player_id: 102, player_name: 'R. Leao', call_mode: 'manual', nominator: 'mock-user', winner_team_id: 11, winner_team_name: 'Mock Team', winning_amount: 42 },
+    ],
+    events: [
+      { id: 2, type: 'bid', actor: 'mock-user', payload: { player_name: 'N. Barella', team_name: 'Mock Team 2', amount: 18 }, created_at: new Date().toISOString() },
+      { id: 1, type: 'assigned', actor: 'mock-admin', payload: { player_name: 'R. Leao', team_name: 'Mock Team', amount: 42, via: 'bid' }, created_at: new Date().toISOString() },
     ],
     team_budgets: [
-      { team_id: 11, team_name: 'Mock Team', manager_username: 'mock-admin', initial_budget: 500, spent_budget: 42, available_budget: 458 },
-      { team_id: 12, team_name: 'Mock Team 2', manager_username: 'mock-user', initial_budget: 500, spent_budget: 18, available_budget: 482 },
+      { team_id: 11, team_name: 'Mock Team', manager_username: 'mock-admin', initial_budget: 1000, spent_budget: 42, available_budget: 958, slots: slots({ ATT: 1 }), slots_remaining_total: 24, max_bid_any: 935 },
+      { team_id: 12, team_name: 'Mock Team 2', manager_username: 'mock-user', initial_budget: 1000, spent_budget: 0, available_budget: 1000, slots: slots({}), slots_remaining_total: 25, max_bid_any: 976 },
     ],
   };
 }

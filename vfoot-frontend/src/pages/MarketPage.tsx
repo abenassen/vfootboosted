@@ -55,11 +55,11 @@ export default function MarketPage() {
       <Card className="p-4">
         <SectionTitle>Asta</SectionTitle>
         <div className="mt-2 text-sm text-slate-600">
-          Acquisizioni e scambi si svolgono tramite l’<b>asta</b> della lega (chiamata, rilancio, assegnazione),
-          gestita dalla sezione amministrazione.
+          Acquisizioni e scambi si svolgono tramite l’<b>asta</b> della lega: chiamata del giocatore,
+          rilanci in diretta e aggiudicazione. Tutti i partecipanti seguono l’asta live dalla sala.
         </div>
-        <Link to="/league-admin?tab=league" className="mt-3 inline-flex">
-          <Button>Vai all’asta (Gestione lega)</Button>
+        <Link to="/auction" className="mt-3 inline-flex">
+          <Button>Entra nella sala asta</Button>
         </Link>
       </Card>
     </div>

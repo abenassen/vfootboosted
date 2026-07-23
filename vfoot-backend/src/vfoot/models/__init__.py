@@ -1,6 +1,7 @@
 from vfoot.models.identity import SocialAccount
 from vfoot.models.fantasy import (
     AuctionBid,
+    AuctionEvent,
     AuctionNomination,
     AuctionSession,
     CompetitionQualificationRule,
@@ -31,6 +32,7 @@ from vfoot.models.zones import Zone, ZoneSet
 __all__ = [
     "SocialAccount",
     "AuctionBid",
+    "AuctionEvent",
     "AuctionNomination",
     "AuctionSession",
     "CompetitionQualificationRule",

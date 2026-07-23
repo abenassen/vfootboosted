@@ -7,6 +7,14 @@ class CreateLeagueSerializer(serializers.Serializer):
     # The real championship the league is played on. Chosen ONCE at creation and
     # then immutable: rosters, listone and calendar all depend on it.
     reference_season_id = serializers.IntegerField()
+    mode = serializers.ChoiceField(choices=["aura", "classic"], required=False, default="aura")
+    # Auction economy (classic). Optional at creation with the standard defaults;
+    # editable from settings until the auction starts.
+    initial_budget = serializers.IntegerField(required=False, min_value=1, default=1000)
+    slots_gk = serializers.IntegerField(required=False, min_value=0, default=3)
+    slots_def = serializers.IntegerField(required=False, min_value=0, default=8)
+    slots_mid = serializers.IntegerField(required=False, min_value=0, default=8)
+    slots_fwd = serializers.IntegerField(required=False, min_value=0, default=6)
 
 
 class JoinLeagueSerializer(serializers.Serializer):
@@ -136,10 +144,39 @@ class ImportRosterCSVSerializer(serializers.Serializer):
 
 
 class CreateAuctionSerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=120, required=False, default="Main Auction")
-    player_ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
-    random_seed = serializers.IntegerField(required=False, default=42)
+    name = serializers.CharField(max_length=120, required=False, default="Asta iniziale")
+    # The eligible pool. Optional: when omitted the whole classic listone is used.
+    player_ids = serializers.ListField(
+        child=serializers.IntegerField(), allow_empty=False, required=False)
+
+
+class NominateSerializer(serializers.Serializer):
+    mode = serializers.ChoiceField(
+        choices=["manual", "random", "random_role"], required=False, default="random")
+    # Required when mode == manual.
+    player_id = serializers.IntegerField(required=False)
+    # Required when mode == random_role (POR/DIF/CEN/ATT).
+    role = serializers.ChoiceField(
+        choices=["POR", "DIF", "CEN", "ATT"], required=False)
+    # Optional determinism for the random draw (tests / reproducibility).
+    random_seed = serializers.IntegerField(required=False, allow_null=True)
+
+    def validate(self, data):
+        if data.get("mode") == "manual" and not data.get("player_id"):
+            raise serializers.ValidationError({"player_id": "Obbligatorio in modalita' manuale."})
+        if data.get("mode") == "random_role" and not data.get("role"):
+            raise serializers.ValidationError({"role": "Obbligatorio in modalita' casuale-per-ruolo."})
+        return data
 
 
 class PlaceBidSerializer(serializers.Serializer):
     amount = serializers.IntegerField(min_value=1)
+    # Admin-only: place the bid on behalf of another team (verbal auctions).
+    team_id = serializers.IntegerField(required=False)
+
+
+class AuctionAssignSerializer(serializers.Serializer):
+    """Admin direct-assign shortcut: give a player to a team at a set price."""
+    player_id = serializers.IntegerField()
+    team_id = serializers.IntegerField()
+    price = serializers.IntegerField(min_value=1)

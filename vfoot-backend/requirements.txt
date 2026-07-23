@@ -2,6 +2,15 @@ asgiref==3.11.0
 Django==5.2.10
 django-cors-headers==4.9.0
 djangorestframework==3.16.1
+# Live auction room: WebSocket transport (ASGI). daphne provides the ASGI server /
+# runserver integration; channels-redis is the cross-process channel layer (prod
+# points it at the Redis already running on the box via REDIS_URL).
+channels==4.3.2
+daphne==4.2.3
+channels-redis==4.3.0
+# uvicorn (the production ASGI server) needs this to actually serve the WebSocket
+# handshake; without it the /ws upgrade is rejected even though channels is loaded.
+websockets==16.0
 pillow==12.1.0
 python-dotenv==1.2.1
 sqlparse==0.5.5

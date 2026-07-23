@@ -55,7 +55,30 @@ class FantasyLeague(models.Model):
                          (ROLE_MODE_DATA, "Pura dai dati")]
     role_mode = models.CharField(max_length=10, choices=ROLE_MODE_CHOICES,
                                  default=ROLE_MODE_MITIGATED)
+
+    # --- Auction / roster economy (classic) ------------------------------
+    # Budget every manager starts the initial auction with. Serie A fantacalcio
+    # convention is 1000 credits. Chosen at creation, editable ONLY until the
+    # auction starts (afterwards it would rewrite what everyone paid against).
+    initial_budget = models.PositiveIntegerField(default=1000)
+    # Roster shape: how many players of each classic role a full squad holds.
+    # Default is the standard 3-8-8-6 = 25. Total is not stored; it is the sum,
+    # and the auction engine enforces "at least 1 credit reservable per unfilled
+    # slot" against it.
+    slots_gk = models.PositiveSmallIntegerField(default=3)
+    slots_def = models.PositiveSmallIntegerField(default=8)
+    slots_mid = models.PositiveSmallIntegerField(default=8)
+    slots_fwd = models.PositiveSmallIntegerField(default=6)
+
     created_at = models.DateTimeField(default=timezone.now)
+
+    # Classic role code (POR/DIF/CEN/ATT) -> the league quota for that role.
+    def roster_quota(self) -> dict[str, int]:
+        return {"POR": self.slots_gk, "DIF": self.slots_def,
+                "CEN": self.slots_mid, "ATT": self.slots_fwd}
+
+    def roster_size(self) -> int:
+        return self.slots_gk + self.slots_def + self.slots_mid + self.slots_fwd
 
     def __str__(self) -> str:
         return self.name
@@ -528,18 +551,37 @@ class AuctionSession(models.Model):
 
 class AuctionNomination(models.Model):
     STATUS_OPEN = "open"
-    STATUS_CLOSED = "closed"
+    STATUS_CLOSED = "closed"       # assigned to a winner (or admin direct-assign)
+    STATUS_CANCELLED = "cancelled"  # withdrawn without assignment (undo) -> back in pool
+
+    # How the player was put up for auction, kept for the activity feed.
+    CALL_MANUAL = "manual"          # admin picked this exact player
+    CALL_RANDOM = "random"          # random over the whole remaining pool
+    CALL_RANDOM_ROLE = "random_role"  # random within one role
+    CALL_ASSIGN = "assign"          # admin direct-assign shortcut (verbal auction)
+    CALL_CHOICES = [
+        (CALL_MANUAL, "Manuale"), (CALL_RANDOM, "Casuale"),
+        (CALL_RANDOM_ROLE, "Casuale per ruolo"), (CALL_ASSIGN, "Assegnazione diretta"),
+    ]
 
     session = models.ForeignKey(AuctionSession, on_delete=models.CASCADE, related_name="nominations")
     player = models.ForeignKey(Player, on_delete=models.PROTECT, related_name="auction_nominations")
     nominator = models.ForeignKey(LeagueMembership, on_delete=models.PROTECT, related_name="nominations")
+    call_mode = models.CharField(max_length=16, choices=CALL_CHOICES, default=CALL_MANUAL)
     status = models.CharField(
         max_length=16,
-        choices=[(STATUS_OPEN, "Open"), (STATUS_CLOSED, "Closed")],
+        choices=[(STATUS_OPEN, "Open"), (STATUS_CLOSED, "Closed"), (STATUS_CANCELLED, "Cancelled")],
         default=STATUS_OPEN,
     )
     closed_winner_team = models.ForeignKey(
         FantasyTeam, on_delete=models.SET_NULL, null=True, blank=True, related_name="won_nominations"
+    )
+    # Final price paid, recorded at close for the feed (also lives on the roster slot).
+    winning_amount = models.IntegerField(null=True, blank=True)
+    # The roster slot minted at close, so undo can revert exactly this acquisition.
+    roster_slot = models.ForeignKey(
+        "FantasyRosterSlot", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="from_nomination",
     )
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -551,7 +593,45 @@ class AuctionBid(models.Model):
     nomination = models.ForeignKey(AuctionNomination, on_delete=models.CASCADE, related_name="bids")
     bidder = models.ForeignKey(LeagueMembership, on_delete=models.PROTECT, related_name="auction_bids")
     amount = models.IntegerField()
+    # A bid retracted by an undo is kept (not deleted) so the history stays honest;
+    # only active bids count towards the current top bid.
+    is_void = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         indexes = [models.Index(fields=["nomination", "amount"])]
+
+
+class AuctionEvent(models.Model):
+    """Append-only audit trail of everything that happens in an auction room.
+
+    Doubles as the live activity feed (pushed over the WebSocket) and as the
+    backbone of 'undo last action': each state-changing endpoint records one event,
+    and undo endpoints record their own compensating event rather than erasing
+    history. Never edited after creation."""
+
+    TYPE_SESSION_CREATED = "session_created"
+    TYPE_NOMINATED = "nominated"
+    TYPE_BID = "bid"
+    TYPE_BID_VOIDED = "bid_voided"
+    TYPE_ASSIGNED = "assigned"          # nomination closed with a winner (or direct-assign)
+    TYPE_NOMINATION_CANCELLED = "nomination_cancelled"
+    TYPE_ASSIGNMENT_REVERTED = "assignment_reverted"
+    TYPE_SESSION_CLOSED = "session_closed"
+
+    session = models.ForeignKey(AuctionSession, on_delete=models.CASCADE, related_name="events")
+    nomination = models.ForeignKey(
+        AuctionNomination, on_delete=models.SET_NULL, null=True, blank=True, related_name="events"
+    )
+    event_type = models.CharField(max_length=32)
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="auction_events"
+    )
+    # Denormalised, human-readable snapshot (player name, team, amount, ...) so the
+    # feed renders without extra joins and survives later row deletions.
+    payload = models.JSONField(default=dict)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [models.Index(fields=["session", "created_at"])]
+        ordering = ["-created_at", "-id"]

@@ -5,10 +5,8 @@ import {
   buildDefaultCompetitionStages,
   concludeLeagueMatchday,
   bulkAssignRoster,
-  closeNomination,
   createCompetitionStage,
   createCompetitionPrize,
-  createAuction,
   addCompetitionStageRule,
   createCompetitionTemplate,
   deleteCompetition,
@@ -16,7 +14,6 @@ import {
   deleteCompetitionStage,
   createLeague,
   getCompetitionStages,
-  getAuctionState,
   getCompetitions,
   getLeagueDetail,
   getLeagueMatchdays,
@@ -24,8 +21,6 @@ import {
   getTeamRoster,
   importRosterCsv,
   joinLeague,
-  nominateNext,
-  placeBid,
   previewCompetitionSchedule,
   removeRosterPlayer,
   scheduleCompetition,
@@ -40,7 +35,6 @@ import { useAuth } from '../auth/AuthContext';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import type {
-  AuctionState,
   CompetitionItem,
   CompetitionSchedulePreview,
   CompetitionStageItem,
@@ -94,11 +88,6 @@ export default function LeagueAdminPage() {
   const [compStartsAt, setCompStartsAt] = useState('');
   const [compEndsAt, setCompEndsAt] = useState('');
 
-  const [auctionPlayerIds, setAuctionPlayerIds] = useState('');
-  const [auctionId, setAuctionId] = useState<number | null>(null);
-  const [auctionState, setAuctionState] = useState<AuctionState | null>(null);
-  const [nominationId, setNominationId] = useState<number | null>(null);
-  const [bidAmount, setBidAmount] = useState('1');
   const [matchdays, setMatchdays] = useState<LeagueMatchdayItem[]>([]);
   const [competitionStages, setCompetitionStages] = useState<CompetitionStageItem[]>([]);
   const [leagueStageOptions, setLeagueStageOptions] = useState<Array<{ stage_id: number; competition_id: number; label: string }>>([]);
@@ -217,11 +206,6 @@ export default function LeagueAdminPage() {
       })
     );
     setLeagueStageOptions(allStages.flat());
-  }
-
-  async function loadAuctionState(currentAuctionId: number) {
-    const s = await getAuctionState(currentAuctionId);
-    setAuctionState(s);
   }
 
   async function loadMatchdays(leagueId: number) {
@@ -400,13 +384,6 @@ export default function LeagueAdminPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function parseIds(input: string): number[] {
-    return input
-      .split(/[\s,;]+/)
-      .map((x) => Number(x.trim()))
-      .filter((x) => Number.isFinite(x) && x > 0);
   }
 
   function parseAssignments(input: string): Array<{ team_name: string; player_id: number; price: number }> {
@@ -1699,143 +1676,17 @@ export default function LeagueAdminPage() {
               ) : null}
 
               {leagueTab === 'auction' ? (
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <Card className="p-4">
-                    <SectionTitle>Auction Room (beta)</SectionTitle>
-                    <div className="mt-2 text-xs text-slate-500">Questa sezione mostra stato asta: prossimo giocatore, giocatori chiamati e budget disponibili per team.</div>
-
-                    <textarea
-                      id="auction-player-ids"
-                      className="mt-3 h-20 w-full rounded-xl border px-3 py-2 text-xs"
-                      placeholder="Player IDs per creare l'asta (es. 101,102,103...)"
-                      value={auctionPlayerIds}
-                      onChange={(e) => setAuctionPlayerIds(e.target.value)}
-                    />
-                    <label htmlFor="auction-player-ids" className="sr-only">Player IDs per creare l'asta</label>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          void run(async () => {
-                            if (!selectedLeagueId) return;
-                            const ids = parseIds(auctionPlayerIds);
-                            const res = await createAuction(selectedLeagueId, ids, 42);
-                            setAuctionId(res.auction_id);
-                            await loadAuctionState(res.auction_id);
-                            setMsg(`Asta creata: ${res.auction_id}`);
-                          })
-                        }
-                      >
-                        Crea asta
-                      </Button>
-                      <input
-                        id="auction-id-input"
-                        className="w-28 rounded-xl border px-3 py-2 text-sm"
-                        placeholder="auction id"
-                        value={auctionId ?? ''}
-                        onChange={(e) => setAuctionId(e.target.value ? Number(e.target.value) : null)}
-                      />
-                      <label htmlFor="auction-id-input" className="sr-only">Auction ID</label>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() =>
-                          void run(async () => {
-                            if (!auctionId) return;
-                            await loadAuctionState(auctionId);
-                          })
-                        }
-                      >
-                        Carica stato
-                      </Button>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() =>
-                          void run(async () => {
-                            if (!auctionId) return;
-                            const res = await nominateNext(auctionId);
-                            setNominationId(res.nomination_id);
-                            await loadAuctionState(auctionId);
-                            setMsg(`Nomination ${res.nomination_id}: ${res.player_name}`);
-                          })
-                        }
-                      >
-                        Nominate next
-                      </Button>
-                      <label htmlFor="auction-bid-amount" className="sr-only">Importo offerta</label>
-                      <input id="auction-bid-amount" className="w-24 rounded-xl border px-3 py-2 text-sm" value={bidAmount} onChange={(e) => setBidAmount(e.target.value)} />
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          void run(async () => {
-                            if (!nominationId) return;
-                            await placeBid(nominationId, Number(bidAmount));
-                            if (auctionId) await loadAuctionState(auctionId);
-                            setMsg('Bid inserita');
-                          })
-                        }
-                      >
-                        Bid
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() =>
-                          void run(async () => {
-                            if (!nominationId) return;
-                            const res = await closeNomination(nominationId);
-                            if (auctionId) await loadAuctionState(auctionId);
-                            setMsg(`Nomination chiusa. Winner team: ${res.winner_team_id ?? '-'}`);
-                          })
-                        }
-                      >
-                        Close nomination
-                      </Button>
-                    </div>
-                  </Card>
-
-                  <Card className="p-4">
-                    <SectionTitle>Stato Asta</SectionTitle>
-                    {auctionState ? (
-                      <div className="space-y-3 text-sm">
-                        <div className="rounded-xl border p-2">
-                          <div><span className="font-semibold">Asta:</span> {auctionState.name} (#{auctionState.auction_id})</div>
-                          <div><span className="font-semibold">Progress:</span> {auctionState.nomination_index}/{auctionState.nomination_total}</div>
-                          <div><span className="font-semibold">Prossimo giocatore:</span> {auctionState.next_player?.name ?? '-'}</div>
-                          <div><span className="font-semibold">Giocatore in chiamata:</span> {auctionState.open_nomination?.player_name ?? '-'}</div>
-                        </div>
-
-                        <div>
-                          <div className="text-xs font-semibold text-slate-500">Budget per team</div>
-                          <div className="mt-1 max-h-40 overflow-auto space-y-1 text-xs">
-                            {auctionState.team_budgets.map((b) => (
-                              <div key={b.team_id} className="rounded-lg border px-2 py-1">
-                                {b.team_name} ({b.manager_username}) · Disponibile {b.available_budget} / {b.initial_budget}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-xs font-semibold text-slate-500">Giocatori già chiamati</div>
-                          <div className="mt-1 max-h-48 overflow-auto space-y-1 text-xs">
-                            {auctionState.recent_nominations.map((n) => (
-                              <div key={n.nomination_id} className="rounded-lg border px-2 py-1">
-                                {n.player_name} · top bid {n.top_bid} · winner {n.winner_team_name ?? '-'}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-sm text-slate-500">Carica uno stato asta inserendo auction id oppure crea una nuova asta.</div>
-                    )}
-                  </Card>
-                </div>
+                <Card className="p-4">
+                  <SectionTitle>Asta</SectionTitle>
+                  <div className="mt-2 text-sm text-slate-600">
+                    L’asta si svolge nella <b>Sala asta</b> live: chiamata del giocatore (manuale, casuale
+                    o casuale per ruolo), rilanci in tempo reale, aggiudicazione e assegnazione diretta,
+                    con controllo automatico di budget e slot. Da lì puoi anche avviare l’asta iniziale.
+                  </div>
+                  <Link to="/auction" className="mt-3 inline-flex">
+                    <Button>Apri la sala asta</Button>
+                  </Link>
+                </Card>
               ) : null}
             </>
           ) : (
