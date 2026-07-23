@@ -33,6 +33,18 @@ l'intero mercato: accettabile al listone iniziale, sbagliato a gennaio, dove un
 singolo acquisto avrebbe congelato tutta la lega. Il blocco **per-giocatore**
 rende lo stesso meccanismo valido tutto l'anno.
 
+**Il congelamento è per-giocatore, non per-lega** (specifica utente 23/07/2026,
+testata in `tests_decisions.DepartureReturnTests`). Il ruolo si fissa quando il
+giocatore **entra la prima volta** nel listone e non muta più; il listone come
+*membership* invece è vivo (arrivi/partenze a ogni poll). Conseguenze:
+- se TM **cambia il ruolo** di un giocatore, le leghe dove è **già presente** non
+  ne risentono (riga frozen intatta); solo le leghe **create dopo** pescano il
+  ruolo aggiornato dal listone di quel momento;
+- un giocatore che **parte** per l'estero (stint chiusa) tiene la sua riga come
+  storia — non viene cancellato; al **rientro** (gennaio) la riga è preservata,
+  quindi il ruolo resta **quello consolidato all'inizio**, anche se TM l'ha
+  riclassificato durante l'assenza.
+
 **Risolto (23/07/2026): TM gira dal Linode.** La sonda
 `realdata/scripts/probe_transfermarkt.py` (o l'equivalente `curl`) dà dall'IP
 Linode `139.162.144.123` esattamente lo stesso esito dell'IP residenziale —

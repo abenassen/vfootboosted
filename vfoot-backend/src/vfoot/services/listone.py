@@ -1,18 +1,29 @@
-"""Freeze a classic-mode league's role 'listone' (snapshot of player roles).
+"""Freeze a classic-mode league's role 'listone' (per-league snapshot of roles).
 
-Classic fantacalcio fixes each player's role at season start; it must not drift when
-Transfermarkt later re-classifies a player. So a league snapshots the global,
-TM-derived ``Player.classic_role`` into per-league ``LeaguePlayerRole`` rows ONCE,
-when its listone opens, and the weekly TM re-import never touches those rows again.
+Classic fantacalcio freezes a player's role PER PLAYER, at the moment he first
+enters the listone (arrives in Serie A) — and it must not drift when Transfermarkt
+later re-classifies him. This runs on EVERY TM poll (not once): each run seeds the
+roles of players who are new to the listone and leaves every already-frozen role
+untouched. So the listone MEMBERSHIP is live (players come and go with the market)
+while assigned ROLES are stable.
 
-The snapshot is additive by design:
-  * missing rows are created from the current seed (so a new signing that joins the
-    roster mid-season still gets a role when it first appears);
-  * existing rows are left untouched — both admin overrides AND already-frozen seed
-    rows — so the listone is stable once set.
+Additive by design:
+  * a player new to the listone gets a fresh ``LeaguePlayerRole`` from the current
+    seed (data-driven inference, else the TM map) — so a mid-season signing is
+    covered the first time he appears;
+  * existing rows are never touched — admin overrides AND already-frozen seed rows
+    alike — so a role, once set in a league, never moves.
 
-``reset=True`` re-snapshots seed rows from the current TM roles (an explicit "redo the
-listone" admin action) while still preserving admin overrides.
+Consequences of freezing per player (rules the user fixed, tested in
+``tests_decisions.DepartureReturnTests``):
+  * TM changing a player's role does NOT disturb a league where he is already
+    present; only leagues formed afterwards seed the new role from the listone.
+  * A player who LEAVES (stint closed) keeps his frozen row as history — it is not
+    deleted — and on RETURN (stint re-opened) that same row is preserved, so the
+    role stays the one consolidated at his first appearance.
+
+``reset=True`` re-snapshots seed rows from the current TM roles (an explicit "redo
+the listone" admin action) while still preserving admin overrides.
 """
 
 from __future__ import annotations

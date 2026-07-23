@@ -360,3 +360,58 @@ class UnseenArrivalTests(DecisionQueueTests):
         self.assertEqual(
             LeaguePlayerRole.objects.get(league=self.league, player=p).role, "DIF")
         self.assertEqual(undecided_player_ids(self.league), set())
+
+
+class DepartureReturnTests(DecisionQueueTests):
+    """A player leaves Serie A (stint closed) and returns in January. The role
+    frozen at his FIRST assignment must survive the disappearance AND must not
+    drift to whatever Transfermarkt reclassified him as while he was gone. Encodes
+    the user's rules: an already-settled per-league role never changes; the listone
+    membership may come and go, the frozen role does not.
+    """
+
+    def _set_end(self, player, end):
+        from datetime import date
+        PlayerTeamStint.objects.filter(player=player, team_season=self.ts).update(
+            end_date=(date(2026, 8, 31) if end else None))
+
+    def test_departed_and_returning_player_keeps_the_original_frozen_role(self):
+        from vfoot.services.listone import snapshot_league_listone
+        # 1. present when the listone opens, unambiguous -> frozen as DIF
+        p = self._player("Difensore", method=SeasonPlayerRole.METHOD_CATEGORY,
+                         tm_position="centre-back", role="DIF")
+        snapshot_league_listone(self.league)
+        self.assertEqual(
+            LeaguePlayerRole.objects.get(league=self.league, player=p).role, "DIF")
+
+        # 2. he leaves for abroad; meanwhile Transfermarkt reclassifies him ATT
+        self._set_end(p, True)
+        SeasonPlayerRole.objects.filter(player=p).update(
+            role_data="ATT", role_mitigated="ATT")
+        Player.objects.filter(id=p.id).update(classic_role="ATT")
+        snapshot_league_listone(self.league)          # a poll while he is gone
+        # his frozen row is kept as history, untouched — not deleted, not changed
+        self.assertEqual(
+            LeaguePlayerRole.objects.get(league=self.league, player=p).role, "DIF")
+
+        # 3. he returns in January -> STILL the original frozen DIF, not the new ATT
+        self._set_end(p, False)
+        snapshot_league_listone(self.league)
+        rows = LeaguePlayerRole.objects.filter(league=self.league, player=p)
+        self.assertEqual(rows.count(), 1)             # no duplicate row on return
+        self.assertEqual(rows.first().role, "DIF")    # consolidated from the start
+
+    def test_a_tm_role_change_does_not_touch_a_league_where_he_is_present(self):
+        """Rule 4: TM changing a player's role must not disturb leagues that already
+        froze him; only leagues formed afterwards see the new role."""
+        from vfoot.services.listone import snapshot_league_listone
+        p = self._player("Ambivalente", method=SeasonPlayerRole.METHOD_CATEGORY,
+                         tm_position="centre-back", role="DIF")
+        snapshot_league_listone(self.league)
+        # TM flips him to an attacker; a later poll must NOT move the frozen role
+        SeasonPlayerRole.objects.filter(player=p).update(
+            role_data="ATT", role_mitigated="ATT")
+        Player.objects.filter(id=p.id).update(classic_role="ATT")
+        snapshot_league_listone(self.league)
+        self.assertEqual(
+            LeaguePlayerRole.objects.get(league=self.league, player=p).role, "DIF")
