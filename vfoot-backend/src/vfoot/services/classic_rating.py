@@ -43,27 +43,38 @@ from realdata.models import (
 # blew up under per-90 extrapolation. The shooting block encodes the agreed combination:
 #   xG (getting into the position) small + xGOT (execution) large − big_chance_missed
 #   (squandering an easy chance) > the xG credit, so a glaring miss nets NEGATIVE.
+#
+# NOTE (refit 2026-07-23): the MAGNITUDES below were re-fit by within-role
+# constrained least-squares against fantacalcio's Statistico base vote (season
+# 2025-26), with domain sign constraints and hand floors on the rare decisive
+# events (clearances_off_line, last_man_tackle). This raised agreement with BOTH
+# fantacalcio sheets across every outfield role (e.g. DIF vs the editorial vote
+# 0.37 -> 0.45) at ~no cost to the independent SofaScore rating. The SIGNS and
+# STRUCTURE are the original design; the inline comments below explain that
+# rationale and may quote the PRIOR magnitudes. Key finding: playmaking
+# (key_passes, expected_assists) was over-weighted for EVERY role and cut hard;
+# shot EXECUTION (xg_on_target) is now the dominant positive term.
 TOTAL_WEIGHTS = {
-    "expected_assists": 1.20,    # xA: chance creation, credited to the CREATOR
-    "xg_on_target": 1.20,        # post-shot xG: the shooter's EXECUTION merit
-    "big_chance_created": 0.80,
-    "xg_shots": 0.50,            # raw xG: only partial 'got into position' merit
-    "key_passes": 0.50,
-    "shots_on_target": 0.25,
-    "shots": 0.15,
-    "errors_led_to_goal": -1.50,  # decisive error (heavy)
+    "expected_assists": 0.366,    # xA: chance creation, credited to the CREATOR
+    "xg_on_target": 1.607,        # post-shot xG: the shooter's EXECUTION merit
+    "big_chance_created": 0.465,
+    "xg_shots": 0.715,            # raw xG: only partial 'got into position' merit
+    "key_passes": 0.181,
+    "shots_on_target": -0.03,
+    "shots": -0.116,
+    "errors_led_to_goal": -1.388,  # decisive error (heavy)
     # Conceding a penalty hands over roughly 0.78 expected goals through a clear
     # individual foul, and — unlike a missed penalty — carries NO fantacalcio
     # malus, so the base vote is the only place it can register at all. Below the
     # error that concedes a goal, because a penalty is not yet a goal.
-    "penalties_conceded": -1.20,
+    "penalties_conceded": -1.193,
     # Winning one is the mirror image and equally unrewarded: the bonus goes to
     # whoever converts, never to the player who earned it.
-    "penalties_won": 0.80,
+    "penalties_won": 0.607,
     # Rare interventions that prevent a near-certain goal. Kept as impact totals,
     # not per-90: their value does not scale with how long you played.
-    "clearances_off_line": 0.80,
-    "last_man_tackle": 0.60,
+    "clearances_off_line": 0.8,
+    "last_man_tackle": 0.6,
     # An error that let the opponent SHOOT, without a goal following. Anchored at
     # a third of the error-that-conceded, which is both the intuitive expected
     # cost (a chance handed to an opponent converts roughly one time in three)
@@ -72,8 +83,8 @@ TOTAL_WEIGHTS = {
     # affected player-matches (0.4882 -> 0.5113), with heavier weights doing
     # worse. The two features barely overlap (7 player-matches in a season), so
     # this does not double-count the conceded goal.
-    "errors_led_to_shot": -0.50,
-    "big_chance_missed": -0.80,   # squandering an easy chance > the xG positioning credit
+    "errors_led_to_shot": -0.19,
+    "big_chance_missed": -0.528,   # squandering an easy chance > the xG positioning credit
 }
 
 # VOLUME / involvement — rescaled to PER-90 (density is the signal: 120 touches in 90'
@@ -88,10 +99,11 @@ TOTAL_WEIGHTS = {
 # computed, while reading as if progression and pressing were being rewarded.
 # Removing them changes no vote (verified over a full season); what it removes is
 # the illusion. The intent behind them — credit for creating and progressing — is
-# in fact carried by the TOTAL block, where expected_assists, key_passes and
-# big_chance_created are the three heaviest positive terms.
+# in fact carried by the TOTAL block. (After the 2026-07-23 refit the dominant
+# positive term is xg_on_target; expected_assists/key_passes were found
+# over-weighted against the base vote and cut.)
 PER90_WEIGHTS = {
-    "dribbles_won": 0.25,
+    "dribbles_won": 0.137,
     # The losing side of the contests we already reward. Without it a defender who
     # won 5 duels out of 6 scored exactly like one who won 5 out of 20: we were
     # treating a RATE as a count, and against the provider's own rating the rate
@@ -99,30 +111,30 @@ PER90_WEIGHTS = {
     # +0.20 on duels won lets the index respond to the rate while still keeping
     # volume, which a bare ratio would throw away — and a ratio over three duels
     # is noise anyway.
-    "duels_lost": -0.20,
+    "duels_lost": -0.163,
     # Being dribbled past is a subset of duels lost (verified: 0 violations in
     # 8659 appearances), so this is deliberate EXTRA weight, not new evidence —
     # getting beaten one-on-one is worse than losing a shoulder-to-shoulder. It is
     # also the individual defensive failure our features could not see at all,
     # which is what made "no recorded error" such a poor proxy for "no fault".
-    "dribbled_past": -0.15,
+    "dribbled_past": -0.031,
     # Also a subset of accuratePass (weight 0.02): the claim is not that these are
     # extra passes but that a pass played in the opponent half is worth more than
     # one played in your own. This is the progression signal the deleted
     # passes_into_box and progressive_passes were reaching for and never had.
-    "passes_opp_half": 0.05,
+    "passes_opp_half": 0.0,
     # Aerial duels, also a subset of the duel counts: the claim is that a header
     # contested is worth about half again a duel on the ground, because that is
     # where set pieces and crosses are decided. Same mirrored shape as the duels.
-    "aerials_won": 0.10,
-    "aerials_lost": -0.10,
+    "aerials_won": 0.009,
+    "aerials_lost": 0.0,
     # A tackle is a committed, deliberate intervention, unlike coming out of a
     # loose 50-50. Extra weight on the subset of duels won that way.
-    "tackles_won": 0.10,
+    "tackles_won": 0.091,
     # Being fouled is evidence an opponent had to stop you illegally.
-    "was_fouled": 0.05,
+    "was_fouled": 0.11,
     # An accurate long ball is progression, like a pass in the opponent half.
-    "long_balls_completed": 0.05,
+    "long_balls_completed": 0.039,
     # NOT here: crosses_completed. An accurate cross accrues to whoever crosses
     # OFTEN, and the crosses that actually create something are already counted by
     # expected_assists and key_passes — so it adds volume without end product. The
@@ -130,18 +142,18 @@ PER90_WEIGHTS = {
     # rating for every outfield role (DIF .623 -> .613, CEN .699 -> .695).
     # NOT here either: possession_lost, which CONTAINS dispossessed and
     # unsuccessfulTouch, both already weighted.
-    "touches_in_box": 0.10,
-    "duels_won": 0.20,
-    "interceptions": 0.30,
-    "ball_recoveries": 0.15,
-    "blocks": 0.30,
-    "clearances": 0.10,
-    "passes_completed": 0.02,
+    "touches_in_box": 0.031,
+    "duels_won": 0.048,
+    "interceptions": 0.095,
+    "ball_recoveries": 0.023,
+    "blocks": 0.104,
+    "clearances": 0.195,
+    "passes_completed": 0.044,
     "touches": 0.01,
-    "errors_bad_passes": -0.15,
-    "errors_dispossessed": -0.20,
-    "errors_miscontrols": -0.20,
-    "errors_fouls_committed": -0.15,
+    "errors_bad_passes": -0.081,
+    "errors_dispossessed": -0.05,
+    "errors_miscontrols": -0.053,
+    "errors_fouls_committed": -0.016,
 }
 
 WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / breakdowns
@@ -222,7 +234,7 @@ EXTRAP_FLOOR_MINUTES = 55
 # importing their collective punishment — the independent referee is what sets the
 # stop. The effect is deliberately modest: defenders end up at -0.09 against goals
 # conceded, not the -0.53 of the sources that punish the whole back line.
-DEF_EXPOSURE_WEIGHT = 1.0
+DEF_EXPOSURE_WEIGHT = 1.154
 
 # 'A voto' vs 'senza voto' (s.v.): classic fantacalcio rates a player only if he
 # played enough AND was involved enough; below that he gets NO vote (a bench player
