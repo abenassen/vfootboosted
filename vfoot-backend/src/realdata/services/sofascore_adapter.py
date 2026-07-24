@@ -517,14 +517,20 @@ def _ingest_match(
         substitute = _first(row, "substitute")
         is_starter = (not bool(substitute)) if substitute is not None else False
         team_ts = home_ts if side == SIDE_HOME else away_ts
+        raw_stats = {k: v for k, v in row.items()
+                     if isinstance(v, (int, float, bool))}
+        # Keep the coarse lineup position (F/M/D/G, a string) too: it disambiguates
+        # the role of players with too few minutes to cluster. See role_inference.
+        _pos = _first(row, "position")
+        if _pos:
+            raw_stats["position"] = str(_pos)
         MatchAppearance.objects.update_or_create(
             match=match, player=player,
             defaults={"team_season": team_ts, "side": side,
                       "minutes_played": minutes, "is_starter": is_starter,
                       "goals": int(_stat(row, "goals")),
                       "assists": int(_stat(row, "goalAssist")),
-                      "raw_stats": {k: v for k, v in row.items()
-                                    if isinstance(v, (int, float, bool))}},
+                      "raw_stats": raw_stats},
         )
         appearances += 1
 

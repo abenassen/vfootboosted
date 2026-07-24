@@ -30,7 +30,7 @@ class DefensiveExposureTests(TestCase):
 
     def _defender(self, name, col, row, minutes=90, starter=True):
         """A home defender whose touches sit in one zone of his own half."""
-        p = Player.objects.create(full_name=name, short_name=name, classic_role="DIF")
+        p = Player.objects.create(full_name=name, short_name=name, classic_role_seed="DIF")
         MatchAppearance.objects.create(match=self.match, player=p,
                                        team_season=self.home, side="home",
                                        minutes_played=minutes, is_starter=starter)

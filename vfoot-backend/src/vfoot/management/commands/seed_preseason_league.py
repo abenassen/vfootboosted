@@ -66,10 +66,10 @@ class Command(BaseCommand):
 
         by_role: dict[str, list] = {r: [] for r in SQUAD}
         spare: list = []
-        for p in Player.objects.filter(id__in=pool).values("id", "classic_role"):
+        for p in Player.objects.filter(id__in=pool).values("id", "classic_role_seed"):
             row = (p["id"], (values.get(p["id"]) or {}).get("estimated_value"))
-            if p["classic_role"] in by_role:
-                by_role[p["classic_role"]].append(row)
+            if p["classic_role_seed"] in by_role:
+                by_role[p["classic_role_seed"]].append(row)
             else:
                 spare.append(row)
         for r in by_role:

@@ -21,7 +21,7 @@ from django.utils import timezone
 from realdata.models import Player
 from vfoot.models import (
     LeagueDecision, LeagueDecisionVote, LeagueMembership, LeaguePlayerRole,
-    SeasonPlayerRole,
+    CurrentPlayerRole,
 )
 from vfoot.services.role_inference import TM_AMBIGUOUS, TM_DEFAULT
 
@@ -31,14 +31,21 @@ ROLE_OPTIONS = [{"value": r, "label": l} for r, l in ROLE_LABELS.items()
                 if r != Player.ROLE_GK]
 
 METHOD_REASON = {
-    SeasonPlayerRole.METHOD_DEFAULT:
+    CurrentPlayerRole.METHOD_DEFAULT:
         "Nessun dato sufficiente sulla stagione precedente: il ruolo e' un default "
         "posizionale, non una misura.",
-    SeasonPlayerRole.METHOD_UNKNOWN:
+    CurrentPlayerRole.METHOD_UNKNOWN:
         "Non abbiamo ne' dati di gioco ne' una posizione affidabile.",
-    SeasonPlayerRole.METHOD_TM:
+    CurrentPlayerRole.METHOD_TM:
         "Posizione del provider ambigua e nessun dato di gioco per scioglierla.",
 }
+
+
+# Below this Transfermarkt market value an ambiguous player is NOT worth an admin
+# decision: he barely features (young prospects, transient squad filler), so he
+# silently takes the system proposal (the SofaScore-derived role when he ever
+# lined up, the raw TM default otherwise). Only relevant players reach the queue.
+RELEVANCE_MIN_VALUE_EUR = 5_000_000
 
 
 def _roster_player_ids(league) -> set[int]:
@@ -50,9 +57,26 @@ def _roster_player_ids(league) -> set[int]:
                .values_list("player_id", flat=True))
 
 
-def players_needing_decision(league) -> set[int]:
-    """Roster players our criterion cannot settle: the provider position is
-    genuinely ambiguous AND there is no play data to resolve it.
+def _latest_market_values(player_ids) -> dict[int, int]:
+    """player_id -> most recent Transfermarkt value_eur (0 when we have none)."""
+    from realdata.models import PlayerMarketValue
+    out: dict[int, int] = {}
+    for pid, val in (PlayerMarketValue.objects
+                     .filter(player_id__in=player_ids)
+                     .order_by("player_id", "-as_of")
+                     .values_list("player_id", "value_eur")):
+        if pid not in out and val is not None:  # first row per player = latest as_of
+            out[pid] = val
+    return out
+
+
+def players_needing_decision(league, *,
+                             min_market_value: int = RELEVANCE_MIN_VALUE_EUR) -> set[int]:
+    """Roster players our criterion cannot settle AND who are worth arbitrating:
+    the provider position is genuinely ambiguous, there is no play data to resolve
+    it, and the player carries enough market value to matter. Everyone below the
+    value floor takes the system proposal automatically (see ``snapshot_league_
+    listone``), so the admin is not asked to rule on players who never play.
 
     Excludes anyone already SETTLED in this league — an open or answered
     decision, or a frozen role. A role, once settled, does not become an open
@@ -68,22 +92,20 @@ def players_needing_decision(league) -> set[int]:
     settled |= set(LeaguePlayerRole.objects.filter(league=league)
                    .values_list("player_id", flat=True))
     candidates = _roster_player_ids(league) - settled
-    unresolved = set(SeasonPlayerRole.objects
-                     .filter(competition_season_id=league.reference_season_id,
-                             player_id__in=candidates,
+    unresolved = set(CurrentPlayerRole.objects
+                     .filter(player_id__in=candidates,
                              tm_position__in=TM_AMBIGUOUS)
-                     .exclude(method=SeasonPlayerRole.METHOD_CATEGORY)
+                     .exclude(method=CurrentPlayerRole.METHOD_CATEGORY)
                      .values_list("player_id", flat=True))
-    # A player who arrived since the last inference run has NO SeasonPlayerRole at
-    # all. Without this he would be seeded straight from Player.classic_role —
+    # A player who arrived since the last inference run has NO CurrentPlayerRole at
+    # all. Without this he would be seeded straight from Player.classic_role_seed —
     # the raw provider map, under which every winger is a midfielder — silently
     # bypassing the criterion and the limbo alike. Ambiguous position and nothing
     # to resolve it with is exactly the case a human has to answer, whether the
     # inference has run since he signed or not.
     from realdata.models import PlayerTeamStint
-    known = set(SeasonPlayerRole.objects
-                .filter(competition_season_id=league.reference_season_id,
-                        player_id__in=candidates)
+    known = set(CurrentPlayerRole.objects
+                .filter(player_id__in=candidates)
                 .values_list("player_id", flat=True))
     unseen = set(PlayerTeamStint.objects
                  .filter(team_season__competition_season_id=league.reference_season_id,
@@ -91,11 +113,19 @@ def players_needing_decision(league) -> set[int]:
                          player_id__in=candidates - known,
                          tm_position__in=TM_AMBIGUOUS)
                  .values_list("player_id", flat=True))
-    return unresolved | unseen
+    flagged = unresolved | unseen
+    # Relevance gate: only players worth an admin's time reach the queue. The rest
+    # (barely-featuring youngsters and squad filler) auto-take the system proposal.
+    if min_market_value:
+        values = _latest_market_values(flagged)
+        flagged = {pid for pid in flagged
+                   if values.get(pid, 0) >= min_market_value}
+    return flagged
 
 
 @transaction.atomic
-def open_role_decisions(league, *, opened_by=None) -> int:
+def open_role_decisions(league, *, opened_by=None,
+                        min_market_value: int = RELEVANCE_MIN_VALUE_EUR) -> int:
     """Create the blocking decisions for this league's unresolvable players.
 
     Idempotent: a decision already open (or already resolved) for a player is left
@@ -109,12 +139,11 @@ def open_role_decisions(league, *, opened_by=None) -> int:
     holding someone who had a perfectly good role when he was paid for. A role,
     once settled in a league, does not become an open question again.
     """
-    needing = players_needing_decision(league)
+    needing = players_needing_decision(league, min_market_value=min_market_value)
     if not needing:
         return 0
-    inferred = {r.player_id: r for r in SeasonPlayerRole.objects
-                .filter(competition_season_id=league.reference_season_id,
-                        player_id__in=needing)}
+    inferred = {r.player_id: r for r in CurrentPlayerRole.objects
+                .filter(player_id__in=needing)}
     # Players who signed since the last inference run have no row yet: their
     # position comes from the roster stint and their proposal from the positional
     # default. Leaving them out would be worse than seeding them wrongly — they

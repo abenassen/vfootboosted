@@ -113,10 +113,11 @@ class PlayerRoleResult:
     @property
     def needs_decision(self) -> bool:
         """A human should settle this one: the position is genuinely ambiguous AND
-        we could not measure the player. Everything else has an answer we stand
-        behind (an unambiguous position needs no arbitration, and a measured
-        player has one)."""
-        return self.tm_position in TM_AMBIGUOUS and self.method != "category"
+        we have nothing to resolve it with. Everything else has an answer we stand
+        behind (an unambiguous position needs no arbitration, a measured player has
+        a category, and a player who lined up has a SofaScore position)."""
+        return (self.tm_position in TM_AMBIGUOUS
+                and self.method not in ("category", "sofa"))
 
 
 @dataclass
@@ -124,6 +125,7 @@ class InferenceReport:
     results: list = field(default_factory=list)
     categories: dict = field(default_factory=dict)   # name -> {size, role, profile}
     n_measured: int = 0
+    n_sofa: int = 0
     n_default: int = 0
     n_unknown: int = 0
 
@@ -131,6 +133,39 @@ class InferenceReport:
 # --------------------------------------------------------------------------
 # feature extraction
 # --------------------------------------------------------------------------
+
+# SofaScore's coarse lineup position -> classic role. A crude signal, used ONLY
+# for players we could not cluster (too few minutes) whose TM position is
+# ambiguous — it still beats the blind positional default (a winger SofaScore
+# lines up as a forward should not become a midfielder by convention).
+SOFA_POSITION_ROLE = {"G": Player.ROLE_GK, "D": Player.ROLE_DEF,
+                      "M": Player.ROLE_MID, "F": Player.ROLE_FWD}
+
+
+def sofascore_position_roles(data_season_id: int) -> dict[int, str]:
+    """player_id -> classic role from the MAJORITY of his SofaScore lineup
+    positions (F/M/D/G) over ``data_season_id``. Reads the position persisted in
+    ``MatchAppearance.raw_stats['position']``; empty for imports predating that
+    field (run ``manage.py backfill_sofascore_position``)."""
+    from collections import Counter, defaultdict
+    tally: dict[int, Counter] = defaultdict(Counter)
+    # Every appearance that carries a position counts, bench included: a player
+    # named in a lineup has a coarse position even at 0 minutes, and it still beats
+    # the raw TM default. Only a player who never appears at all falls through to
+    # the TM identification.
+    for pid, raw in (MatchAppearance.objects
+                     .filter(match__competition_season_id=data_season_id)
+                     .values_list("player_id", "raw_stats")):
+        pos = (raw or {}).get("position")
+        if pos:
+            tally[pid][pos] += 1
+    roles = {}
+    for pid, counter in tally.items():
+        role = SOFA_POSITION_ROLE.get(counter.most_common(1)[0][0])
+        if role:
+            roles[pid] = role
+    return roles
+
 
 def tm_positions(competition_season_id: int) -> dict[int, str]:
     """player_id -> the position his squad entry carried IN THAT SEASON.
@@ -326,7 +361,12 @@ def infer_roles(roster_season_id: int, data_season_id: int, *,
         name = by_label[int(labels[i])]
         measured[pid] = (name, float(conf[i]), _role_for_category(name))
 
-    everyone = set(tm_pos) | set(measured)
+    # Coarse SofaScore lineup position: too few minutes to cluster (< MIN_MINUTES)
+    # is NOT the same as no data — a player who lined up at all has a position, and
+    # for an ambiguous TM label it beats the blind positional default.
+    sofa_roles = sofascore_position_roles(competition_season_id)
+
+    everyone = set(tm_pos) | set(measured) | set(sofa_roles)
     for pid in sorted(everyone):
         pos = tm_pos.get(pid, "")
         if pid in measured:
@@ -335,6 +375,9 @@ def infer_roles(roster_season_id: int, data_season_id: int, *,
             report.n_measured += 1
         elif pos in TM_DETERMINISTIC:
             cat, c, role, method = "", 1.0, TM_DETERMINISTIC[pos], "tm"
+        elif pid in sofa_roles:
+            cat, c, role, method = "", 0.0, sofa_roles[pid], "sofa"
+            report.n_sofa += 1
         elif pos in TM_DEFAULT:
             cat, c, role, method = "", 0.0, TM_DEFAULT[pos], "default"
             report.n_default += 1

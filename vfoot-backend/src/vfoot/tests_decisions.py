@@ -5,12 +5,15 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from datetime import date
+
 from realdata.models import (
-    Competition, CompetitionSeason, Player, PlayerTeamStint, Season, Team, TeamSeason,
+    Competition, CompetitionSeason, Player, PlayerMarketValue, PlayerTeamStint,
+    Season, Team, TeamSeason,
 )
 from vfoot.models import (
     FantasyLeague, LeagueDecision, LeagueMembership, LeaguePlayerRole,
-    SeasonPlayerRole,
+    CurrentPlayerRole,
 )
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
@@ -34,20 +37,27 @@ class DecisionQueueTests(TestCase):
                         (self.member, LeagueMembership.ROLE_MANAGER)):
             LeagueMembership.objects.create(league=self.league, user=u, role=role)
 
-    def _player(self, name, *, method, tm_position="left winger", role="CEN"):
+    def _player(self, name, *, method, tm_position="left winger", role="CEN",
+                value_eur=10_000_000):
         p = Player.objects.create(full_name=name, short_name=name)
         PlayerTeamStint.objects.create(player=p, team_season=self.ts,
                                        tm_position=tm_position)
-        SeasonPlayerRole.objects.create(
-            competition_season=self.cs, player=p, method=method,
+        CurrentPlayerRole.objects.create(
+            player=p, method=method,
             tm_position=tm_position, role_data=role, role_mitigated=role)
+        # A market value at/above the relevance floor by default, so a test player
+        # reaches the decision queue; pass a low value_eur to exercise the gate.
+        if value_eur is not None:
+            PlayerMarketValue.objects.create(
+                player=p, provider="transfermarkt", value_eur=value_eur,
+                as_of=date(2026, 7, 1))
         return p
 
     def test_only_unmeasurable_ambiguous_players_become_decisions(self):
-        self._player("Misurato", method=SeasonPlayerRole.METHOD_CATEGORY)
-        self._player("Centrale", method=SeasonPlayerRole.METHOD_TM,
+        self._player("Misurato", method=CurrentPlayerRole.METHOD_CATEGORY)
+        self._player("Centrale", method=CurrentPlayerRole.METHOD_TM,
                      tm_position="centre-back", role="DIF")
-        newcomer = self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
+        newcomer = self._player("Esordiente", method=CurrentPlayerRole.METHOD_DEFAULT)
 
         self.assertEqual(open_role_decisions(self.league), 1)
         d = LeagueDecision.objects.get(league=self.league)
@@ -56,8 +66,23 @@ class DecisionQueueTests(TestCase):
         self.assertEqual(d.proposed, "CEN")
         self.assertIn("Nessun dato", d.rationale)
 
+    def test_only_relevant_players_reach_the_queue(self):
+        # Same ambiguous, unmeasurable position; only market value differs.
+        big = self._player("Titolare costoso", method=CurrentPlayerRole.METHOD_DEFAULT,
+                           value_eur=8_000_000)
+        self._player("Riserva economica", method=CurrentPlayerRole.METHOD_DEFAULT,
+                     value_eur=500_000)
+        self.assertEqual(open_role_decisions(self.league), 1)
+        d = LeagueDecision.objects.get(league=self.league)
+        self.assertEqual(d.player_id, big.id)  # the cheap one auto-took his proposal
+
+    def test_a_sofascore_resolved_player_still_needs_no_decision_when_cheap(self):
+        self._player("Ala economica", method=CurrentPlayerRole.METHOD_SOFA,
+                     role="ATT", value_eur=1_000_000)
+        self.assertEqual(open_role_decisions(self.league), 0)
+
     def test_reseeding_does_not_duplicate_or_reopen(self):
-        self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Esordiente", method=CurrentPlayerRole.METHOD_DEFAULT)
         self.assertEqual(open_role_decisions(self.league), 1)
         self.assertEqual(open_role_decisions(self.league), 0)
         resolve(LeagueDecision.objects.get(league=self.league), "ATT", user=self.admin)
@@ -68,9 +93,9 @@ class DecisionQueueTests(TestCase):
     def test_only_the_undecided_player_is_in_limbo(self):
         """Per PLAYER, not per league: a single January signing must not stop
         everyone else in the league from trading."""
-        ok = self._player("Deciso", method=SeasonPlayerRole.METHOD_TM,
+        ok = self._player("Deciso", method=CurrentPlayerRole.METHOD_TM,
                           tm_position="centre-back", role="DIF")
-        pending = self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
+        pending = self._player("Esordiente", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
 
         self.assertEqual(undecided_player_ids(self.league), {pending.id})
@@ -83,7 +108,7 @@ class DecisionQueueTests(TestCase):
         self.assertEqual(undecided_player_ids(self.league), set())
 
     def test_resolving_writes_the_frozen_league_role_as_an_admin_choice(self):
-        p = self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
+        p = self._player("Esordiente", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         resolve(LeagueDecision.objects.get(league=self.league), "ATT", user=self.admin)
         row = LeaguePlayerRole.objects.get(league=self.league, player=p)
@@ -91,7 +116,7 @@ class DecisionQueueTests(TestCase):
         self.assertEqual(row.source, LeaguePlayerRole.SOURCE_ADMIN)
 
     def test_an_outcome_outside_the_offered_options_is_refused(self):
-        self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Esordiente", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         d = LeagueDecision.objects.get(league=self.league)
         with self.assertRaises(ValueError):
@@ -102,8 +127,8 @@ class DecisionQueueTests(TestCase):
     def test_bulk_accept_skips_decisions_under_consultation(self):
         """Otherwise a bulk sign-off would quietly overrule a consultation the
         admin himself opened and members are still answering."""
-        self._player("Uno", method=SeasonPlayerRole.METHOD_DEFAULT)
-        self._player("Due", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Uno", method=CurrentPlayerRole.METHOD_DEFAULT)
+        self._player("Due", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         d = LeagueDecision.objects.filter(league=self.league).first()
         d.consultation_open = True
@@ -115,8 +140,8 @@ class DecisionQueueTests(TestCase):
         self.assertIsNotNone(market_blocked_reason(self.league))
 
     def test_members_only_see_and_are_notified_of_consultations(self):
-        self._player("Uno", method=SeasonPlayerRole.METHOD_DEFAULT)
-        self._player("Due", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Uno", method=CurrentPlayerRole.METHOD_DEFAULT)
+        self._player("Due", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         self.assertEqual(attention_count(self.league, self.member), 0)
 
@@ -130,7 +155,7 @@ class DecisionQueueTests(TestCase):
         self.assertEqual(d.tally()["ATT"], 1)
 
     def test_voting_needs_an_open_consultation_and_membership(self):
-        self._player("Uno", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Uno", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         d = LeagueDecision.objects.get(league=self.league)
         with self.assertRaises(ValueError):
@@ -142,7 +167,7 @@ class DecisionQueueTests(TestCase):
             cast_vote(d, outsider, "ATT")
 
     def test_votes_are_advisory_the_admin_may_decide_otherwise(self):
-        self._player("Uno", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Uno", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         d = LeagueDecision.objects.get(league=self.league)
         d.consultation_open = True
@@ -160,7 +185,7 @@ class DecisionApiTests(DecisionQueueTests):
 
     def test_the_market_opens_even_with_a_player_still_pending(self):
         """The league keeps working around him; only he waits."""
-        self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Esordiente", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         self.client.force_authenticate(user=self.admin)
         r = self.client.patch(f"/api/v1/leagues/{self.league.id}/market",
@@ -168,9 +193,9 @@ class DecisionApiTests(DecisionQueueTests):
         self.assertEqual(r.status_code, 200)
 
     def test_an_auction_refuses_the_undecided_and_names_them(self):
-        ok = self._player("Deciso", method=SeasonPlayerRole.METHOD_TM,
+        ok = self._player("Deciso", method=CurrentPlayerRole.METHOD_TM,
                           tm_position="centre-back", role="DIF")
-        pending = self._player("Esordiente", method=SeasonPlayerRole.METHOD_DEFAULT)
+        pending = self._player("Esordiente", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         self.client.force_authenticate(user=self.admin)
 
@@ -187,7 +212,7 @@ class DecisionApiTests(DecisionQueueTests):
         self.assertNotEqual(r.status_code, 400)
 
     def test_member_cannot_resolve_but_can_vote_once_consulted(self):
-        self._player("Uno", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Uno", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         d = LeagueDecision.objects.get(league=self.league)
         self.client.force_authenticate(user=self.member)
@@ -206,7 +231,7 @@ class DecisionApiTests(DecisionQueueTests):
         self.assertEqual(r.json()["my_vote"], "ATT")
 
     def test_list_hides_the_admin_backlog_from_members(self):
-        self._player("Uno", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Uno", method=CurrentPlayerRole.METHOD_DEFAULT)
         open_role_decisions(self.league)
         self.client.force_authenticate(user=self.member)
         body = self.client.get(f"/api/v1/leagues/{self.league.id}/decisions").json()
@@ -235,13 +260,13 @@ class LateArrivalTests(DecisionQueueTests):
         self.snapshot = snapshot_league_listone
 
     def test_a_late_arrival_is_seeded_and_can_block_the_market(self):
-        self._player("Titolare", method=SeasonPlayerRole.METHOD_TM,
+        self._player("Titolare", method=CurrentPlayerRole.METHOD_TM,
                      tm_position="centre-back", role="DIF")
         self.snapshot(self.league)
         self.assertIsNone(market_blocked_reason(self.league))
 
         # ...the January window opens and an unclassifiable winger arrives.
-        self._player("Arrivato a gennaio", method=SeasonPlayerRole.METHOD_DEFAULT)
+        self._player("Arrivato a gennaio", method=CurrentPlayerRole.METHOD_DEFAULT)
 
         self.client.force_authenticate(user=self.admin)
         r = self.client.post(f"/api/v1/leagues/{self.league.id}/decisions/refresh",
@@ -254,7 +279,7 @@ class LateArrivalTests(DecisionQueueTests):
         """Opening the market seeds whoever has arrived since — and opens for
         them, not against them: the market opens, only the newcomer waits."""
         self.snapshot(self.league)
-        late = self._player("Arrivato tardi", method=SeasonPlayerRole.METHOD_DEFAULT)
+        late = self._player("Arrivato tardi", method=CurrentPlayerRole.METHOD_DEFAULT)
         self.league.market_open = False
         self.league.save(update_fields=["market_open"])
 
@@ -269,7 +294,7 @@ class LateArrivalTests(DecisionQueueTests):
     def test_a_late_arrival_cannot_be_added_to_a_roster_undecided(self):
         """The gate that actually matters, since the market is open by default."""
         self.snapshot(self.league)
-        p = self._player("Arrivato tardi", method=SeasonPlayerRole.METHOD_DEFAULT)
+        p = self._player("Arrivato tardi", method=CurrentPlayerRole.METHOD_DEFAULT)
         self.snapshot(self.league)
         from vfoot.models import FantasyTeam
         team = FantasyTeam.objects.create(
@@ -289,16 +314,16 @@ class LateArrivalTests(DecisionQueueTests):
         back into limbo and leave a squad holding someone unusable.
 
         Reproduced before the fix: a player seeded automatically as ATT, whose
-        SeasonPlayerRole later stopped being measurable, acquired an open
+        CurrentPlayerRole later stopped being measurable, acquired an open
         decision while his frozen role sat there intact."""
-        p = self._player("Misurato", method=SeasonPlayerRole.METHOD_CATEGORY)
+        p = self._player("Misurato", method=CurrentPlayerRole.METHOD_CATEGORY)
         self.snapshot(self.league)
         self.assertEqual(LeagueDecision.objects.filter(league=self.league).count(), 0)
         frozen = LeaguePlayerRole.objects.get(league=self.league, player=p).role
 
         # the season roles are recomputed and he is no longer measurable
-        SeasonPlayerRole.objects.filter(player=p).update(
-            method=SeasonPlayerRole.METHOD_DEFAULT, category="", confidence=0.0)
+        CurrentPlayerRole.objects.filter(player=p).update(
+            method=CurrentPlayerRole.METHOD_DEFAULT, category="", confidence=0.0)
         self.snapshot(self.league)
 
         self.assertEqual(LeagueDecision.objects.filter(league=self.league).count(), 0)
@@ -307,7 +332,7 @@ class LateArrivalTests(DecisionQueueTests):
             LeaguePlayerRole.objects.get(league=self.league, player=p).role, frozen)
 
     def test_refreshing_never_disturbs_a_role_already_settled(self):
-        p = self._player("Deciso", method=SeasonPlayerRole.METHOD_DEFAULT)
+        p = self._player("Deciso", method=CurrentPlayerRole.METHOD_DEFAULT)
         self.snapshot(self.league)
         resolve(LeagueDecision.objects.get(league=self.league, player=p), "ATT",
                 user=self.admin)
@@ -322,18 +347,23 @@ class LateArrivalTests(DecisionQueueTests):
 class UnseenArrivalTests(DecisionQueueTests):
     """A player who signs between two runs of the role inference.
 
-    He has no SeasonPlayerRole at all, so the criterion has never looked at him.
-    Before this he was seeded straight from Player.classic_role — the raw
+    He has no CurrentPlayerRole at all, so the criterion has never looked at him.
+    Before this he was seeded straight from Player.classic_role_seed — the raw
     provider map, under which every winger is a midfielder — silently bypassing
     both the criterion and the limbo.
     """
 
-    def _stint_only(self, name, tm_position="left winger", classic_role="CEN"):
+    def _stint_only(self, name, tm_position="left winger", classic_role_seed="CEN",
+                    value_eur=10_000_000):
         from realdata.models import Player, PlayerTeamStint
         p = Player.objects.create(full_name=name, short_name=name,
-                                  classic_role=classic_role)
+                                  classic_role_seed=classic_role_seed)
         PlayerTeamStint.objects.create(player=p, team_season=self.ts,
                                        tm_position=tm_position)
+        if value_eur is not None:  # relevant enough to reach the queue by default
+            PlayerMarketValue.objects.create(
+                player=p, provider="transfermarkt", value_eur=value_eur,
+                as_of=date(2026, 7, 1))
         return p
 
     def test_an_ambiguous_arrival_goes_to_limbo_not_to_the_raw_provider_map(self):
@@ -353,7 +383,7 @@ class UnseenArrivalTests(DecisionQueueTests):
     def test_an_unambiguous_arrival_is_seeded_without_bothering_anyone(self):
         from vfoot.services.listone import snapshot_league_listone
         p = self._stint_only("Centrale Nuovo", tm_position="centre-back",
-                             classic_role="DIF")
+                             classic_role_seed="DIF")
         summary = snapshot_league_listone(self.league)
 
         self.assertEqual(summary["decisions_opened"], 0)
@@ -378,7 +408,7 @@ class DepartureReturnTests(DecisionQueueTests):
     def test_departed_and_returning_player_keeps_the_original_frozen_role(self):
         from vfoot.services.listone import snapshot_league_listone
         # 1. present when the listone opens, unambiguous -> frozen as DIF
-        p = self._player("Difensore", method=SeasonPlayerRole.METHOD_CATEGORY,
+        p = self._player("Difensore", method=CurrentPlayerRole.METHOD_CATEGORY,
                          tm_position="centre-back", role="DIF")
         snapshot_league_listone(self.league)
         self.assertEqual(
@@ -386,9 +416,9 @@ class DepartureReturnTests(DecisionQueueTests):
 
         # 2. he leaves for abroad; meanwhile Transfermarkt reclassifies him ATT
         self._set_end(p, True)
-        SeasonPlayerRole.objects.filter(player=p).update(
+        CurrentPlayerRole.objects.filter(player=p).update(
             role_data="ATT", role_mitigated="ATT")
-        Player.objects.filter(id=p.id).update(classic_role="ATT")
+        Player.objects.filter(id=p.id).update(classic_role_seed="ATT")
         snapshot_league_listone(self.league)          # a poll while he is gone
         # his frozen row is kept as history, untouched — not deleted, not changed
         self.assertEqual(
@@ -405,13 +435,13 @@ class DepartureReturnTests(DecisionQueueTests):
         """Rule 4: TM changing a player's role must not disturb leagues that already
         froze him; only leagues formed afterwards see the new role."""
         from vfoot.services.listone import snapshot_league_listone
-        p = self._player("Ambivalente", method=SeasonPlayerRole.METHOD_CATEGORY,
+        p = self._player("Ambivalente", method=CurrentPlayerRole.METHOD_CATEGORY,
                          tm_position="centre-back", role="DIF")
         snapshot_league_listone(self.league)
         # TM flips him to an attacker; a later poll must NOT move the frozen role
-        SeasonPlayerRole.objects.filter(player=p).update(
+        CurrentPlayerRole.objects.filter(player=p).update(
             role_data="ATT", role_mitigated="ATT")
-        Player.objects.filter(id=p.id).update(classic_role="ATT")
+        Player.objects.filter(id=p.id).update(classic_role_seed="ATT")
         snapshot_league_listone(self.league)
         self.assertEqual(
             LeaguePlayerRole.objects.get(league=self.league, player=p).role, "DIF")

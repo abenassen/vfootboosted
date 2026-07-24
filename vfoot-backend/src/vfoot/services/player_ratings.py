@@ -31,6 +31,7 @@ from vfoot.services.classic_rating import (
     _vote_from_index,
     index_for_role,
     is_rated,
+    current_role_map,
 )
 
 # Rated appearances at which current form and last season's value weigh the same.
@@ -72,8 +73,8 @@ def _compute_season_player_ratings(cs_id: int) -> dict:
     ref = get_reference(cs_id)
     totals = _per_match_player_totals(match_ids)
     minutes = _minutes_map(match_ids)
-    roles = dict(Player.objects.exclude(classic_role="")
-                 .values_list("id", "classic_role"))
+    # Canonical scoring role source (k-means disambiguated), NOT the raw TM seed.
+    roles = current_role_map(only_declared=True)
 
     agg: dict[int, list] = defaultdict(lambda: [0.0, 0])
     for (mid, pid), feats in totals.items():

@@ -319,11 +319,11 @@ class LeaguePlayerRole(models.Model):
     a player later plays elsewhere on the pitch. So roles are SNAPSHOTTED per league
     when its listone opens and are immune to later Transfermarkt role changes — a
     weekly TM re-import refreshes rosters/DOBs but must NOT mutate a started league's
-    roles. The global ``Player.classic_role`` (live from TM) only SEEDS this snapshot;
+    roles. The global ``Player.classic_role_seed`` (live from TM) only SEEDS this snapshot;
     admin overrides live here, scoped to the league.
     """
 
-    SOURCE_SEED = "seed"      # snapshotted from Player.classic_role (TM-derived)
+    SOURCE_SEED = "seed"      # snapshotted from Player.classic_role_seed (TM-derived)
     SOURCE_ADMIN = "admin"    # admin override within this league
     SOURCE_CHOICES = [(SOURCE_SEED, "Seed (TM)"), (SOURCE_ADMIN, "Admin override")]
 
@@ -342,14 +342,16 @@ class LeaguePlayerRole(models.Model):
         return f"{self.player_id}={self.role} @league {self.league_id}"
 
 
-class SeasonPlayerRole(models.Model):
-    """Roles computed for a SEASON's squads, before any league freezes them.
+class CurrentPlayerRole(models.Model):
+    """The CURRENT resolved classic role of each player — ONE row per player.
 
-    Sits between the raw providers and ``LeaguePlayerRole``: the inference is
-    expensive and season-wide (it clusters every player at once), while a league's
-    listone is a cheap snapshot of one of the two variants. Recomputing per league
-    would be wasteful and, worse, could hand two leagues different roles from the
-    same evidence.
+    Sits between the raw provider seed (``Player.classic_role_seed``) and a
+    league's frozen ``LeaguePlayerRole``: the k-means inference is expensive, so
+    it is computed once (``manage.py compute_classic_roles``) and cached here, and
+    every league created at that moment snapshots from the same evidence. There is
+    deliberately NO season dimension — a role is the current best estimate, not a
+    per-season record; recomputing (on a fresh scrape) overwrites it in place, and
+    leagues that need permanence freeze their own copy.
 
     Both variants are stored, not just the chosen one, so a league can be created
     under either policy without re-running anything — and so the two can be
@@ -358,15 +360,16 @@ class SeasonPlayerRole(models.Model):
 
     METHOD_CATEGORY = "category"   # measured: we know how he played
     METHOD_TM = "tm"               # provider position, unambiguous
-    METHOD_DEFAULT = "default"     # no data: positional fallback
+    METHOD_SOFA = "sofa"           # too few minutes to cluster, but SofaScore's
+                                   # coarse lineup position (F/M/D) disambiguates
+    METHOD_DEFAULT = "default"     # no data at all: positional fallback
     METHOD_UNKNOWN = "unknown"
     METHOD_CHOICES = [(METHOD_CATEGORY, "Categoria misurata"), (METHOD_TM, "Posizione TM"),
+                      (METHOD_SOFA, "Posizione SofaScore"),
                       (METHOD_DEFAULT, "Default posizionale"), (METHOD_UNKNOWN, "Ignoto")]
 
-    competition_season = models.ForeignKey(CompetitionSeason, on_delete=models.CASCADE,
-                                           related_name="player_roles")
-    player = models.ForeignKey(Player, on_delete=models.CASCADE,
-                               related_name="season_roles")
+    player = models.OneToOneField(Player, on_delete=models.CASCADE,
+                                  related_name="current_role")
     # Human-readable playing style ("ala offensiva"), empty when unmeasured.
     category = models.CharField(max_length=40, blank=True, default="")
     # How firmly he belongs to that category (co-association with its core).
@@ -380,14 +383,13 @@ class SeasonPlayerRole(models.Model):
     computed_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        unique_together = [("competition_season", "player")]
-        indexes = [models.Index(fields=["competition_season", "method"])]
+        indexes = [models.Index(fields=["method"])]
 
     def role_for(self, mode: str) -> str:
         return self.role_data if mode == "data" else self.role_mitigated
 
     def __str__(self) -> str:
-        return f"{self.player_id}@{self.competition_season_id}: {self.role_mitigated}"
+        return f"player {self.player_id}: {self.role_mitigated}"
 
 
 class CompetitionTeam(models.Model):

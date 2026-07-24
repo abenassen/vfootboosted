@@ -7,7 +7,7 @@ that has finished, not the one about to be played.
     python manage.py compute_classic_roles --season 3 --data-season 2
     python manage.py compute_classic_roles --season 3 --data-season 2 --dry-run
 
-Writes ``SeasonPlayerRole`` (both the mitigated and the pure-data variant, so a
+Writes ``CurrentPlayerRole`` (both the mitigated and the pure-data variant, so a
 league can pick either without a recompute). It does NOT touch any league: a
 started listone is frozen and re-running this must never disturb it.
 """
@@ -17,7 +17,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from realdata.models import CompetitionSeason, Player
-from vfoot.models import SeasonPlayerRole
+from vfoot.models import CurrentPlayerRole
 from vfoot.services.role_inference import (
     LOW_CONFIDENCE, infer_roles, tm_positions,
 )
@@ -91,11 +91,13 @@ class Command(BaseCommand):
         if o["dry_run"]:
             self.stdout.write("\n[dry-run] nulla e' stato scritto")
             return
+        # CurrentPlayerRole is "the current role", one row per player and no season
+        # dimension: a recompute overwrites the whole table in place.
         with transaction.atomic():
-            SeasonPlayerRole.objects.filter(competition_season_id=o["season"]).delete()
-            SeasonPlayerRole.objects.bulk_create([
-                SeasonPlayerRole(
-                    competition_season_id=o["season"], player_id=r.player_id,
+            CurrentPlayerRole.objects.all().delete()
+            CurrentPlayerRole.objects.bulk_create([
+                CurrentPlayerRole(
+                    player_id=r.player_id,
                     category=r.category, confidence=r.confidence,
                     role_data=r.role_data, role_mitigated=r.role_mitigated,
                     method=r.method, tm_position=r.tm_position)

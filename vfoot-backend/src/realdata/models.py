@@ -160,11 +160,16 @@ class Player(models.Model):
     # channel (goals-prevented), never via zone vectors.
     is_goalkeeper = models.BooleanField(default=False)
 
-    # Canonical fantasy role for "classic" mode leagues: POR/DIF/CEN/ATT. Stored
-    # on the player (not provider-namespaced) because the formation validator and
-    # scorer need ONE resolved role, and the fantasy role is a convention — Lega
-    # role tables diverge from real positions (wingers especially) and admins may
-    # override — not a pure provider fact. POR is kept in sync with is_goalkeeper.
+    # RAW PROVIDER SEED, not a resolved role. This is the Transfermarkt position
+    # mapped to POR/DIF/CEN/ATT — under which every winger is a CEN by convention
+    # (Leão included) — optionally corrected by an admin (see role_source). It is a
+    # SEED for the resolved roles, and must NEVER be read to SCORE the voto puro:
+    #   * resolved SCORING role  -> CurrentPlayerRole via
+    #     `classic_rating.current_role_map()` (TM + k-means + SofaScore fallback);
+    #   * a league's FROZEN role  -> LeaguePlayerRole (authority inside a league).
+    # Kept on the player (not provider-namespaced) only as the single seed those
+    # layers snapshot from. POR is kept in sync with is_goalkeeper. See AGENTS.md
+    # "Classic Role Resolution".
     ROLE_GK = "POR"
     ROLE_DEF = "DIF"
     ROLE_MID = "CEN"
@@ -175,11 +180,17 @@ class Player(models.Model):
         (ROLE_MID, "Centrocampista"),
         (ROLE_FWD, "Attaccante"),
     ]
-    classic_role = models.CharField(
-        max_length=3, choices=CLASSIC_ROLE_CHOICES, blank=True, default="")
+    # NB: the name predates the resolution layers; it is a provider seed despite
+    # reading like a settled role. help_text spells that out in the admin/API.
+    classic_role_seed = models.CharField(
+        max_length=3, choices=CLASSIC_ROLE_CHOICES, blank=True, default="",
+        help_text="Raw Transfermarkt provider seed (winger→CEN by convention), "
+                  "NOT the resolved scoring role — see CurrentPlayerRole / "
+                  "current_role_map().")
 
-    # Where classic_role came from. "admin" overrides are preserved across TM
-    # re-imports (same non-clobber rule as date_of_birth corrections).
+    # Where classic_role_seed came from: the raw provider map, or an "admin" override
+    # (preserved across TM re-imports, same non-clobber rule as date_of_birth
+    # corrections). Either way it stays a SEED, never the scoring role.
     ROLE_SOURCE_TM = "transfermarkt"
     ROLE_SOURCE_ADMIN = "admin"
     role_source = models.CharField(max_length=16, blank=True, default="")

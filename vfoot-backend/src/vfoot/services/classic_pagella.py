@@ -33,7 +33,7 @@ from realdata.models import (
 )
 from vfoot.models import LeaguePlayerRole
 from vfoot.services.classic_rating import (
-    build_reference, defensive_exposure, voto_puro_for_match,
+    build_reference, defensive_exposure, current_role_map, voto_puro_for_match,
     _minutes_map, _per_match_player_totals,
 )
 from vfoot.services.vote_explanation import explain, role_average_terms, to_sentence
@@ -111,12 +111,13 @@ def compute_role_averages(competition_season_id: int) -> dict:
     totals = _per_match_player_totals(match_ids)
     minutes = _minutes_map(match_ids)
     exposure = defensive_exposure(match_ids, minutes)
-    roles = dict(Player.objects.exclude(classic_role="")
-                 .values_list("id", "classic_role"))
+    # SAME disambiguated role source as build_reference, so the explanation's
+    # per-role means line up with the reference the vote is z-scored against.
+    from vfoot.services.classic_rating import MIN_MINUTES_REFERENCE, is_rated
+    roles = current_role_map(only_declared=True)
     # SAME filter as build_reference (>= MIN_MINUTES_REFERENCE and rated): the
     # explanation subtracts this mean, the vote subtracts build_reference's, and
     # if the two sets differ the breakdown cannot sum to the vote.
-    from vfoot.services.classic_rating import MIN_MINUTES_REFERENCE, is_rated
     rows = [(roles[pid], feats, minutes.get((mid, pid), 0),
              exposure.get((mid, pid), 0.0))
             for (mid, pid), feats in totals.items()
@@ -146,7 +147,7 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
     card_malus = c.get("malus", 0.0)
     row = vp_rows.get(pid)
     # Prefer the role the rating layer actually SCORED him as: when the Player row
-    # carries no classic_role it may have inferred one (a keeper gives himself
+    # carries no classic_role_seed it may have inferred one (a keeper gives himself
     # away through his gk_* features). Falling straight back to "CEN" used to put
     # a keeper in midfield and cost him the -1/goal conceded.
     role = declared_role or (row or {}).get("role") or ""
@@ -218,7 +219,7 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
 
     Pass ``league`` whenever the pagella is read INSIDE a league: classic roles are
     fixed when that league's listone opens and never move again, so its frozen
-    LeaguePlayerRole is the authority. ``Player.classic_role`` is a live seed that
+    LeaguePlayerRole is the authority. ``Player.classic_role_seed`` is a live seed that
     the next Transfermarkt import can rewrite — reading it here would let a league's
     match detail contradict its own listone. The league is tied to one reference
     season, so its snapshot already carries the season: no per-season role needed.
@@ -235,11 +236,13 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
     cards = _cards_for_match(match.id)
     apps = list(MatchAppearance.objects.filter(match=match).select_related("player"))
     pids = [a.player_id for a in apps]
-    roles = dict(Player.objects.filter(id__in=pids)
-                 .values_list("id", "classic_role"))
+    # Base: the season's disambiguated role (same source the voto puro was scored
+    # against), so a league-less match detail agrees with the vote it shows.
+    roles = {pid: r for pid, r in
+             current_role_map().items() if pid in pids}
     if league is not None:
         # Frozen roles win. Players with no frozen row (e.g. someone sold before
-        # the listone was drawn up) keep the global seed as a fallback.
+        # the listone was drawn up) keep the season role as a fallback.
         roles.update(LeaguePlayerRole.objects
                      .filter(league=league, player_id__in=pids)
                      .values_list("player_id", "role"))

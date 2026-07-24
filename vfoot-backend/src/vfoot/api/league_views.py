@@ -3153,7 +3153,7 @@ class LeagueTeamLineupView(APIView):
                 for lpr in LeaguePlayerRole.objects.filter(league=league, player_id__in=player_ids)
             }
             seed_roles = dict(
-                Player.objects.filter(id__in=player_ids).exclude(classic_role="").values_list("id", "classic_role")
+                Player.objects.filter(id__in=player_ids).exclude(classic_role_seed="").values_list("id", "classic_role_seed")
             )
 
         # Real club each player belongs to, in the season the stats come from — so a
@@ -3284,7 +3284,7 @@ class LeagueTeamLineupSaveView(APIView):
                 for lpr in LeaguePlayerRole.objects.filter(league=league, player_id__in=starter_ids)
             }
             seed = dict(
-                Player.objects.filter(id__in=starter_ids).exclude(classic_role="").values_list("id", "classic_role")
+                Player.objects.filter(id__in=starter_ids).exclude(classic_role_seed="").values_list("id", "classic_role_seed")
             )
             starter_roles = [
                 frozen.get(pid) or _CLASSIC_ROLE_TO_LINEUP.get(seed.get(pid, ""), "MID")
@@ -3492,7 +3492,7 @@ class LeagueChampionshipPlayersView(APIView):
         values, prev_cs, fit = player_values(cs, market)
 
         players = (Player.objects.filter(id__in=pool)
-                   .values("id", "full_name", "short_name", "classic_role"))
+                   .values("id", "full_name", "short_name", "classic_role_seed"))
         # Players whose role is still an open question: shown, but marked, so
         # nobody plans an auction around someone they cannot actually buy.
         undecided = undecided_player_ids(league)
@@ -3504,7 +3504,7 @@ class LeagueChampionshipPlayersView(APIView):
                 "market_value": market.get(pid),
                 "player_id": pid,
                 "name": p["short_name"] or p["full_name"] or str(pid),
-                "role": lpr.get(pid) or p["classic_role"] or "",
+                "role": lpr.get(pid) or p["classic_role_seed"] or "",
                 "team": team_by_player.get(pid),
                 "owned": pid in owner_by_player,
                 "owner": owner_by_player.get(pid),

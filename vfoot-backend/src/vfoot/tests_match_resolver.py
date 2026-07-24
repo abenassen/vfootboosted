@@ -34,7 +34,7 @@ class MatchResolverTests(TestCase):
         self.tsa = TeamSeason.objects.create(competition_season=self.cs, team=a)
         self.tsb = TeamSeason.objects.create(competition_season=self.cs, team=b)
         self.player = Player.objects.create(full_name="P One", short_name="P. One",
-                                            classic_role="DIF")
+                                            classic_role_seed="DIF")
         PlayerTeamStint.objects.create(player=self.player, team_season=self.tsa,
                                        end_date=None)
         # empty reference: no features -> outfield players are unrated (sv), which
@@ -102,7 +102,7 @@ class MatchResolverTests(TestCase):
         self.assertEqual(o["status"], SENZA_VOTO)
 
     def test_no_stint_is_no_match(self):
-        other = Player.objects.create(full_name="No Club", classic_role="ATT")
+        other = Player.objects.create(full_name="No Club", classic_role_seed="ATT")
         self._match(1, Match.STATUS_FINISHED, True, "m1")
         self.assertEqual(resolve_player(other.id, self.cs.id, 1, self.ref)["status"],
                          NO_MATCH)

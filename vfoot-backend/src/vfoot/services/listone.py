@@ -29,7 +29,7 @@ the listone" admin action) while still preserving admin overrides.
 from __future__ import annotations
 
 from realdata.models import Player, PlayerTeamStint
-from vfoot.models import LeaguePlayerRole, SeasonPlayerRole
+from vfoot.models import LeaguePlayerRole, CurrentPlayerRole
 
 
 def _open_role_decisions(league):   # thin indirection, keeps the import lazy
@@ -57,10 +57,10 @@ def snapshot_league_listone(league, *, reset: bool = False) -> dict:
     cs_id = league.reference_season_id
     # Seed from the season-wide inference under THIS league's policy (mitigated =
     # an unambiguous provider position wins; data = the measured playing style
-    # decides). Player.classic_role stays a last-resort fallback for players the
+    # decides). Player.classic_role_seed stays a last-resort fallback for players the
     # inference never saw, so a league is never left with a hole.
     seeded = {r.player_id: r.role_for(league.role_mode)
-              for r in SeasonPlayerRole.objects.filter(competition_season_id=cs_id)
+              for r in CurrentPlayerRole.objects.all()
               if r.role_for(league.role_mode)}
     # Players the inference cannot settle get NO seeded role at all: they are in
     # limbo until a human answers, and a frozen row would be an answer. Keeping
@@ -80,7 +80,7 @@ def snapshot_league_listone(league, *, reset: bool = False) -> dict:
                "awaiting_decision": 0}
 
     for p in players:
-        seed = seeded.get(p.id) or p.classic_role
+        seed = seeded.get(p.id) or p.classic_role_seed
         row = existing.get(p.id)
         if row is None:
             if p.id in undecidable:

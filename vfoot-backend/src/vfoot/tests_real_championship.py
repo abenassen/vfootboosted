@@ -88,9 +88,9 @@ class RealChampionshipTests(TestCase):
         self.away_ts = TeamSeason.objects.create(competition_season=self.cs, team=away)
 
         self.gk = Player.objects.create(full_name="Keeper One", short_name="K. One",
-                                        classic_role="POR")
+                                        classic_role_seed="POR")
         self.df = Player.objects.create(full_name="Def One", short_name="D. One",
-                                        classic_role="DIF")
+                                        classic_role_seed="DIF")
 
         self.match = Match.objects.create(
             competition_season=self.cs, matchday=1, home_team=self.home_ts,
@@ -149,7 +149,7 @@ class RealChampionshipTests(TestCase):
         """A hole in our squad data must never surface as 'senza voto'.
 
         Regression: players the Transfermarkt import failed to match had an empty
-        classic_role, the rating layer skipped them, and the pagella rendered that
+        classic_role_seed, the rating layer skipped them, and the pagella rendered that
         as s.v. — so a goalscorer who played an hour was shown as unrated, and
         three whole promoted sides were wiped out."""
         nameless = Player.objects.create(full_name="No Role", short_name="N. Role")
@@ -191,7 +191,7 @@ class RealChampionshipTests(TestCase):
         to a player who was on the pitch for most of the match it produced absurd
         s.v. — including four full 90' appearances in a single season."""
         quiet = Player.objects.create(full_name="Quiet One", short_name="Q. One",
-                                      classic_role="ATT")
+                                      classic_role_seed="ATT")
         MatchAppearance.objects.create(match=self.match, player=quiet,
                                        team_season=self.home_ts, side="home",
                                        minutes_played=90, is_starter=True)
@@ -206,7 +206,7 @@ class RealChampionshipTests(TestCase):
     def test_short_uninvolved_cameo_is_still_senza_voto(self):
         """The counterpart: the touch gate must keep working where it belongs."""
         cameo = Player.objects.create(full_name="Cameo One", short_name="C. One",
-                                      classic_role="ATT")
+                                      classic_role_seed="ATT")
         MatchAppearance.objects.create(match=self.match, player=cameo,
                                        team_season=self.home_ts, side="home",
                                        minutes_played=18, is_starter=False)
@@ -227,7 +227,7 @@ class RealChampionshipTests(TestCase):
 
     def test_league_frozen_role_wins_over_the_live_seed(self):
         """A league fixes its roles when its listone opens; a later Transfermarkt
-        re-import may move Player.classic_role, but the league's pagella must keep
+        re-import may move Player.classic_role_seed, but the league's pagella must keep
         agreeing with the league's own listone."""
         league, _ = self._league()
         LeaguePlayerRole.objects.create(league=league, player=self.df, role="ATT",

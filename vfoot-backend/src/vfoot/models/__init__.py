@@ -20,7 +20,7 @@ from vfoot.models.fantasy import (
     FantasyTeam,
     LeagueMembership,
     LeaguePlayerRole,
-    SeasonPlayerRole,
+    CurrentPlayerRole,
     OfficeOverride,
 )
 from vfoot.models.decisions import LeagueDecision, LeagueDecisionVote
@@ -52,7 +52,7 @@ __all__ = [
     "HeatmapGrid",
     "LeagueMembership",
     "LeaguePlayerRole",
-    "SeasonPlayerRole",
+    "CurrentPlayerRole",
     "LeagueDecision",
     "LeagueDecisionVote",
     "OfficeOverride",

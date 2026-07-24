@@ -149,10 +149,41 @@ logic should live in parallel.
 
 ------------------------------------------------------------------------
 
+## Classic Role Resolution (voto puro / listone)
+
+A player's classic role (POR/DIF/CEN/ATT) has THREE layers. Do not confuse them —
+mixing them up silently mis-scores wide attackers (a `left winger` Transfermarkt
+files as a midfielder is really a forward).
+
+1.  **`Player.classic_role_seed`** — the raw Transfermarkt seed. Wingers map to CEN by
+    convention. This SEEDS the layers below; it must **never** be read to score.
+2.  **`CurrentPlayerRole`** (ONE row per player, no season dimension,
+    `manage.py compute_classic_roles`) — TM + a k-means style inference over 15
+    measures that resolves ambiguous positions. A player with too few minutes to
+    cluster (< 600) but who lined up at all is disambiguated by his **coarse
+    SofaScore lineup position** (F/M/D, stored in `MatchAppearance.raw_stats
+    ['position']`, method `sofa`); only a player who never appears falls back to
+    the raw TM default. It is the CURRENT best estimate — a recompute (fresh
+    scrape) overwrites it in place, there is no per-season history. This is **THE
+    role for scoring** — reach it via `classic_rating.current_role_map()`, used by
+    `build_reference`, `voto_puro_for_match`, `compute_role_averages`,
+    `player_ratings`, and `classic_fit_weights`. (Calibrate a season's reference
+    while the current roles still reflect that season's play, i.e. at season end.)
+3.  **`LeaguePlayerRole`** — a league's frozen snapshot of layer 2 at listone time.
+    Authority INSIDE that league (pagella display, lineup legality); it overrides
+    layer 2 for that league only.
+
+Listone arbitration: only players whose position is genuinely ambiguous AND whose
+Transfermarkt market value clears `league_decisions.RELEVANCE_MIN_VALUE_EUR`
+(€5M) reach the admin's decision queue; everyone below auto-takes the layer-2
+proposal (no market value ⇒ obscure ⇒ auto-default). See `league_decisions.py`.
+
 ## Invariants (Hard Constraints)
 
 Agents must NEVER:
 
+-   Read `Player.classic_role_seed` to SCORE the voto puro — always go through
+    `current_role_map()` (see Classic Role Resolution above).
 -   Reintroduce rigid positional roles in the new engine.
 -   Hardcode tactical bonuses into individual players.
 -   Break zone normalization.

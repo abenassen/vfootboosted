@@ -250,27 +250,66 @@ MIN_TOUCHES_RATED = 12
 ALWAYS_RATED_MINUTES = 20
 
 # Reference bucket for a player we could rate but whose ROLE we don't know (his
-# Player row has no classic_role because the squad import never matched him).
+# Player row has no classic_role_seed because the squad import never matched him).
 # See ``resolve_role``: s.v. is a statement about the PLAYER'S MATCH, so a hole in
 # our master data must never be dressed up as one.
 POOLED_OUTFIELD = "_OUTFIELD"
 
 
-def resolve_role(classic_role: str, totals: dict, is_goalkeeper: bool) -> tuple[str, bool]:
+def resolve_role(classic_role_seed: str, totals: dict, is_goalkeeper: bool) -> tuple[str, bool]:
     """(role, role_is_known) for scoring purposes.
 
-    Returns the declared classic_role when we have one. When we don't, we do NOT
+    Returns the declared classic_role_seed when we have one. When we don't, we do NOT
     give up: a keeper is identifiable from his own match data (only keepers
     produce ``gk_*`` features), and any other player can still be scored on the
     outfield index against the pooled outfield reference. The second element says
     whether the role is declared, so callers can flag an estimate as such instead
     of presenting it as fact.
     """
-    if classic_role:
-        return classic_role, True
+    if classic_role_seed:
+        return classic_role_seed, True
     if is_goalkeeper or any(k.startswith("gk_") for k in totals):
         return Player.ROLE_GK, False
     return "", False
+
+
+def current_role_map(*, only_declared: bool = False) -> dict:
+    """pid -> classic role. THE canonical role source for scoring the voto puro.
+
+    Any code that computes the voto puro / its reference MUST get roles from here,
+    never from ``Player.classic_role_seed`` directly. That raw field is only
+    Transfermarkt's provider seed, under which every winger is a midfielder by
+    convention — reading it for scoring pools wide attackers (Leão, Berardi,
+    Neres...) into the CEN reference and z-scores them against the wrong peers.
+    This helper instead returns the DISAMBIGUATED current role from the k-means
+    style inference (``CurrentPlayerRole.role_mitigated``, written by ``manage.py
+    compute_classic_roles``), so Leão is scored as the 'punta d'area' he plays as.
+    It falls back to the raw seed only for players the inference never covered.
+
+    Role hierarchy across the app (do not confuse the layers):
+      * ``Player.classic_role_seed`` – raw TM seed; SEEDS the rest, never scores.
+      * ``CurrentPlayerRole``        – TM + k-means disambiguation, one row per
+                                       player, recomputed on a fresh scrape; THIS,
+                                       for scoring. No season dimension.
+      * ``LeaguePlayerRole``         – a league's frozen snapshot; authority INSIDE
+                                       a league (overrides this for that league's
+                                       pagella display / lineup legality).
+
+    NB: calibrate a season's reference while the current roles still reflect that
+    season's play (i.e. at season end), since there is no per-season role history.
+
+    With ``only_declared`` empty roles are dropped, which is what the reference-
+    population builders want (a role has to be known to bucket a sample).
+    """
+    from vfoot.models import CurrentPlayerRole
+    roles = dict(Player.objects.values_list("id", "classic_role_seed"))
+    for pid, role in (CurrentPlayerRole.objects
+                      .values_list("player_id", "role_mitigated")):
+        if role:
+            roles[pid] = role
+    if only_declared:
+        return {pid: r for pid, r in roles.items() if r}
+    return roles
 
 
 def is_rated(minutes: int, totals: dict) -> bool:
@@ -472,8 +511,7 @@ def build_reference(competition_season_id: int, *, pooled_std: bool = False) -> 
     totals = _per_match_player_totals(match_ids)
     minutes = _minutes_map(match_ids)
     exposure = defensive_exposure(match_ids, minutes)
-    roles = dict(Player.objects.exclude(classic_role="")
-                 .values_list("id", "classic_role"))
+    roles = current_role_map(only_declared=True)
 
     samples = defaultdict(list)  # role -> [performance index]
     for (mid, pid), feats in totals.items():
@@ -547,7 +585,7 @@ def voto_puro_for_match(match, reference: dict,
     totals = _per_match_player_totals([match.id])
     minutes = _minutes_map([match.id])
     exposure = defensive_exposure([match.id], minutes)
-    roles = dict(Player.objects.values_list("id", "classic_role"))
+    roles = current_role_map()
     keepers = dict(Player.objects.values_list("id", "is_goalkeeper"))
     names = dict(Player.objects.values_list("id", "short_name"))
     full = dict(Player.objects.values_list("id", "full_name"))

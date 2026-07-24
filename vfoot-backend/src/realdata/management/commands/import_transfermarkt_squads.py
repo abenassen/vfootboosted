@@ -337,7 +337,7 @@ class Command(BaseCommand):
                         player = Player(external_source=PROVIDER_TM, external_id=tm_id,
                                         full_name=tp_name, short_name="",
                                         date_of_birth=tp_dob, is_goalkeeper=is_gk,
-                                        classic_role=tm_role,
+                                        classic_role_seed=tm_role,
                                         role_source=(Player.ROLE_SOURCE_TM if tm_role else ""))
                         if not dry:
                             player.save()
@@ -372,11 +372,11 @@ class Command(BaseCommand):
                     # override (role_source == "admin"). POR stays consistent with
                     # is_goalkeeper since both derive from the same TM position.
                     if (tm_role and player.role_source != Player.ROLE_SOURCE_ADMIN
-                            and player.classic_role != tm_role):
-                        player.classic_role = tm_role
+                            and player.classic_role_seed != tm_role):
+                        player.classic_role_seed = tm_role
                         player.role_source = Player.ROLE_SOURCE_TM
                         if not dry:
-                            player.save(update_fields=["classic_role", "role_source"])
+                            player.save(update_fields=["classic_role_seed", "role_source"])
                         stats["role_set"] += 1
 
                     # Market value: provenanced external datum (provider + as_of),

@@ -133,7 +133,7 @@ class Command(BaseCommand):
                                                home_goals__isnull=False, away_goals__isnull=False)}
         md_by_match = dict(Match.objects.filter(competition_season_id=cs_id)
                            .values_list("id", "matchday"))
-        gk_ids = set(Player.objects.filter(classic_role="POR").values_list("id", flat=True))
+        gk_ids = set(Player.objects.filter(classic_role_seed="POR").values_list("id", flat=True))
         out, played = {}, set()
         for mid, pid, side, mins in MatchAppearance.objects.filter(
             player_id__in=gk_ids, match__competition_season_id=cs_id
@@ -284,13 +284,13 @@ class Command(BaseCommand):
                     .values("player_id").annotate(n=Count("id"))
                     .values_list("player_id", "n"))
         by_role: dict[str, list[dict]] = defaultdict(list)
-        for p in Player.objects.exclude(classic_role="").values(
-                "id", "classic_role", "short_name", "full_name"):
+        for p in Player.objects.exclude(classic_role_seed="").values(
+                "id", "classic_role_seed", "short_name", "full_name"):
             n = apps.get(p["id"], 0)
             if n < min_app:
                 continue
-            by_role[p["classic_role"]].append(
-                {"player_id": p["id"], "role": p["classic_role"],
+            by_role[p["classic_role_seed"]].append(
+                {"player_id": p["id"], "role": p["classic_role_seed"],
                  "name": p["short_name"] or p["full_name"] or str(p["id"]),
                  "apps": n, "price": max(1, n // 2)})
         for role, need in SQUAD.items():
