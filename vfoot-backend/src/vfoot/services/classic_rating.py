@@ -173,6 +173,18 @@ VOTE_CENTER = 6.0
 VOTE_SPREAD_K = 0.8        # vote points per 1 std of within-role index
 VOTE_MIN, VOTE_MAX = 3.0, 10.0
 MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distribution
+
+# --- Result-mitigation (v2 stage 2) ------------------------------------------
+# A mild nudge toward the team's result WHILE THE PLAYER WAS ON THE PITCH, acting
+# ONLY on DIVERGENT cases: a high vote in a defeat comes down, a low vote in a win
+# goes up — always TOWARD 6, never away. It deliberately leaves aligned votes alone
+# (a high vote in a win is untouched), which is what a symmetric additive term got
+# wrong: it further exalted a De Ketelaere already high in a win. Calibrated by the
+# SofaScore-merit correlation, not the result-based Statistico (which would be
+# circular). Outfield only — the GK channel already reflects the result through
+# goals-prevented. gd_on is the on-pitch goal difference (see on_pitch_goal_difference).
+RESULT_MITIGATION_K = 0.15
+RESULT_MITIGATION_CAP = 1.0
 # Bayesian shrinkage strength: a per-90 rate from few minutes is noisy and fat-tailed
 # low-count features (xG, key passes) explode when extrapolated to 90'. The evidence
 # weight minutes/(minutes+this) pulls short cameos toward the role prior (vote 6); a
@@ -525,6 +537,45 @@ def defensive_exposure(match_ids, minutes: dict) -> dict:
     return out
 
 
+def on_pitch_goal_difference(match_ids, minutes: dict) -> dict:
+    """{(match_id, player_id): goals_for - goals_against WHILE he was on the pitch}.
+
+    The mitigation nudges a vote toward the team's fortunes, but only for the
+    minutes the player actually shared: a defender must not be tempered for goals
+    conceded after he came off, nor a sub credited for a lead built before he came
+    on. Goals are timed from the shot map (is_goal); presence from the same on-pitch
+    windows the exposure uses. Only non-zero differences are returned."""
+    goals: dict[int, list] = defaultdict(list)  # match_id -> [(minute, side)]
+    for mid, minute, side in (MatchShot.objects
+                              .filter(match_id__in=match_ids, is_goal=True,
+                                      provider=PROVIDER_SOFASCORE)
+                              .values_list("match_id", "minute", "team_side")):
+        goals[mid].append((minute, side))
+    if not goals:
+        return {}
+    appearances = {(a["match_id"], a["player_id"]): (a["side"], a["is_starter"])
+                   for a in MatchAppearance.objects.filter(match_id__in=match_ids)
+                   .values("match_id", "player_id", "side", "is_starter")}
+    windows = on_pitch_windows(match_ids, minutes, appearances)
+    out = {}
+    for key, (side, is_starter) in appearances.items():
+        scored = goals.get(key[0])
+        if not scored:
+            continue
+        lo, hi = windows.get(key, _fallback_window(minutes.get(key, 0), is_starter))
+        gf = ga = 0
+        for minute, gside in scored:
+            if minute is None or not (lo <= minute <= hi):
+                continue
+            if gside == side:
+                gf += 1
+            else:
+                ga += 1
+        if gf != ga:
+            out[key] = gf - ga
+    return out
+
+
 def _minutes_map(match_ids):
     return {(a["match_id"], a["player_id"]): a["minutes_played"]
             for a in MatchAppearance.objects
@@ -590,8 +641,11 @@ def build_reference(competition_season_id: int, *, pooled_std: bool = False) -> 
     return ref
 
 
-def _vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
-                     spread_k: float = VOTE_SPREAD_K) -> float:
+def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
+                         spread_k: float = VOTE_SPREAD_K) -> float:
+    """The vote before the 0.5-grid rounding (and before result mitigation), clamped
+    to the pagella range. Split out so the mitigation nudge can be applied to the
+    raw value and the result rounded once."""
     r = reference.get(ref_key)
     if not r:
         return VOTE_CENTER
@@ -601,8 +655,30 @@ def _vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
     # proportion to the evidence. w -> 1 for full games, ~0.4 at 20', ~0.3 at 10'.
     w = minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0
     raw = VOTE_CENTER + spread_k * w * z
-    vote = max(VOTE_MIN, min(VOTE_MAX, raw))
+    return max(VOTE_MIN, min(VOTE_MAX, raw))
+
+
+def _round_half(vote: float) -> float:
     return round(vote * 2) / 2.0  # 0.5 grid
+
+
+def _vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
+                     spread_k: float = VOTE_SPREAD_K) -> float:
+    return _round_half(_raw_vote_from_index(index, ref_key, minutes, reference,
+                                            spread_k))
+
+
+def result_mitigation(raw_vote: float, gd_on: int,
+                      k: float = RESULT_MITIGATION_K,
+                      cap: float = RESULT_MITIGATION_CAP) -> float:
+    """Divergence-only nudge toward the on-pitch result (see RESULT_MITIGATION_K).
+
+    ``down`` fires only for a high vote (>6) in a net defeat (gd_on<0), ``up`` only
+    for a low vote (<6) in a net win (gd_on>0); an aligned vote gets neither, so the
+    nudge always pulls TOWARD 6 and never inflates. Returns the clamped delta."""
+    down = max(0.0, raw_vote - VOTE_CENTER) * max(0, -gd_on)
+    up = max(0.0, VOTE_CENTER - raw_vote) * max(0, gd_on)
+    return max(-cap, min(cap, k * (up - down)))
 
 
 def voto_puro_for_match(match, reference: dict,
@@ -620,6 +696,7 @@ def voto_puro_for_match(match, reference: dict,
     totals = _per_match_player_totals([match.id])
     minutes = _minutes_map([match.id])
     exposure = defensive_exposure([match.id], minutes)
+    gd_on = on_pitch_goal_difference([match.id], minutes)
     roles = current_role_map()
     keepers = dict(Player.objects.values_list("id", "is_goalkeeper"))
     names = dict(Player.objects.values_list("id", "short_name"))
@@ -627,6 +704,7 @@ def voto_puro_for_match(match, reference: dict,
     # Decisive-event override for s.v.: a scorer/assist-man/booked/sent-off (on the
     # pitch) player is rated even below the minutes/touches gate.
     forcing = rating_forcing_event_players(match.id)
+    outfield_roles = (Player.ROLE_DEF, Player.ROLE_MID, Player.ROLE_FWD)
 
     results = []
     for (mid, pid), feats in totals.items():
@@ -644,6 +722,11 @@ def voto_puro_for_match(match, reference: dict,
         rated = (is_rated(mins, feats) or pid in forcing
                  or feats.get("penalties_won", 0.0) > 0
                  or feats.get("penalties_conceded", 0.0) > 0)
+        raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k)
+        # Result mitigation: divergence-only, outfield only (the GK channel already
+        # reflects the result). Recorded so the vote explanation can reconcile.
+        nudge = (result_mitigation(raw, gd_on[(mid, pid)])
+                 if role in outfield_roles and (mid, pid) in gd_on else 0.0)
         results.append({
             "player_id": pid,
             "name": names.get(pid) or full.get(pid) or str(pid),
@@ -653,8 +736,8 @@ def voto_puro_for_match(match, reference: dict,
             "touches": round(feats.get("touches", 0.0), 1),
             "index": round(idx, 2),
             "rated": rated,
-            "voto_puro": (_vote_from_index(idx, ref_key, mins, reference, spread_k)
-                          if rated else None),
+            "result_nudge": round(nudge, 3),
+            "voto_puro": (_round_half(raw + nudge) if rated else None),
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))
     return results

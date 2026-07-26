@@ -173,7 +173,8 @@ def role_average_terms(rows) -> dict:
 
 
 def explain(role: str, totals: dict, minutes: int, reference: dict,
-            averages: dict, exposure: float = 0.0, *, top: int = 3) -> dict:
+            averages: dict, exposure: float = 0.0, *, top: int = 3,
+            result_nudge: float = 0.0) -> dict:
     """Why this vote, decomposed so it ADDS UP to the vote.
 
     The vote is 6 + spread * shrink * (index - role_mean) / std. Every feature is
@@ -216,7 +217,10 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # numbers still reconcile to this subtotal.
     index = sum(terms.values())
     z = (index - ref["mean"]) / ref["std"]
-    subtotal = max(VOTE_MIN, min(VOTE_MAX, VOTE_CENTER + VOTE_SPREAD_K * weight * z))
+    raw = max(VOTE_MIN, min(VOTE_MAX, VOTE_CENTER + VOTE_SPREAD_K * weight * z))
+    # Same order as the scorer: clamp the merit vote, THEN add the (divergence-only)
+    # result nudge, which always pulls toward 6 so the sum stays in range.
+    subtotal = max(VOTE_MIN, min(VOTE_MAX, raw + result_nudge))
     voto = round(subtotal * 2) / 2
 
     named = [(pts, ph) for pts, _, ph in scored if ph and abs(pts) >= 0.05]
@@ -229,6 +233,11 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         return {"label": label, "points": round(pts, 2)}
 
     contributions = [entry(pts, ph) for pts, ph in shown]
+    # The result adjustment is a vote-level term, not a feature, so it rides on top
+    # of the feature contributions and is named explicitly.
+    if abs(result_nudge) >= 0.005:
+        contributions.append(entry(result_nudge,
+                                   "adeguamento al risultato di squadra"))
     shown_rounded = sum(c["points"] for c in contributions)
     other_points = round(subtotal - VOTE_CENTER - shown_rounded, 2)
     low = minutes < SHRINKAGE_MINUTES * 2
