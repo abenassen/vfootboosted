@@ -66,9 +66,13 @@ from realdata.models import (
     TeamSeason,
     TeamZoneFeature,
 )
-# Reuse the exact zone-binning / box test the StatsBomb importer uses, so both
-# providers land features in identical zones.
-from realdata.services.statsbomb_adapter import _is_box_coord, _zone_key
+# Reuse the exact zone-binning the StatsBomb importer uses, so both providers land
+# features in identical zones. We do NOT reuse ``_is_box_coord`` for touches_in_box:
+# it flags BOTH penalty areas, and the heatmap is in the player's own attacking
+# frame, so it would count a centre-back's defensive own-box touches as box
+# presence. We test the ATTACKING box only (see the box_count loop).
+from realdata.services.statsbomb_adapter import (
+    BOX_X_MIN, BOX_Y_MIN, BOX_Y_MAX, _zone_key)
 from realdata.services.sofascore_client import SofaScoreBlocked
 from realdata.services.identity import is_placeholder_dob, norm_name
 
@@ -550,7 +554,12 @@ def _ingest_match(
                 continue
             zone = _zone_key(norm[0], norm[1], zone_cols, zone_rows)
             zone_count[zone] += 1
-            if _is_box_coord(norm[0], norm[1]):
+            # touches_in_box = ATTACKING-box presence only. The raw heatmap is in
+            # the player's own attacking frame (own goal at x=0), so the opponent
+            # box is the HIGH-x box; testing the unflipped point avoids crediting a
+            # defender for touches in his OWN box while under pressure.
+            raw = _norm_point(px, py, side, False)
+            if raw is not None and raw[0] >= BOX_X_MIN and BOX_Y_MIN <= raw[1] <= BOX_Y_MAX:
                 box_count[zone] += 1
             total += 1
             if first_match:
