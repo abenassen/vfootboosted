@@ -107,26 +107,69 @@ class Command(BaseCommand):
                  .values_list("team_season__team__name", flat=True).distinct())
         return {_club_key(t): t for t in set(teams)}
 
+    # letters unicode NFKD leaves alone, but our DB and fantacalcio disagree on:
+    # Turkish ı, Nordic ø/å, Icelandic ð/þ, Slavic ł/đ...
+    _FOLD = {"ı": "i", "İ": "i", "ø": "o", "å": "a", "ð": "d", "þ": "t",
+             "đ": "d", "ł": "l", "æ": "ae", "œ": "oe", "ß": "ss"}
+
+    @classmethod
+    def _afold(cls, s):
+        """Aggressive fold to bare a-z (accents + the letters above + apostrophes),
+        so 'Østigård'=='Ostigard', 'Yıldız'=='Yildiz', "N'Dicka"=='Ndicka'."""
+        import unicodedata
+        s = "".join(cls._FOLD.get(c, c) for c in (s or "").lower())
+        s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+        return re.sub(r"[^a-z ]", " ", s)
+
+    @classmethod
+    def _surname_and_initial(cls, name):
+        """(surname, first-name abbreviation) for a name in any format we see:
+        'Nico Paz', 'N. Paz', 'Paz N.', 'Pellegrini Lu.', 'Ederson D.S.', 'De Ketelaere'.
+
+        Fantacalcio puts the surname FIRST and appends the first name abbreviated
+        ('Lu.', 'Se.') only to disambiguate a shared surname. A trailing run of
+        abbreviations (a token ending '.' or a lone letter) is stripped to recover
+        the surname; the leftmost abbreviation (folded, e.g. 'lu') then disambiguates
+        by the candidate's first-name PREFIX."""
+        toks = (name or "").split()
+        stripped = []
+        while len(toks) > 1 and (toks[-1].endswith(".") or len(toks[-1].rstrip(".")) == 1):
+            stripped.insert(0, toks.pop())
+        surname = cls._afold(toks[-1]).replace(" ", "") if toks else ""
+        abbr = (cls._afold(stripped[0]).replace(" ", "") if stripped
+                else (cls._afold(toks[0]).replace(" ", "")[:1] if len(toks) > 1 and toks[0] else ""))
+        return surname, abbr
+
     def _our_player_index(self, cs_id):
         idx = defaultdict(list)
         pid_team = {}
-        rows = (PlayerTeamStint.objects
-                .filter(team_season__competition_season_id=cs_id, end_date__isnull=True)
+        pid_first = defaultdict(set)  # pid -> folded first names, for prefix disambiguation
+        # Index on the teams a player ACTUALLY appeared for (not the single open TM
+        # stint): this follows mid-season transfers per match AND catches players who
+        # played but are missing from the TM roster — both of which we only compare
+        # because they have a voto puro (i.e. they appeared).
+        rows = (MatchAppearance.objects
+                .filter(match__competition_season_id=cs_id)
                 .values_list("player_id", "team_season__team__name",
-                             "player__full_name", "player__short_name"))
+                             "player__full_name", "player__short_name")
+                .distinct())
         for pid, team, full, short in rows:
             pid_team.setdefault(pid, team)
             keys = set()
             for nm in (full, short):
-                toks = norm_name(nm or "").split()
-                if toks:
-                    keys.add(toks[-1])
+                surn, _ = self._surname_and_initial(nm)
+                if surn:
+                    keys.add(surn)
+            ft = self._afold(full or "").split()  # our names are 'First Last'
+            if ft:
+                pid_first[pid].add(ft[0])
             for k in keys:
                 idx[(team, k)].append(pid)
-        return idx, pid_team
+        return idx, pid_team, pid_first
 
-    def _match_external(self, files, sheet, team_map, pidx):
-        """{(gd, pid): {voto, gf, ass}} for one sheet."""
+    def _match_external(self, files, sheet, team_map, pidx, pid_first):
+        """{(gd, pid): {voto, gf, ass}} for one sheet. Head coaches (ruolo ALL) are
+        skipped: fantacalcio grades them, we do not rate them."""
         gd_re = re.compile(r"Giornata_(\d+)")
         out, unmatched = {}, 0
         for f in files:
@@ -135,13 +178,20 @@ class Command(BaseCommand):
                 continue
             gd = int(mm.group(1))
             for e in self._parse_file(f, sheet):
-                if e["voto"] is None:
+                if e["voto"] is None or str(e["ruolo"]).upper() == "ALL":
                     continue
                 our_team = team_map.get(_club_key(e["team"] or ""))
                 if not our_team:
                     continue
-                surn = norm_name(e["nome"]).split()[-1] if e["nome"] else ""
+                surn, abbr = self._surname_and_initial(e["nome"])
                 cands = pidx.get((our_team, surn), [])
+                # shared surname on one team: the appended abbreviation is a prefix
+                # of the right player's first name (Lu.->Luca, Lo.->Lorenzo).
+                if len(cands) > 1 and abbr:
+                    narrowed = [pid for pid in cands
+                                if any(fn.startswith(abbr) for fn in pid_first.get(pid, ()))]
+                    if narrowed:
+                        cands = narrowed
                 if len(cands) != 1:
                     unmatched += 1
                     continue
@@ -156,10 +206,19 @@ class Command(BaseCommand):
         if not files:
             raise CommandError(f"No .xlsx in {opts['dir']}")
 
+        rows = self.discrepancy_rows(cs_id, files)
+        self._quick_corr(rows)
+        if opts["json"]:
+            Path(opts["json"]).write_text(json.dumps(rows, ensure_ascii=False))
+            self.stdout.write(f"\nWrote {len(rows)} rows -> {opts['json']}")
+
+    def discrepancy_rows(self, cs_id, files):
+        """Unified our-vs-external rows for a season. Reusable by other commands
+        (e.g. build_voto_tuner) so the external-sheet parsing lives in one place."""
         ref = get_reference(cs_id)
         averages = get_role_averages(cs_id)
         team_map = self._our_team_index(cs_id)
-        pidx, pid_team = self._our_player_index(cs_id)
+        pidx, pid_team, pid_ini = self._our_player_index(cs_id)
 
         # our side (sheet-independent): compute pagella ONCE
         self.stdout.write("Computing voto puro + explanation for every match…")
@@ -188,7 +247,7 @@ class Command(BaseCommand):
         # match both sheets
         ext = {}
         for sheet in SHEETS:
-            ext[sheet], unm = self._match_external(files, sheet, team_map, pidx)
+            ext[sheet], unm = self._match_external(files, sheet, team_map, pidx, pid_ini)
             self.stdout.write(f"  {sheet}: matched {len(ext[sheet])} "
                               f"(unmatched names {unm})")
 
@@ -211,11 +270,7 @@ class Command(BaseCommand):
                 "contributions": o["contributions"],
                 "other_points": o["other_points"],
             })
-
-        self._quick_corr(rows)
-        if opts["json"]:
-            Path(opts["json"]).write_text(json.dumps(rows, ensure_ascii=False))
-            self.stdout.write(f"\nWrote {len(rows)} rows -> {opts['json']}")
+        return rows
 
     def _quick_corr(self, rows):
         w = self.stdout.write
