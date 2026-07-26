@@ -13,9 +13,10 @@ from vfoot.services.classic_rating import (
 
 
 class VoteExplanationTests(SimpleTestCase):
-    REFERENCE = {"DIF": {"mean": 1.5, "std": 0.9, "n": 100},
+    # Realistic v2 scale (cf. the calibrated season: DIF mean ~0.42 std ~0.22).
+    REFERENCE = {"DIF": {"mean": 0.42, "std": 0.22, "n": 100},
                  "POR": {"mean": 0.7, "std": 2.1, "n": 100},
-                 "ATT": {"mean": 0.0, "std": 0.9, "n": 100}}
+                 "ATT": {"mean": 0.16, "std": 0.24, "n": 100}}
 
     def _averages(self, role, feats, minutes=90):
         return role_average_terms([(role, feats, minutes, 0.0)])
@@ -53,9 +54,13 @@ class VoteExplanationTests(SimpleTestCase):
     # --- direction in context -------------------------------------------
     def test_losing_fewer_duels_is_good_and_winning_fewer_is_bad(self):
         average = self._averages("DIF", {"duels_won": 16.0, "duels_lost": 16.0,
-                                         "touches": 60.0})
-        e = explain("DIF", {"duels_won": 4.0, "duels_lost": 4.0, "touches": 60.0},
+                                         "clearances": 8.0, "touches": 60.0})
+        # Strong clearances keep the vote above the faint-praise cutoff, so the
+        # duels directions are still surfaced.
+        e = explain("DIF", {"duels_won": 4.0, "duels_lost": 4.0,
+                            "clearances": 80.0, "touches": 90.0},
                     90, self.REFERENCE, average)
+        self.assertGreaterEqual(e["voto"], 5.5)
         self.assertIn("meno duelli persi", [x["label"] for x in e["positives"]])
         self.assertIn("meno duelli vinti", [x["label"] for x in e["negatives"]])
 
@@ -87,7 +92,8 @@ class VoteExplanationTests(SimpleTestCase):
     # --- numbers reconcile ----------------------------------------------
     def test_contributions_are_in_vote_points(self):
         average = self._averages("DIF", {"touches": 10.0})
-        e = explain("DIF", {"touches": 400.0}, 90, self.REFERENCE, average)
+        e = explain("DIF", {"clearances": 80.0, "duels_won": 30.0, "touches": 100.0},
+                    90, self.REFERENCE, average)
         self.assertTrue(e["positives"])
         for entry in e["positives"]:
             self.assertLess(abs(entry["points"]), 7.0)
@@ -118,6 +124,18 @@ class VoteExplanationTests(SimpleTestCase):
         shown = e["base"] + sum(c["points"] for c in e["contributions"]) + e["other_points"]
         self.assertAlmostEqual(shown, e["subtotal"], places=2)
         self.assertIn("Espulso.", to_sentence(e))
+
+    def test_a_clearly_poor_vote_drops_the_faint_positives(self):
+        """Below 5.5 the "positives" are only least-bad deviations; naming them is
+        faint praise for a bad game. They fold into "other" so the sum still holds."""
+        average = self._averages("DIF", {"clearances": 6.0, "touches": 60.0})
+        feats = {"errors_led_to_goal": 1.0, "clearances": 30.0, "touches": 30.0}
+        e = explain("DIF", feats, 90, self.REFERENCE, average)
+        self.assertLess(e["voto"], 5.5)
+        self.assertEqual(e["positives"], [])
+        self.assertNotIn("Bene", to_sentence(e))
+        shown = e["base"] + sum(c["points"] for c in e["contributions"]) + e["other_points"]
+        self.assertAlmostEqual(shown, e["subtotal"], places=2)
 
     # --- housekeeping ----------------------------------------------------
     def test_reports_minutes_played(self):

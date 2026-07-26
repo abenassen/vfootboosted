@@ -43,6 +43,12 @@ from realdata.models import Player
 # da ultimo uomo", not "un intervento". Nobody wants to hear about FEWER penalties
 # conceded than average, so events never surface on the low side.
 COUNT, EVENT = "count", "event"
+
+# Below this vote the explanation stops naming positives (see ``explain``): a
+# clearly poor game's "positives" are only the least-bad deviations, and reading
+# them back is faint praise. 5.5 keeps a note for a merely below-average game; 5.0
+# and under get only what went wrong.
+POSITIVES_MIN_VOTE = 5.5
 LABELS = {
     "expected_assists": (COUNT, "occasioni create per i compagni"),
     "xg_on_target": (COUNT, "qualita' nelle conclusioni"),
@@ -251,7 +257,12 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
 
     named = [(pts, ph) for pts, _, ph in scored if ph and abs(pts) >= 0.05]
     named.sort(key=lambda x: x[0], reverse=True)
-    positives = [x for x in named[:top] if x[0] > 0]
+    # On a clearly poor vote the "positives" are only the least-bad deviations
+    # ("meno duelli persi"): naming them reads as faint praise for a bad game. Below
+    # POSITIVES_MIN_VOTE we drop them from the narrative — they fold into "altre
+    # voci", so the breakdown still reconciles — and explain only what went wrong.
+    positives = ([] if voto < POSITIVES_MIN_VOTE
+                 else [x for x in named[:top] if x[0] > 0])
     negatives = [x for x in (named[-top:][::-1]) if x[0] < 0]
     shown = positives + negatives
 
