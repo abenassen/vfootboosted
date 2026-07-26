@@ -28,72 +28,89 @@ from vfoot.services.classic_rating import (
 from realdata.models import Player
 
 # What each feature is called when we have to say it out loud, and how to say it.
+# Two kinds, phrased very differently on purpose:
 #
-# "count" features are continuous and only mean something COMPARED to the role
-# average, so they are announced as molti/pochi. Getting this wrong produces
-# sentences that are arithmetically right and read as nonsense — the first draft
-# said "Bene: duelli persi" for a defender who had lost FEWER duels than his
-# peers, and "Male: duelli vinti" for one who had won fewer.
+# COUNT (kind, label): everything measured only RELATIVE to the role average — true
+# counts (clearances, duels) and continuous xG-type quantities (xA, xG) alike. These
+# are announced COMPARATIVELY: "più/meno {label}", never with an absolute quantifier.
+# "molte occasioni create" read as "many chances" even when a single dangerous pass
+# drove a high xA; "più occasioni create [del solito]" is what the number actually
+# says — he did MORE than his usual, whatever the absolute amount. The comparative
+# also fixes the low-mean trap (one box touch against a ~0 role mean is not "molti").
 #
-# "event" features are rare and discrete. Nobody wants to hear that a player
-# conceded fewer penalties than average; those are reported only when they
-# actually happened.
+# EVENT (kind, singular, plural): rare, discrete, and COUNTED — reported only when it
+# happened, and with the real number, so three last-man tackles read as "3 interventi
+# da ultimo uomo", not "un intervento". Nobody wants to hear about FEWER penalties
+# conceded than average, so events never surface on the low side.
 COUNT, EVENT = "count", "event"
-# Quantifier pairs, because Italian will not let a single "molti/pochi" serve:
-# "molti respinte" and "pochi occasioni" are the kind of thing that makes an
-# explanation feel machine-made even when its arithmetic is right.
-QUANTIFIERS = {"mp": ("molti", "pochi"), "fp": ("molte", "poche"),
-               "ms": ("molto", "poco"), "fs": ("molta", "poca")}
 LABELS = {
-    "expected_assists": ("occasioni create per i compagni", COUNT, "fp"),
-    "xg_on_target": ("conclusioni di qualita'", COUNT, "fp"),
-    "xg_shots": ("posizioni di tiro conquistate", COUNT, "fp"),
-    "big_chance_created": ("un'occasione nitida creata", EVENT, None),
-    "key_passes": ("passaggi chiave", COUNT, "mp"),
-    "shots_on_target": ("tiri nello specchio", COUNT, "mp"),
-    "shots": ("tiri tentati", COUNT, "mp"),
-    "shots_post": ("un tiro sul palo", EVENT, None),
-    "shots_blocked": ("tiri murati", COUNT, "mp"),
-    "errors_led_to_goal": ("un errore che ha portato a un gol", EVENT, None),
-    "errors_led_to_shot": ("un errore che ha concesso un tiro", EVENT, None),
-    "big_chance_missed": ("un'occasione nitida sprecata", EVENT, None),
-    "penalties_conceded": ("un rigore concesso", EVENT, None),
-    "penalties_won": ("un rigore conquistato", EVENT, None),
-    "clearances_off_line": ("un salvataggio sulla linea", EVENT, None),
-    "last_man_tackle": ("un intervento da ultimo uomo", EVENT, None),
-    "dribbles_won": ("dribbling riusciti", COUNT, "mp"),
-    "duels_won": ("duelli vinti", COUNT, "mp"),
-    "duels_lost": ("duelli persi", COUNT, "mp"),
-    "aerials_won": ("duelli aerei vinti", COUNT, "mp"),
-    "aerials_lost": ("duelli aerei persi", COUNT, "mp"),
-    "dribbled_past": ("dribbling subiti", COUNT, "mp"),
-    "tackles_won": ("contrasti vinti", COUNT, "mp"),
-    "interceptions": ("intercetti", COUNT, "mp"),
-    "ball_recoveries": ("palloni recuperati", COUNT, "mp"),
-    "blocks": ("conclusioni murate", COUNT, "fp"),
-    "clearances": ("respinte", COUNT, "fp"),
-    "touches_in_box": ("palloni toccati in area", COUNT, "mp"),
-    "passes_opp_half": ("gioco nella meta' campo avversaria", COUNT, "ms"),
-    "long_balls_completed": ("lanci lunghi riusciti", COUNT, "mp"),
-    "crosses_completed": ("cross riusciti", COUNT, "mp"),
-    "dribbles_attempted": ("dribbling tentati", COUNT, "mp"),
-    "passes_completed": ("passaggi riusciti", COUNT, "mp"),
-    "was_fouled": ("falli subiti", COUNT, "mp"),
-    "touches": ("palloni giocati", COUNT, "mp"),
-    "errors_bad_passes": ("passaggi sbagliati", COUNT, "mp"),
-    "errors_dispossessed": ("palloni persi in conduzione", COUNT, "mp"),
-    "errors_miscontrols": ("controlli sbagliati", COUNT, "mp"),
-    "errors_fouls_committed": ("falli commessi", COUNT, "mp"),
-    "gk_goals_prevented": ("gol evitati rispetto ai tiri affrontati", COUNT, "mp"),
-    "gk_saves": ("parate", COUNT, "fp"),
-    "gk_saves_inside_box": ("parate su tiri ravvicinati", COUNT, "fp"),
-    "gk_penalty_saves": ("un rigore parato", EVENT, None),
-    "gk_high_claims": ("uscite alte", COUNT, "fp"),
-    "gk_punches": ("respinte di pugno", COUNT, "fp"),
-    "gk_sweeper": ("uscite fuori area", COUNT, "fp"),
-    "gk_crosses_not_claimed": ("cross non trattenuti", COUNT, "mp"),
-    "_exposure": ("pericolo concesso nella sua zona", COUNT, "ms"),
+    "expected_assists": (COUNT, "occasioni create per i compagni"),
+    "xg_on_target": (COUNT, "qualita' nelle conclusioni"),
+    "xg_shots": (COUNT, "posizioni di tiro conquistate"),
+    "big_chance_created": (EVENT, "un'occasione nitida creata", "occasioni nitide create"),
+    "key_passes": (COUNT, "passaggi chiave"),
+    "shots_on_target": (COUNT, "tiri nello specchio"),
+    "shots": (COUNT, "tiri tentati"),
+    "shots_post": (EVENT, "un tiro sul palo", "tiri sul palo"),
+    "shots_blocked": (COUNT, "conclusioni respinte dalla difesa"),
+    "errors_led_to_goal": (EVENT, "un errore che ha portato a un gol",
+                           "errori che hanno portato a un gol"),
+    "errors_led_to_shot": (EVENT, "un errore che ha concesso un tiro",
+                           "errori che hanno concesso un tiro"),
+    "big_chance_missed": (EVENT, "un'occasione nitida sprecata",
+                          "occasioni nitide sprecate"),
+    "penalties_conceded": (EVENT, "un rigore concesso", "rigori concessi"),
+    "penalties_won": (EVENT, "un rigore conquistato", "rigori conquistati"),
+    "clearances_off_line": (EVENT, "un salvataggio sulla linea",
+                            "salvataggi sulla linea"),
+    "last_man_tackle": (EVENT, "un intervento da ultimo uomo",
+                        "interventi da ultimo uomo"),
+    "dribbles_won": (COUNT, "dribbling riusciti"),
+    "duels_won": (COUNT, "duelli vinti"),
+    "duels_lost": (COUNT, "duelli persi"),
+    "aerials_won": (COUNT, "duelli aerei vinti"),
+    "aerials_lost": (COUNT, "duelli aerei persi"),
+    "dribbled_past": (COUNT, "dribbling subiti"),
+    "tackles_won": (COUNT, "contrasti vinti"),
+    "interceptions": (COUNT, "intercetti"),
+    "ball_recoveries": (COUNT, "palloni recuperati"),
+    "blocks": (COUNT, "conclusioni murate"),
+    "clearances": (COUNT, "respinte"),
+    "touches_in_box": (COUNT, "palloni toccati in area"),
+    "passes_opp_half": (COUNT, "gioco nella meta' campo avversaria"),
+    "long_balls_completed": (COUNT, "lanci lunghi riusciti"),
+    "crosses_completed": (COUNT, "cross riusciti"),
+    "dribbles_attempted": (COUNT, "dribbling tentati"),
+    "passes_completed": (COUNT, "passaggi riusciti"),
+    "was_fouled": (COUNT, "falli subiti"),
+    "touches": (COUNT, "palloni giocati"),
+    "errors_bad_passes": (COUNT, "passaggi sbagliati"),
+    "errors_dispossessed": (COUNT, "palloni persi in conduzione"),
+    "errors_miscontrols": (COUNT, "controlli sbagliati"),
+    "errors_fouls_committed": (COUNT, "falli commessi"),
+    "gk_goals_prevented": (COUNT, "gol evitati rispetto ai tiri affrontati"),
+    "gk_saves": (COUNT, "parate"),
+    "gk_saves_inside_box": (COUNT, "parate su tiri ravvicinati"),
+    "gk_penalty_saves": (EVENT, "un rigore parato", "rigori parati"),
+    "gk_high_claims": (COUNT, "uscite alte"),
+    "gk_punches": (COUNT, "respinte di pugno"),
+    "gk_sweeper": (COUNT, "uscite fuori area"),
+    "gk_crosses_not_claimed": (COUNT, "cross non trattenuti"),
+    "_exposure": (COUNT, "pericolo concesso nella sua zona"),
 }
+
+# Feature families that describe ONE thing through several overlapping terms — a
+# "good minus volume" structure where the parts point opposite ways and read as
+# nonsense on their own ("Bene: più dribbling riusciti. Male: più dribbling
+# tentati"; "Male: più posizioni di tiro conquistate", because xg_shots is
+# subtracted by design). They are summed into a single net line for display; the
+# scoring is untouched. (group_keys, label when net-positive, label when negative.)
+MERGES = [
+    (("xg_on_target", "xg_shots", "shots_on_target", "shots", "shots_blocked"),
+     "più incisività nelle conclusioni", "meno incisività nelle conclusioni"),
+    (("dribbles_won", "dribbles_attempted"),
+     "più efficacia nel dribbling", "meno efficacia nel dribbling"),
+]
 
 
 def _weight_of(role: str, key: str) -> float:
@@ -113,17 +130,20 @@ def _phrase(role: str, key: str, term_delta: float, raw_value: float) -> str | N
     entry = LABELS.get(key)
     if entry is None:
         return None
-    label, kind, quant = entry
-    if kind == EVENT:
-        # Only when it actually happened; "fewer penalties conceded than average"
-        # is not a thing anyone wants read back to them.
-        return label if raw_value > 0 else None
-    # A negative-weighted feature improves the index by being SMALLER, so the
-    # direction of the raw deviation is the sign of the term deviation flipped by
-    # the weight's own sign.
+    if entry[0] == EVENT:
+        # Only when it actually happened, and with the real count: three last-man
+        # tackles are "3 interventi da ultimo uomo", not "un intervento".
+        n = int(round(raw_value))
+        if n <= 0:
+            return None
+        singular, plural = entry[1], entry[2]
+        return singular if n == 1 else f"{n} {plural}"
+    # COUNT: comparative, never absolute. ``more`` is whether the raw value is ABOVE
+    # the role average — a negative-weighted feature improves the index by being
+    # SMALLER, so the raw direction is the term-delta sign flipped by the weight's.
+    label = entry[1]
     more = (term_delta > 0) == (_weight_of(role, key) > 0)
-    high, low = QUANTIFIERS.get(quant, QUANTIFIERS["mp"])
-    return f"{high if more else low} {label}"
+    return f"più {label}" if more else f"meno {label}"
 
 
 def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0) -> dict:
@@ -201,12 +221,19 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     weight = minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0
     per_unit = VOTE_SPREAD_K * weight / ref["std"]
 
+    points_by_key = {key: (terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * per_unit
+                     for key in set(terms) | set(mean_terms)}
+
     scored = []
-    for key in set(terms) | set(mean_terms):
-        delta = terms.get(key, 0.0) - mean_terms.get(key, 0.0)
-        phrase = _phrase(role, key, delta,
+    # Collapse the overlapping feature families (see MERGES) into one net line each.
+    for group, label_pos, label_neg in MERGES:
+        net = sum(points_by_key.pop(k, 0.0) for k in group)
+        if abs(net) >= 1e-9:
+            scored.append((net, group[0], label_pos if net > 0 else label_neg))
+    for key, pts in points_by_key.items():
+        phrase = _phrase(role, key, pts,
                          (totals.get(key, 0.0) if key != "_exposure" else exposure))
-        scored.append((delta * per_unit, key, phrase))
+        scored.append((pts, key, phrase))
 
     # The subtotal is the vote's OWN raw value, computed exactly as the scorer
     # computes it (index z-scored against the reference mean), not re-derived from
@@ -265,9 +292,16 @@ def to_sentence(explanation: dict) -> str:
         return ", ".join(e["label"] for e in entries)
     pos, neg = explanation.get("positives", []), explanation.get("negatives", [])
     if pos and neg:
-        return f"Bene: {names(pos)}. Male: {names(neg)}."
-    if pos:
-        return f"Bene: {names(pos)}."
-    if neg:
-        return f"Male: {names(neg)}."
-    return "Prestazione in linea con la media del suo ruolo."
+        core = f"Bene: {names(pos)}. Male: {names(neg)}."
+    elif pos:
+        core = f"Bene: {names(pos)}."
+    elif neg:
+        core = f"Male: {names(neg)}."
+    else:
+        core = "Prestazione in linea con la media del suo ruolo."
+    # The sending-off is a vote-level fact, not a feature, so it is not in
+    # positives/negatives — call it out explicitly.
+    if any(c["label"] == "espulsione"
+           for c in explanation.get("contributions", [])):
+        core += " Espulso."
+    return core
