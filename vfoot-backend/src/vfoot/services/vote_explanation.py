@@ -52,11 +52,13 @@ COUNT, SIGNAL, EVENT = "count", "signal", "event"
 QUANTIFIERS = {"mp": ("tanti", "pochi"), "fp": ("tante", "poche"),
                "ms": ("tanto", "poco"), "fs": ("tanta", "poca")}
 
-# Below this vote the explanation stops naming positives (see ``explain``): a
-# clearly poor game's "positives" are only the least-bad deviations, and reading
-# them back is faint praise. 5.5 keeps a note for a merely below-average game; 5.0
-# and under get only what went wrong.
-POSITIVES_MIN_VOTE = 5.5
+# The narrative is one-sided at the extremes, symmetrically around 6. A clearly
+# poor game's "positives" are only its least-bad deviations (faint praise), and a
+# clearly good game's "negatives" are trivialities on a fine display — neither is
+# worth reading back. In the middle band [5.5, 6.5] (mixed games) both sides show.
+# Suppressed items fold into "altre voci", so the breakdown still reconciles.
+POSITIVES_MIN_VOTE = 5.5   # below this: only what went wrong
+NEGATIVES_MAX_VOTE = 6.5   # above this: only what went well
 
 LABELS = {
     # SIGNAL — small high-value continuous; "una o più ...", (positive, negative)
@@ -80,7 +82,7 @@ LABELS = {
     "duels_lost": (COUNT, "duelli persi", "mp"),
     "aerials_won": (COUNT, "duelli aerei vinti", "mp"),
     "aerials_lost": (COUNT, "duelli aerei persi", "mp"),
-    "dribbled_past": (COUNT, "dribbling subiti", "mp"),
+    "dribbled_past": (COUNT, "dribbling concessi all'avversario", "mp"),
     "tackles_won": (COUNT, "contrasti vinti", "mp"),
     "interceptions": (COUNT, "intercetti", "mp"),
     "ball_recoveries": (COUNT, "palloni recuperati", "mp"),
@@ -273,13 +275,13 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
 
     named = [(pts, ph) for pts, _, ph in scored if ph and abs(pts) >= 0.05]
     named.sort(key=lambda x: x[0], reverse=True)
-    # On a clearly poor vote the "positives" are only the least-bad deviations
-    # ("meno duelli persi"): naming them reads as faint praise for a bad game. Below
-    # POSITIVES_MIN_VOTE we drop them from the narrative — they fold into "altre
-    # voci", so the breakdown still reconciles — and explain only what went wrong.
+    # One-sided at the extremes (see POSITIVES_MIN_VOTE / NEGATIVES_MAX_VOTE): a bad
+    # game's "positives" are faint praise, a fine game's "negatives" are nitpicks.
+    # Suppressed items fold into "altre voci", so the breakdown still reconciles.
     positives = ([] if voto < POSITIVES_MIN_VOTE
                  else [x for x in named[:top] if x[0] > 0])
-    negatives = [x for x in (named[-top:][::-1]) if x[0] < 0]
+    negatives = ([] if voto > NEGATIVES_MAX_VOTE
+                 else [x for x in (named[-top:][::-1]) if x[0] < 0])
     shown = positives + negatives
 
     def entry(pts, label):

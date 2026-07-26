@@ -142,6 +142,21 @@ class VoteExplanationTests(SimpleTestCase):
         shown = e["base"] + sum(c["points"] for c in e["contributions"]) + e["other_points"]
         self.assertAlmostEqual(shown, e["subtotal"], places=2)
 
+    def test_a_clearly_good_vote_drops_the_nitpick_negatives(self):
+        """Above 6.5 the "negatives" are trivialities on a fine game (a striker's
+        "dribbling concessi all'avversario"); a 7.5 should read as praise. They fold
+        into "other" so the sum still holds."""
+        average = self._averages("DIF", {"clearances": 8.0, "duels_won": 6.0,
+                                         "touches": 60.0})
+        feats = {"clearances": 200.0, "duels_won": 60.0, "touches": 150.0,
+                 "dribbled_past": 3.0}
+        e = explain("DIF", feats, 90, self.REFERENCE, average)
+        self.assertGreater(e["voto"], 6.5)
+        self.assertEqual(e["negatives"], [])
+        self.assertNotIn("Male", to_sentence(e))
+        shown = e["base"] + sum(c["points"] for c in e["contributions"]) + e["other_points"]
+        self.assertAlmostEqual(shown, e["subtotal"], places=2)
+
     # --- housekeeping ----------------------------------------------------
     def test_reports_minutes_played(self):
         average = self._averages("DIF", {"touches": 60.0})
