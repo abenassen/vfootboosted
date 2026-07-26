@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import glob
 import math
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -36,7 +36,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 import vfoot.services.classic_rating as cr
-from realdata.models import Match, MatchAppearance, MatchShot, Player, Team
+from realdata.models import Match, MatchAppearance, Player, Team
 from vfoot.management.commands.voto_puro_discrepancies import Command as DiscCmd
 
 OUT_ROLES = ["DIF", "CEN", "ATT"]
@@ -108,20 +108,13 @@ class Command(BaseCommand):
         # ---- per-match data ----
         mids = list(Match.objects.filter(competition_season_id=cs).values_list("id", flat=True))
         md_of = {m.id: m.matchday for m in Match.objects.filter(competition_season_id=cs)}
+        # _per_match_player_totals already merges the shot-outcome detail (post/goal/
+        # save/miss/block), with own goals excluded from shots_goal — so no manual
+        # re-injection here (it would re-count own goals as goals scored).
         totals = cr._per_match_player_totals(mids)
         minutes = cr._minutes_map(mids)
         expo = cr.defensive_exposure(mids, minutes)
         gd_on_map = cr.on_pitch_goal_difference(mids, minutes)
-        # inject shot-outcome detail from the event-level shotmap
-        shd = defaultdict(Counter)
-        for mid, pid, st in (MatchShot.objects.filter(match_id__in=mids)
-                             .values_list("match_id", "player_id", "shot_type")):
-            if st in SHOTMAP:
-                shd[(mid, pid)][SHOTMAP[st]] += 1
-        for key, tot in totals.items():
-            c = shd.get(key, {})
-            for f in SHOTDET:
-                tot[f] = float(c.get(f, 0))
 
         roles = {p: r for p, r in cr.current_role_map().items() if r}
         teamname = {t.id: t.name for t in Team.objects.all()}
