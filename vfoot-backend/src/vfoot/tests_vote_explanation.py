@@ -4,7 +4,8 @@ from __future__ import annotations
 from django.test import SimpleTestCase
 
 from vfoot.services.vote_explanation import (
-    COUNT, EVENT, LABELS, _phrase, explain, role_average_terms, to_sentence,
+    COUNT, EVENT, SIGNAL, LABELS, QUANTIFIERS, _phrase, explain,
+    role_average_terms, to_sentence,
 )
 from vfoot.services.classic_rating import (
     VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, SHRINKAGE_MINUTES,
@@ -22,23 +23,27 @@ class VoteExplanationTests(SimpleTestCase):
         return role_average_terms([(role, feats, minutes, 0.0)])
 
     # --- phrasing --------------------------------------------------------
-    def test_count_phrasing_is_comparative_never_absolute(self):
-        """The bug this closes: "molte occasioni create" read as MANY chances even
-        when a single dangerous pass drove a high (continuous) xA. Comparative
-        "più/meno" says only what the number says — more/less than the role's usual."""
-        more = _phrase("DIF", "clearances", +0.3, 8.0)
-        less = _phrase("DIF", "clearances", -0.3, 1.0)
-        self.assertEqual(more, "più respinte")
-        self.assertEqual(less, "meno respinte")
-        for word in ("molti", "molte", "pochi", "poche"):
-            self.assertNotIn(word, f"{more} {less}")
+    def test_volume_features_use_absolute_quantifiers(self):
+        """Volume stats (1 is nothing, only the amount vs the role average matters)
+        read as "tanti/pochi", with gender/number agreement."""
+        self.assertEqual(_phrase("DIF", "clearances", +0.3, 8.0), "tante respinte")
+        self.assertEqual(_phrase("DIF", "clearances", -0.3, 1.0), "poche respinte")
+        self.assertEqual(_phrase("DIF", "duels_won", +0.3, 10.0), "tanti duelli vinti")
 
     def test_negative_weight_feature_flips_direction(self):
         """More duels LOST is above average yet worsens the vote — the phrase must
-        still say "più duelli persi", not invert with the weight's sign."""
+        still say "tanti duelli persi", not invert with the weight's sign."""
         # term_delta < 0 (more losses lower the index), weight < 0 -> raw above avg.
-        self.assertEqual(_phrase("DIF", "duels_lost", -0.3, 20.0), "più duelli persi")
-        self.assertEqual(_phrase("DIF", "duels_lost", +0.3, 2.0), "meno duelli persi")
+        self.assertEqual(_phrase("DIF", "duels_lost", -0.3, 20.0), "tanti duelli persi")
+        self.assertEqual(_phrase("DIF", "duels_lost", +0.3, 2.0), "pochi duelli persi")
+
+    def test_signal_features_read_as_one_or_more(self):
+        """The small high-value continuous quantities (xA/SGA) never claim "molte"
+        (false for one big pass): "una o più ...", the noun carrying the sense. The
+        low side of creation is a non-event, so it stays silent."""
+        self.assertEqual(_phrase("ATT", "expected_assists", +0.3, 0.8),
+                         "una o più occasioni create per i compagni")
+        self.assertIsNone(_phrase("ATT", "expected_assists", -0.3, 0.0))
 
     def test_events_report_the_real_count(self):
         """Three last-man tackles are "3 interventi da ultimo uomo", not "un
@@ -61,8 +66,8 @@ class VoteExplanationTests(SimpleTestCase):
                             "clearances": 80.0, "touches": 90.0},
                     90, self.REFERENCE, average)
         self.assertGreaterEqual(e["voto"], 5.5)
-        self.assertIn("meno duelli persi", [x["label"] for x in e["positives"]])
-        self.assertIn("meno duelli vinti", [x["label"] for x in e["negatives"]])
+        self.assertIn("pochi duelli persi", [x["label"] for x in e["positives"]])
+        self.assertIn("pochi duelli vinti", [x["label"] for x in e["negatives"]])
 
     def test_rare_events_are_named_only_when_they_happened(self):
         clean = explain("DIF", {"touches": 60.0}, 90, self.REFERENCE,
@@ -85,7 +90,7 @@ class VoteExplanationTests(SimpleTestCase):
         e = explain("ATT", {"xg_on_target": 1.0, "xg_shots": 0.2, "touches": 40.0},
                     90, self.REFERENCE, average)
         labels = [c["label"] for c in e["contributions"]]
-        self.assertIn("più incisività nelle conclusioni", labels)
+        self.assertIn("una o più conclusioni pericolose", labels)
         for lab in labels:
             self.assertNotIn("posizioni di tiro", lab)
 
@@ -159,11 +164,13 @@ class VoteExplanationTests(SimpleTestCase):
     def test_every_label_declares_how_to_say_it(self):
         for key, entry in LABELS.items():
             kind = entry[0]
-            self.assertIn(kind, (COUNT, EVENT), key)
+            self.assertIn(kind, (COUNT, SIGNAL, EVENT), key)
+            self.assertEqual(len(entry), 3, key)
             if kind == COUNT:
-                self.assertEqual(len(entry), 2, f"{key}: (COUNT, label)")
-                self.assertTrue(entry[1], key)
-            else:
-                self.assertEqual(len(entry), 3,
-                                 f"{key}: (EVENT, singolare, plurale)")
-                self.assertTrue(entry[1] and entry[2], key)
+                self.assertIn(entry[2], QUANTIFIERS,
+                              f"{key}: senza accordo si ottiene 'tanti respinte'")
+            elif kind == EVENT:
+                self.assertTrue(entry[1] and entry[2],
+                                f"{key}: (EVENT, singolare, plurale)")
+            else:  # SIGNAL — positive required, negative may be None
+                self.assertTrue(entry[1], f"{key}: manca la frase positiva")
