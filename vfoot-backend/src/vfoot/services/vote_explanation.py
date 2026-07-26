@@ -77,7 +77,6 @@ LABELS = {
     "long_balls_completed": ("lanci lunghi riusciti", COUNT, "mp"),
     "crosses_completed": ("cross riusciti", COUNT, "mp"),
     "dribbles_attempted": ("dribbling tentati", COUNT, "mp"),
-    "possession_lost": ("palloni persi", COUNT, "mp"),
     "passes_completed": ("passaggi riusciti", COUNT, "mp"),
     "was_fouled": ("falli subiti", COUNT, "mp"),
     "touches": ("palloni giocati", COUNT, "mp"),

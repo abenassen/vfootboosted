@@ -42,8 +42,10 @@ from vfoot.management.commands.voto_puro_discrepancies import Command as DiscCmd
 OUT_ROLES = ["DIF", "CEN", "ATT"]
 SHOTMAP = {"post": "shots_post", "goal": "shots_goal", "save": "shots_saved",
            "miss": "shots_off", "block": "shots_blocked"}
-# 4 provider stats we ingest but do not weight — shown at weight 0 for inspection.
-UNUSED = ["tackles", "crosses_completed", "dribbles_attempted", "possession_lost"]
+# Provider stats we ingest but do not weight — shown at weight 0 for inspection.
+# (crosses_completed / dribbles_attempted are now weighted; possession_lost was
+# dropped as 79% redundant with the errors_* it overlaps — see PER90_WEIGHTS.)
+UNUSED = ["tackles", "possession_lost"]
 # forced cases we have analysed and want to keep visible: (player_id, matchday)
 # Baschirotto, Leão, Troilo, Ismajli, David.
 FORCED = [(1323, 14), (1123, 26), (1070, 22), (1271, 17), (913, 18)]

@@ -118,8 +118,15 @@ PER90_WEIGHTS = {
     "errors_dispossessed": -0.03,
     "errors_miscontrols": -0.03,
     "errors_fouls_committed": -0.02,
-    "dribbles_attempted": -0.03,  # (reactivated) a failed take-on lost the ball
-    "possession_lost": -0.05,     # (reactivated) overlaps dispossessed/miscontrols
+    # dribbles_won(+) / dribbles_attempted(-) is a deliberate RATE pairing, like
+    # duels_won/duels_lost: the negative on the superset makes the net contribution
+    # turn negative below a ~36% success rate, so many failed take-ons cost even if a
+    # few come off. NOT here: possession_lost (possessionLostCtrl) — it is 79% the
+    # SAME losses already penalised by errors_dispossessed/miscontrols/bad_passes
+    # (same sign, no rate counterpart), so it just doubled the malus on one event and
+    # made those weights un-interpretable. Raise the specific errors_* to weigh ball
+    # loss more, not this aggregate.
+    "dribbles_attempted": -0.03,
 }
 
 WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / breakdowns
