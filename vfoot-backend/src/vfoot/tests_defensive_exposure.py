@@ -111,11 +111,13 @@ class DefensiveExposureTests(TestCase):
         self.assertLess(index_for_role("DIF", feats, 90, 0.9),
                         index_for_role("DIF", feats, 90, 0.0))
 
-    def test_the_penalty_grows_with_the_danger_but_is_compressed(self):
+    def test_the_penalty_grows_linearly_with_the_danger(self):
+        # v2: exposure is applied LINEARLY (it is already a small xG figure, not a
+        # fat-tailed count, so it is not √-compressed like the volume block).
         feats = {"touches": 60.0}
         base = index_for_role("DIF", feats, 90, 0.0)
         small = base - index_for_role("DIF", feats, 90, 0.25)
         large = base - index_for_role("DIF", feats, 90, 1.0)
         self.assertGreater(large, small)
-        self.assertLess(large, 4 * small)   # sqrt, not linear
+        self.assertAlmostEqual(large, 4 * small)   # linear, not sqrt
         self.assertAlmostEqual(large, DEF_EXPOSURE_WEIGHT * 1.0)

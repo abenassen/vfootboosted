@@ -32,131 +32,106 @@ from collections import defaultdict
 from django.db.models import Sum
 
 from realdata.models import (
-    MatchAppearance, Match, MatchShot, Player, PlayerOnPitchInterval,
-    PlayerZoneFeature, PROVIDER_SOFASCORE,
+    CARD_RED, CARD_SECOND_YELLOW, CARD_YELLOW,
+    MatchAppearance, Match, MatchDisciplinaryEvent, MatchShot, Player,
+    PlayerOnPitchInterval, PlayerZoneFeature, PROVIDER_SOFASCORE,
 )
 
 # Relative value of each action. Errors are negative. Only the ratios matter (the
 # index is z-scored downstream), so these encode "how much a good game looks like".
 # IMPACT events — counted as TOTALS (NOT rescaled to 90'): a decisive action's value
-# doesn't scale with how few minutes you played, and these fat-tailed features are what
-# blew up under per-90 extrapolation. The shooting block encodes the agreed combination:
-#   xG (getting into the position) small + xGOT (execution) large − big_chance_missed
-#   (squandering an easy chance) > the xG credit, so a glaring miss nets NEGATIVE.
+# doesn't scale with how few minutes you played. TOTALS are also NOT √-compressed;
+# they stay LINEAR (integer counts stay integer, xG/xGOT stay linear). Only the
+# PER90 volume block below gets √ (see ``_index_from_totals``).
 #
-# NOTE (refit 2026-07-23): the MAGNITUDES below were re-fit by within-role
-# constrained least-squares against fantacalcio's Statistico base vote (season
-# 2025-26), with domain sign constraints and hand floors on the rare decisive
-# events (clearances_off_line, last_man_tackle). This raised agreement with BOTH
-# fantacalcio sheets across every outfield role (e.g. DIF vs the editorial vote
-# 0.37 -> 0.45) at ~no cost to the independent SofaScore rating. The SIGNS and
-# STRUCTURE are the original design; the inline comments below explain that
-# rationale and may quote the PRIOR magnitudes. Key finding: playmaking
-# (key_passes, expected_assists) was over-weighted for EVERY role and cut hard;
-# shot EXECUTION (xg_on_target) is now the dominant positive term.
+# NOTE (hand-tuning 2026-07-26, model v2): the MAGNITUDES below are the analyst's
+# hand-tuned weights from the ``build_voto_tuner`` spreadsheet, not a machine fit.
+# A constrained NNLS fit on SofaScore confirmed every SIGN but wanted ~4x more xA
+# (SofaScore's known offensive bias); the analyst keeps a flatter, less
+# offense-heavy hand set instead. The shooting block encodes the SGA_Pali
+# paradigm agreed with the analyst — shot EXECUTION merit, not the goals
+# themselves (those are the bonus layer):
+#     SGA = xg_on_target − xg_shots + c·shots_post + (c/4)·shots_blocked
+# i.e. post-shot xG (how well he hit it) MINUS pre-shot xG (getting into position
+# is only partial merit), plus a small credit for a shot that struck the frame
+# (shots_post, from the event shot map) and a quarter of that for one the defence
+# blocked. shots_post / shots_blocked come from ``MatchShot.shot_type``, not the
+# zone features (see SHOT_TYPE_TO_FEATURE / _merge_shot_detail).
 TOTAL_WEIGHTS = {
-    "expected_assists": 0.366,    # xA: chance creation, credited to the CREATOR
-    "xg_on_target": 1.607,        # post-shot xG: the shooter's EXECUTION merit
-    "big_chance_created": 0.465,
-    "xg_shots": 0.715,            # raw xG: only partial 'got into position' merit
-    "key_passes": 0.181,
-    "shots_on_target": -0.03,
-    "shots": -0.116,
-    "errors_led_to_goal": -1.388,  # decisive error (heavy)
+    "expected_assists": 0.15,     # xA: chance creation, credited to the CREATOR
+    "xg_on_target": 0.30,         # post-shot xG: the shooter's EXECUTION merit (SGA +)
+    "big_chance_created": 0.10,
+    "xg_shots": -0.30,            # raw xG: subtracted, so SGA credits EXECUTION over positioning
+    "key_passes": 0.0,
+    "shots_on_target": 0.05,
+    "shots": -0.05,
+    "errors_led_to_goal": -0.35,  # decisive error (heavy)
     # Conceding a penalty hands over roughly 0.78 expected goals through a clear
     # individual foul, and — unlike a missed penalty — carries NO fantacalcio
-    # malus, so the base vote is the only place it can register at all. Below the
-    # error that concedes a goal, because a penalty is not yet a goal.
-    "penalties_conceded": -1.193,
+    # malus, so the base vote is the only place it can register at all.
+    "penalties_conceded": -0.50,
     # Winning one is the mirror image and equally unrewarded: the bonus goes to
     # whoever converts, never to the player who earned it.
-    "penalties_won": 0.607,
+    "penalties_won": 0.30,
     # Rare interventions that prevent a near-certain goal. Kept as impact totals,
     # not per-90: their value does not scale with how long you played.
-    "clearances_off_line": 0.8,
-    "last_man_tackle": 0.6,
-    # An error that let the opponent SHOOT, without a goal following. Anchored at
-    # a third of the error-that-conceded, which is both the intuitive expected
-    # cost (a chance handed to an opponent converts roughly one time in three)
-    # and the empirical optimum: swept against a full season of real pagelle,
-    # -0.50 maximised agreement both overall (0.4593 -> 0.4627) and on the 327
-    # affected player-matches (0.4882 -> 0.5113), with heavier weights doing
-    # worse. The two features barely overlap (7 player-matches in a season), so
-    # this does not double-count the conceded goal.
-    "errors_led_to_shot": -0.19,
-    "big_chance_missed": -0.528,   # squandering an easy chance > the xG positioning credit
+    "clearances_off_line": 0.20,
+    "last_man_tackle": 0.20,
+    # An error that let the opponent SHOOT, without a goal following.
+    "errors_led_to_shot": -0.10,
+    "big_chance_missed": -0.15,   # squandering an easy chance
+    # SGA_Pali shot-outcome detail, from the event-level shot map
+    # (MatchShot.shot_type), merged in by _merge_shot_detail. LINEAR totals.
+    "shots_post": 0.12,           # hit the frame: execution merit a goal/save can't show
+    "shots_blocked": 0.03,        # a quarter of shots_post — the defence intervened
 }
 
 # VOLUME / involvement — rescaled to PER-90 (density is the signal: 120 touches in 90'
-# != 30 in 20'), tail-compressed, with a floor so a short cameo isn't projected to 90'.
+# != 30 in 20'), √-compressed (tail-tamed), with a floor so a short cameo isn't
+# projected to 90'. This is the ONLY block that gets √; totals stay linear.
 #
 # Every key here must be one the provider actually supplies (see
 # ``sofascore_adapter.KNOWN_FEATURE_KEYS``; enforced by a test). This table used to
-# carry ``passes_into_box`` at 0.40 — the largest weight in the block — plus
-# ``progressive_passes_completed``, ``progressive_carries`` and ``pressures``,
-# none of which SofaScore reports. They were not merely empty for a season: the
-# adapter never writes them, so they contributed exactly zero to every voto ever
-# computed, while reading as if progression and pressing were being rewarded.
-# Removing them changes no vote (verified over a full season); what it removes is
-# the illusion. The intent behind them — credit for creating and progressing — is
-# in fact carried by the TOTAL block. (After the 2026-07-23 refit the dominant
-# positive term is xg_on_target; expected_assists/key_passes were found
-# over-weighted against the base vote and cut.)
+# carry ``passes_into_box``, ``progressive_passes_completed``, ``progressive_carries``
+# and ``pressures``, none of which SofaScore reports — they contributed exactly zero
+# while reading as if progression and pressing were rewarded, so they were removed.
 PER90_WEIGHTS = {
-    "dribbles_won": 0.137,
-    # The losing side of the contests we already reward. Without it a defender who
-    # won 5 duels out of 6 scored exactly like one who won 5 out of 20: we were
-    # treating a RATE as a count, and against the provider's own rating the rate
-    # tracks performance better than the count (+0.387 vs +0.348). Mirroring the
-    # +0.20 on duels won lets the index respond to the rate while still keeping
-    # volume, which a bare ratio would throw away — and a ratio over three duels
-    # is noise anyway.
-    "duels_lost": -0.163,
-    # Being dribbled past is a subset of duels lost (verified: 0 violations in
-    # 8659 appearances), so this is deliberate EXTRA weight, not new evidence —
-    # getting beaten one-on-one is worse than losing a shoulder-to-shoulder. It is
-    # also the individual defensive failure our features could not see at all,
-    # which is what made "no recorded error" such a poor proxy for "no fault".
-    "dribbled_past": -0.031,
-    # Also a subset of accuratePass (weight 0.02): the claim is not that these are
-    # extra passes but that a pass played in the opponent half is worth more than
-    # one played in your own. This is the progression signal the deleted
-    # passes_into_box and progressive_passes were reaching for and never had.
-    "passes_opp_half": 0.0,
-    # Aerial duels, also a subset of the duel counts: the claim is that a header
-    # contested is worth about half again a duel on the ground, because that is
-    # where set pieces and crosses are decided. Same mirrored shape as the duels.
-    "aerials_won": 0.009,
-    "aerials_lost": 0.0,
-    # A tackle is a committed, deliberate intervention, unlike coming out of a
-    # loose 50-50. Extra weight on the subset of duels won that way.
-    "tackles_won": 0.091,
-    # Being fouled is evidence an opponent had to stop you illegally.
-    "was_fouled": 0.11,
-    # An accurate long ball is progression, like a pass in the opponent half.
-    "long_balls_completed": 0.039,
-    # NOT here: crosses_completed. An accurate cross accrues to whoever crosses
-    # OFTEN, and the crosses that actually create something are already counted by
-    # expected_assists and key_passes — so it adds volume without end product. The
-    # diagnostic agrees: adding it at 0.10 LOWERS agreement with the provider's
-    # rating for every outfield role (DIF .623 -> .613, CEN .699 -> .695).
-    # NOT here either: possession_lost, which CONTAINS dispossessed and
-    # unsuccessfulTouch, both already weighted.
-    "touches_in_box": 0.031,
-    "duels_won": 0.048,
-    "interceptions": 0.095,
-    "ball_recoveries": 0.023,
-    "blocks": 0.104,
-    "clearances": 0.195,
-    "passes_completed": 0.044,
+    "dribbles_won": 0.05,
+    "duels_won": 0.05,
+    "duels_lost": -0.05,          # the losing side of the contests we reward
+    "dribbled_past": -0.05,       # subset of duels_lost: beaten one-on-one is worse
+    "passes_opp_half": 0.05,      # progression: a pass in the opponent half is worth more
+    "aerials_won": 0.05,
+    "aerials_lost": -0.05,
+    "tackles_won": 0.04,          # a committed, deliberate intervention
+    "was_fouled": 0.02,           # an opponent had to stop you illegally
+    "long_balls_completed": 0.05,
+    "crosses_completed": 0.05,    # (reactivated by the hand-tuning)
+    "touches_in_box": 0.01,
+    "interceptions": 0.05,
+    "ball_recoveries": 0.03,
+    "blocks": 0.03,
+    "clearances": 0.03,
+    "passes_completed": 0.01,
     "touches": 0.01,
-    "errors_bad_passes": -0.081,
-    "errors_dispossessed": -0.05,
-    "errors_miscontrols": -0.053,
-    "errors_fouls_committed": -0.016,
+    "errors_bad_passes": -0.03,
+    "errors_dispossessed": -0.03,
+    "errors_miscontrols": -0.03,
+    "errors_fouls_committed": -0.02,
+    "dribbles_attempted": -0.03,  # (reactivated) a failed take-on lost the ball
+    "possession_lost": -0.05,     # (reactivated) overlaps dispossessed/miscontrols
 }
 
 WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / breakdowns
+
+# Shot-outcome detail lives in the event-level shot map (``MatchShot.shot_type``),
+# not the per-zone features, so it is fetched and merged separately (see
+# ``_merge_shot_detail``). Only shots_post / shots_blocked carry weight today; the
+# rest are mapped for completeness and inspection.
+SHOT_TYPE_TO_FEATURE = {"post": "shots_post", "goal": "shots_goal",
+                        "save": "shots_saved", "miss": "shots_off",
+                        "block": "shots_blocked"}
+SHOT_DETAIL_FEATURES = frozenset(SHOT_TYPE_TO_FEATURE.values())
 
 # --- Goalkeeper channel ------------------------------------------------------
 # Keepers produce almost none of the outfield features above, so they need their own
@@ -228,18 +203,21 @@ EXTRAP_FLOOR_MINUTES = 55
 # data chose rather than one we imposed: 57% of its variance is between back
 # lines (the team suffered) and 43% within one (this defender was exposed).
 #
-# Weight 1.0: swept against SofaScore's INDEPENDENT rating, agreement peaks there
-# (0.531 -> 0.541) and falls away beyond it, while agreement with the external
-# pagella keeps climbing to 3.0. Past 1.0 we would not be measuring better, only
-# importing their collective punishment — the independent referee is what sets the
-# stop. The effect is deliberately modest: defenders end up at -0.09 against goals
-# conceded, not the -0.53 of the sources that punish the whole back line.
-DEF_EXPOSURE_WEIGHT = 1.154
+# Applied LINEARLY (v2 hand-tuning), unlike the √-compressed volume block: exposure
+# is already a small xG figure, not a fat-tailed count, so √ would over-flatten it.
+# Weight set by the analyst in the tuner; the effect stays deliberately modest —
+# charge the defender for danger in HIS zones while he was on, not collective
+# punishment of the whole back line.
+DEF_EXPOSURE_WEIGHT = 0.30
 
 # 'A voto' vs 'senza voto' (s.v.): classic fantacalcio rates a player only if he
 # played enough AND was involved enough; below that he gets NO vote (a bench player
 # replaces him), not a 6. Involvement is proxied by ball touches. Both tunable.
-MIN_MINUTES_RATED = 15
+# NB: this is only the MINUTES/INVOLVEMENT gate. A player involved in a decisive
+# event (goal, assist, own goal, penalty, booking, sending-off on the pitch) is
+# rated regardless — that override lives in ``voto_puro_for_match`` via
+# ``rating_forcing_event_players``, because those events are not in the zone totals.
+MIN_MINUTES_RATED = 12
 MIN_TOUCHES_RATED = 12
 # Above this many minutes, minutes ALONE decide: the touch count is a proxy for
 # "was he involved enough to judge", and that question only makes sense for a
@@ -313,11 +291,48 @@ def current_role_map(*, only_declared: bool = False) -> dict:
 
 
 def is_rated(minutes: int, totals: dict) -> bool:
-    """Whether a player goes 'a voto' (vs senza voto) given minutes + involvement."""
+    """Minutes/involvement gate for 'a voto' vs senza voto. NOT the whole story:
+    a player involved in a decisive event is rated even below this — see
+    ``rating_forcing_event_players`` and how ``voto_puro_for_match`` combines them."""
     if minutes >= ALWAYS_RATED_MINUTES:
         return True
     return (minutes >= MIN_MINUTES_RATED
             and totals.get("touches", 0.0) >= MIN_TOUCHES_RATED)
+
+
+_CARD_TYPES = (CARD_YELLOW, CARD_SECOND_YELLOW, CARD_RED)
+
+
+def rating_forcing_event_players(match_id: int) -> set:
+    """player_ids whose match carried a decisive event that forces a rating no
+    matter how few minutes/touches they had — classic fantacalcio never leaves such
+    a player 'senza voto'. Covers a goal, assist or own goal; a booking; and a
+    sending-off/booking taken ON THE PITCH (the card's minute falls inside the
+    player's on-pitch window, which drops the post-match/bench card anomalies at
+    minute -5). Penalties won/conceded are handled by the caller from the zone
+    totals it already holds. Own goals live in ``MatchAppearance.raw_stats``."""
+    apps = list(MatchAppearance.objects.filter(match_id=match_id)
+                .values("player_id", "side", "is_starter", "goals", "assists",
+                        "minutes_played", "raw_stats"))
+    if not apps:
+        return set()
+    forcing = set()
+    for a in apps:
+        rs = a.get("raw_stats") or {}
+        if a["goals"] or a["assists"] or (rs.get("ownGoals") or 0) > 0:
+            forcing.add(a["player_id"])
+
+    minutes = {(match_id, a["player_id"]): a["minutes_played"] for a in apps}
+    appearances = {(match_id, a["player_id"]): (a["side"], a["is_starter"])
+                   for a in apps}
+    windows = on_pitch_windows([match_id], minutes, appearances)
+    for pid, minute in (MatchDisciplinaryEvent.objects
+                        .filter(match_id=match_id, card_type__in=_CARD_TYPES)
+                        .values_list("player_id", "minute")):
+        lo, hi = windows.get((match_id, pid), (0.0, 0.0))
+        if minute is not None and lo <= minute <= hi:
+            forcing.add(pid)
+    return forcing
 
 
 def _compress(rate: float) -> float:
@@ -362,19 +377,20 @@ def index_for_role(role: str, totals: dict, minutes: int,
         return _gk_index_from_totals(totals, minutes)
     idx = _index_from_totals(totals, minutes)
     if role == Player.ROLE_DEF and exposure > 0:
-        idx -= DEF_EXPOSURE_WEIGHT * _compress(exposure)
+        idx -= DEF_EXPOSURE_WEIGHT * exposure  # LINEAR (v2), not √-compressed
     return idx
 
 
 def _index_from_totals(totals: dict, minutes: int) -> float:
-    """Weighted, tail-compressed performance index. Impact events count as totals;
-    volume/involvement is per-90 (floored so short cameos aren't extrapolated)."""
+    """Weighted performance index (outfield). Impact events count as LINEAR totals;
+    the volume/involvement block is per-90 and √-compressed (floored so short cameos
+    aren't extrapolated). The two-way split is the v2 selective-√ design."""
     if minutes <= 0:
         return 0.0
-    idx = sum(TOTAL_WEIGHTS[k] * _compress(totals.get(k, 0.0)) for k in TOTAL_WEIGHTS)
+    idx = sum(TOTAL_WEIGHTS[k] * totals.get(k, 0.0) for k in TOTAL_WEIGHTS)  # LINEAR
     scale = 90.0 / max(minutes, EXTRAP_FLOOR_MINUTES)
     idx += sum(PER90_WEIGHTS[k] * _compress(totals.get(k, 0.0) * scale)
-               for k in PER90_WEIGHTS)
+               for k in PER90_WEIGHTS)  # √ only here
     return idx
 
 
@@ -393,7 +409,26 @@ def _per_match_player_totals(match_ids):
     out = defaultdict(dict)
     for r in rows:
         out[(r["match_id"], r["player_id"])][r["feature_key"]] = r["v"]
+    _merge_shot_detail(out, match_ids)
     return out
+
+
+def _merge_shot_detail(out: dict, match_ids) -> None:
+    """Fold the SGA_Pali shot-outcome counts (shots_post / shots_blocked / ...) into
+    the per-player totals. They live in the event-level shot map, not the zone
+    features, so they are counted from ``MatchShot.shot_type`` and added in place.
+    Only the mapped types are counted; unmapped ones are ignored."""
+    counts = defaultdict(lambda: defaultdict(float))
+    for mid, pid, st in (MatchShot.objects
+                         .filter(match_id__in=match_ids)
+                         .values_list("match_id", "player_id", "shot_type")):
+        feat = SHOT_TYPE_TO_FEATURE.get(st)
+        if feat:
+            counts[(mid, pid)][feat] += 1.0
+    for key, feats in counts.items():
+        row = out[key]  # defaultdict(dict): materialises a shots-only player too
+        for feat, n in feats.items():
+            row[feat] = row.get(feat, 0.0) + n
 
 
 def _fallback_window(minutes: int, is_starter: bool) -> tuple[float, float]:
@@ -589,6 +624,9 @@ def voto_puro_for_match(match, reference: dict,
     keepers = dict(Player.objects.values_list("id", "is_goalkeeper"))
     names = dict(Player.objects.values_list("id", "short_name"))
     full = dict(Player.objects.values_list("id", "full_name"))
+    # Decisive-event override for s.v.: a scorer/assist-man/booked/sent-off (on the
+    # pitch) player is rated even below the minutes/touches gate.
+    forcing = rating_forcing_event_players(match.id)
 
     results = []
     for (mid, pid), feats in totals.items():
@@ -601,7 +639,11 @@ def voto_puro_for_match(match, reference: dict,
         # An inferred KEEPER still belongs in the keeper distribution — his own
         # features identified him. Only an unknown outfielder needs the pool.
         ref_key = role if role else POOLED_OUTFIELD
-        rated = is_rated(mins, feats)
+        # Rated if he played/was involved enough, OR was in a decisive event
+        # (goal/assist/own goal/booking/sending-off), OR won/conceded a penalty.
+        rated = (is_rated(mins, feats) or pid in forcing
+                 or feats.get("penalties_won", 0.0) > 0
+                 or feats.get("penalties_conceded", 0.0) > 0)
         results.append({
             "player_id": pid,
             "name": names.get(pid) or full.get(pid) or str(pid),

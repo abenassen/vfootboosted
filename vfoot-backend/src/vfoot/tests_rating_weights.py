@@ -15,13 +15,17 @@ from django.test import SimpleTestCase
 
 from realdata.services.sofascore_adapter import KNOWN_FEATURE_KEYS
 from vfoot.services.classic_rating import (
-    GK_PER90_WEIGHTS, GK_TOTAL_WEIGHTS, PER90_WEIGHTS, TOTAL_WEIGHTS,
+    GK_PER90_WEIGHTS, GK_TOTAL_WEIGHTS, PER90_WEIGHTS, SHOT_DETAIL_FEATURES,
+    TOTAL_WEIGHTS,
 )
 
 
 class RatingWeightsTests(SimpleTestCase):
     def test_every_weighted_feature_is_one_the_provider_supplies(self):
-        supplied = set(KNOWN_FEATURE_KEYS)
+        # Shot-outcome detail (shots_post/blocked/...) is supplied too, but from the
+        # event-level shot map (MatchShot.shot_type), not the zone features — see
+        # classic_rating._merge_shot_detail.
+        supplied = set(KNOWN_FEATURE_KEYS) | set(SHOT_DETAIL_FEATURES)
         for name, table in (("TOTAL_WEIGHTS", TOTAL_WEIGHTS),
                             ("PER90_WEIGHTS", PER90_WEIGHTS),
                             ("GK_TOTAL_WEIGHTS", GK_TOTAL_WEIGHTS),

@@ -52,6 +52,8 @@ LABELS = {
     "key_passes": ("passaggi chiave", COUNT, "mp"),
     "shots_on_target": ("tiri nello specchio", COUNT, "mp"),
     "shots": ("tiri tentati", COUNT, "mp"),
+    "shots_post": ("un tiro sul palo", EVENT, None),
+    "shots_blocked": ("tiri murati", COUNT, "mp"),
     "errors_led_to_goal": ("un errore che ha portato a un gol", EVENT, None),
     "errors_led_to_shot": ("un errore che ha concesso un tiro", EVENT, None),
     "big_chance_missed": ("un'occasione nitida sprecata", EVENT, None),
@@ -73,6 +75,9 @@ LABELS = {
     "touches_in_box": ("palloni toccati in area", COUNT, "mp"),
     "passes_opp_half": ("gioco nella meta' campo avversaria", COUNT, "ms"),
     "long_balls_completed": ("lanci lunghi riusciti", COUNT, "mp"),
+    "crosses_completed": ("cross riusciti", COUNT, "mp"),
+    "dribbles_attempted": ("dribbling tentati", COUNT, "mp"),
+    "possession_lost": ("palloni persi", COUNT, "mp"),
     "passes_completed": ("passaggi riusciti", COUNT, "mp"),
     "was_fouled": ("falli subiti", COUNT, "mp"),
     "touches": ("palloni giocati", COUNT, "mp"),
@@ -132,16 +137,21 @@ def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0) -> dict
     out = {}
     for key, w in total_w.items():
         raw = totals.get(key, 0.0)
-        squashed = _compress_signed(raw) if key in SIGNED_FEATURES else _compress(raw)
-        if squashed:
-            out[key] = w * squashed
+        # v2 selective-√: outfield totals are LINEAR; the GK channel keeps √
+        # (its weights were fit against a √-compressed total block).
+        if is_gk:
+            val = _compress_signed(raw) if key in SIGNED_FEATURES else _compress(raw)
+        else:
+            val = raw
+        if val:
+            out[key] = w * val
     scale = 90.0 / max(minutes, EXTRAP_FLOOR_MINUTES)
     for key, w in per90_w.items():
         squashed = _compress(totals.get(key, 0.0) * scale)
         if squashed:
             out[key] = w * squashed
     if role == Player.ROLE_DEF and exposure > 0:
-        out["_exposure"] = -DEF_EXPOSURE_WEIGHT * _compress(exposure)
+        out["_exposure"] = -DEF_EXPOSURE_WEIGHT * exposure  # LINEAR (v2)
     return out
 
 
