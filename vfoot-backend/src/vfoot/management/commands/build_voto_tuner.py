@@ -111,6 +111,7 @@ class Command(BaseCommand):
         totals = cr._per_match_player_totals(mids)
         minutes = cr._minutes_map(mids)
         expo = cr.defensive_exposure(mids, minutes)
+        gd_on_map = cr.on_pitch_goal_difference(mids, minutes)
         # inject shot-outcome detail from the event-level shotmap
         shd = defaultdict(Counter)
         for mid, pid, st in (MatchShot.objects.filter(match_id__in=mids)
@@ -248,7 +249,10 @@ class Command(BaseCommand):
             casedata.append({"name": name.get(pid, str(pid)), "tipo": r["tipo"], "role": role,
                              "min": m, "match": res, "goals": r["goals"], "raw": sd,
                              "sqrt": sqrtv(sd), "fanta": r["fanta"], "stat": r["statistico"],
-                             "sofa": r["sofa"], "our": r["our"]})
+                             "sofa": r["sofa"], "our": r["our"],
+                             # weight-independent inputs to the post-adjustment layer
+                             "gd_on": gd_on_map.get((mid, pid), 0),
+                             "red_adj": round(cr.red_card_adjustments(mid).get(pid, 0.0), 3)})
         casedata.sort(key=lambda c: (OUT_ROLES.index(c["role"]), c["tipo"], c["name"]))
 
         self._build_xlsx(out, FEATS, nF, is_p90, w_of, STATS, casedata)
@@ -357,13 +361,17 @@ class Command(BaseCommand):
         # ---- Tuner ----
         tun = wb.create_sheet("Tuner"); wb.move_sheet("Tuner", -(len(wb.sheetnames) - 1))
         tun["A1"] = "VOTO PURO — tuner dei pesi"; tun["A1"].font = Font(bold=True, size=14)
-        tun["A2"] = ("Edita i PESI (col C, celle gialle). Interruttore RAW/SQRT in B4. "
-                     "Il VOTO (riga 20) si colora: verde=accordo, giallo=borderline, rosso=outlier.")
-        tun["A3"] = ("Norm.90': le PER-90 sono gia' ×90/max(min,55). SQRT applica la √ SOLO "
-                     "alle PER90 (alta varianza); TOTAL/tiri/exposure LINEARI. "
-                     "Voto = 6 + 0.8·(min/(min+25))·(indice−media)/sigma, in [3,10].")
+        tun["A2"] = ("Edita i PESI (col C, celle gialle) e K mitigazione (B5). Interruttore "
+                     "RAW/SQRT in B4. Il VOTO FINALE (riga 24) si colora: verde=accordo, "
+                     "giallo=borderline, rosso=outlier.")
+        tun["A3"] = ("Pipeline: voto base = 6+0.8·(min/(min+25))·(indice−media)/σ in [3,10]; "
+                     "poi + mitigazione risultato (solo divergenze, cap ±1) + red_adj; "
+                     "poi clamp [3,10] e arrotondamento 0.5. gd_on e red_adj sono FISSI "
+                     "(non dipendono dai pesi). SQRT applica √ solo alle PER90.")
         tun["A4"] = "compressione:"; tun["B4"] = "SQRT"; tun["B4"].font = Font(bold=True); tun["B4"].fill = yel
         dv = DataValidation(type="list", formula1='"RAW,SQRT"'); tun.add_data_validation(dv); dv.add(tun["B4"])
+        tun["A5"] = "K mitigazione:"; tun["B5"] = 0.15
+        tun["B5"].font = Font(bold=True); tun["B5"].fill = yel; tun["B5"].number_format = "0.00"
         tun["A6"] = "feature"; tun["B6"] = "tipo"; tun["C6"] = "PESO"
         for cc in ("A6", "B6", "C6"):
             tun[cc].font = Font(bold=True, color="FFFFFF"); tun[cc].fill = fillh
@@ -371,11 +379,12 @@ class Command(BaseCommand):
             tun.cell(7 + i, 1, f)
             tun.cell(7 + i, 2, "PER90" if is_p90[f] else ("EXPOS" if f == "_exposure" else "TOT"))
             wc = tun.cell(7 + i, 3, round(w_of(f), 3)); wc.fill = yel; wc.number_format = "0.000"
-        TOG = "Tuner!$B$4"; c0 = 5
+        TOG = "Tuner!$B$4"; KM = "Tuner!$B$5"; c0 = 5
         rowlab = [(7, "giocatore"), (8, "TIPO"), (9, "ruolo"), (10, "partita (gd, risultato, gol)"),
                   (11, "minuti"), (12, "fanta"), (13, "statistico"), (14, "sofascore"),
                   (15, "nostro(attuale)"), (16, "indice"), (17, "media INDICE ruolo"),
-                  (18, "sigma INDICE ruolo"), (20, "VOTO PURO (live)")]
+                  (18, "sigma INDICE ruolo"), (19, "gd_on (in campo)"), (20, "red_adj (fisso)"),
+                  (21, "voto base"), (22, "mitigazione"), (24, "VOTO FINALE (live)")]
         for rr2, lab in rowlab:
             tun.cell(rr2, c0, lab).font = Font(bold=True, size=9)
         for ci, c in enumerate(casedata):
@@ -390,34 +399,43 @@ class Command(BaseCommand):
             tun.cell(16, cc, f'=IF({TOG}="SQRT",SUMPRODUCT({wvec},{csq(ci)}),SUMPRODUCT({wvec},{craw(ci)}))')
             tun.cell(17, cc, f'=IF({TOG}="SQRT",calc!$C${mr},calc!$B${mr})')
             tun.cell(18, cc, f'=IF({TOG}="SQRT",calc!$E${mr},calc!$D${mr})')
-            tun.cell(20, cc, f'=MAX(3,MIN(10,6+0.8*({L}11/({L}11+25))*(({L}16-{L}17)/{L}18)))')
-            tun.cell(20, cc).font = Font(bold=True, size=12)
-            for rr in (16, 17, 18):
+            tun.cell(19, cc, c["gd_on"])
+            tun.cell(20, cc, c["red_adj"])
+            # voto base (clamp [3,10], pre-arrotondamento)
+            tun.cell(21, cc, f'=MAX(3,MIN(10,6+0.8*({L}11/({L}11+25))*(({L}16-{L}17)/{L}18)))')
+            # mitigazione: solo divergenze, k*(up - down), cap ±1.
+            #   up   = (6-base)·max(0, gd_on)   -> voto basso in vittoria: sale
+            #   down = (base-6)·max(0,-gd_on)   -> voto alto in sconfitta: scende
+            tun.cell(22, cc, f'=MAX(-1,MIN(1,{KM}*(MAX(0,6-{L}21)*MAX(0,{L}19)'
+                             f'-MAX(0,{L}21-6)*MAX(0,-{L}19))))')
+            # voto finale = clamp(base + mitigazione + red_adj), arrotondato a 0.5
+            tun.cell(24, cc, f'=ROUND(MAX(3,MIN(10,{L}21+{L}22+{L}20))*2)/2')
+            tun.cell(24, cc).font = Font(bold=True, size=12)
+            for rr in (16, 17, 18, 20, 21, 22):
                 tun.cell(rr, cc).number_format = "0.000"
-            tun.cell(20, cc).number_format = "0.00"
+            tun.cell(24, cc).number_format = "0.0"
             for rr in (12, 13, 14, 15):
                 if isinstance(tun.cell(rr, cc).value, (int, float)):
                     tun.cell(rr, cc).number_format = "0.0"
             tun.column_dimensions[col(cc)].width = 13
-        # conditional colour on the voto row vs fanta/statistico
-        first = col(c0 + 1); last = col(c0 + len(casedata)); rng = f"{first}20:{last}20"
-        D = f"MIN(ABS({first}20-{first}12),IF(ISNUMBER({first}13),ABS({first}20-{first}13),99))"
+        # conditional colour on the FINAL voto row vs fanta/statistico
+        first = col(c0 + 1); last = col(c0 + len(casedata)); rng = f"{first}24:{last}24"
+        D = f"MIN(ABS({first}24-{first}12),IF(ISNUMBER({first}13),ABS({first}24-{first}13),99))"
         for cond, (bg, fg) in ((f"{D}<=0.75", CF_GREEN), (f"AND({D}>0.75,{D}<=1.5)", CF_YEL), (f"{D}>1.5", CF_RED)):
             tun.conditional_formatting.add(rng, FormulaRule(
                 formula=[cond], fill=PatternFill("solid", fgColor=bg),
                 font=Font(bold=True, size=12, color=fg)))
-        tun["E22"] = ("NOTE: 'media/sigma INDICE ruolo' sono media e dev.std dell'INDICE (somma pesata) "
-                      "tra i giocatori del ruolo → cambiano coi pesi. Le medie per-feature (fisse) "
-                      "sono nel foglio 'cases' (colonne a destra) e 'medie'.")
-        tun["E23"] = ("TIPO: 'DISAC. 2x'=disaccordo con fanta E SofaScore (marcatori "
+        tun["E26"] = ("NOTE: 'media/sigma INDICE ruolo' sono media e dev.std dell'INDICE (somma pesata) "
+                      "tra i giocatori del ruolo → cambiano coi pesi. gd_on e red_adj sono FISSI. "
+                      "'nostro(attuale)' (riga 15) è il deployato e dovrebbe ≈ VOTO FINALE (riga 24).")
+        tun["E27"] = ("TIPO: 'DISAC. 2x'=disaccordo con fanta E SofaScore (marcatori "
                       "che sprecano: il gol è bonus +3, non voto base; loro fanno l'alone-gol, "
                       "noi no); 'DISAC. fanta'=disaccordo con fanta ma SofaScore ci dà ragione "
                       "(merito individuale in sconfitta vs punizione collettiva); "
                       "GOL=marcatore, 'KO netto'=sconfitta ≥3 gol, OUTLIER, buono=accordo.")
-        tun["E24"] = ("SGA_Pali: w(xg_on_target)=+a, w(xg_shots)=−a (differenza xgOT−xg), "
-                      "w(shots_post)=+a·c (palo, c~0.2); azzera shots/shots_on_target/big_chance_missed, "
-                      "creazione sulla sola expected_assists.")
-        for a in ("E22", "E23", "E24"):
+        tun["E28"] = ("Mitigazione: solo divergenze (voto>6 in sconfitta → giù; voto<6 in vittoria → su), "
+                      "= K·(voto−6)·(gd contrario), cap ±1. K in B5. SGA_Pali: xgOT−xg + palo.")
+        for a in ("E26", "E27", "E28"):
             tun[a].font = Font(italic=True, size=9)
         tun.column_dimensions["A"].width = 21; tun.column_dimensions["C"].width = 8
         tun.column_dimensions["E"].width = 19
