@@ -64,6 +64,7 @@ LABELS = {
     # SIGNAL — small high-value continuous; "una o più ...", (positive, negative)
     "expected_assists": (SIGNAL, "una o più occasioni create per i compagni", None),
     # EVENT — counted exactly, (singular, plural)
+    "shots_goal": (EVENT, "un gol", "gol"),
     "big_chance_created": (EVENT, "un'occasione nitida creata", "occasioni nitide create"),
     "big_chance_missed": (EVENT, "un'occasione nitida sprecata", "occasioni nitide sprecate"),
     "shots_post": (EVENT, "un tiro sul palo", "tiri sul palo"),

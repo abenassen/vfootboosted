@@ -45,6 +45,8 @@ SHOTMAP = {"post": "shots_post", "goal": "shots_goal", "save": "shots_saved",
 # Provider stats we ingest but do not weight — shown at weight 0 for inspection.
 # (crosses_completed / dribbles_attempted are now weighted; possession_lost was
 # dropped as 79% redundant with the errors_* it overlaps — see PER90_WEIGHTS.)
+# big_chance_created/missed were dropped (goal now weighted via shots_goal) — they're
+# TOTAL events, not shown here (UNUSED is treated as PER90); re-add to TOTAL_WEIGHTS.
 UNUSED = ["tackles", "possession_lost"]
 # Emblematic cases to always show, tagged by disagreement type:
 #   "DISAC. 2x"    — we disagree with BOTH fantacalcio and SofaScore. Scorers who

@@ -44,24 +44,29 @@ from realdata.models import (
 # they stay LINEAR (integer counts stay integer, xG/xGOT stay linear). Only the
 # PER90 volume block below gets √ (see ``_index_from_totals``).
 #
-# NOTE (hand-tuning 2026-07-26, model v2): the MAGNITUDES below are the analyst's
+# NOTE (hand-tuning 2026-07-27, model v2): the MAGNITUDES below are the analyst's
 # hand-tuned weights from the ``build_voto_tuner`` spreadsheet, not a machine fit.
 # A constrained NNLS fit on SofaScore confirmed every SIGN but wanted ~4x more xA
 # (SofaScore's known offensive bias); the analyst keeps a flatter, less
-# offense-heavy hand set instead. The shooting block encodes the SGA_Pali
-# paradigm agreed with the analyst — shot EXECUTION merit, not the goals
-# themselves (those are the bonus layer):
-#     SGA = xg_on_target − xg_shots + c·shots_post + (c/4)·shots_blocked
-# i.e. post-shot xG (how well he hit it) MINUS pre-shot xG (getting into position
-# is only partial merit), plus a small credit for a shot that struck the frame
-# (shots_post, from the event shot map) and a quarter of that for one the defence
-# blocked. shots_post / shots_blocked come from ``MatchShot.shot_type``, not the
-# zone features (see SHOT_TYPE_TO_FEATURE / _merge_shot_detail).
+# offense-heavy hand set instead. The shooting block:
+#   * shots_goal (+0.45): the GOAL itself now scores in the base — the analyst chose
+#     to weight goals moderately (own goals excluded upstream, see _merge_shot_detail),
+#     closing the "scoring halo" gap where BOTH fantacalcio and SofaScore rated
+#     scorers ~+0.85 above us. This is ON TOP of the +3 fantavoto bonus (a different
+#     dimension: the base credits the finishing quality, the bonus the fantasy points).
+#   * xg_on_target (+0.30) − xg_shots (−0.15): the SGA execution term — post-shot xG
+#     over pre-shot xG (positioning is only partial merit), the subtraction now
+#     softened. Plus shots_post/shots_blocked for a shot that struck the frame / was
+#     blocked (from MatchShot.shot_type, see SHOT_TYPE_TO_FEATURE / _merge_shot_detail).
+# DROPPED: big_chance_created / big_chance_missed — redundant now that the goal is
+# weighted directly (shots_goal) and the miss is already in the SGA (a missed big
+# chance has high xg_shots, low xg_on_target). Removing big_chance_missed also
+# fixes its double-penalty with the SGA on the same shot.
 TOTAL_WEIGHTS = {
     "expected_assists": 0.15,     # xA: chance creation, credited to the CREATOR
+    "shots_goal": 0.45,           # the GOAL itself (own goals excluded), on top of +3 bonus
     "xg_on_target": 0.30,         # post-shot xG: the shooter's EXECUTION merit (SGA +)
-    "big_chance_created": 0.10,
-    "xg_shots": -0.30,            # raw xG: subtracted, so SGA credits EXECUTION over positioning
+    "xg_shots": -0.15,            # raw xG: subtracted (softened) — execution over positioning
     "key_passes": 0.0,
     "shots_on_target": 0.05,
     "shots": -0.05,
@@ -79,10 +84,9 @@ TOTAL_WEIGHTS = {
     "last_man_tackle": 0.20,
     # An error that let the opponent SHOOT, without a goal following.
     "errors_led_to_shot": -0.10,
-    "big_chance_missed": -0.15,   # squandering an easy chance
     # SGA_Pali shot-outcome detail, from the event-level shot map
     # (MatchShot.shot_type), merged in by _merge_shot_detail. LINEAR totals.
-    "shots_post": 0.12,           # hit the frame: execution merit a goal/save can't show
+    "shots_post": 0.14,           # hit the frame: execution merit a goal/save can't show
     "shots_blocked": 0.03,        # a quarter of shots_post — the defence intervened
 }
 
@@ -97,9 +101,9 @@ TOTAL_WEIGHTS = {
 # while reading as if progression and pressing were rewarded, so they were removed.
 PER90_WEIGHTS = {
     "dribbles_won": 0.05,
-    "duels_won": 0.05,
-    "duels_lost": -0.05,          # the losing side of the contests we reward
-    "dribbled_past": -0.05,       # subset of duels_lost: beaten one-on-one is worse
+    "duels_won": 0.12,
+    "duels_lost": -0.12,          # the losing side of the contests we reward
+    "dribbled_past": -0.07,       # subset of duels_lost: beaten one-on-one is worse
     "passes_opp_half": 0.05,      # progression: a pass in the opponent half is worth more
     "aerials_won": 0.05,
     "aerials_lost": -0.05,
@@ -133,8 +137,8 @@ WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / break
 
 # Shot-outcome detail lives in the event-level shot map (``MatchShot.shot_type``),
 # not the per-zone features, so it is fetched and merged separately (see
-# ``_merge_shot_detail``). Only shots_post / shots_blocked carry weight today; the
-# rest are mapped for completeness and inspection.
+# ``_merge_shot_detail``). shots_goal / shots_post / shots_blocked carry weight; the
+# rest (shots_saved / shots_off) are mapped for completeness and inspection.
 SHOT_TYPE_TO_FEATURE = {"post": "shots_post", "goal": "shots_goal",
                         "save": "shots_saved", "miss": "shots_off",
                         "block": "shots_blocked"}
@@ -259,7 +263,7 @@ EXTRAP_FLOOR_MINUTES = 55
 # Weight set by the analyst in the tuner; the effect stays deliberately modest —
 # charge the defender for danger in HIS zones while he was on, not collective
 # punishment of the whole back line.
-DEF_EXPOSURE_WEIGHT = 0.30
+DEF_EXPOSURE_WEIGHT = 0.40
 
 # 'A voto' vs 'senza voto' (s.v.): classic fantacalcio rates a player only if he
 # played enough AND was involved enough; below that he gets NO vote (a bench player
