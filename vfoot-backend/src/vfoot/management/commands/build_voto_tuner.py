@@ -46,9 +46,24 @@ SHOTMAP = {"post": "shots_post", "goal": "shots_goal", "save": "shots_saved",
 # (crosses_completed / dribbles_attempted are now weighted; possession_lost was
 # dropped as 79% redundant with the errors_* it overlaps — see PER90_WEIGHTS.)
 UNUSED = ["tackles", "possession_lost"]
-# forced cases we have analysed and want to keep visible: (player_id, matchday)
-# Baschirotto, Leão, Troilo, Ismajli, David.
-FORCED = [(1323, 14), (1123, 26), (1070, 22), (1271, 17), (913, 18)]
+# Emblematic cases to always show, tagged by disagreement type:
+#   "DISAC. 2x"    — we disagree with BOTH fantacalcio and SofaScore. Scorers who
+#                    also wasted chances: the goal is our +3 bonus, not the base
+#                    vote, and both benchmarks apply a scoring halo we don't.
+#   "DISAC. fanta" — we disagree with fantacalcio but SofaScore AGREES with us:
+#                    individual merit in a team defeat vs fanta's collective punishment.
+FORCED = [
+    (1072, 11, "DISAC. 2x"),     # Delprato (DIF) 1 gol, 2 big chance mancate
+    (1101, 36, "DISAC. 2x"),     # Malen (ATT) 2 gol ma sprechi
+    (768, 11, "DISAC. 2x"),      # Berardi (CEN) 2 gol
+    (1188, 10, "DISAC. 2x"),     # Castro (ATT) 2 gol
+    (934, 28, "DISAC. 2x"),      # Bowie (ATT) 1 gol
+    (740, 29, "DISAC. 2x"),      # Simeone (ATT) 1 gol
+    (1002, 25, "DISAC. 2x"),     # Loyola (CEN) 1 gol + rigore concesso
+    (926, 37, "DISAC. fanta"),   # Edmundsson (DIF) SofaScore 9.1 conferma noi
+    (907, 21, "DISAC. fanta"),   # Koopmeiners (CEN)
+    (1160, 33, "DISAC. fanta"),  # Buongiorno (DIF)
+]
 
 TEAL = "1F5C53"; YEL = "FFF2CC"
 CF_GREEN = ("C6EFCE", "006100"); CF_YEL = ("FFEB9C", "9C6500"); CF_RED = ("FFC7CE", "9C0006")
@@ -59,8 +74,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--season", type=int, default=2)
-        parser.add_argument("--cases", type=int, default=24,
-                            help="Target number of case columns.")
+        parser.add_argument("--cases", type=int, default=18,
+                            help="Target number of case columns (10 emblematic + fillers).")
         parser.add_argument("--dir", default=None,
                             help="Folder with the external fantacalcio .xlsx sheets.")
         parser.add_argument("--out", default=None,
@@ -77,7 +92,10 @@ class Command(BaseCommand):
         # ---- feature set (deployed + shot detail) ----
         TOTAL = list(cr.TOTAL_WEIGHTS)
         PER90 = list(cr.PER90_WEIGHTS) + UNUSED
-        SHOTDET = list(SHOTMAP.values())
+        # shots_post / shots_blocked are now WEIGHTED TOTAL features (their values
+        # arrive via _per_match_player_totals); only the UNWEIGHTED shot outcomes go
+        # here, shown at weight 0 for inspection — else they'd be double-counted.
+        SHOTDET = [f for f in SHOTMAP.values() if f not in cr.TOTAL_WEIGHTS]
         FEATS = TOTAL + PER90 + ["_exposure"] + SHOTDET
         nF = len(FEATS)
         is_p90 = {f: (f in PER90) for f in FEATS}
@@ -180,10 +198,10 @@ class Command(BaseCommand):
             sel.append({**r, "tipo": tipo}); seen.add(r["pid"]); return True
 
         by_key = {(r["gd"], r["pid"]): r for r in cand}
-        for pid, gd in FORCED:                                   # analysed cases
+        for pid, gd, tag in FORCED:                              # emblematic cases
             r = by_key.get((gd, pid))
             if r:
-                take(r, "OUTLIER")
+                take(r, tag)
         # scorers with a base-vote discrepancy
         n = 0
         for r in sorted([x for x in cand if x["goals"]], key=lambda x: -x["absd"]):
@@ -363,8 +381,9 @@ class Command(BaseCommand):
         for ci, c in enumerate(casedata):
             cc = c0 + 1 + ci; L = col(cc); mr = murow[c["role"]]
             tun.cell(7, cc, c["name"]).font = Font(bold=True)
-            tun.cell(8, cc, c["tipo"]).fill = PatternFill(
-                "solid", fgColor="C9E7DF" if c["tipo"] == "buono" else "F7ECDD")
+            _tipo_fill = {"buono": "C9E7DF", "DISAC. 2x": "F8CBAD",
+                          "DISAC. fanta": "FFE699"}.get(c["tipo"], "F7ECDD")
+            tun.cell(8, cc, c["tipo"]).fill = PatternFill("solid", fgColor=_tipo_fill)
             tun.cell(9, cc, c["role"]); tun.cell(10, cc, c["match"]); tun.cell(11, cc, c["min"])
             tun.cell(12, cc, c["fanta"]); tun.cell(13, cc, c["stat"] if c["stat"] is not None else "-")
             tun.cell(14, cc, c["sofa"] if c["sofa"] is not None else "-"); tun.cell(15, cc, c["our"])
@@ -390,8 +409,11 @@ class Command(BaseCommand):
         tun["E22"] = ("NOTE: 'media/sigma INDICE ruolo' sono media e dev.std dell'INDICE (somma pesata) "
                       "tra i giocatori del ruolo → cambiano coi pesi. Le medie per-feature (fisse) "
                       "sono nel foglio 'cases' (colonne a destra) e 'medie'.")
-        tun["E23"] = ("TIPO: OUTLIER=forte discrepanza, GOL=marcatore, 'KO netto'=sconfitta ≥3 gol "
-                      "(fanta lega il voto al risultato, noi no), buono=accordo.")
+        tun["E23"] = ("TIPO: 'DISAC. 2x'=disaccordo con fanta E SofaScore (marcatori "
+                      "che sprecano: il gol è bonus +3, non voto base; loro fanno l'alone-gol, "
+                      "noi no); 'DISAC. fanta'=disaccordo con fanta ma SofaScore ci dà ragione "
+                      "(merito individuale in sconfitta vs punizione collettiva); "
+                      "GOL=marcatore, 'KO netto'=sconfitta ≥3 gol, OUTLIER, buono=accordo.")
         tun["E24"] = ("SGA_Pali: w(xg_on_target)=+a, w(xg_shots)=−a (differenza xgOT−xg), "
                       "w(shots_post)=+a·c (palo, c~0.2); azzera shots/shots_on_target/big_chance_missed, "
                       "creazione sulla sola expected_assists.")
