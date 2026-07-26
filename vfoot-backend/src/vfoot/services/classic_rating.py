@@ -502,14 +502,27 @@ def _merge_shot_detail(out: dict, match_ids) -> None:
     """Fold the SGA_Pali shot-outcome counts (shots_post / shots_blocked / ...) into
     the per-player totals. They live in the event-level shot map, not the zone
     features, so they are counted from ``MatchShot.shot_type`` and added in place.
-    Only the mapped types are counted; unmapped ones are ignored."""
+    Only the mapped types are counted; unmapped ones are ignored.
+
+    OWN GOALS are dropped: SofaScore files an own goal as a 'goal' shot by the
+    own-scorer but tags it with the side it counts FOR (the opponent's), so a
+    goal-shot whose team_side differs from the player's own side is an own goal and
+    must not count as a goal for him — it would otherwise pollute shots_goal (used as
+    a goals-scored proxy when tuning)."""
+    sides = {(a["match_id"], a["player_id"]): a["side"]
+             for a in MatchAppearance.objects.filter(match_id__in=match_ids)
+             .values("match_id", "player_id", "side")}
     counts = defaultdict(lambda: defaultdict(float))
-    for mid, pid, st in (MatchShot.objects
-                         .filter(match_id__in=match_ids)
-                         .values_list("match_id", "player_id", "shot_type")):
+    for mid, pid, st, ts in (MatchShot.objects
+                             .filter(match_id__in=match_ids)
+                             .values_list("match_id", "player_id", "shot_type",
+                                          "team_side")):
         feat = SHOT_TYPE_TO_FEATURE.get(st)
-        if feat:
-            counts[(mid, pid)][feat] += 1.0
+        if not feat:
+            continue
+        if st == "goal" and sides.get((mid, pid), ts) != ts:
+            continue  # own goal: counts for the opponent, not a goal for him
+        counts[(mid, pid)][feat] += 1.0
     for key, feats in counts.items():
         row = out[key]  # defaultdict(dict): materialises a shots-only player too
         for feat, n in feats.items():

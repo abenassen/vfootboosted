@@ -40,6 +40,7 @@ from vfoot.services.vote_explanation import explain, role_average_terms, to_sent
 from vfoot.services.vote_reference import fixed_reference, fixed_role_averages
 
 CARD_MALUS = {CARD_YELLOW: 0.5, CARD_SECOND_YELLOW: 1.0, CARD_RED: 1.0}
+OWN_GOAL_MALUS = 2.0  # classic fantacalcio: -2 per own goal (from raw_stats.ownGoals)
 ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
 # Pagella reading order: goalkeeper -> defence -> midfield -> attack.
 ROLE_ORDER = {"POR": 0, "DIF": 1, "CEN": 2, "ATT": 3}
@@ -145,6 +146,7 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
     pid = app.player_id
     c = cards.get(pid, {})
     card_malus = c.get("malus", 0.0)
+    own_goals = int((app.raw_stats or {}).get("ownGoals") or 0)
     row = vp_rows.get(pid)
     # Prefer the role the rating layer actually SCORED him as: when the Player row
     # carries no classic_role_seed it may have inferred one (a keeper gives himself
@@ -156,7 +158,7 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
     events = {"goals": app.goals, "assists": app.assists,
               "yellow": c.get("yellow", 0),
               "red": c.get("red", 0) + c.get("second_yellow", 0),
-              "own_goals": 0}
+              "own_goals": own_goals}
     base = {"player_id": pid,
             "name": app.player.short_name or app.player.full_name or str(pid),
             "role": role or "CEN", "role_known": role_known,
@@ -186,8 +188,11 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
     # A keeper also carries the classic -1 per goal conceded. This does NOT double
     # count: his voto puro measures performance against the xG ON TARGET he faced
     # (shot difficulty), the malus is the raw goal count — the usual voto-puro /
-    # bonus-malus separation.
-    malus = card_malus + (float(conceded) if role == "POR" else 0.0)
+    # bonus-malus separation. Own goals (-2 each) sit here too: the voto puro is
+    # feature-based and blind to them (they never enter its shot features), so the
+    # malus is the ONLY place the own goal registers — no double penalty.
+    malus = (card_malus + OWN_GOAL_MALUS * own_goals
+             + (float(conceded) if role == "POR" else 0.0))
     return {**base, "sv": False, "voto_puro": round(vp, 1),
             "bonus": bonus, "malus": malus, "fantavoto": round(vp + bonus - malus, 1)}
 

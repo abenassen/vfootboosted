@@ -136,6 +136,48 @@ class RealChampionshipTests(TestCase):
         self.assertEqual(home["total"], 3.5)
         self.assertEqual(pag["away"]["starters"], [])  # no away appearances seeded
 
+    def test_own_goal_carries_the_minus_two_malus(self):
+        """An own goal (raw_stats.ownGoals) is a -2 in the fantavoto. The voto puro
+        is feature-based and blind to it, so the malus is the only place it lands."""
+        og = Player.objects.create(full_name="Own Goal", short_name="O. Goal",
+                                   classic_role_seed="DIF")
+        MatchAppearance.objects.create(match=self.match, player=og,
+                                       team_season=self.home_ts, side="home",
+                                       minutes_played=90, is_starter=True,
+                                       raw_stats={"ownGoals": 1})
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=og, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=30.0, team_side="home")
+
+        line = next(l for l in pagella_for_match(self.match, self.reference)["home"]
+                    ["starters"] if l["player_id"] == og.id)
+        self.assertEqual(line["events"]["own_goals"], 1)
+        self.assertEqual(line["voto_puro"], 6.0)   # empty reference -> centre
+        self.assertEqual(line["malus"], 2.0)
+        self.assertEqual(line["fantavoto"], 4.0)
+
+    def test_own_goal_shot_is_not_counted_as_a_goal_scored(self):
+        """SofaScore files an own goal as a 'goal' shot tagged with the OPPONENT's
+        side; it must not inflate the own-scorer's shots_goal (a goals-scored proxy),
+        while a real goal on the player's own side still counts."""
+        from realdata.models import MatchShot
+        from vfoot.services.classic_rating import _per_match_player_totals
+        scorer = Player.objects.create(full_name="Real Scorer", short_name="R. Scorer",
+                                       classic_role_seed="ATT")
+        MatchAppearance.objects.create(match=self.match, player=scorer,
+                                       team_season=self.home_ts, side="home",
+                                       minutes_played=90, is_starter=True)
+        # df is home (setUp): an own goal is tagged with the away side.
+        MatchShot.objects.create(match=self.match, player=self.df, team_side="away",
+                                 minute=50, shot_type="goal", is_goal=True,
+                                 xg=0.0, xgot=0.9, provider="sofascore", zone_key="z_4_2")
+        MatchShot.objects.create(match=self.match, player=scorer, team_side="home",
+                                 minute=60, shot_type="goal", is_goal=True,
+                                 xg=0.3, xgot=0.7, provider="sofascore", zone_key="z_4_2")
+        tot = _per_match_player_totals([self.match.id])
+        self.assertEqual(tot[(self.match.id, scorer.id)]["shots_goal"], 1.0)
+        self.assertEqual(tot.get((self.match.id, self.df.id), {}).get("shots_goal", 0), 0)
+
     def test_gk_without_data_is_senza_voto(self):
         # No features at all -> the keeper is s.v. like any other player (he no
         # longer gets an automatic 6.0 baseline).
