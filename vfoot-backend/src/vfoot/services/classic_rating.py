@@ -185,6 +185,30 @@ MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distributi
 # goals-prevented. gd_on is the on-pitch goal difference (see on_pitch_goal_difference).
 RESULT_MITIGATION_K = 0.15
 RESULT_MITIGATION_CAP = 1.0
+
+# --- Red-card performance adjustment (v2 stage 3) ----------------------------
+# A sending-off is a PERFORMANCE fact the base vote must reflect, over and above
+# the flat -1 fantacalcio malus in the bonus layer (which stays — real pagelle both
+# drop the vote AND the malus applies). Two graded parts:
+#   * severity × man-down: how justifiable the offence was, scaled by how long the
+#     team then played a man short (match_end - red_minute)/90. A DOGSO ("last man")
+#     is a tactical foul, the least culpable; a straight foul mid; violent conduct /
+#     argument / bad behaviour the worst.
+#   * a fixed extra for the indefensible reasons (violent conduct, argument, bad
+#     behaviour) — those are not football and cost regardless of the timing.
+# BOTH are gated ON THE PITCH: a post-match/bench card (minute < 0 or outside the
+# player's window) had no in-game impact and adds nothing. red_adj = -(K·sev·down + fixed).
+RED_CARD_K = 2.0
+RED_CARD_SEVERITY = {
+    "Professional foul last man": 0.3,   # DOGSO: tactical, least culpable
+    "Foul": 0.6,
+    "Foul Committed": 0.6,
+    "Violent conduct": 1.0,
+    "Bad Behaviour": 1.0,
+    "Argument": 1.0,
+}
+RED_CARD_SEVERITY_DEFAULT = 0.6
+RED_CARD_FIXED = {"Violent conduct": 0.3, "Argument": 0.3, "Bad Behaviour": 0.3}
 # Bayesian shrinkage strength: a per-90 rate from few minutes is noisy and fat-tailed
 # low-count features (xG, key passes) explode when extrapolated to 90'. The evidence
 # weight minutes/(minutes+this) pulls short cameos toward the role prior (vote 6); a
@@ -345,6 +369,48 @@ def rating_forcing_event_players(match_id: int) -> set:
         if minute is not None and lo <= minute <= hi:
             forcing.add(pid)
     return forcing
+
+
+def red_card_adjustments(match_id: int) -> dict:
+    """{player_id: voto-puro adjustment (<= 0) for a sending-off taken on the pitch}.
+
+    Grades the sending-off by severity (how justifiable the reason) times how long
+    it left the team a man down, plus a fixed extra for the indefensible reasons
+    (see RED_CARD_*). Gated on the pitch: a post-match/bench card (minute < 0, or a
+    minute outside the player's on-pitch window) had no in-game impact and is
+    skipped — this drops the minute -5 anomalies. This is separate from and additive
+    to the flat fantacalcio red malus applied in the bonus layer."""
+    events = list(MatchDisciplinaryEvent.objects
+                  .filter(match_id=match_id,
+                          card_type__in=(CARD_RED, CARD_SECOND_YELLOW))
+                  .values_list("player_id", "minute", "reason"))
+    if not events:
+        return {}
+    apps = list(MatchAppearance.objects.filter(match_id=match_id)
+                .values("player_id", "side", "is_starter", "minutes_played"))
+    minutes = {(match_id, a["player_id"]): a["minutes_played"] for a in apps}
+    appearances = {(match_id, a["player_id"]): (a["side"], a["is_starter"])
+                   for a in apps}
+    windows = on_pitch_windows([match_id], minutes, appearances)
+    match_end = max((hi for _lo, hi in windows.values()), default=95.0)
+    out = {}
+    for pid, minute, reason in events:
+        lo, hi = windows.get((match_id, pid), (0.0, 0.0))
+        if minute is None or minute < 0 or not (lo <= minute <= hi):
+            continue
+        out[pid] = out.get(pid, 0.0) - red_card_penalty(reason, minute, match_end)
+    return out
+
+
+def red_card_penalty(reason: str, minute: float, match_end: float) -> float:
+    """Positive magnitude of a sending-off's voto-puro drop: severity (how
+    justifiable the reason) times the man-down fraction (match_end - minute)/90,
+    plus a fixed extra for the indefensible reasons. Pure — the on-pitch gating and
+    sign live in ``red_card_adjustments``."""
+    minutes_down = max(0.0, match_end - minute)
+    sev = RED_CARD_SEVERITY.get(reason, RED_CARD_SEVERITY_DEFAULT)
+    fixed = RED_CARD_FIXED.get(reason, 0.0)
+    return RED_CARD_K * sev * (minutes_down / 90.0) + fixed
 
 
 def _compress(rate: float) -> float:
@@ -704,6 +770,7 @@ def voto_puro_for_match(match, reference: dict,
     # Decisive-event override for s.v.: a scorer/assist-man/booked/sent-off (on the
     # pitch) player is rated even below the minutes/touches gate.
     forcing = rating_forcing_event_players(match.id)
+    red_adj = red_card_adjustments(match.id)
     outfield_roles = (Player.ROLE_DEF, Player.ROLE_MID, Player.ROLE_FWD)
 
     results = []
@@ -727,6 +794,10 @@ def voto_puro_for_match(match, reference: dict,
         # reflects the result). Recorded so the vote explanation can reconcile.
         nudge = (result_mitigation(raw, gd_on[(mid, pid)])
                  if role in outfield_roles and (mid, pid) in gd_on else 0.0)
+        # Red-card performance drop (on-pitch gated); applies to any role.
+        radj = red_adj.get(pid, 0.0)
+        voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, raw + nudge + radj)))
+                if rated else None)
         results.append({
             "player_id": pid,
             "name": names.get(pid) or full.get(pid) or str(pid),
@@ -737,7 +808,8 @@ def voto_puro_for_match(match, reference: dict,
             "index": round(idx, 2),
             "rated": rated,
             "result_nudge": round(nudge, 3),
-            "voto_puro": (_round_half(raw + nudge) if rated else None),
+            "red_adjustment": round(radj, 3),
+            "voto_puro": voto,
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))
     return results

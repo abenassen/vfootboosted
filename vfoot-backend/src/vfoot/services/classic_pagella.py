@@ -259,7 +259,8 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
             why = explain(row.get("role") or roles.get(a.player_id, ""), feats[key],
                           mins.get(key, 0), reference, averages,
                           exposures.get(key, 0.0),
-                          result_nudge=row.get("result_nudge", 0.0))
+                          result_nudge=row.get("result_nudge", 0.0),
+                          red_adjustment=row.get("red_adjustment", 0.0))
         line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded, why)
         buckets[a.side]["starters" if a.is_starter else "bench"].append(line)
 

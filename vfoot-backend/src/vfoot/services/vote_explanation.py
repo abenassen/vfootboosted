@@ -174,7 +174,7 @@ def role_average_terms(rows) -> dict:
 
 def explain(role: str, totals: dict, minutes: int, reference: dict,
             averages: dict, exposure: float = 0.0, *, top: int = 3,
-            result_nudge: float = 0.0) -> dict:
+            result_nudge: float = 0.0, red_adjustment: float = 0.0) -> dict:
     """Why this vote, decomposed so it ADDS UP to the vote.
 
     The vote is 6 + spread * shrink * (index - role_mean) / std. Every feature is
@@ -218,9 +218,9 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     index = sum(terms.values())
     z = (index - ref["mean"]) / ref["std"]
     raw = max(VOTE_MIN, min(VOTE_MAX, VOTE_CENTER + VOTE_SPREAD_K * weight * z))
-    # Same order as the scorer: clamp the merit vote, THEN add the (divergence-only)
-    # result nudge, which always pulls toward 6 so the sum stays in range.
-    subtotal = max(VOTE_MIN, min(VOTE_MAX, raw + result_nudge))
+    # Same order as the scorer: clamp the merit vote, add the (divergence-only)
+    # result nudge and the red-card drop, then clamp back to the pagella range.
+    subtotal = max(VOTE_MIN, min(VOTE_MAX, raw + result_nudge + red_adjustment))
     voto = round(subtotal * 2) / 2
 
     named = [(pts, ph) for pts, _, ph in scored if ph and abs(pts) >= 0.05]
@@ -238,6 +238,8 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     if abs(result_nudge) >= 0.005:
         contributions.append(entry(result_nudge,
                                    "adeguamento al risultato di squadra"))
+    if abs(red_adjustment) >= 0.005:
+        contributions.append(entry(red_adjustment, "espulsione"))
     shown_rounded = sum(c["points"] for c in contributions)
     other_points = round(subtotal - VOTE_CENTER - shown_rounded, 2)
     low = minutes < SHRINKAGE_MINUTES * 2

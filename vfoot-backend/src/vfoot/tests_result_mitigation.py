@@ -11,7 +11,7 @@ from __future__ import annotations
 from django.test import SimpleTestCase
 
 from vfoot.services.classic_rating import (
-    RESULT_MITIGATION_CAP, result_mitigation,
+    RESULT_MITIGATION_CAP, red_card_penalty, result_mitigation,
 )
 
 
@@ -45,3 +45,27 @@ class ResultMitigationTests(SimpleTestCase):
 
     def test_it_grows_with_the_margin(self):
         self.assertLess(result_mitigation(8.0, -4), result_mitigation(8.0, -1))
+
+
+class RedCardPenaltyTests(SimpleTestCase):
+    def test_earlier_sending_off_costs_more(self):
+        early = red_card_penalty("Foul", 10, 95)
+        late = red_card_penalty("Foul", 85, 95)
+        self.assertGreater(early, late)
+
+    def test_severity_orders_dogso_below_foul_below_violent(self):
+        dogso = red_card_penalty("Professional foul last man", 20, 95)
+        foul = red_card_penalty("Foul", 20, 95)
+        violent = red_card_penalty("Violent conduct", 20, 95)
+        self.assertLess(dogso, foul)
+        self.assertLess(foul, violent)
+
+    def test_indefensible_reasons_carry_a_fixed_floor(self):
+        # A violent conduct at the final whistle still costs the fixed 0.3, unlike a
+        # last-second foul which fades to ~0.
+        self.assertAlmostEqual(red_card_penalty("Violent conduct", 95, 95), 0.3)
+        self.assertAlmostEqual(red_card_penalty("Foul", 95, 95), 0.0)
+
+    def test_an_unknown_reason_uses_the_default_severity(self):
+        self.assertAlmostEqual(red_card_penalty("Unheard of", 20, 95),
+                               red_card_penalty("Foul", 20, 95))
