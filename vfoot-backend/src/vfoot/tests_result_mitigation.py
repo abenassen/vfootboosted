@@ -46,6 +46,21 @@ class ResultMitigationTests(SimpleTestCase):
     def test_it_grows_with_the_margin(self):
         self.assertLess(result_mitigation(8.0, -4), result_mitigation(8.0, -1))
 
+    def test_a_defeat_costs_a_discrete_base_beyond_the_margin(self):
+        # The result base makes ANY defeat cost more than the pure per-goal term.
+        self.assertLess(result_mitigation(8.0, -1),
+                        result_mitigation(8.0, -1, base=0.0))
+
+    def test_crossing_into_defeat_weighs_more_than_a_further_goal(self):
+        # draw->defeat (0->1) should drop the vote more than 1->2 (base on the first).
+        d01 = result_mitigation(8.0, -1) - result_mitigation(8.0, 0)
+        d12 = result_mitigation(8.0, -2) - result_mitigation(8.0, -1)
+        self.assertLess(d01, d12)  # both negative; the first step is the bigger drop
+
+    def test_base_zero_reproduces_the_pure_linear_rule(self):
+        self.assertAlmostEqual(result_mitigation(8.0, -2, base=0.0),
+                               -max(0.0, 8.0 - 6.0) * 0.15 * 2)
+
 
 class RedCardPenaltyTests(SimpleTestCase):
     def test_earlier_sending_off_costs_more(self):

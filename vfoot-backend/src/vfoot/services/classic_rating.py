@@ -190,7 +190,15 @@ MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distributi
 # SofaScore-merit correlation, not the result-based Statistico (which would be
 # circular). Outfield only — the GK channel already reflects the result through
 # goals-prevented. gd_on is the on-pitch goal difference (see on_pitch_goal_difference).
+#
+# The severity of the result scales as BASE + K·|gd_on|: K is the per-goal margin
+# ("i gol successivi", weighted fine already), BASE is the discrete "a loss is a
+# loss / a win is a win" that fires on the FIRST goal — so crossing draw→defeat
+# weighs BASE+K, each further goal only K. Still divergence-only (it multiplies how
+# far the vote is from 6), so an aligned vote is untouched. BASE=0 ⇒ the old
+# purely-linear behaviour.
 RESULT_MITIGATION_K = 0.15
+RESULT_MITIGATION_BASE = 0.15
 RESULT_MITIGATION_CAP = 1.0
 
 # --- Red-card performance adjustment (v2 stage 3) ----------------------------
@@ -756,15 +764,22 @@ def _vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
 
 def result_mitigation(raw_vote: float, gd_on: int,
                       k: float = RESULT_MITIGATION_K,
+                      base: float = RESULT_MITIGATION_BASE,
                       cap: float = RESULT_MITIGATION_CAP) -> float:
     """Divergence-only nudge toward the on-pitch result (see RESULT_MITIGATION_K).
 
-    ``down`` fires only for a high vote (>6) in a net defeat (gd_on<0), ``up`` only
-    for a low vote (<6) in a net win (gd_on>0); an aligned vote gets neither, so the
-    nudge always pulls TOWARD 6 and never inflates. Returns the clamped delta."""
-    down = max(0.0, raw_vote - VOTE_CENTER) * max(0, -gd_on)
-    up = max(0.0, VOTE_CENTER - raw_vote) * max(0, gd_on)
-    return max(-cap, min(cap, k * (up - down)))
+    Fires only for a high vote (>6) in a net defeat (gd_on<0) — pulled DOWN — or a
+    low vote (<6) in a net win (gd_on>0) — pulled UP; an aligned vote gets neither,
+    so the nudge always moves TOWARD 6 and never inflates. The result severity is
+    ``base + k·|gd_on|``: the discrete ``base`` marks that it IS a defeat/win (fires
+    on the first goal), ``k`` weights each further goal of margin. Clamped to ±cap."""
+    over = max(0.0, raw_vote - VOTE_CENTER)   # only a high vote is tempered in a loss
+    under = max(0.0, VOTE_CENTER - raw_vote)  # only a low vote is lifted in a win
+    if gd_on < 0:
+        return max(-cap, -over * (base + k * (-gd_on)))
+    if gd_on > 0:
+        return min(cap, under * (base + k * gd_on))
+    return 0.0
 
 
 def voto_puro_for_match(match, reference: dict,

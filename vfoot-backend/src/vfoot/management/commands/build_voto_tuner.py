@@ -363,8 +363,11 @@ class Command(BaseCommand):
                      "(non dipendono dai pesi). SQRT applica √ solo alle PER90.")
         tun["A4"] = "compressione:"; tun["B4"] = "SQRT"; tun["B4"].font = Font(bold=True); tun["B4"].fill = yel
         dv = DataValidation(type="list", formula1='"RAW,SQRT"'); tun.add_data_validation(dv); dv.add(tun["B4"])
-        tun["A5"] = "K mitigazione:"; tun["B5"] = 0.15
-        tun["B5"].font = Font(bold=True); tun["B5"].fill = yel; tun["B5"].number_format = "0.00"
+        tun["A5"] = "K mitigazione:"; tun["B5"] = cr.RESULT_MITIGATION_K
+        tun["C5"] = "base sc/vitt:"; tun["D5"] = cr.RESULT_MITIGATION_BASE
+        for cell in ("B5", "D5"):
+            tun[cell].font = Font(bold=True); tun[cell].fill = yel
+            tun[cell].number_format = "0.00"
         tun["A6"] = "feature"; tun["B6"] = "tipo"; tun["C6"] = "PESO"
         for cc in ("A6", "B6", "C6"):
             tun[cc].font = Font(bold=True, color="FFFFFF"); tun[cc].fill = fillh
@@ -372,7 +375,7 @@ class Command(BaseCommand):
             tun.cell(7 + i, 1, f)
             tun.cell(7 + i, 2, "PER90" if is_p90[f] else ("EXPOS" if f == "_exposure" else "TOT"))
             wc = tun.cell(7 + i, 3, round(w_of(f), 3)); wc.fill = yel; wc.number_format = "0.000"
-        TOG = "Tuner!$B$4"; KM = "Tuner!$B$5"; c0 = 5
+        TOG = "Tuner!$B$4"; KM = "Tuner!$B$5"; BB = "Tuner!$D$5"; c0 = 5
         rowlab = [(7, "giocatore"), (8, "TIPO"), (9, "ruolo"), (10, "partita (gd, risultato, gol)"),
                   (11, "minuti"), (12, "fanta"), (13, "statistico"), (14, "sofascore"),
                   (15, "nostro(attuale)"), (16, "indice"), (17, "media INDICE ruolo"),
@@ -396,11 +399,12 @@ class Command(BaseCommand):
             tun.cell(20, cc, c["red_adj"])
             # voto base (clamp [3,10], pre-arrotondamento)
             tun.cell(21, cc, f'=MAX(3,MIN(10,6+0.8*({L}11/({L}11+25))*(({L}16-{L}17)/{L}18)))')
-            # mitigazione: solo divergenze, k*(up - down), cap ±1.
-            #   up   = (6-base)·max(0, gd_on)   -> voto basso in vittoria: sale
-            #   down = (base-6)·max(0,-gd_on)   -> voto alto in sconfitta: scende
-            tun.cell(22, cc, f'=MAX(-1,MIN(1,{KM}*(MAX(0,6-{L}21)*MAX(0,{L}19)'
-                             f'-MAX(0,{L}21-6)*MAX(0,-{L}19))))')
+            # mitigazione: solo divergenze, gravità = base + K·|gd_on|, cap ±1.
+            #   sconfitta (gd_on<0): voto alto scende di (voto-6)·(base+K·|gd_on|)
+            #   vittoria  (gd_on>0): voto basso sale di (6-voto)·(base+K·gd_on)
+            tun.cell(22, cc,
+                     f'=MAX(-1,MIN(1,IF({L}19<0,-MAX(0,{L}21-6)*({BB}+{KM}*(-{L}19)),'
+                     f'IF({L}19>0,MAX(0,6-{L}21)*({BB}+{KM}*{L}19),0))))')
             # voto finale = clamp(base + mitigazione + red_adj), arrotondato a 0.5
             tun.cell(24, cc, f'=ROUND(MAX(3,MIN(10,{L}21+{L}22+{L}20))*2)/2')
             tun.cell(24, cc).font = Font(bold=True, size=12)
@@ -427,7 +431,8 @@ class Command(BaseCommand):
                       "(merito individuale in sconfitta vs punizione collettiva); "
                       "GOL=marcatore, 'KO netto'=sconfitta ≥3 gol, OUTLIER, buono=accordo.")
         tun["E28"] = ("Mitigazione: solo divergenze (voto>6 in sconfitta → giù; voto<6 in vittoria → su), "
-                      "= K·(voto−6)·(gd contrario), cap ±1. K in B5. SGA_Pali: xgOT−xg + palo.")
+                      "gravità = base + K·|gd_on|, cap ±1. K in B5, 'base sc/vitt' (contributo "
+                      "discreto sconfitta/vittoria, oltre i gol) in D5. SGA_Pali: xgOT−xg + palo.")
         for a in ("E26", "E27", "E28"):
             tun[a].font = Font(italic=True, size=9)
         tun.column_dimensions["A"].width = 21; tun.column_dimensions["C"].width = 8
