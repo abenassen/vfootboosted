@@ -37,6 +37,9 @@ historical-data/**
 
 # External datasets (voti fantacalcio.it .xlsx): data, not source
 data_fantacalcio/
+# Real league lineup exports (Fantaresilienza) + generated replay report: private data
+fantaresilienza2025-2026/
+fantaresilienza_report.html
 # Screenshots / scratch notes
 screenshot/
 claudesession
