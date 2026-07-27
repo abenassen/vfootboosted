@@ -155,27 +155,24 @@ def _missed_penalties_for_match(match_id: int) -> dict[int, int]:
     return out
 
 
-def _penalties_saved_for_match(match_id: int) -> dict[int, int]:
-    """{goalkeeper_id: penalties he SAVED} — the +3 bonus events. A saved penalty is
-    a shot situation='penalty' with outcome 'save' (not merely off target / woodwork);
-    fantacalcio credits it to the keeper of the side defending it — the opposite side
-    from the taker. Uses the goalkeeper who appeared on that side (one per team)."""
-    saves = list(MatchShot.objects
-                 .filter(match_id=match_id, situation="penalty", is_goal=False,
-                         shot_type="save")
-                 .values_list("team_side", "minute"))
-    if not saves:
-        return {}
-    # Keepers per side. With two (a substitution) the one ON PITCH at the shot minute
-    # is credited: the starter up to the minute he was replaced, the sub after.
+def _keeper_at(match_id: int, keeper_apps=None):
+    """Returns ``at(side, minute) -> goalkeeper_id`` for the keeper ON PITCH for that
+    side at that minute. With a substitution the starter is credited up to the minute
+    he was replaced (his minutes_played), the sub after. One keeper -> always him.
+
+    ``keeper_apps`` is an optional iterable of (side, pid, is_starter, minutes) — the
+    keepers as the caller identified them (e.g. by resolved POR role, which also picks
+    up a keeper recognised from his features but missing the provider flag). Omitted,
+    it falls back to the ``is_goalkeeper`` provider flag."""
+    if keeper_apps is None:
+        keeper_apps = (MatchAppearance.objects
+                       .filter(match_id=match_id, player__is_goalkeeper=True)
+                       .values_list("side", "player_id", "is_starter", "minutes_played"))
     gks: dict[str, list] = defaultdict(list)
-    for side, pid, starter, mins in (MatchAppearance.objects
-                                     .filter(match_id=match_id, player__is_goalkeeper=True)
-                                     .values_list("side", "player_id", "is_starter",
-                                                  "minutes_played")):
+    for side, pid, starter, mins in keeper_apps:
         gks[side].append({"pid": pid, "starter": bool(starter), "mins": mins or 0})
 
-    def keeper_at(side: str, minute) -> int | None:
+    def at(side: str, minute) -> int | None:
         cands = gks.get(side, [])
         if not cands:
             return None
@@ -187,13 +184,64 @@ def _penalties_saved_for_match(match_id: int) -> dict[int, int]:
             if sub is not None:
                 return sub["pid"]
         return starter["pid"]
+    return at
 
-    opp = {"home": "away", "away": "home"}
+
+_OPP_SIDE = {"home": "away", "away": "home"}
+
+
+def _penalties_saved_for_match(match_id: int) -> dict[int, int]:
+    """{goalkeeper_id: penalties he SAVED} — the +3 bonus events. A saved penalty is
+    a shot situation='penalty' with outcome 'save' (not merely off target / woodwork);
+    fantacalcio credits it to the keeper of the side defending it — the opposite side
+    from the taker, and the one on the pitch at the shot minute."""
+    saves = list(MatchShot.objects
+                 .filter(match_id=match_id, situation="penalty", is_goal=False,
+                         shot_type="save")
+                 .values_list("team_side", "minute"))
+    if not saves:
+        return {}
+    at = _keeper_at(match_id)
     out: dict[int, int] = defaultdict(int)
     for taker_side, minute in saves:
-        gk = keeper_at(opp.get(taker_side, ""), minute)
+        gk = at(_OPP_SIDE.get(taker_side, ""), minute)
         if gk is not None:
             out[gk] += 1
+    return out
+
+
+def _goals_conceded_by_keeper(match_id: int, keeper_apps=None) -> dict[int, int]:
+    """{goalkeeper_id: goals conceded WHILE ON PITCH} — the GK -1/goal malus. Charging
+    the whole team's goals-against to whichever keeper appeared double-counts a keeper
+    change and hands a subbed-off keeper goals he never faced (Okoye gd16: fanta 0, we
+    had 5). Each goal (opponent shot is_goal, own goals included as they count for the
+    opponent) is charged to the keeper on the pitch for the conceding side at its
+    minute. Falls back to the score-based total for a side whose goals aren't all in
+    the shotmap, so the malus is never understated. ``keeper_apps`` — see _keeper_at."""
+    goals = list(MatchShot.objects
+                 .filter(match_id=match_id, is_goal=True)
+                 .values_list("team_side", "minute"))
+    m = Match.objects.filter(id=match_id).values("home_goals", "away_goals").first()
+    hg, ag = (int((m or {}).get("home_goals") or 0), int((m or {}).get("away_goals") or 0))
+    at = _keeper_at(match_id, keeper_apps)
+    out: dict[int, int] = defaultdict(int)
+    # per-side shotmap goal count, to detect an incomplete shotmap
+    shot_against = {"home": 0, "away": 0}
+    charged = {"home": 0, "away": 0}
+    for scoring_side, minute in goals:
+        conceding = _OPP_SIDE.get(scoring_side, "")
+        shot_against[conceding] = shot_against.get(conceding, 0) + 1
+        gk = at(conceding, minute)
+        if gk is not None:
+            out[gk] += 1
+            charged[conceding] += 1
+    # if a side's goals-against aren't fully in the shotmap, top up its starter keeper
+    for side, total in (("home", ag), ("away", hg)):  # home concedes the away goals
+        missing = total - shot_against.get(side, 0)
+        if missing > 0:
+            gk = at(side, 0)  # minute 0 -> the starter
+            if gk is not None:
+                out[gk] += missing
     return out
 
 
@@ -314,10 +362,22 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                      .values_list("player_id", "role"))
     hg, ag = int(match.home_goals or 0), int(match.away_goals or 0)
 
+    # Goals conceded are charged to the keeper on the pitch (not the whole team's
+    # total to each keeper who appeared). Identify keepers the same way the malus
+    # does — the resolved POR role — so a keeper recognised only from his features
+    # (no provider flag) is still credited.
+    def _is_por(a):
+        return (roles.get(a.player_id) or (vp_rows.get(a.player_id) or {}).get("role")) == "POR"
+    keeper_apps = [(a.side, a.player_id, a.is_starter, a.minutes_played)
+                   for a in apps if _is_por(a)]
+    conceded_by = _goals_conceded_by_keeper(match.id, keeper_apps)
+
     buckets = {"home": {"starters": [], "bench": []},
                "away": {"starters": [], "bench": []}}
     for a in apps:
-        conceded = ag if a.side == "home" else hg
+        # Goals conceded WHILE THIS keeper was on the pitch (0 for outfielders; a
+        # keeper change no longer charges both keepers the whole team's goals-against).
+        conceded = conceded_by.get(a.player_id, 0)
         key = (match.id, a.player_id)
         row = vp_rows.get(a.player_id)
         why = None

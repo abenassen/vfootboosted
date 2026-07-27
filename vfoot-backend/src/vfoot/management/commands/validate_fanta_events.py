@@ -123,6 +123,7 @@ class Command(BaseCommand):
             ("amm", "Ammonizione (Amm)", lambda o: o["yellow"], "MatchDisciplinaryEvent"),
             ("esp", "Espulsione (Esp)", lambda o: o["red"], "MatchDisciplinaryEvent"),
             ("rp", "Rig. parato (Rp)", lambda o: o["pen_saved"], "MatchShot save -> portiere"),
+            ("gs", "Gol subiti GK (Gs)", lambda o: o["conceded"], "gol subiti dal portiere in campo"),
             ("ass", "Assist (Ass)", lambda o: o["assists"], "def. assist diverse (informativo)"),
         ]
 
@@ -161,7 +162,7 @@ class Command(BaseCommand):
     @staticmethod
     def _empty():
         return {"goals": 0, "assists": 0, "own_goals": 0, "missed_pen": 0,
-                "yellow": 0, "red": 0, "pen_saved": 0}
+                "yellow": 0, "red": 0, "pen_saved": 0, "conceded": 0}
 
     def _our_events(self, cs) -> dict:
         out: dict = defaultdict(self._empty)
@@ -187,7 +188,8 @@ class Command(BaseCommand):
             out[(md, pid)]["missed_pen"] += 1
         # penalties saved -> +3 to the keeper: reuse the production detector so the
         # validation checks the real code path (per match with a saved penalty).
-        from vfoot.services.classic_pagella import _penalties_saved_for_match
+        from vfoot.services.classic_pagella import (
+            _penalties_saved_for_match, _goals_conceded_by_keeper)
         md_of = dict(Match.objects.filter(competition_season_id=cs)
                      .values_list("id", "matchday"))
         for mid in (MatchShot.objects
@@ -196,4 +198,7 @@ class Command(BaseCommand):
                     .values_list("match_id", flat=True).distinct()):
             for gk_pid, n in _penalties_saved_for_match(mid).items():
                 out[(md_of[mid], gk_pid)]["pen_saved"] += n
+        for mid in md_of:  # goals conceded, per on-pitch keeper (production detector)
+            for gk_pid, n in _goals_conceded_by_keeper(mid).items():
+                out[(md_of[mid], gk_pid)]["conceded"] += n
         return dict(out)

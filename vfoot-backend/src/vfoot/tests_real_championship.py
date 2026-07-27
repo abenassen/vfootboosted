@@ -274,6 +274,32 @@ class RealChampionshipTests(TestCase):
         self.assertEqual(_penalties_saved_for_match(self.match.id),
                          {self.gk.id: 1, gk2.id: 1})
 
+    def test_goals_conceded_charged_to_the_keeper_on_pitch(self):
+        """The -1/goal keeper malus goes to whoever was in goal when each was scored,
+        not the whole team's total to every keeper who appeared (Okoye gd16: subbed
+        off before the goals, fanta charged him 0, we used to charge 5)."""
+        from realdata.models import MatchShot
+        from vfoot.services.classic_pagella import _goals_conceded_by_keeper
+        Player.objects.filter(id=self.gk.id).update(is_goalkeeper=True)
+        # home keeper self.gk plays 45', then a back-up comes on. Home concedes 2 (1-2):
+        MatchAppearance.objects.filter(match=self.match,
+                                       player=self.gk).update(minutes_played=45)
+        gk2 = Player.objects.create(full_name="Keeper Two", short_name="K. Two",
+                                    classic_role_seed="POR", is_goalkeeper=True)
+        MatchAppearance.objects.create(match=self.match, player=gk2,
+                                       team_season=self.home_ts, side="home",
+                                       minutes_played=45, is_starter=False)
+        # one goal before the change (35'), one after (70')
+        MatchShot.objects.create(match=self.match, player=None, team_side="away",
+                                 minute=35, shot_type="goal", is_goal=True, xg=0.3,
+                                 xgot=0.7, provider="sofascore", zone_key="z_4_2")
+        MatchShot.objects.create(match=self.match, player=None, team_side="away",
+                                 minute=70, shot_type="goal", is_goal=True, xg=0.3,
+                                 xgot=0.7, provider="sofascore", zone_key="z_4_2")
+        conceded = _goals_conceded_by_keeper(self.match.id)
+        self.assertEqual(conceded.get(self.gk.id), 1)   # only the 35' goal
+        self.assertEqual(conceded.get(gk2.id), 1)       # only the 70' goal
+
     def test_own_goal_shot_is_not_counted_as_a_goal_scored(self):
         """SofaScore files an own goal as a 'goal' shot tagged with the OPPONENT's
         side; it must not inflate the own-scorer's shots_goal (a goals-scored proxy),
