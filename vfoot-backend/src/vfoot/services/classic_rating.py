@@ -240,10 +240,12 @@ RED_CARD_FIXED = {"Violent conduct": 0.3, "Argument": 0.3, "Bad Behaviour": 0.3}
 # from a coincidental shot, so we fall back to a single FLAT penalty rather than
 # claim a gravity we cannot measure. The flat -2 fantacalcio malus applies ON TOP in
 # the bonus layer regardless. Re-scrape to backfill elapsed_seconds and unlock grading.
-OWN_GOAL_VOTE_DEFLECTION = -0.5
+OWN_GOAL_VOTE_DEFLECTION = -0.75
 OWN_GOAL_VOTE_SOLO = -1.5
 OWN_GOAL_VOTE_FLAT = -1.0          # when sub-minute timing is unavailable
-OWN_GOAL_DEFLECTION_WINDOW_S = 8   # seconds between the OG and the shot it deflected
+OWN_GOAL_DEFLECTION_WINDOW_S = 3   # seconds between the OG and the shot it deflected;
+# kept tight (deflections sit at Δ1-2s, solo errors at Δ40s+) so a hectic sequence
+# with an unrelated close-by shot is not mistaken for a deflection.
 # Bayesian shrinkage strength: a per-90 rate from few minutes is noisy and fat-tailed
 # low-count features (xG, key passes) explode when extrapolated to 90'. The evidence
 # weight minutes/(minutes+this) pulls short cameos toward the role prior (vote 6); a

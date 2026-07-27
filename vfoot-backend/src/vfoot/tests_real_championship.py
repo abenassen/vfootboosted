@@ -193,10 +193,10 @@ class RealChampionshipTests(TestCase):
                                  provider="sofascore", zone_key="z_4_2")
         self.assertEqual(own_goal_adjustments(self.match.id)[self.df.id],
                          OWN_GOAL_VOTE_SOLO)
-        # the shot it actually deflected, 3s before -> a deflection
+        # the shot it actually deflected, 2s before -> a deflection
         MatchShot.objects.create(match=self.match, player=opp, team_side="away",
                                  minute=50, shot_type="miss", is_goal=False, xg=0.3,
-                                 xgot=0.0, elapsed_seconds=2999,
+                                 xgot=0.0, elapsed_seconds=3000,
                                  provider="sofascore", zone_key="z_4_2")
         self.assertEqual(own_goal_adjustments(self.match.id)[self.df.id],
                          OWN_GOAL_VOTE_DEFLECTION)
