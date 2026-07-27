@@ -105,7 +105,7 @@ PER90_WEIGHTS = {
     "duels_won": 0.10,
     "duels_lost": -0.10,          # the losing side of the contests we reward
     "dribbled_past": -0.07,       # subset of duels_lost: beaten one-on-one is worse
-    "passes_opp_half": 0.06,      # progression: a pass in the opponent half is worth more
+    "passes_opp_half": 0.05,      # progression: a pass in the opponent half is worth more
     "aerials_won": 0.05,
     "aerials_lost": -0.05,
     "tackles_won": 0.04,          # a committed, deliberate intervention
@@ -117,13 +117,14 @@ PER90_WEIGHTS = {
     "ball_recoveries": 0.03,
     "blocks": 0.03,
     "clearances": 0.03,
-    # passes_completed/touches nudged 0.01 -> 0.02 (with passes_opp_half 0.05 -> 0.06)
-    # in the kurtosis-gradient direction: up-weighting these broadly-distributed
-    # volume features flattens the peaked distribution (kurtosis 1.06 -> 0.71, std
-    # 0.60 -> 0.64 ≈ Statistico) while preserving the merit ordering (rank corr 0.94)
-    # and leaving the decisive weights (goals, xG, events) untouched.
-    "passes_completed": 0.02,
-    "touches": 0.02,
+    # passes_completed/touches held at 0.01: the earlier kurtosis-gradient nudge
+    # (0.01 -> 0.02, with passes_opp_half 0.05 -> 0.06) flattened the distribution
+    # toward Statistico's, but that low kurtosis is a symptom of Statistico being
+    # result-driven, not a target — and the possession up-weight worked against
+    # tempering high votes in defeats (Koopmeiners). Reverted; result-awareness is
+    # instead carried by the (stronger) result mitigation below.
+    "passes_completed": 0.01,
+    "touches": 0.01,
     "errors_bad_passes": -0.03,
     "errors_dispossessed": -0.03,
     "errors_miscontrols": -0.03,
@@ -217,7 +218,7 @@ MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distributi
 # far the vote is from 6), so an aligned vote is untouched. BASE=0 ⇒ the old
 # purely-linear behaviour.
 RESULT_MITIGATION_K = 0.15
-RESULT_MITIGATION_BASE = 0.15
+RESULT_MITIGATION_BASE = 0.40
 RESULT_MITIGATION_CAP = 1.0
 
 # --- Red-card performance adjustment (v2 stage 3) ----------------------------
@@ -264,7 +265,10 @@ OWN_GOAL_DEFLECTION_WINDOW_S = 3   # seconds between the OG and the shot it defl
 # low-count features (xG, key passes) explode when extrapolated to 90'. The evidence
 # weight minutes/(minutes+this) pulls short cameos toward the role prior (vote 6); a
 # full game keeps almost all its signal. Higher value = more distrust of short games.
-SHRINKAGE_MINUTES = 18
+# (Was briefly lowered to 18 alongside the kurtosis nudge to keep spread up; reverted
+# to the well-reasoned 25 when that nudge was undone — 18 also inflated full-game
+# bases like Koopmeiners' by trusting the sample slightly more than warranted.)
+SHRINKAGE_MINUTES = 25
 # Extrapolation floor: never project a per-90 rate from FEWER than this many minutes
 # as if the player had played 90'. A 26' cameo that created one big chance must not be
 # read as a 3.5x/90 rate — we cap the projection at this minute baseline. This tackles

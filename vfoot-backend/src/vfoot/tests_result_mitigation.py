@@ -44,7 +44,9 @@ class ResultMitigationTests(SimpleTestCase):
         self.assertAlmostEqual(huge, -RESULT_MITIGATION_CAP)
 
     def test_it_grows_with_the_margin(self):
-        self.assertLess(result_mitigation(8.0, -4), result_mitigation(8.0, -1))
+        # A small over so the ±cap isn't hit at either margin (with the stronger
+        # BASE=0.40 an over of 2 saturates the cap even at gd -1).
+        self.assertLess(result_mitigation(6.5, -4), result_mitigation(6.5, -1))
 
     def test_a_defeat_costs_a_discrete_base_beyond_the_margin(self):
         # The result base makes ANY defeat cost more than the pure per-goal term.
@@ -53,8 +55,8 @@ class ResultMitigationTests(SimpleTestCase):
 
     def test_crossing_into_defeat_weighs_more_than_a_further_goal(self):
         # draw->defeat (0->1) should drop the vote more than 1->2 (base on the first).
-        d01 = result_mitigation(8.0, -1) - result_mitigation(8.0, 0)
-        d12 = result_mitigation(8.0, -2) - result_mitigation(8.0, -1)
+        d01 = result_mitigation(6.5, -1) - result_mitigation(6.5, 0)
+        d12 = result_mitigation(6.5, -2) - result_mitigation(6.5, -1)
         self.assertLess(d01, d12)  # both negative; the first step is the bigger drop
 
     def test_base_zero_reproduces_the_pure_linear_rule(self):
