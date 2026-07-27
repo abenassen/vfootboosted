@@ -157,22 +157,42 @@ class RealChampionshipTests(TestCase):
         self.assertEqual(line["fantavoto"], 4.0)
 
     def test_own_goal_voto_puro_penalty_graded_by_deflection(self):
-        """A solo own goal (no opponent shot near) is a genuine error and costs more;
-        one that deflected an opponent's shot in the same minute is unlucky, lighter."""
+        """A solo own goal (a weak cross turned in) is a genuine error and costs more;
+        an own goal that deflected an opponent's shot IN THE SAME MINUTE, or that
+        itself carries xGOT, is unlucky and costs less. The same-minute test is exact:
+        a coincidental opponent shot a minute away must NOT excuse the error."""
         from realdata.models import MatchShot
         from vfoot.services.classic_rating import (
             own_goal_adjustments, OWN_GOAL_VOTE_DEFLECTION, OWN_GOAL_VOTE_SOLO)
-        # df is home; his own goal is a 'goal' shot tagged with the away side.
+        opp = Player.objects.create(full_name="Opp Shooter", short_name="O. Shooter")
+        # df is home; his own goal is a 'goal' shot tagged with the away side, xgot 0.
         MatchShot.objects.create(match=self.match, player=self.df, team_side="away",
                                  minute=50, shot_type="goal", is_goal=True,
                                  xg=0.0, xgot=0.0, provider="sofascore", zone_key="z_4_2")
         self.assertEqual(own_goal_adjustments(self.match.id)[self.df.id],
                          OWN_GOAL_VOTE_SOLO)
-        # An opponent (away) shot in the same minute -> now reads as a deflection.
-        opp = Player.objects.create(full_name="Opp Shooter", short_name="O. Shooter")
+        # An opponent shot the minute BEFORE is coincidental -> still a solo error.
+        MatchShot.objects.create(match=self.match, player=opp, team_side="away",
+                                 minute=49, shot_type="save", is_goal=False,
+                                 xg=0.1, xgot=0.2, provider="sofascore", zone_key="z_4_2")
+        self.assertEqual(own_goal_adjustments(self.match.id)[self.df.id],
+                         OWN_GOAL_VOTE_SOLO)
+        # An opponent shot in the SAME minute -> a deflection.
         MatchShot.objects.create(match=self.match, player=opp, team_side="away",
                                  minute=50, shot_type="save", is_goal=False,
                                  xg=0.1, xgot=0.2, provider="sofascore", zone_key="z_4_2")
+        self.assertEqual(own_goal_adjustments(self.match.id)[self.df.id],
+                         OWN_GOAL_VOTE_DEFLECTION)
+
+    def test_own_goal_with_xgot_reads_as_a_deflection(self):
+        """A hard shot deflected in (the OG 'shot' carries xGOT) is unlucky even with
+        no same-minute opponent shot recorded."""
+        from realdata.models import MatchShot
+        from vfoot.services.classic_rating import (
+            own_goal_adjustments, OWN_GOAL_VOTE_DEFLECTION)
+        MatchShot.objects.create(match=self.match, player=self.df, team_side="away",
+                                 minute=50, shot_type="goal", is_goal=True,
+                                 xg=0.0, xgot=0.9, provider="sofascore", zone_key="z_4_2")
         self.assertEqual(own_goal_adjustments(self.match.id)[self.df.id],
                          OWN_GOAL_VOTE_DEFLECTION)
 

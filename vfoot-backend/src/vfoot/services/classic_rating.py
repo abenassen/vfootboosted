@@ -438,25 +438,31 @@ def own_goal_adjustments(match_id: int) -> dict:
 
     An own goal is a 'goal' shot tagged with the OPPONENT's side (the side it counts
     for), so a goal-shot whose team_side differs from the scorer's own side is an own
-    goal. Gravity via a deflection proxy: an opponent shot within ±1 minute means it
-    most likely deflected in (unlucky -> OWN_GOAL_VOTE_DEFLECTION); no opponent shot
-    near reads as a solo error (-> OWN_GOAL_VOTE_SOLO). Separate from and additive to
-    the flat -2 fantacalcio malus in the bonus layer."""
+    goal. Gravity via a deflection proxy — it reads as UNLUCKY (light penalty) when
+    EITHER an opponent shot fell in the SAME minute (the ball it turned in) OR the
+    own-goal 'shot' itself carries xGOT > 0 (a hard shot deflected in); otherwise a
+    SOLO error (heavier), e.g. turning a weak cross into your own net.
+
+    The same-minute test is exact on purpose: a ±1 window fired on a coincidental
+    opponent shot a minute away (Cambiaso's grave OG off a cross was mis-read as a
+    deflection because of an unrelated save the minute before). Separate from and
+    additive to the flat -2 fantacalcio malus in the bonus layer."""
     sides = {(match_id, a["player_id"]): a["side"]
              for a in MatchAppearance.objects.filter(match_id=match_id)
              .values("player_id", "side")}
     shots = list(MatchShot.objects.filter(match_id=match_id)
-                 .values_list("player_id", "minute", "team_side", "is_goal", "shot_type"))
-    own_goals = [(pid, minute) for pid, minute, ts, isg, st in shots
+                 .values_list("player_id", "minute", "team_side", "is_goal",
+                              "shot_type", "xgot"))
+    own_goals = [(pid, minute, xgot) for pid, minute, ts, isg, st, xgot in shots
                  if isg and st == "goal" and sides.get((match_id, pid), ts) != ts]
     if not own_goals:
         return {}
     out = {}
-    for pid, minute in own_goals:
+    for pid, minute, og_xgot in own_goals:
         opp = "away" if sides.get((match_id, pid)) == "home" else "home"
-        deflection = any(ts == opp and sp != pid and minute is not None
-                         and sm is not None and abs(sm - minute) <= 1
-                         for sp, sm, ts, _isg, _st in shots)
+        same_minute = any(ts == opp and sp != pid and sm == minute
+                          for sp, sm, ts, _isg, _st, _xo in shots)
+        deflection = same_minute or (og_xgot or 0) > 0
         out[pid] = out.get(pid, 0.0) + (OWN_GOAL_VOTE_DEFLECTION if deflection
                                         else OWN_GOAL_VOTE_SOLO)
     return out
