@@ -219,7 +219,8 @@ def role_average_terms(rows) -> dict:
 
 def explain(role: str, totals: dict, minutes: int, reference: dict,
             averages: dict, exposure: float = 0.0, *, top: int = 3,
-            result_nudge: float = 0.0, red_adjustment: float = 0.0) -> dict:
+            result_nudge: float = 0.0, red_adjustment: float = 0.0,
+            own_goal_adjustment: float = 0.0) -> dict:
     """Why this vote, decomposed so it ADDS UP to the vote.
 
     The vote is 6 + spread * shrink * (index - role_mean) / std. Every feature is
@@ -271,8 +272,9 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     z = (index - ref["mean"]) / ref["std"]
     raw = max(VOTE_MIN, min(VOTE_MAX, VOTE_CENTER + VOTE_SPREAD_K * weight * z))
     # Same order as the scorer: clamp the merit vote, add the (divergence-only)
-    # result nudge and the red-card drop, then clamp back to the pagella range.
-    subtotal = max(VOTE_MIN, min(VOTE_MAX, raw + result_nudge + red_adjustment))
+    # result nudge, the red-card drop and the own-goal drop, then clamp back.
+    subtotal = max(VOTE_MIN, min(VOTE_MAX,
+                   raw + result_nudge + red_adjustment + own_goal_adjustment))
     voto = round(subtotal * 2) / 2
 
     named = [(pts, ph) for pts, _, ph in scored if ph and abs(pts) >= 0.05]
@@ -297,6 +299,8 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                                    "adeguamento al risultato di squadra"))
     if abs(red_adjustment) >= 0.005:
         contributions.append(entry(red_adjustment, "espulsione"))
+    if abs(own_goal_adjustment) >= 0.005:
+        contributions.append(entry(own_goal_adjustment, "autogol"))
     shown_rounded = sum(c["points"] for c in contributions)
     other_points = round(subtotal - VOTE_CENTER - shown_rounded, 2)
     low = minutes < SHRINKAGE_MINUTES * 2
@@ -332,7 +336,9 @@ def to_sentence(explanation: dict) -> str:
         core = "Prestazione in linea con la media del suo ruolo."
     # The sending-off is a vote-level fact, not a feature, so it is not in
     # positives/negatives — call it out explicitly.
-    if any(c["label"] == "espulsione"
-           for c in explanation.get("contributions", [])):
+    labels = {c["label"] for c in explanation.get("contributions", [])}
+    if "espulsione" in labels:
         core += " Espulso."
+    if "autogol" in labels:
+        core += " Autogol."
     return core

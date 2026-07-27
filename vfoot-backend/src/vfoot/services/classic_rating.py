@@ -229,6 +229,17 @@ RED_CARD_SEVERITY = {
 }
 RED_CARD_SEVERITY_DEFAULT = 0.6
 RED_CARD_FIXED = {"Violent conduct": 0.3, "Argument": 0.3, "Bad Behaviour": 0.3}
+
+# --- Own-goal performance adjustment -----------------------------------------
+# An own goal is a negative performance event a real pagella reflects in the vote,
+# graded by fault via a deflection proxy: SofaScore files an own goal as a 'goal'
+# shot tagged with the OPPONENT's side, so a goal-shot on the wrong side is an own
+# goal. If an opponent shot falls in the same minute it most likely deflected in —
+# unlucky, light penalty; otherwise it reads as a solo error — heavier. This is the
+# voto-puro drop; the flat -2 fantacalcio malus applies ON TOP in the bonus layer.
+# The gravity proxy is heuristic (16 deflections / 6 solo over the 2025-26 season).
+OWN_GOAL_VOTE_DEFLECTION = -0.5
+OWN_GOAL_VOTE_SOLO = -1.5
 # Bayesian shrinkage strength: a per-90 rate from few minutes is noisy and fat-tailed
 # low-count features (xG, key passes) explode when extrapolated to 90'. The evidence
 # weight minutes/(minutes+this) pulls short cameos toward the role prior (vote 6); a
@@ -419,6 +430,35 @@ def red_card_adjustments(match_id: int) -> dict:
         if minute is None or minute < 0 or not (lo <= minute <= hi):
             continue
         out[pid] = out.get(pid, 0.0) - red_card_penalty(reason, minute, match_end)
+    return out
+
+
+def own_goal_adjustments(match_id: int) -> dict:
+    """{player_id: voto-puro penalty for an own goal}, graded by fault.
+
+    An own goal is a 'goal' shot tagged with the OPPONENT's side (the side it counts
+    for), so a goal-shot whose team_side differs from the scorer's own side is an own
+    goal. Gravity via a deflection proxy: an opponent shot within ±1 minute means it
+    most likely deflected in (unlucky -> OWN_GOAL_VOTE_DEFLECTION); no opponent shot
+    near reads as a solo error (-> OWN_GOAL_VOTE_SOLO). Separate from and additive to
+    the flat -2 fantacalcio malus in the bonus layer."""
+    sides = {(match_id, a["player_id"]): a["side"]
+             for a in MatchAppearance.objects.filter(match_id=match_id)
+             .values("player_id", "side")}
+    shots = list(MatchShot.objects.filter(match_id=match_id)
+                 .values_list("player_id", "minute", "team_side", "is_goal", "shot_type"))
+    own_goals = [(pid, minute) for pid, minute, ts, isg, st in shots
+                 if isg and st == "goal" and sides.get((match_id, pid), ts) != ts]
+    if not own_goals:
+        return {}
+    out = {}
+    for pid, minute in own_goals:
+        opp = "away" if sides.get((match_id, pid)) == "home" else "home"
+        deflection = any(ts == opp and sp != pid and minute is not None
+                         and sm is not None and abs(sm - minute) <= 1
+                         for sp, sm, ts, _isg, _st in shots)
+        out[pid] = out.get(pid, 0.0) + (OWN_GOAL_VOTE_DEFLECTION if deflection
+                                        else OWN_GOAL_VOTE_SOLO)
     return out
 
 
@@ -811,6 +851,7 @@ def voto_puro_for_match(match, reference: dict,
     # pitch) player is rated even below the minutes/touches gate.
     forcing = rating_forcing_event_players(match.id)
     red_adj = red_card_adjustments(match.id)
+    og_adj = own_goal_adjustments(match.id)
     outfield_roles = (Player.ROLE_DEF, Player.ROLE_MID, Player.ROLE_FWD)
 
     results = []
@@ -834,9 +875,10 @@ def voto_puro_for_match(match, reference: dict,
         # reflects the result). Recorded so the vote explanation can reconcile.
         nudge = (result_mitigation(raw, gd_on[(mid, pid)])
                  if role in outfield_roles and (mid, pid) in gd_on else 0.0)
-        # Red-card performance drop (on-pitch gated); applies to any role.
+        # Red-card + own-goal performance drops (both post-adjustments, any role).
         radj = red_adj.get(pid, 0.0)
-        voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, raw + nudge + radj)))
+        oadj = og_adj.get(pid, 0.0)
+        voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, raw + nudge + radj + oadj)))
                 if rated else None)
         results.append({
             "player_id": pid,
@@ -849,6 +891,7 @@ def voto_puro_for_match(match, reference: dict,
             "rated": rated,
             "result_nudge": round(nudge, 3),
             "red_adjustment": round(radj, 3),
+            "own_goal_adjustment": round(oadj, 3),
             "voto_puro": voto,
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))

@@ -156,6 +156,26 @@ class RealChampionshipTests(TestCase):
         self.assertEqual(line["malus"], 2.0)
         self.assertEqual(line["fantavoto"], 4.0)
 
+    def test_own_goal_voto_puro_penalty_graded_by_deflection(self):
+        """A solo own goal (no opponent shot near) is a genuine error and costs more;
+        one that deflected an opponent's shot in the same minute is unlucky, lighter."""
+        from realdata.models import MatchShot
+        from vfoot.services.classic_rating import (
+            own_goal_adjustments, OWN_GOAL_VOTE_DEFLECTION, OWN_GOAL_VOTE_SOLO)
+        # df is home; his own goal is a 'goal' shot tagged with the away side.
+        MatchShot.objects.create(match=self.match, player=self.df, team_side="away",
+                                 minute=50, shot_type="goal", is_goal=True,
+                                 xg=0.0, xgot=0.0, provider="sofascore", zone_key="z_4_2")
+        self.assertEqual(own_goal_adjustments(self.match.id)[self.df.id],
+                         OWN_GOAL_VOTE_SOLO)
+        # An opponent (away) shot in the same minute -> now reads as a deflection.
+        opp = Player.objects.create(full_name="Opp Shooter", short_name="O. Shooter")
+        MatchShot.objects.create(match=self.match, player=opp, team_side="away",
+                                 minute=50, shot_type="save", is_goal=False,
+                                 xg=0.1, xgot=0.2, provider="sofascore", zone_key="z_4_2")
+        self.assertEqual(own_goal_adjustments(self.match.id)[self.df.id],
+                         OWN_GOAL_VOTE_DEFLECTION)
+
     def test_own_goal_shot_is_not_counted_as_a_goal_scored(self):
         """SofaScore files an own goal as a 'goal' shot tagged with the OPPONENT's
         side; it must not inflate the own-scorer's shots_goal (a goals-scored proxy),
