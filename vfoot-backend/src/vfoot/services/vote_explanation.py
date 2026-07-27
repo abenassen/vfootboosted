@@ -223,7 +223,7 @@ def role_average_terms(rows) -> dict:
 def explain(role: str, totals: dict, minutes: int, reference: dict,
             averages: dict, exposure: float = 0.0, *, top: int = 3,
             result_nudge: float = 0.0, red_adjustment: float = 0.0,
-            own_goal_adjustment: float = 0.0) -> dict:
+            own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0) -> dict:
     """Why this vote, decomposed so it ADDS UP to the vote.
 
     The vote is 6 + spread * shrink * (index - role_mean) / std. Every feature is
@@ -277,7 +277,8 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # Same order as the scorer: clamp the merit vote, add the (divergence-only)
     # result nudge, the red-card drop and the own-goal drop, then clamp back.
     subtotal = max(VOTE_MIN, min(VOTE_MAX,
-                   raw + result_nudge + red_adjustment + own_goal_adjustment))
+                   raw + result_nudge + red_adjustment + own_goal_adjustment
+                   + penalty_adjustment))
     voto = round(subtotal * 2) / 2
 
     named = [(pts, ph) for pts, _, ph in scored if ph and abs(pts) >= 0.05]
@@ -304,6 +305,12 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         contributions.append(entry(red_adjustment, "espulsione"))
     if abs(own_goal_adjustment) >= 0.005:
         contributions.append(entry(own_goal_adjustment, "autogol"))
+    if abs(penalty_adjustment) >= 0.005:
+        # "decisivo" when converting it would have flipped the result (the larger
+        # drop); a plain miss when the result was already decided.
+        pen_label = ("rigore decisivo sbagliato" if penalty_adjustment <= -0.75
+                     else "rigore sbagliato")
+        contributions.append(entry(penalty_adjustment, pen_label))
     shown_rounded = sum(c["points"] for c in contributions)
     other_points = round(subtotal - VOTE_CENTER - shown_rounded, 2)
     low = minutes < SHRINKAGE_MINUTES * 2
@@ -344,4 +351,7 @@ def to_sentence(explanation: dict) -> str:
         core += " Espulso."
     if "autogol" in labels:
         core += " Autogol."
+    pen = next((l for l in labels if l.startswith("rigore")), None)
+    if pen:
+        core += " " + pen.capitalize() + "."
     return core

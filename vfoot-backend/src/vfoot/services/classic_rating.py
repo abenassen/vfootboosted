@@ -261,6 +261,13 @@ OWN_GOAL_VOTE_FLAT = -1.0          # when sub-minute timing is unavailable
 OWN_GOAL_DEFLECTION_WINDOW_S = 3   # seconds between the OG and the shot it deflected;
 # kept tight (deflections sit at Δ1-2s, solo errors at Δ40s+) so a hectic sequence
 # with an unrelated close-by shot is not mistaken for a deflection.
+# A missed penalty (shot situation='penalty', not scored). The -3 fantavoto malus
+# lives in the bonus layer (classic_pagella); THIS is the added voto-puro drop, kept
+# small because the voto puro already reads the penalty as a good on-target shot via
+# the SGA and we deliberately keep that (the strike itself was well hit). Scaled by
+# whether converting it would have changed the result — see penalty_missed_adjustments.
+PENALTY_MISSED_VOTE_RELEVANT = -1.0    # +1 goal would have flipped the final result
+PENALTY_MISSED_VOTE_IRRELEVANT = -0.5  # result already decided
 # Bayesian shrinkage strength: a per-90 rate from few minutes is noisy and fat-tailed
 # low-count features (xG, key passes) explode when extrapolated to 90'. The evidence
 # weight minutes/(minutes+this) pulls short cameos toward the role prior (vote 6); a
@@ -488,6 +495,32 @@ def own_goal_adjustments(match_id: int) -> dict:
                          for sp, ts, _isg, _st, sec in shots)
         out[pid] = out.get(pid, 0.0) + (OWN_GOAL_VOTE_DEFLECTION if deflection
                                         else OWN_GOAL_VOTE_SOLO)
+    return out
+
+
+def penalty_missed_adjustments(match_id: int) -> dict:
+    """{player_id: voto-puro drop for a missed penalty}, scaled by result relevance.
+
+    A missed penalty is a shot with ``situation='penalty'`` that is not a goal (saved,
+    off target, woodwork). Magnitude: RELEVANT (-1) if converting it would have flipped
+    the final result — the taker's team drew (gd 0 → win) or lost by one (gd -1 → draw);
+    IRRELEVANT (-0.5) if the result was already decided. Additive to the -3 fantacalcio
+    malus in the bonus layer, and ON TOP of the SGA (the strike stays a good on-target
+    shot in the index — we only add this performance drop for the miss itself)."""
+    m = (Match.objects.filter(id=match_id)
+         .values("home_goals", "away_goals").first())
+    if not m:
+        return {}
+    hg, ag = int(m["home_goals"] or 0), int(m["away_goals"] or 0)
+    out: dict = {}
+    for pid, side in (MatchShot.objects
+                      .filter(match_id=match_id, situation="penalty", is_goal=False)
+                      .exclude(player__isnull=True)
+                      .values_list("player_id", "team_side")):
+        gd = (hg - ag) if side == "home" else (ag - hg)
+        relevant = gd in (0, -1)
+        out[pid] = out.get(pid, 0.0) + (PENALTY_MISSED_VOTE_RELEVANT if relevant
+                                        else PENALTY_MISSED_VOTE_IRRELEVANT)
     return out
 
 
@@ -885,6 +918,7 @@ def voto_puro_for_match(match, reference: dict,
     forcing = rating_forcing_event_players(match.id)
     red_adj = red_card_adjustments(match.id)
     og_adj = own_goal_adjustments(match.id)
+    pen_adj = penalty_missed_adjustments(match.id)
     outfield_roles = (Player.ROLE_DEF, Player.ROLE_MID, Player.ROLE_FWD)
 
     results = []
@@ -908,10 +942,13 @@ def voto_puro_for_match(match, reference: dict,
         # reflects the result). Recorded so the vote explanation can reconcile.
         nudge = (result_mitigation(raw, gd_on[(mid, pid)])
                  if role in outfield_roles and (mid, pid) in gd_on else 0.0)
-        # Red-card + own-goal performance drops (both post-adjustments, any role).
+        # Red-card + own-goal + missed-penalty performance drops (post-adjustments,
+        # any role; the missed penalty stays a good shot in the index, this is the
+        # added drop for the miss — see penalty_missed_adjustments).
         radj = red_adj.get(pid, 0.0)
         oadj = og_adj.get(pid, 0.0)
-        voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, raw + nudge + radj + oadj)))
+        padj = pen_adj.get(pid, 0.0)
+        voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, raw + nudge + radj + oadj + padj)))
                 if rated else None)
         results.append({
             "player_id": pid,
@@ -925,6 +962,7 @@ def voto_puro_for_match(match, reference: dict,
             "result_nudge": round(nudge, 3),
             "red_adjustment": round(radj, 3),
             "own_goal_adjustment": round(oadj, 3),
+            "penalty_adjustment": round(padj, 3),
             "voto_puro": voto,
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))

@@ -267,7 +267,8 @@ class Command(BaseCommand):
                              # weight-independent inputs to the post-adjustment layer
                              "gd_on": gd_on_map.get((mid, pid), 0),
                              "red_adj": round(cr.red_card_adjustments(mid).get(pid, 0.0)
-                                              + cr.own_goal_adjustments(mid).get(pid, 0.0), 3)})
+                                              + cr.own_goal_adjustments(mid).get(pid, 0.0)
+                                              + cr.penalty_missed_adjustments(mid).get(pid, 0.0), 3)})
         casedata.sort(key=lambda c: (OUT_ROLES.index(c["role"]), c["tipo"], c["name"]))
 
         # ---- the discrepancy ledger: top gaps vs Statistico, with our text ----
@@ -422,7 +423,7 @@ class Command(BaseCommand):
         rowlab = [(7, "giocatore"), (8, "TIPO"), (9, "ruolo"), (10, "partita (gd, risultato, gol)"),
                   (11, "minuti"), (12, "fanta"), (13, "statistico"), (14, "sofascore"),
                   (15, "nostro(attuale)"), (16, "indice"), (17, "media INDICE ruolo"),
-                  (18, "sigma INDICE ruolo"), (19, "gd_on (in campo)"), (20, "red/autogol (fisso)"),
+                  (18, "sigma INDICE ruolo"), (19, "gd_on (in campo)"), (20, "red/autogol/rigore (fisso)"),
                   (21, "voto base"), (22, "mitigazione"), (24, "VOTO FINALE (live)")]
         for rr2, lab in rowlab:
             tun.cell(rr2, c0, lab).font = Font(bold=True, size=9)

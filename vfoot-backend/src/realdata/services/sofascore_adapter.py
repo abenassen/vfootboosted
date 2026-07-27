@@ -634,6 +634,8 @@ def _ingest_match(
             xg=_num(shot.get("xg")), xgot=_num(shot.get("xgot")),
             is_goal=(str(shot.get("shotType") or "").lower() == "goal"),
             shot_type=str(shot.get("shotType") or "")[:24],
+            # Play type (penalty/set-piece/…); a missed penalty needs it (see MatchShot).
+            situation=str(shot.get("situation") or "")[:24],
             provider=PROVIDER, external_id=str(shot.get("id") or "")))
 
     # Incidents -> disciplinary events (cards). Cards live ONLY here, not in the

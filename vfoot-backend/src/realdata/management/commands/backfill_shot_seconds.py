@@ -1,11 +1,12 @@
-"""Backfill MatchShot.elapsed_seconds from the cached SofaScore shotmaps.
+"""Backfill MatchShot.elapsed_seconds and .situation from the cached SofaScore shotmaps.
 
-New imports capture the shot's ``timeSeconds`` (see sofascore_adapter), but rows
-imported before that lack it. This reads the shotmaps already cached under
-VFOOT_DATA_DIR (offline, no network) and fills elapsed_seconds by the provider shot
-id. With it, own goals can be graded by fault — a deflection shares the moment of
-the shot it turned in, which a minute is too coarse to tell (see
-classic_rating.own_goal_adjustments).
+New imports capture the shot's ``timeSeconds`` and ``situation`` (see
+sofascore_adapter), but rows imported before that lack them. This reads the shotmaps
+already cached under VFOOT_DATA_DIR (offline, no network) and fills both by the
+provider shot id. elapsed_seconds lets own goals be graded by fault (a deflection
+shares the moment of the shot it turned in); situation flags penalties, so a missed
+one carries the -3 fantavoto malus and a result-scaled voto-puro drop (see
+classic_rating.penalty_missed_adjustments).
 
     python manage.py backfill_shot_seconds --season 2
     python manage.py backfill_shot_seconds --season 2 --dry-run
@@ -45,20 +46,30 @@ class Command(BaseCommand):
                 missing += 1
                 continue
             data = json.loads(f.read_text())
-            secs = {}
+            meta = {}  # shot id -> (timeSeconds|None, situation|"")
             for s in (data.get("shotmap") or []):
-                sid, ts = s.get("id"), s.get("timeSeconds")
-                if sid is not None and isinstance(ts, (int, float)):
-                    secs[str(sid)] = int(ts)
+                sid = s.get("id")
+                if sid is None:
+                    continue
+                ts = s.get("timeSeconds")
+                meta[str(sid)] = (int(ts) if isinstance(ts, (int, float)) else None,
+                                  str(s.get("situation") or "")[:24])
             to_update = []
             for shot in MatchShot.objects.filter(match=m).exclude(external_id=""):
-                ts = secs.get(shot.external_id)
+                info = meta.get(shot.external_id)
+                if not info:
+                    continue
+                ts, sit = info
+                dirty = False
                 if ts is not None and shot.elapsed_seconds != ts:
-                    shot.elapsed_seconds = ts
+                    shot.elapsed_seconds = ts; dirty = True
+                if sit and shot.situation != sit:
+                    shot.situation = sit; dirty = True
+                if dirty:
                     to_update.append(shot)
             filled += len(to_update)
             if to_update and not o["dry_run"]:
-                MatchShot.objects.bulk_update(to_update, ["elapsed_seconds"])
+                MatchShot.objects.bulk_update(to_update, ["elapsed_seconds", "situation"])
             read += 1
 
         verb = "sarebbero aggiornati" if o["dry_run"] else "aggiornati"

@@ -29,6 +29,7 @@ from realdata.models import (
     Match,
     MatchAppearance,
     MatchDisciplinaryEvent,
+    MatchShot,
     Player,
 )
 from vfoot.models import LeaguePlayerRole
@@ -41,6 +42,7 @@ from vfoot.services.vote_reference import fixed_reference, fixed_role_averages
 
 CARD_MALUS = {CARD_YELLOW: 0.5, CARD_SECOND_YELLOW: 1.0, CARD_RED: 1.0}
 OWN_GOAL_MALUS = 2.0  # classic fantacalcio: -2 per own goal (from raw_stats.ownGoals)
+PENALTY_MISSED_MALUS = 3.0  # classic fantacalcio: -3 per missed penalty (MatchShot situation)
 ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
 # Pagella reading order: goalkeeper -> defence -> midfield -> attack.
 ROLE_ORDER = {"POR": 0, "DIF": 1, "CEN": 2, "ATT": 3}
@@ -141,8 +143,20 @@ def _cards_for_match(match_id: int) -> dict[int, dict]:
     return cards
 
 
+def _missed_penalties_for_match(match_id: int) -> dict[int, int]:
+    """{player_id: count of penalties taken and NOT scored} — the -3 malus events."""
+    out: dict[int, int] = defaultdict(int)
+    for pid in (MatchShot.objects
+                .filter(match_id=match_id, situation="penalty", is_goal=False)
+                .exclude(player__isnull=True)
+                .values_list("player_id", flat=True)):
+        out[pid] += 1
+    return out
+
+
 def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
-          cards: dict, conceded: int, explanation: dict | None = None) -> dict:
+          cards: dict, conceded: int, explanation: dict | None = None,
+          missed_pens: int = 0) -> dict:
     pid = app.player_id
     c = cards.get(pid, {})
     card_malus = c.get("malus", 0.0)
@@ -158,7 +172,7 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
     events = {"goals": app.goals, "assists": app.assists,
               "yellow": c.get("yellow", 0),
               "red": c.get("red", 0) + c.get("second_yellow", 0),
-              "own_goals": own_goals}
+              "own_goals": own_goals, "missed_penalties": missed_pens}
     base = {"player_id": pid,
             "name": app.player.short_name or app.player.full_name or str(pid),
             "role": role or "CEN", "role_known": role_known,
@@ -192,6 +206,7 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
     # feature-based and blind to them (they never enter its shot features), so the
     # malus is the ONLY place the own goal registers — no double penalty.
     malus = (card_malus + OWN_GOAL_MALUS * own_goals
+             + PENALTY_MISSED_MALUS * missed_pens
              + (float(conceded) if role == "POR" else 0.0))
     return {**base, "sv": False, "voto_puro": round(vp, 1),
             "bonus": bonus, "malus": malus, "fantavoto": round(vp + bonus - malus, 1)}
@@ -239,6 +254,7 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
     mins = _minutes_map([match.id])
     exposures = defensive_exposure([match.id], mins)
     cards = _cards_for_match(match.id)
+    missed_pens = _missed_penalties_for_match(match.id)
     apps = list(MatchAppearance.objects.filter(match=match).select_related("player"))
     pids = [a.player_id for a in apps]
     # Base: the season's disambiguated role (same source the voto puro was scored
@@ -266,8 +282,10 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           exposures.get(key, 0.0),
                           result_nudge=row.get("result_nudge", 0.0),
                           red_adjustment=row.get("red_adjustment", 0.0),
-                          own_goal_adjustment=row.get("own_goal_adjustment", 0.0))
-        line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded, why)
+                          own_goal_adjustment=row.get("own_goal_adjustment", 0.0),
+                          penalty_adjustment=row.get("penalty_adjustment", 0.0))
+        line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded, why,
+                     missed_pens=missed_pens.get(a.player_id, 0))
         buckets[a.side]["starters" if a.is_starter else "bench"].append(line)
 
     return {

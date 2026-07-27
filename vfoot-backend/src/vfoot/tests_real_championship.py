@@ -201,6 +201,45 @@ class RealChampionshipTests(TestCase):
         self.assertEqual(own_goal_adjustments(self.match.id)[self.df.id],
                          OWN_GOAL_VOTE_DEFLECTION)
 
+    def test_missed_penalty_malus_and_result_scaled_drop(self):
+        """A missed penalty (shot situation='penalty', not scored) is -3 in the
+        fantavoto, like a goal is +3. In the voto puro it also carries a result-scaled
+        drop: -1 when converting it would have flipped the result (the taker's team
+        drew or lost by one), -0.5 when the result was already decided."""
+        from realdata.models import MatchShot
+        from vfoot.services.classic_rating import (
+            penalty_missed_adjustments, PENALTY_MISSED_VOTE_RELEVANT,
+            PENALTY_MISSED_VOTE_IRRELEVANT)
+        # home lost 1-2: the home taker's miss was decisive (a goal -> 2-2)
+        MatchShot.objects.create(match=self.match, player=self.df, team_side="home",
+                                 minute=88, shot_type="save", is_goal=False, xg=0.79,
+                                 xgot=0.7, situation="penalty",
+                                 provider="sofascore", zone_key="z_4_2")
+        self.assertEqual(penalty_missed_adjustments(self.match.id)[self.df.id],
+                         PENALTY_MISSED_VOTE_RELEVANT)
+        # an away taker whose team won 2-1: the miss did not change the result
+        fw = Player.objects.create(full_name="Fwd Away", short_name="F. Away",
+                                   classic_role_seed="ATT")
+        MatchAppearance.objects.create(match=self.match, player=fw,
+                                       team_season=self.away_ts, side="away",
+                                       minutes_played=90, is_starter=True)
+        MatchShot.objects.create(match=self.match, player=fw, team_side="away",
+                                 minute=70, shot_type="miss", is_goal=False, xg=0.79,
+                                 xgot=0.0, situation="penalty",
+                                 provider="sofascore", zone_key="z_4_2")
+        self.assertEqual(penalty_missed_adjustments(self.match.id)[fw.id],
+                         PENALTY_MISSED_VOTE_IRRELEVANT)
+        # the -3 malus and the -1 drop both reach the pagella (df rated via touches)
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=self.df, provider="sofascore",
+            feature_key="touches", zone_key="z_1_1", value=30.0, team_side="home")
+        line = next(l for l in pagella_for_match(self.match, self.reference)["home"]
+                    ["starters"] if l["player_id"] == self.df.id)
+        self.assertEqual(line["events"]["missed_penalties"], 1)
+        self.assertEqual(line["malus"], 3.0)
+        self.assertEqual(line["voto_puro"], 5.0)      # 6.0 centre - 1.0 drop
+        self.assertEqual(line["fantavoto"], 2.0)      # 5.0 - 3 malus
+
     def test_own_goal_shot_is_not_counted_as_a_goal_scored(self):
         """SofaScore files an own goal as a 'goal' shot tagged with the OPPONENT's
         side; it must not inflate the own-scorer's shots_goal (a goals-scored proxy),

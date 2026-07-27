@@ -456,6 +456,11 @@ class MatchShot(models.Model):
     xgot = models.FloatField(default=0.0)     # post-shot xG; 0 when off target
     is_goal = models.BooleanField(default=False)
     shot_type = models.CharField(max_length=24, blank=True, default="")
+    # The play the shot came from (SofaScore ``situation``): regular, fast-break,
+    # set-piece, corner, assisted, and — the one we act on — ``penalty``. A missed
+    # penalty (situation=penalty, not is_goal) carries the -3 fantavoto malus and a
+    # result-scaled voto-puro drop, neither of which shot_type (the outcome) can tell.
+    situation = models.CharField(max_length=24, blank=True, default="")
     provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES,
                                 default=PROVIDER_SOFASCORE)
     external_id = models.CharField(max_length=64, blank=True, default="")

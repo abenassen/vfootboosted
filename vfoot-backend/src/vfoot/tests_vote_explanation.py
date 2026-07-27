@@ -130,6 +130,20 @@ class VoteExplanationTests(SimpleTestCase):
         self.assertAlmostEqual(shown, e["subtotal"], places=2)
         self.assertIn("Espulso.", to_sentence(e))
 
+    def test_missed_penalty_reconciles_and_is_named_by_relevance(self):
+        average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0})
+        feats = {"clearances": 20.0, "touches": 90.0}
+        # a decisive miss (-1) reads "decisivo"; a dead-rubber miss (-0.5) does not
+        dec = explain("DIF", feats, 90, self.REFERENCE, average, penalty_adjustment=-1.0)
+        self.assertIn("rigore decisivo sbagliato", [c["label"] for c in dec["contributions"]])
+        self.assertIn("Rigore decisivo sbagliato.", to_sentence(dec))
+        shown = dec["base"] + sum(c["points"] for c in dec["contributions"]) + dec["other_points"]
+        self.assertAlmostEqual(shown, dec["subtotal"], places=2)
+        dead = explain("DIF", feats, 90, self.REFERENCE, average, penalty_adjustment=-0.5)
+        self.assertIn("rigore sbagliato", [c["label"] for c in dead["contributions"]])
+        self.assertIn("Rigore sbagliato.", to_sentence(dead))
+        self.assertNotIn("decisivo", to_sentence(dead))
+
     def test_a_clearly_poor_vote_drops_the_faint_positives(self):
         """Below 5.5 the "positives" are only least-bad deviations; naming them is
         faint praise for a bad game. They fold into "other" so the sum still holds."""
