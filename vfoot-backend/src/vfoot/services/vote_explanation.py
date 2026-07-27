@@ -22,8 +22,9 @@ from __future__ import annotations
 
 from vfoot.services.classic_rating import (
     DEF_EXPOSURE_WEIGHT, EXTRAP_FLOOR_MINUTES, GK_PER90_WEIGHTS, GK_TOTAL_WEIGHTS,
-    PER90_WEIGHTS, SHRINKAGE_MINUTES, SIGNED_FEATURES, TOTAL_WEIGHTS, VOTE_CENTER,
-    VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, _compress, _compress_signed,
+    PER90_WEIGHTS, SHRINKAGE_MINUTES, SIGNED_FEATURES, SQRT_TOTAL_FEATURES,
+    TOTAL_WEIGHTS, VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K,
+    _compress, _compress_signed,
 )
 from realdata.models import Player
 
@@ -182,10 +183,12 @@ def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0) -> dict
     out = {}
     for key, w in total_w.items():
         raw = totals.get(key, 0.0)
-        # v2 selective-√: outfield totals are LINEAR; the GK channel keeps √
-        # (its weights were fit against a √-compressed total block).
+        # v2 selective-√: outfield totals are LINEAR (except shots_goal, √ for
+        # diminishing returns on multiple goals); the GK channel keeps √.
         if is_gk:
             val = _compress_signed(raw) if key in SIGNED_FEATURES else _compress(raw)
+        elif key in SQRT_TOTAL_FEATURES:
+            val = _compress(raw)
         else:
             val = raw
         if val:

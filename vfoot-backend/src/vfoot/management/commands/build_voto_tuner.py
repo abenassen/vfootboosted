@@ -101,7 +101,8 @@ class Command(BaseCommand):
         FEATS = TOTAL + PER90 + ["_exposure"] + SHOTDET
         nF = len(FEATS)
         is_p90 = {f: (f in PER90) for f in FEATS}
-        sqmask = np.array([is_p90[f] for f in FEATS])  # √ only on PER90
+        # √ on PER90 and on the √-TOTAL features (shots_goal: diminishing returns).
+        sqmask = np.array([is_p90[f] or f in cr.SQRT_TOTAL_FEATURES for f in FEATS])
         curw = {**cr.TOTAL_WEIGHTS, **cr.PER90_WEIGHTS}
 
         def w_of(f):
@@ -361,9 +362,10 @@ class Command(BaseCommand):
                      "RAW/SQRT in B4. Il VOTO FINALE (riga 24) si colora: verde=accordo, "
                      "giallo=borderline, rosso=outlier.")
         tun["A3"] = ("Pipeline: voto base = 6+0.8·(min/(min+25))·(indice−media)/σ in [3,10]; "
-                     "poi + mitigazione risultato (solo divergenze, cap ±1) + red_adj; "
-                     "poi clamp [3,10] e arrotondamento 0.5. gd_on e red_adj sono FISSI "
-                     "(non dipendono dai pesi). SQRT applica √ solo alle PER90.")
+                     "poi + mitigazione risultato (solo divergenze, cap ±1) + red/autogol; "
+                     "poi clamp [3,10] e arrotondamento 0.5. gd_on e red/autogol sono FISSI "
+                     "(non dipendono dai pesi). SQRT applica √ alle PER90 e a shots_goal "
+                     "(rendimento decrescente sui gol multipli).")
         tun["A4"] = "compressione:"; tun["B4"] = "SQRT"; tun["B4"].font = Font(bold=True); tun["B4"].fill = yel
         dv = DataValidation(type="list", formula1='"RAW,SQRT"'); tun.add_data_validation(dv); dv.add(tun["B4"])
         tun["A5"] = "K mitigazione:"; tun["B5"] = cr.RESULT_MITIGATION_K

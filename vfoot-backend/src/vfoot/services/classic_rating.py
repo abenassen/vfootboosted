@@ -145,6 +145,12 @@ SHOT_TYPE_TO_FEATURE = {"post": "shots_post", "goal": "shots_goal",
                         "block": "shots_blocked"}
 SHOT_DETAIL_FEATURES = frozenset(SHOT_TYPE_TO_FEATURE.values())
 
+# TOTAL features that get √-compressed (but NOT per-90 scaled, being decisive
+# events). Only shots_goal: √ gives diminishing returns on multiple goals (a brace
+# is worth √2≈1.4, not 2), which keeps the single-goal credit intact while stopping
+# multi-goal games from over-inflating the top tail (max 9.5 -> 9.0, ~ Statistico).
+SQRT_TOTAL_FEATURES = frozenset({"shots_goal"})
+
 # --- Goalkeeper channel ------------------------------------------------------
 # Keepers produce almost none of the outfield features above, so they need their own
 # index. The anchor is goals_prevented (xG-on-target faced MINUS goals conceded): the
@@ -536,10 +542,14 @@ def _index_from_totals(totals: dict, minutes: int) -> float:
     aren't extrapolated). The two-way split is the v2 selective-√ design."""
     if minutes <= 0:
         return 0.0
-    idx = sum(TOTAL_WEIGHTS[k] * totals.get(k, 0.0) for k in TOTAL_WEIGHTS)  # LINEAR
+    # TOTAL: linear, except SQRT_TOTAL_FEATURES (shots_goal) which is √-compressed
+    # for diminishing returns on multiple goals — still no per-90 scaling.
+    idx = sum(TOTAL_WEIGHTS[k] * (_compress(totals.get(k, 0.0))
+                                  if k in SQRT_TOTAL_FEATURES else totals.get(k, 0.0))
+              for k in TOTAL_WEIGHTS)
     scale = 90.0 / max(minutes, EXTRAP_FLOOR_MINUTES)
     idx += sum(PER90_WEIGHTS[k] * _compress(totals.get(k, 0.0) * scale)
-               for k in PER90_WEIGHTS)  # √ only here
+               for k in PER90_WEIGHTS)  # √ per-90 block
     return idx
 
 

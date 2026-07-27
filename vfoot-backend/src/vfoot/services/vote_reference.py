@@ -42,6 +42,7 @@ def weights_fingerprint() -> str:
         "total": cr.TOTAL_WEIGHTS, "per90": cr.PER90_WEIGHTS,
         "gk_total": cr.GK_TOTAL_WEIGHTS, "gk_per90": cr.GK_PER90_WEIGHTS,
         "def_exposure": cr.DEF_EXPOSURE_WEIGHT,
+        "sqrt_total": sorted(cr.SQRT_TOTAL_FEATURES),  # which totals get √ changes the index
         "spread_k": cr.VOTE_SPREAD_K, "center": cr.VOTE_CENTER,
         "extrap_floor": cr.EXTRAP_FLOOR_MINUTES, "shrinkage": cr.SHRINKAGE_MINUTES,
         "min_ref": cr.MIN_MINUTES_REFERENCE,
