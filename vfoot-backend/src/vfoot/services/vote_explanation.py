@@ -125,7 +125,8 @@ LABELS = {
 # SIGNAL line, phrased "una o più ..." by the sign of the net. Scoring untouched.
 # (group_keys, phrase when net-positive, phrase when net-negative.)
 MERGES = [
-    (("xg_on_target", "xg_shots", "shots_on_target", "shots", "shots_blocked"),
+    (("xg_on_target", "xg_shots", "shots_on_target", "shots", "shots_blocked",
+      "shots_off"),
      "una o più conclusioni pericolose", "una o più occasioni fallite"),
     (("dribbles_won", "dribbles_attempted"),
      "uno o più dribbling riusciti", "uno o più dribbling falliti"),

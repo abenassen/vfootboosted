@@ -64,12 +64,13 @@ from realdata.models import (
 # fixes its double-penalty with the SGA on the same shot.
 TOTAL_WEIGHTS = {
     "expected_assists": 0.15,     # xA: chance creation, credited to the CREATOR
-    "shots_goal": 0.45,           # the GOAL itself (own goals excluded), on top of +3 bonus
+    "shots_goal": 0.30,           # the GOAL itself (own goals excluded), on top of +3 bonus
     "xg_on_target": 0.30,         # post-shot xG: the shooter's EXECUTION merit (SGA +)
-    "xg_shots": -0.15,            # raw xG: subtracted (softened) — execution over positioning
+    "xg_shots": -0.10,            # raw xG: subtracted (softened) — execution over positioning
     "key_passes": 0.0,
     "shots_on_target": 0.05,
-    "shots": -0.05,
+    "shots": 0.05,                # shot ACTIVITY now rewarded (analyst v2.2), not penalised
+    "shots_off": 0.02,            # even an off-target attempt: small credit for shooting
     "errors_led_to_goal": -0.35,  # decisive error (heavy)
     # Conceding a penalty hands over roughly 0.78 expected goals through a clear
     # individual foul, and — unlike a missed penalty — carries NO fantacalcio
@@ -86,8 +87,8 @@ TOTAL_WEIGHTS = {
     "errors_led_to_shot": -0.10,
     # SGA_Pali shot-outcome detail, from the event-level shot map
     # (MatchShot.shot_type), merged in by _merge_shot_detail. LINEAR totals.
-    "shots_post": 0.14,           # hit the frame: execution merit a goal/save can't show
-    "shots_blocked": 0.03,        # a quarter of shots_post — the defence intervened
+    "shots_post": 0.22,           # hit the frame: execution merit a goal/save can't show
+    "shots_blocked": 0.03,        # the defence intervened
 }
 
 # VOLUME / involvement — rescaled to PER-90 (density is the signal: 120 touches in 90'
@@ -101,8 +102,8 @@ TOTAL_WEIGHTS = {
 # while reading as if progression and pressing were rewarded, so they were removed.
 PER90_WEIGHTS = {
     "dribbles_won": 0.05,
-    "duels_won": 0.12,
-    "duels_lost": -0.12,          # the losing side of the contests we reward
+    "duels_won": 0.10,
+    "duels_lost": -0.10,          # the losing side of the contests we reward
     "dribbled_past": -0.07,       # subset of duels_lost: beaten one-on-one is worse
     "passes_opp_half": 0.05,      # progression: a pass in the opponent half is worth more
     "aerials_won": 0.05,
