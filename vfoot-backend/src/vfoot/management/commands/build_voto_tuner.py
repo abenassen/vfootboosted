@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import openpyxl
 from openpyxl.formatting.rule import FormulaRule
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter as col
 from openpyxl.worksheet.datavalidation import DataValidation
 
@@ -76,8 +76,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--season", type=int, default=2)
-        parser.add_argument("--cases", type=int, default=18,
-                            help="Target number of case columns (10 emblematic + fillers).")
+        parser.add_argument("--cases", type=int, default=24,
+                            help="Target number of case columns (emblematic + Statistico "
+                                 "discrepancies + fillers).")
         parser.add_argument("--dir", default=None,
                             help="Folder with the external fantacalcio .xlsx sheets.")
         parser.add_argument("--out", default=None,
@@ -180,9 +181,15 @@ class Command(BaseCommand):
         for r in rows:
             if (r["minutes"] or 0) < 60 or r["role"] not in OUT_ROLES:
                 continue
-            if (r["gd"], r["pid"]) not in gp2mp or r["fanta"] is None or r["our"] is None:
+            # need our vote and at least one external benchmark to compare against
+            if (r["gd"], r["pid"]) not in gp2mp or r["our"] is None:
                 continue
-            r = {**r, "absd": abs(r["our"] - r["fanta"]),
+            if r["fanta"] is None and r["statistico"] is None:
+                continue
+            r = {**r,
+                 "absd": abs(r["our"] - r["fanta"]) if r["fanta"] is not None else 0.0,
+                 "absd_stat": (abs(r["our"] - r["statistico"])
+                               if r["statistico"] is not None else None),
                  "margin": margin(r["gd"], r["pid"])}
             cand.append(r)
 
@@ -199,6 +206,16 @@ class Command(BaseCommand):
             r = by_key.get((gd, pid))
             if r:
                 take(r, tag)
+        # THE STRANGE-VOTE HUNT: biggest gaps vs the Statistico base vote. Statistico
+        # is the goal-stripped algorithmic grade, so a large gap here is a pure
+        # performance-read disagreement — exactly the votes to sanity-check.
+        n = 0
+        for r in sorted([x for x in cand if x["absd_stat"] is not None],
+                        key=lambda x: -x["absd_stat"]):
+            if take(r, "DISAC. stat"):
+                n += 1
+            if n >= 10:
+                break
         # scorers with a base-vote discrepancy
         n = 0
         for r in sorted([x for x in cand if x["goals"]], key=lambda x: -x["absd"]):
@@ -246,20 +263,41 @@ class Command(BaseCommand):
                              "min": m, "match": res, "goals": r["goals"], "raw": sd,
                              "sqrt": sqrtv(sd), "fanta": r["fanta"], "stat": r["statistico"],
                              "sofa": r["sofa"], "our": r["our"],
+                             "expl": r.get("explanation_text", ""),
                              # weight-independent inputs to the post-adjustment layer
                              "gd_on": gd_on_map.get((mid, pid), 0),
                              "red_adj": round(cr.red_card_adjustments(mid).get(pid, 0.0)
                                               + cr.own_goal_adjustments(mid).get(pid, 0.0), 3)})
         casedata.sort(key=lambda c: (OUT_ROLES.index(c["role"]), c["tipo"], c["name"]))
 
-        self._build_xlsx(out, FEATS, nF, is_p90, w_of, STATS, casedata)
+        # ---- the discrepancy ledger: top gaps vs Statistico, with our text ----
+        expl_rows, seen_e = [], set()
+        for r in sorted([x for x in cand if x["absd_stat"] is not None],
+                        key=lambda x: -x["absd_stat"]):
+            if r["pid"] in seen_e:
+                continue
+            seen_e.add(r["pid"])
+            mid, _ = gp2mp[(r["gd"], r["pid"])]
+            M = Match.objects.get(id=mid)
+            expl_rows.append({
+                "name": name.get(r["pid"], str(r["pid"])), "role": r["role"], "gd": r["gd"],
+                "match": (f"{teamname.get(M.home_team_id,'?')} {M.home_goals}-{M.away_goals} "
+                          f"{teamname.get(M.away_team_id,'?')}"),
+                "goals": r["goals"], "assists": r["assists"],
+                "our": r["our"], "stat": r["statistico"], "fanta": r["fanta"],
+                "delta": round(r["our"] - r["statistico"], 1),
+                "expl": r.get("explanation_text", "") or "(nessuna voce sopra soglia)"})
+            if len(expl_rows) >= 30:
+                break
+
+        self._build_xlsx(out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows)
         self.stdout.write(self.style.SUCCESS(
             f"scritto {out} | casi: {len(casedata)} "
             f"(gol: {sum(1 for c in casedata if c['goals'])}, "
             f"KO netto: {sum(1 for c in casedata if c['tipo']=='KO netto')})"))
 
     # ------------------------------------------------------------------
-    def _build_xlsx(self, out, FEATS, nF, is_p90, w_of, STATS, casedata):
+    def _build_xlsx(self, out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows=()):
         wb = openpyxl.Workbook()
         fillh = PatternFill("solid", fgColor=TEAL); yel = PatternFill("solid", fgColor=YEL)
 
@@ -454,6 +492,43 @@ class Command(BaseCommand):
                 med.cell(4 + i, 2 + jr, round(float(STATS[role]["mean_raw"][i]), 3))
                 med.cell(4 + i, 5 + jr, round(float(STATS[role]["mean_sqrt"][i]), 3))
         med.column_dimensions["A"].width = 21
+
+        # ---- spiegazioni: the strange-vote ledger with our generated text ----
+        if expl_rows:
+            sp = wb.create_sheet("spiegazioni")
+            wb.move_sheet("spiegazioni", -(len(wb.sheetnames) - 2))  # right after Tuner
+            sp["A1"] = ("Voti più lontani dallo STATISTICO (voto fanta senza bonus/malus), "
+                        "con la spiegazione testuale che genera il nostro sistema.")
+            sp["A1"].font = Font(bold=True, size=12)
+            sp["A2"] = ("Lo Statistico toglie i gol dal voto, quindi un Δ grande = pura "
+                        "divergenza sulla LETTURA della prestazione. 'nostro' è il voto puro "
+                        "deployato (mitigazione + espulsione/autogol già dentro). Leggi la "
+                        "spiegazione e giudica se il voto è difendibile.")
+            sp["A2"].font = Font(italic=True, size=9)
+            heads = ["giocatore", "ruolo", "gd", "partita", "gol", "assist",
+                     "nostro", "statistico", "fanta", "Δ ns−stat", "spiegazione"]
+            for j, h in enumerate(heads):
+                hc = sp.cell(4, 1 + j, h)
+                hc.font = Font(bold=True, color="FFFFFF"); hc.fill = fillh
+            for i, e in enumerate(expl_rows):
+                r = 5 + i
+                sp.cell(r, 1, e["name"]).font = Font(bold=True)
+                sp.cell(r, 2, e["role"]); sp.cell(r, 3, e["gd"]); sp.cell(r, 4, e["match"])
+                sp.cell(r, 5, e["goals"] or ""); sp.cell(r, 6, e["assists"] or "")
+                sp.cell(r, 7, e["our"]).number_format = "0.0"
+                sp.cell(r, 8, e["stat"]).number_format = "0.0"
+                sp.cell(r, 9, e["fanta"] if e["fanta"] is not None else "-")
+                dc = sp.cell(r, 10, e["delta"]); dc.number_format = "+0.0;-0.0"
+                dc.font = Font(bold=True)
+                ad = abs(e["delta"])
+                fg = (CF_RED if ad >= 2 else (CF_YEL if ad >= 1.5 else CF_GREEN))
+                dc.fill = PatternFill("solid", fgColor=fg[0]); dc.font = Font(bold=True, color=fg[1])
+                tc = sp.cell(r, 11, e["expl"]); tc.alignment = Alignment(wrap_text=True, vertical="top")
+            widths = {"A": 18, "B": 6, "C": 5, "D": 26, "E": 5, "F": 6,
+                      "G": 8, "H": 9, "I": 7, "J": 10, "K": 88}
+            for c, w in widths.items():
+                sp.column_dimensions[c].width = w
+            sp.freeze_panes = "A5"
 
         if "Sheet" in wb.sheetnames:
             wb.remove(wb["Sheet"])
