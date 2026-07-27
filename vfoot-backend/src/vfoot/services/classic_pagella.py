@@ -43,6 +43,7 @@ from vfoot.services.vote_reference import fixed_reference, fixed_role_averages
 CARD_MALUS = {CARD_YELLOW: 0.5, CARD_SECOND_YELLOW: 1.0, CARD_RED: 1.0}
 OWN_GOAL_MALUS = 2.0  # classic fantacalcio: -2 per own goal (from raw_stats.ownGoals)
 PENALTY_MISSED_MALUS = 3.0  # classic fantacalcio: -3 per missed penalty (MatchShot situation)
+PENALTY_SAVED_BONUS = 3.0   # classic fantacalcio: +3 to the GK who saves a penalty
 ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
 # Pagella reading order: goalkeeper -> defence -> midfield -> attack.
 ROLE_ORDER = {"POR": 0, "DIF": 1, "CEN": 2, "ATT": 3}
@@ -154,9 +155,51 @@ def _missed_penalties_for_match(match_id: int) -> dict[int, int]:
     return out
 
 
+def _penalties_saved_for_match(match_id: int) -> dict[int, int]:
+    """{goalkeeper_id: penalties he SAVED} — the +3 bonus events. A saved penalty is
+    a shot situation='penalty' with outcome 'save' (not merely off target / woodwork);
+    fantacalcio credits it to the keeper of the side defending it — the opposite side
+    from the taker. Uses the goalkeeper who appeared on that side (one per team)."""
+    saves = list(MatchShot.objects
+                 .filter(match_id=match_id, situation="penalty", is_goal=False,
+                         shot_type="save")
+                 .values_list("team_side", "minute"))
+    if not saves:
+        return {}
+    # Keepers per side. With two (a substitution) the one ON PITCH at the shot minute
+    # is credited: the starter up to the minute he was replaced, the sub after.
+    gks: dict[str, list] = defaultdict(list)
+    for side, pid, starter, mins in (MatchAppearance.objects
+                                     .filter(match_id=match_id, player__is_goalkeeper=True)
+                                     .values_list("side", "player_id", "is_starter",
+                                                  "minutes_played")):
+        gks[side].append({"pid": pid, "starter": bool(starter), "mins": mins or 0})
+
+    def keeper_at(side: str, minute) -> int | None:
+        cands = gks.get(side, [])
+        if not cands:
+            return None
+        if len(cands) == 1:
+            return cands[0]["pid"]
+        starter = next((c for c in cands if c["starter"]), cands[0])
+        if minute is not None and minute > starter["mins"]:
+            sub = next((c for c in cands if not c["starter"]), None)
+            if sub is not None:
+                return sub["pid"]
+        return starter["pid"]
+
+    opp = {"home": "away", "away": "home"}
+    out: dict[int, int] = defaultdict(int)
+    for taker_side, minute in saves:
+        gk = keeper_at(opp.get(taker_side, ""), minute)
+        if gk is not None:
+            out[gk] += 1
+    return out
+
+
 def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
           cards: dict, conceded: int, explanation: dict | None = None,
-          missed_pens: int = 0) -> dict:
+          missed_pens: int = 0, saved_pens: int = 0) -> dict:
     pid = app.player_id
     c = cards.get(pid, {})
     card_malus = c.get("malus", 0.0)
@@ -172,7 +215,8 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
     events = {"goals": app.goals, "assists": app.assists,
               "yellow": c.get("yellow", 0),
               "red": c.get("red", 0) + c.get("second_yellow", 0),
-              "own_goals": own_goals, "missed_penalties": missed_pens}
+              "own_goals": own_goals, "missed_penalties": missed_pens,
+              "saved_penalties": saved_pens}
     base = {"player_id": pid,
             "name": app.player.short_name or app.player.full_name or str(pid),
             "role": role or "CEN", "role_known": role_known,
@@ -198,7 +242,7 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
         base["explanation"] = explanation
         base["explanation_text"] = to_sentence(explanation)
     vp = float(row["voto_puro"])
-    bonus = 3.0 * app.goals + 1.0 * app.assists
+    bonus = 3.0 * app.goals + 1.0 * app.assists + PENALTY_SAVED_BONUS * saved_pens
     # A keeper also carries the classic -1 per goal conceded. This does NOT double
     # count: his voto puro measures performance against the xG ON TARGET he faced
     # (shot difficulty), the malus is the raw goal count — the usual voto-puro /
@@ -255,6 +299,7 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
     exposures = defensive_exposure([match.id], mins)
     cards = _cards_for_match(match.id)
     missed_pens = _missed_penalties_for_match(match.id)
+    saved_pens = _penalties_saved_for_match(match.id)
     apps = list(MatchAppearance.objects.filter(match=match).select_related("player"))
     pids = [a.player_id for a in apps]
     # Base: the season's disambiguated role (same source the voto puro was scored
@@ -285,7 +330,8 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           own_goal_adjustment=row.get("own_goal_adjustment", 0.0),
                           penalty_adjustment=row.get("penalty_adjustment", 0.0))
         line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded, why,
-                     missed_pens=missed_pens.get(a.player_id, 0))
+                     missed_pens=missed_pens.get(a.player_id, 0),
+                     saved_pens=saved_pens.get(a.player_id, 0))
         buckets[a.side]["starters" if a.is_starter else "bench"].append(line)
 
     return {

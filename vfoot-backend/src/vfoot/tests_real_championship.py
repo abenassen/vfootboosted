@@ -240,6 +240,40 @@ class RealChampionshipTests(TestCase):
         self.assertEqual(line["voto_puro"], 5.0)      # 6.0 centre - 1.0 drop
         self.assertEqual(line["fantavoto"], 2.0)      # 5.0 - 3 malus
 
+    def test_saved_penalty_credited_to_the_keeper_on_pitch(self):
+        """A saved penalty (+3 Rp) goes to the keeper defending it — the opposite
+        side from the taker — and, after a keeper change, to the one on the pitch."""
+        from realdata.models import MatchShot
+        from vfoot.services.classic_pagella import _penalties_saved_for_match
+        Player.objects.filter(id=self.gk.id).update(is_goalkeeper=True)
+        # away take a penalty at 30', the home starting keeper saves it
+        MatchShot.objects.create(match=self.match, player=None, team_side="away",
+                                 minute=30, shot_type="save", is_goal=False, xg=0.79,
+                                 xgot=0.7, situation="penalty", provider="sofascore",
+                                 zone_key="z_4_2")
+        self.assertEqual(_penalties_saved_for_match(self.match.id), {self.gk.id: 1})
+        # a back-up keeper comes on at 60'; a save at 75' is his, not the starter's
+        MatchAppearance.objects.filter(match=self.match,
+                                       player=self.gk).update(minutes_played=60)
+        gk2 = Player.objects.create(full_name="Keeper Two", short_name="K. Two",
+                                    classic_role_seed="POR", is_goalkeeper=True)
+        MatchAppearance.objects.create(match=self.match, player=gk2,
+                                       team_season=self.home_ts, side="home",
+                                       minutes_played=30, is_starter=False)
+        MatchShot.objects.create(match=self.match, player=None, team_side="away",
+                                 minute=75, shot_type="save", is_goal=False, xg=0.79,
+                                 xgot=0.7, situation="penalty", provider="sofascore",
+                                 zone_key="z_4_2")
+        self.assertEqual(_penalties_saved_for_match(self.match.id),
+                         {self.gk.id: 1, gk2.id: 1})
+        # an off-target penalty is a miss, not a save -> no +3
+        MatchShot.objects.create(match=self.match, player=None, team_side="away",
+                                 minute=80, shot_type="miss", is_goal=False, xg=0.79,
+                                 xgot=0.0, situation="penalty", provider="sofascore",
+                                 zone_key="z_4_2")
+        self.assertEqual(_penalties_saved_for_match(self.match.id),
+                         {self.gk.id: 1, gk2.id: 1})
+
     def test_own_goal_shot_is_not_counted_as_a_goal_scored(self):
         """SofaScore files an own goal as a 'goal' shot tagged with the OPPONENT's
         side; it must not inflate the own-scorer's shots_goal (a goals-scored proxy),
