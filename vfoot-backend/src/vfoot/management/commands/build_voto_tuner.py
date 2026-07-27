@@ -502,8 +502,11 @@ class Command(BaseCommand):
             sp["A1"].font = Font(bold=True, size=12)
             sp["A2"] = ("Lo Statistico toglie i gol dal voto, quindi un Δ grande = pura "
                         "divergenza sulla LETTURA della prestazione. 'nostro' è il voto puro "
-                        "deployato (mitigazione + espulsione/autogol già dentro). Leggi la "
-                        "spiegazione e giudica se il voto è difendibile.")
+                        "deployato (mitigazione + drop-prestazione da espulsione/autogol già "
+                        "dentro). ATTENZIONE alle righe con 'Espulso.'/'Autogol.' nella "
+                        "spiegazione: lì il Δ è GONFIATO, perché lo Statistico mette tutta la "
+                        "penalità nel voto base mentre noi ci aggiungiamo il malus -1/-2 a "
+                        "livello di FANTAVOTO (non qui). Leggi la spiegazione e giudica.")
             sp["A2"].font = Font(italic=True, size=9)
             heads = ["giocatore", "ruolo", "gd", "partita", "gol", "assist",
                      "nostro", "statistico", "fanta", "Δ ns−stat", "spiegazione"]
