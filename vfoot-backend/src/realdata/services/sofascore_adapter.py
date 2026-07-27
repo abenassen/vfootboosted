@@ -627,6 +627,10 @@ def _ingest_match(
             match=match, player=player, team_side=side, zone_key=zone,
             minute=(int(shot["time"]) if isinstance(shot.get("time"), (int, float))
                     else None),
+            # Seconds from kick-off — kept for OG↔shot linking (see MatchShot).
+            elapsed_seconds=(int(shot["timeSeconds"])
+                             if isinstance(shot.get("timeSeconds"), (int, float))
+                             else None),
             xg=_num(shot.get("xg")), xgot=_num(shot.get("xgot")),
             is_goal=(str(shot.get("shotType") or "").lower() == "goal"),
             shot_type=str(shot.get("shotType") or "")[:24],

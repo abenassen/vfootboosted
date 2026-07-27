@@ -231,15 +231,19 @@ RED_CARD_SEVERITY_DEFAULT = 0.6
 RED_CARD_FIXED = {"Violent conduct": 0.3, "Argument": 0.3, "Bad Behaviour": 0.3}
 
 # --- Own-goal performance adjustment -----------------------------------------
-# An own goal is a negative performance event a real pagella reflects in the vote,
-# graded by fault via a deflection proxy: SofaScore files an own goal as a 'goal'
-# shot tagged with the OPPONENT's side, so a goal-shot on the wrong side is an own
-# goal. If an opponent shot falls in the same minute it most likely deflected in —
-# unlucky, light penalty; otherwise it reads as a solo error — heavier. This is the
-# voto-puro drop; the flat -2 fantacalcio malus applies ON TOP in the bonus layer.
-# The gravity proxy is heuristic (16 deflections / 6 solo over the 2025-26 season).
+# An own goal is a negative performance event a real pagella reflects in the vote.
+# We grade it by fault ONLY when we have the precision to do so reliably: with
+# sub-minute timing (MatchShot.elapsed_seconds), an own goal that shares the moment
+# of an opponent shot (within OWN_GOAL_DEFLECTION_WINDOW_S) deflected it in —
+# unlucky, light penalty; otherwise it is a solo error — heavier. WITHOUT seconds
+# (rows imported before we captured them) a minute is too coarse to tell a deflection
+# from a coincidental shot, so we fall back to a single FLAT penalty rather than
+# claim a gravity we cannot measure. The flat -2 fantacalcio malus applies ON TOP in
+# the bonus layer regardless. Re-scrape to backfill elapsed_seconds and unlock grading.
 OWN_GOAL_VOTE_DEFLECTION = -0.5
 OWN_GOAL_VOTE_SOLO = -1.5
+OWN_GOAL_VOTE_FLAT = -1.0          # when sub-minute timing is unavailable
+OWN_GOAL_DEFLECTION_WINDOW_S = 8   # seconds between the OG and the shot it deflected
 # Bayesian shrinkage strength: a per-90 rate from few minutes is noisy and fat-tailed
 # low-count features (xG, key passes) explode when extrapolated to 90'. The evidence
 # weight minutes/(minutes+this) pulls short cameos toward the role prior (vote 6); a
@@ -434,35 +438,34 @@ def red_card_adjustments(match_id: int) -> dict:
 
 
 def own_goal_adjustments(match_id: int) -> dict:
-    """{player_id: voto-puro penalty for an own goal}, graded by fault.
+    """{player_id: voto-puro penalty for an own goal}, graded by fault when possible.
 
     An own goal is a 'goal' shot tagged with the OPPONENT's side (the side it counts
     for), so a goal-shot whose team_side differs from the scorer's own side is an own
-    goal. Gravity via a deflection proxy — it reads as UNLUCKY (light penalty) when
-    EITHER an opponent shot fell in the SAME minute (the ball it turned in) OR the
-    own-goal 'shot' itself carries xGOT > 0 (a hard shot deflected in); otherwise a
-    SOLO error (heavier), e.g. turning a weak cross into your own net.
-
-    The same-minute test is exact on purpose: a ±1 window fired on a coincidental
-    opponent shot a minute away (Cambiaso's grave OG off a cross was mis-read as a
-    deflection because of an unrelated save the minute before). Separate from and
-    additive to the flat -2 fantacalcio malus in the bonus layer."""
+    goal. Gravity, ONLY with sub-minute timing (elapsed_seconds): an opponent shot
+    within OWN_GOAL_DEFLECTION_WINDOW_S seconds is the shot it deflected in — unlucky
+    (OWN_GOAL_VOTE_DEFLECTION); none near reads as a solo error (OWN_GOAL_VOTE_SOLO).
+    WITHOUT seconds, a minute is too coarse to tell them apart, so a single FLAT
+    penalty (OWN_GOAL_VOTE_FLAT) applies. Additive to the -2 fantacalcio malus."""
     sides = {(match_id, a["player_id"]): a["side"]
              for a in MatchAppearance.objects.filter(match_id=match_id)
              .values("player_id", "side")}
     shots = list(MatchShot.objects.filter(match_id=match_id)
-                 .values_list("player_id", "minute", "team_side", "is_goal",
-                              "shot_type", "xgot"))
-    own_goals = [(pid, minute, xgot) for pid, minute, ts, isg, st, xgot in shots
+                 .values_list("player_id", "team_side", "is_goal", "shot_type",
+                              "elapsed_seconds"))
+    own_goals = [(pid, sec) for pid, ts, isg, st, sec in shots
                  if isg and st == "goal" and sides.get((match_id, pid), ts) != ts]
     if not own_goals:
         return {}
     out = {}
-    for pid, minute, og_xgot in own_goals:
+    for pid, og_sec in own_goals:
+        if og_sec is None:
+            out[pid] = out.get(pid, 0.0) + OWN_GOAL_VOTE_FLAT
+            continue
         opp = "away" if sides.get((match_id, pid)) == "home" else "home"
-        same_minute = any(ts == opp and sp != pid and sm == minute
-                          for sp, sm, ts, _isg, _st, _xo in shots)
-        deflection = same_minute or (og_xgot or 0) > 0
+        deflection = any(ts == opp and sp != pid and sec is not None
+                         and abs(sec - og_sec) <= OWN_GOAL_DEFLECTION_WINDOW_S
+                         for sp, ts, _isg, _st, sec in shots)
         out[pid] = out.get(pid, 0.0) + (OWN_GOAL_VOTE_DEFLECTION if deflection
                                         else OWN_GOAL_VOTE_SOLO)
     return out

@@ -446,6 +446,11 @@ class MatchShot(models.Model):
     # Match minute as the provider reports it (stoppage time folded into the
     # preceding minute, so a 90+3 shot reads 90).
     minute = models.IntegerField(null=True, blank=True)
+    # Sub-minute timing from the provider (SofaScore ``timeSeconds``): seconds from
+    # kick-off. Kept so an own goal can be linked to the EXACT shot it deflected — a
+    # minute is too coarse, coincidental shots share it (Bonny/Edmundsson). Null for
+    # rows imported before this was captured; a re-scrape backfills them.
+    elapsed_seconds = models.IntegerField(null=True, blank=True)
     zone_key = models.CharField(max_length=24)
     xg = models.FloatField(default=0.0)
     xgot = models.FloatField(default=0.0)     # post-shot xG; 0 when off target
