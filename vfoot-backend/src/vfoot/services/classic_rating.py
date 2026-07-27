@@ -146,10 +146,13 @@ SHOT_TYPE_TO_FEATURE = {"post": "shots_post", "goal": "shots_goal",
 SHOT_DETAIL_FEATURES = frozenset(SHOT_TYPE_TO_FEATURE.values())
 
 # TOTAL features that get √-compressed (but NOT per-90 scaled, being decisive
-# events). Only shots_goal: √ gives diminishing returns on multiple goals (a brace
-# is worth √2≈1.4, not 2), which keeps the single-goal credit intact while stopping
-# multi-goal games from over-inflating the top tail (max 9.5 -> 9.0, ~ Statistico).
-SQRT_TOTAL_FEATURES = frozenset({"shots_goal"})
+# events). √ gives diminishing returns on volume:
+#   * shots_goal — a brace is worth √2≈1.4, not 2 (keeps single-goal credit intact,
+#     stops multi-goal games inflating the top: max 9.5 -> 9.0, ~ Statistico);
+#   * shots — the shot-ACTIVITY reward (+0.05) is linear and stacked on 10-shot
+#     games (McTominay 10 shots -> +0.84, on top of on_target/xGOT/goal); √ tames the
+#     volume outliers (√10≈3.2) while leaving a normal 2-3 shot game almost unchanged.
+SQRT_TOTAL_FEATURES = frozenset({"shots_goal", "shots"})
 
 # --- Goalkeeper channel ------------------------------------------------------
 # Keepers produce almost none of the outfield features above, so they need their own
