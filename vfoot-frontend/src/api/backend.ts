@@ -371,6 +371,8 @@ export interface LeagueSettingsPatch {
   max_substitutions?: number;
   defense_bonus_enabled?: boolean;
   defense_bonus_mode?: 'add_own' | 'subtract_opponent';
+  keeper_clean_sheet_enabled?: boolean;
+  enforce_lineup_deadline?: boolean;
 }
 
 export async function updateLeagueSettings(leagueId: number, settings: LeagueSettingsPatch) {
@@ -856,11 +858,33 @@ export async function getLeagueMatchdays(leagueId: number): Promise<LeagueMatchd
   return parseJsonOrThrow(res);
 }
 
-export async function concludeLeagueMatchday(leagueId: number, fantasyMatchdayId: number, force = false) {
+export async function concludeLeagueMatchday(
+  leagueId: number,
+  fantasyMatchdayId: number,
+  force = false,
+  lineupResolutions?: Record<string, 'forfait' | 'previous'>,
+) {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/matchdays/${fantasyMatchdayId}/conclude`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ force }),
+    body: JSON.stringify({ force, lineup_resolutions: lineupResolutions ?? {} }),
+  });
+  return parseJsonOrThrow(res);
+}
+
+// Re-score a CONCLUDED classic matchday. use: 'current' = live rules (updates the
+// snapshot); 'snapshot' = the frozen rules (e.g. after a vote fix).
+export async function recomputeLeagueMatchday(
+  leagueId: number,
+  fantasyMatchdayId: number,
+  use: 'current' | 'snapshot' = 'current',
+  force = false,
+  lineupResolutions?: Record<string, 'forfait' | 'previous'>,
+) {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/matchdays/${fantasyMatchdayId}/recompute`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ use, force, lineup_resolutions: lineupResolutions ?? {} }),
   });
   return parseJsonOrThrow(res);
 }

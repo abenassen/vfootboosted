@@ -36,6 +36,7 @@ from vfoot.api.league_views import (
     LeagueJoinView,
     LeagueListCreateView,
     LeagueMatchdayConcludeView,
+    LeagueMatchdayRecomputeView,
     LeagueMatchdayListView,
     LeagueMatchdaySyncView,
     LeagueFixturesView,
@@ -115,6 +116,11 @@ urlpatterns = [
         "leagues/<int:league_id>/matchdays/<int:fantasy_matchday_id>/conclude",
         LeagueMatchdayConcludeView.as_view(),
         name="league-matchday-conclude",
+    ),
+    path(
+        "leagues/<int:league_id>/matchdays/<int:fantasy_matchday_id>/recompute",
+        LeagueMatchdayRecomputeView.as_view(),
+        name="league-matchday-recompute",
     ),
     path(
         "leagues/<int:league_id>/members/<int:membership_id>/role",

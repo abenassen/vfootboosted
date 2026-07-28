@@ -253,6 +253,8 @@ export async function createLeague(req: CreateLeagueRequest) {
     max_substitutions: 5,
     defense_bonus_enabled: true,
     defense_bonus_mode: 'add_own',
+    keeper_clean_sheet_enabled: false,
+    enforce_lineup_deadline: true,
     invite_code: `MOCK${id}`,
     invite_link: `/join/MOCK${id}`,
     reference_season: null,
@@ -699,7 +701,8 @@ export async function getLeagueMatchdays(_leagueId: number): Promise<LeagueMatch
 export async function concludeLeagueMatchday(
   _leagueId: number,
   fantasyMatchdayId: number,
-  _force = false
+  _force = false,
+  _lineupResolutions?: Record<string, 'forfait' | 'previous'>
 ): Promise<{
   fantasy_matchday_id: number;
   status: 'concluded';
@@ -711,6 +714,17 @@ export async function concludeLeagueMatchday(
     status: 'concluded',
     fixtures_scored: 4,
   };
+}
+
+export async function recomputeLeagueMatchday(
+  _leagueId: number,
+  fantasyMatchdayId: number,
+  use: 'current' | 'snapshot' = 'current',
+  _force = false,
+  _lineupResolutions?: Record<string, 'forfait' | 'previous'>
+): Promise<{ fantasy_matchday_id: number; recomputed_with: string; fixtures_scored: number }> {
+  await sleep(100);
+  return { fantasy_matchday_id: fantasyMatchdayId, recomputed_with: use, fixtures_scored: 4 };
 }
 
 export async function getCompetitionStructure(_leagueId: number, competitionId: number) {
