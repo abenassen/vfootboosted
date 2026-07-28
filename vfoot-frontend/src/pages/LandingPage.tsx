@@ -17,6 +17,7 @@ export default function LandingPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -103,14 +104,14 @@ export default function LandingPage() {
                 <img src={logo} alt="Vfoot logo" className="h-12 w-12 rounded-xl object-cover shadow-card" />
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vfoot Boosted</div>
-                  <div className="text-lg font-black">Il fantacalcio con i voti fatti da noi</div>
+                  <div className="text-lg font-black">Il gioco sul calcio con i voti fatti da noi</div>
                 </div>
               </div>
 
               <h1 className="text-3xl font-black leading-tight md:text-5xl">
                 Due modi di giocare
                 <br />
-                al fantacalcio.
+                sul calcio.
               </h1>
 
               <p className="max-w-2xl text-slate-600 md:text-lg">
@@ -123,7 +124,7 @@ export default function LandingPage() {
                   tag="Pronta"
                   tone="green"
                   title="Classic"
-                  text="Il fantacalcio di sempre — ruoli, formazione e bonus — con i nostri voti al posto di quelli della stampa."
+                  text="Il gioco sul calcio di sempre — ruoli, formazione e bonus — con i nostri voti al posto di quelli della stampa."
                 />
                 <Feature
                   tag="In arrivo"
@@ -191,21 +192,31 @@ export default function LandingPage() {
 
               <label className="block text-sm">
                 <div className="mb-1 font-semibold text-slate-700">Password</div>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-sky-200 focus:ring"
-                  placeholder="********"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2 pr-16 outline-none ring-sky-200 focus:ring"
+                    placeholder="********"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                    aria-label={showPassword ? 'Nascondi password' : 'Mostra password'}
+                  >
+                    {showPassword ? 'Nascondi' : 'Mostra'}
+                  </button>
+                </div>
               </label>
 
               {mode === 'register' ? (
                 <label className="block text-sm">
                   <div className="mb-1 font-semibold text-slate-700">Conferma password</div>
                   <input
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     value={passwordConfirm}
                     onChange={(e) => setPasswordConfirm(e.target.value)}
                     required

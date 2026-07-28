@@ -4,6 +4,7 @@ import { getActiveAuction, getCompetitions, getLeagueDetail } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
+import CopyButton from '../components/CopyButton';
 import type { ActiveAuctionInfo, CompetitionItem, LeagueDetail } from '../types/league';
 
 const COMP_TYPE_LABEL: Record<string, string> = { round_robin: 'Campionato', knockout: 'Coppa' };
@@ -75,7 +76,12 @@ export default function LeaguePage() {
                 Mercato {selectedLeague?.market_open ? 'aperto' : 'chiuso'}
               </Badge>
             </div>
-            <div className="mt-2 text-sm text-slate-600">Invite code: {detail.invite_code}</div>
+            <div className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+              <span>
+                Invite code: <span className="font-mono font-semibold text-slate-800">{detail.invite_code}</span>
+              </span>
+              <CopyButton value={detail.invite_code} label="Copia codice" />
+            </div>
           </div>
           <Link to="/matches">
             <Button variant="primary" size="sm">

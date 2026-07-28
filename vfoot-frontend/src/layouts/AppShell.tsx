@@ -161,6 +161,17 @@ export default function AppShell() {
             <div className="font-semibold">{title}</div>
           </div>
           <div className="flex items-center gap-3">
+            {/* "Le mie leghe" is the top-level entry (create/join leagues) and so comes
+                BEFORE the current-league switcher in the reading order. */}
+            <Link
+              to={USER_ADMIN_TO}
+              className={clsx(
+                'flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold',
+                isUserAdmin ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+              )}
+            >
+              <span>🗂️</span> Le mie leghe
+            </Link>
             <div className="flex items-end gap-2">
               <label className="flex flex-col gap-0.5">
                 <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Lega</span>
@@ -171,15 +182,6 @@ export default function AppShell() {
                 <CompetitionSwitcher />
               </label>
             </div>
-            <Link
-              to={USER_ADMIN_TO}
-              className={clsx(
-                'flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold',
-                isUserAdmin ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
-              )}
-            >
-              <span>🧑‍💼</span> Le mie leghe
-            </Link>
             <Link
               to="/profilo"
               className={clsx(
@@ -243,6 +245,16 @@ export default function AppShell() {
             </div>
             <div className="flex items-center gap-2">
               <Link
+                to={USER_ADMIN_TO}
+                aria-label="Le mie leghe"
+                className={clsx(
+                  'rounded-xl px-2 py-2 text-sm',
+                  isUserAdmin ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                )}
+              >
+                🗂️
+              </Link>
+              <Link
                 to="/profilo"
                 aria-label="Profilo"
                 className={clsx(
@@ -251,16 +263,6 @@ export default function AppShell() {
                 )}
               >
                 <Avatar descriptor={user?.avatar} username={user?.username} size={34} />
-              </Link>
-              <Link
-                to={USER_ADMIN_TO}
-                aria-label="Le mie leghe"
-                className={clsx(
-                  'rounded-xl px-2 py-2 text-sm',
-                  isUserAdmin ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
-                )}
-              >
-                🧑‍💼
               </Link>
               <Button size="sm" variant="secondary" onClick={() => void logout()}>
                 Logout
