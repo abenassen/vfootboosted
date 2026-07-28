@@ -1,10 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import clsx from 'clsx';
 import {
   addRosterPlayer,
   buildDefaultCompetitionStages,
   concludeLeagueMatchday,
-  bulkAssignRoster,
   createCompetitionStage,
   createCompetitionPrize,
   addCompetitionStageRule,
@@ -20,6 +20,7 @@ import {
   getRealSeasons,
   getTeamRoster,
   importRosterCsv,
+  importRosterXlsx,
   joinLeague,
   previewCompetitionSchedule,
   removeRosterPlayer,
@@ -34,7 +35,7 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
-import Avatar from '../components/Avatar';
+import CopyButton from '../components/CopyButton';
 import type {
   CompetitionItem,
   CompetitionSchedulePreview,
@@ -68,6 +69,8 @@ export default function LeagueAdminPage() {
   // Reference season is mandatory at creation and immutable afterwards.
   const [createSeasonId, setCreateSeasonId] = useState<number | ''>('');
   const [realSeasons, setRealSeasons] = useState<RealSeasonItem[]>([]);
+  // Invite code of the league we just created, shown with a copy button until dismissed.
+  const [createdInvite, setCreatedInvite] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [joinTeam, setJoinTeam] = useState('');
 
@@ -76,9 +79,9 @@ export default function LeagueAdminPage() {
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerSearchItem | null>(null);
   const [manualPrice, setManualPrice] = useState('1');
 
-  const [bulkAssignmentsText, setBulkAssignmentsText] = useState('team_name,player_id,price\n');
   const [csvText, setCsvText] = useState('team_name,manager_username,player_id,price\n');
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [rosterXlsxFile, setRosterXlsxFile] = useState<File | null>(null);
 
   const [compName, setCompName] = useState('');
   const [compCreateMacro, setCompCreateMacro] = useState<'none' | 'round_robin' | 'knockout'>('none');
@@ -387,21 +390,6 @@ export default function LeagueAdminPage() {
     }
   }
 
-  function parseAssignments(input: string): Array<{ team_name: string; player_id: number; price: number }> {
-    return input
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => line.split(',').map((x) => x.trim()))
-      .filter((cols) => cols.length >= 2)
-      .map((cols) => ({
-        team_name: cols[0],
-        player_id: Number(cols[1]),
-        price: Number(cols[2] || '1'),
-      }))
-      .filter((r) => r.team_name.length > 0 && Number.isFinite(r.player_id) && r.player_id > 0);
-  }
-
   function concludeDisabledReason(md: LeagueMatchdayItem): string | null {
     if (md.phase === 'concluded') return 'Già conclusa';
     if (md.phase === 'future') return 'Concludi prima la giornata attuale';
@@ -549,17 +537,50 @@ export default function LeagueAdminPage() {
       {activeTab === 'user' ? (
         <>
           <Card className="p-4">
-            <SectionTitle>Profilo</SectionTitle>
-            <div className="mt-3 flex items-center gap-3">
-              <Avatar descriptor={user?.avatar} username={user?.username} size={48} />
-              <div className="min-w-0">
-                <div className="font-semibold text-slate-800">{user?.username ?? 'Utente'}</div>
-                <div className="truncate text-sm text-slate-500">{user?.email || 'Email non impostata'}</div>
+            <SectionTitle>Le Tue Leghe</SectionTitle>
+            {leagues.length ? (
+              <div className="mt-3 space-y-2">
+                {leagues.map((l) => {
+                  const active = l.league_id === selectedLeagueId;
+                  return (
+                    <div
+                      key={l.league_id}
+                      className={clsx(
+                        'flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2',
+                        active ? 'border-slate-900 bg-slate-50' : 'border-slate-200',
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-semibold text-slate-800">{l.name}</div>
+                        <div className="text-xs text-slate-500">
+                          Squadra: {l.team_name?.trim() || 'non impostata'}
+                        </div>
+                      </div>
+                      <Badge tone={l.role === 'admin' ? 'green' : 'slate'}>
+                        {l.role === 'admin' ? 'amministratore' : 'partecipante'}
+                      </Badge>
+                      <Badge tone={l.market_open ? 'green' : 'red'}>
+                        Mercato {l.market_open ? 'aperto' : 'chiuso'}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant={active ? 'primary' : 'secondary'}
+                        onClick={() => {
+                          setSelectedLeagueId(l.league_id);
+                          setActiveTab('league');
+                        }}
+                      >
+                        {l.role === 'admin' ? 'Gestisci' : 'Apri'}
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
-              <Link to="/profilo" className="ml-auto">
-                <Button size="sm" variant="secondary">Modifica profilo</Button>
-              </Link>
-            </div>
+            ) : (
+              <div className="mt-3 text-sm text-slate-600">
+                Non appartieni ancora a nessuna lega. Creane una o unisciti con un invite code qui sotto.
+              </div>
+            )}
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -576,35 +597,63 @@ export default function LeagueAdminPage() {
                       team_name: createTeam,
                       reference_season_id: createSeasonId,
                     });
-                    setMsg(`Lega creata. Invite code: ${res.invite_code}`);
+                    setCreatedInvite(res.invite_code);
+                    setMsg('Lega creata. Definisci ora il regolamento (sostituzioni, modificatore difesa, rose).');
                     setCreateName('');
                     setCreateTeam('');
                     await refreshLeagues();
                     setSelectedLeagueId(res.league_id);
+                    // The vote-affecting rules live in Gestione lega, so send the new
+                    // admin straight there instead of leaving them on the create form.
+                    setActiveTab('league');
                   });
                 }}
               >
-                <input className="w-full rounded-xl border px-3 py-2" placeholder="Nome lega" value={createName} onChange={(e) => setCreateName(e.target.value)} required />
-                <input className="w-full rounded-xl border px-3 py-2" placeholder="Nome tua squadra" value={createTeam} onChange={(e) => setCreateTeam(e.target.value)} required />
-                <select
-                  className="w-full rounded-xl border px-3 py-2"
-                  value={createSeasonId}
-                  onChange={(e) => setCreateSeasonId(e.target.value ? Number(e.target.value) : '')}
-                  required
-                >
-                  <option value="">Campionato di riferimento…</option>
-                  {realSeasons.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
+                <label className="block text-sm font-medium text-slate-700">
+                  Nome lega <span className="text-red-500">*</span>
+                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Nome lega" value={createName} onChange={(e) => setCreateName(e.target.value)} required />
+                </label>
+                <label className="block text-sm font-medium text-slate-700">
+                  Nome tua squadra <span className="text-red-500">*</span>
+                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Nome tua squadra" value={createTeam} onChange={(e) => setCreateTeam(e.target.value)} required />
+                </label>
+                <label className="block text-sm font-medium text-slate-700">
+                  Campionato di riferimento <span className="text-red-500">*</span>
+                  <select
+                    className="mt-1 w-full rounded-xl border px-3 py-2 font-normal"
+                    value={createSeasonId}
+                    onChange={(e) => setCreateSeasonId(e.target.value ? Number(e.target.value) : '')}
+                    required
+                  >
+                    <option value="">Campionato di riferimento…</option>
+                    {realSeasons.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <div className="text-xs text-slate-500">
-                  Il campionato di riferimento non è modificabile dopo la creazione: rose, listone e
-                  calendario dipendono da esso.
+                  <span className="text-red-500">*</span> Campi obbligatori. Il campionato di riferimento non è
+                  modificabile dopo la creazione: rose, listone e calendario dipendono da esso.
                 </div>
                 <Button type="submit" disabled={busy}>Crea</Button>
               </form>
+              {createdInvite ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+                  <span className="text-emerald-800">
+                    Invite code: <span className="font-mono font-semibold">{createdInvite}</span>
+                  </span>
+                  <CopyButton value={createdInvite} label="Copia codice" />
+                  <button
+                    type="button"
+                    onClick={() => setCreatedInvite(null)}
+                    className="ml-auto text-xs font-semibold text-slate-400 hover:text-slate-700"
+                  >
+                    Chiudi
+                  </button>
+                </div>
+              ) : null}
             </Card>
 
             <Card className="p-4">
@@ -623,34 +672,18 @@ export default function LeagueAdminPage() {
                   });
                 }}
               >
-                <input className="w-full rounded-xl border px-3 py-2" placeholder="Invite code" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} required />
-                <input className="w-full rounded-xl border px-3 py-2" placeholder="Nome squadra" value={joinTeam} onChange={(e) => setJoinTeam(e.target.value)} required />
+                <label className="block text-sm font-medium text-slate-700">
+                  Invite code <span className="text-red-500">*</span>
+                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Invite code" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} required />
+                </label>
+                <label className="block text-sm font-medium text-slate-700">
+                  Nome squadra <span className="text-red-500">*</span>
+                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Nome squadra" value={joinTeam} onChange={(e) => setJoinTeam(e.target.value)} required />
+                </label>
                 <Button type="submit" disabled={busy}>Join</Button>
               </form>
             </Card>
           </div>
-
-          <Card className="p-4">
-            <SectionTitle>Le Tue Leghe</SectionTitle>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <select
-                className="rounded-xl border px-3 py-2 text-sm"
-                value={selectedLeagueId ?? ''}
-                onChange={(e) => setSelectedLeagueId(e.target.value ? Number(e.target.value) : null)}
-              >
-                <option value="">Seleziona lega</option>
-                {leagues.map((l) => (
-                  <option key={l.league_id} value={l.league_id}>
-                    {l.name} ({l.role})
-                  </option>
-                ))}
-              </select>
-              <Button size="sm" variant="secondary" onClick={() => setActiveTab('league')} disabled={!selectedLeagueId}>
-                Vai a Gestione lega
-              </Button>
-              {selectedLeague ? <Badge tone={selectedLeague.market_open ? 'green' : 'red'}>Mercato {selectedLeague.market_open ? 'aperto' : 'chiuso'}</Badge> : null}
-            </div>
-          </Card>
         </>
       ) : !isAdmin ? (
         <Card className="p-4">
@@ -663,27 +696,24 @@ export default function LeagueAdminPage() {
       ) : (
         <>
           <Card className="p-4">
-            <SectionTitle>Lega Selezionata</SectionTitle>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <select
-                className="rounded-xl border px-3 py-2 text-sm"
-                value={selectedLeagueId ?? ''}
-                onChange={(e) => setSelectedLeagueId(e.target.value ? Number(e.target.value) : null)}
-              >
-                <option value="">Seleziona lega</option>
-                {leagues.map((l) => (
-                  <option key={l.league_id} value={l.league_id}>
-                    {l.name} ({l.role})
-                  </option>
-                ))}
-              </select>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <SectionTitle>
+                Gestione lega{selectedLeague ? <span className="ml-1 normal-case text-slate-800">· {selectedLeague.name}</span> : null}
+              </SectionTitle>
               {selectedLeague ? <Badge tone={selectedLeague.market_open ? 'green' : 'red'}>Mercato {selectedLeague.market_open ? 'aperto' : 'chiuso'}</Badge> : null}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-400">
+              Riferita alla lega selezionata in alto. Cambia lega dal selettore in cima alla pagina.
             </div>
 
             {league ? (
               <div className="mt-3 space-y-3 text-sm">
-                <div>
-                  <span className="font-semibold">Invite code:</span> {league.invite_code}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>
+                    <span className="font-semibold">Invite code:</span>{' '}
+                    <span className="font-mono font-semibold text-slate-800">{league.invite_code}</span>
+                  </span>
+                  <CopyButton value={league.invite_code} label="Copia codice" />
                 </div>
                 <div className="flex gap-2">
                   <Button
@@ -931,44 +961,14 @@ export default function LeagueAdminPage() {
                     </div>
 
                     <div className="mt-3 rounded-xl border p-3">
-                      <div className="text-xs font-semibold text-slate-500">Assegnazione bulk per roster (deterministica)</div>
-                      <div className="mt-1 text-xs text-slate-500">Usa il nome del team fantasy (non ID): <code>team_name,player_id,price</code>.</div>
-                      <label htmlFor="roster-bulk-textarea" className="sr-only">Dati assegnazione bulk</label>
-                      <textarea
-                        id="roster-bulk-textarea"
-                        className="mt-2 h-20 w-full rounded-xl border px-3 py-2 text-xs"
-                        placeholder={'team_name,player_id,price\nAlpha,101,12\nBeta,102,8'}
-                        value={bulkAssignmentsText}
-                        onChange={(e) => setBulkAssignmentsText(e.target.value)}
-                      />
-                      <Button
-                        size="sm"
-                        className="mt-2"
-                        onClick={() =>
-                          void run(async () => {
-                            if (!selectedLeagueId) return;
-                            const assignments = parseAssignments(
-                              bulkAssignmentsText
-                                .split('\n')
-                                .slice(1)
-                                .join('\n')
-                            );
-                            if (!assignments.length) {
-                              setMsg('Inserisci almeno una riga valida nel formato team_name,player_id,price');
-                              return;
-                            }
-                            await bulkAssignRoster(selectedLeagueId, { assignments });
-                            if (selectedTeamId) await loadRoster(selectedLeagueId, selectedTeamId);
-                          })
-                        }
-                      >
-                        Esegui assegnazione bulk
-                      </Button>
-                    </div>
-
-                    <div className="mt-3 rounded-xl border p-3">
-                      <div className="text-xs font-semibold text-slate-500">Import roster da CSV</div>
-                      <div className="mt-1 text-xs text-slate-500">Import tecnico per riempire i roster in blocco. Colonne supportate: <code>team_name</code> oppure <code>manager_username</code>, più <code>player_id</code> e <code>price</code>. Puoi usare testo oppure file .csv.</div>
+                      <div className="text-xs font-semibold text-slate-500">Import roster in blocco</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Riempi più squadre in una volta. Colonne: <code>team_name</code> oppure{' '}
+                        <code>manager_username</code>, più <code>player_id</code> e <code>price</code>. Puoi
+                        incollare il testo oppure caricare un file <code>.csv</code>. Gli <b>id</b> dei
+                        giocatori si trovano nel <Link to="/listone" className="underline">Listone</Link>{' '}
+                        (o cercandoli qui sopra).
+                      </div>
                       <label htmlFor="roster-csv-file" className="sr-only">Seleziona file CSV</label>
                       <input
                         id="roster-csv-file"
@@ -1001,6 +1001,39 @@ export default function LeagueAdminPage() {
                         }
                       >
                         Import CSV
+                      </Button>
+                    </div>
+
+                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+                      <div className="text-xs font-semibold text-slate-500">Import da listone .xlsx compilato</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Scarica il listone dalla pagina <Link to="/listone" className="underline">Listone</Link>,
+                        compila le colonne <b>Assegnato a</b> (menu a discesa) e <b>Prezzo</b>, poi ricaricalo
+                        qui: assegna le rose in un colpo solo, con gli <b>id</b> già corretti.
+                      </div>
+                      <label htmlFor="roster-xlsx-file" className="sr-only">Seleziona file xlsx del listone</label>
+                      <input
+                        id="roster-xlsx-file"
+                        type="file"
+                        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        className="mt-2 block w-full rounded-xl border px-3 py-2 text-xs"
+                        onChange={(e) => setRosterXlsxFile(e.target.files?.[0] ?? null)}
+                      />
+                      <Button
+                        size="sm"
+                        className="mt-2"
+                        disabled={!rosterXlsxFile}
+                        onClick={() =>
+                          void run(async () => {
+                            if (!selectedLeagueId || !rosterXlsxFile) return;
+                            const res = await importRosterXlsx(selectedLeagueId, rosterXlsxFile);
+                            if (selectedTeamId) await loadRoster(selectedLeagueId, selectedTeamId);
+                            setRosterXlsxFile(null);
+                            setMsg(`Import xlsx: ${res.imported} assegnati${res.skipped ? `, ${res.skipped} saltati` : ''}.`);
+                          })
+                        }
+                      >
+                        Importa da xlsx
                       </Button>
                     </div>
                   </Card>

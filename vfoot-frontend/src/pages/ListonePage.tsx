@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getChampionshipPlayers } from '../api';
+import { getChampionshipPlayers, getLeagueDetail } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
-import { Badge, Card, SectionTitle } from '../components/ui';
+import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import type { ChampionshipPlayer, ChampionshipPlayersResponse } from '../types/realChampionship';
 
 // Listone: the full player pool of the league's reference championship, with
@@ -30,6 +30,24 @@ export default function ListonePage() {
   const [desc, setDesc] = useState(true);
   const [ratedOnly, setRatedOnly] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  async function exportXlsx() {
+    if (!selectedLeagueId || !data) return;
+    setExporting(true);
+    try {
+      // Team names for the per-player dropdown come from the league detail; the
+      // ExcelJS module is heavy, so both are loaded only on demand.
+      const [detail, mod] = await Promise.all([
+        getLeagueDetail(selectedLeagueId),
+        import('../utils/listoneXlsx'),
+      ]);
+      const teamNames = detail.teams.map((t) => t.name);
+      await mod.downloadListoneXlsx(data, teamNames, detail.name);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   // Click a column to sort by it; click again to flip. Numeric columns start
   // descending (best first), text columns ascending.
@@ -95,12 +113,23 @@ export default function ListonePage() {
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-2">
           <SectionTitle>Listone</SectionTitle>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="ml-auto"
+            disabled={exporting || !data.players.length}
+            onClick={() => void exportXlsx()}
+          >
+            {exporting ? 'Preparo…' : '⬇ Scarica listone (xlsx)'}
+          </Button>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <Badge tone="blue">
             {data.value_season
-              ? `valore = media voto ${data.value_season} → forma corrente`
+              ? `valore = media voto puro ${data.value_season} → forma corrente`
               : data.current_season
-                ? `valore = media voto ${data.current_season}`
-                : 'valore = media voto'}
+                ? `valore = media voto puro ${data.current_season}`
+                : 'valore = media voto puro'}
           </Badge>
           {data.value_fit ? (
             <Badge tone="slate">~ = stimato dal mercato (r={data.value_fit.r.toFixed(2)})</Badge>
@@ -108,6 +137,10 @@ export default function ListonePage() {
         </div>
         <div className="mt-1 text-sm text-slate-600">
           {shown.length} di {data.count} giocatori
+        </div>
+        <div className="mt-1 text-[11px] text-slate-400">
+          Il <b>Valore</b> è la media del <b>voto puro</b> (la nostra pagella), senza bonus/malus: non è
+          il fantavoto. La colonna <b>Mercato</b> è il valore Transfermarkt, a solo titolo indicativo.
         </div>
 
         {/* filters */}
