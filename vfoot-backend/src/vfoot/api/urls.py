@@ -57,6 +57,14 @@ from vfoot.api.league_views import (
     TeamRosterRemoveView,
     TeamRosterView,
 )
+from vfoot.api.market_views import (
+    MarketActiveView,
+    MarketOfferAdminView,
+    MarketOfferCreateView,
+    MarketSessionControlView,
+    MarketSessionCreateView,
+    MarketSessionListView,
+)
 from vfoot.api.simulation_views import (
     SimulationFixtureDetailView,
     SimulationFixturesView,
@@ -128,6 +136,15 @@ urlpatterns = [
         name="league-member-role",
     ),
     path("leagues/<int:league_id>/market", MarketToggleView.as_view(), name="league-market-toggle"),
+    # Repair market (offer-based sessions on free agents, classic mode).
+    path("leagues/<int:league_id>/market/active", MarketActiveView.as_view(), name="market-active"),
+    path("leagues/<int:league_id>/market/sessions", MarketSessionListView.as_view(), name="market-sessions"),
+    path("leagues/<int:league_id>/market/sessions/create", MarketSessionCreateView.as_view(), name="market-session-create"),
+    path("leagues/<int:league_id>/market/sessions/<int:session_id>/<str:action>",
+         MarketSessionControlView.as_view(), name="market-session-control"),
+    path("leagues/<int:league_id>/market/offers", MarketOfferCreateView.as_view(), name="market-offer-create"),
+    path("leagues/<int:league_id>/market/offers/<int:offer_id>/<str:action>",
+         MarketOfferAdminView.as_view(), name="market-offer-admin"),
     path("leagues/<int:league_id>/settings", LeagueSettingsUpdateView.as_view(), name="league-settings"),
     path("leagues/<int:league_id>/competitions/<int:competition_id>/structure",
          CompetitionStructureView.as_view(), name="competition-structure"),

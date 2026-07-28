@@ -650,3 +650,147 @@ class AuctionEvent(models.Model):
     class Meta:
         indexes = [models.Index(fields=["session", "created_at"])]
         ordering = ["-created_at", "-id"]
+
+
+# --- Repair market: offer-based sessions on free agents (classic) ------------
+# The post-auction transfer window. The admin opens a session; managers place
+# credit offers on free agents (players in the listone not on any active roster),
+# each pledging to release one of their own players of the SAME classic role. An
+# offer that leads its target for 24h without a higher rebid is promoted to
+# "accepted" and queued; the admin then applies the roster swap. See
+# docs/offer_market_plan.md.
+
+class MarketSession(models.Model):
+    STATUS_OPEN = "open"          # accepting offers, timers running
+    STATUS_SUSPENDED = "suspended"  # frozen: no new offers, no promotions
+    STATUS_CLOSED = "closed"      # finished; history stays visible
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Aperta"), (STATUS_SUSPENDED, "Sospesa"), (STATUS_CLOSED, "Chiusa"),
+    ]
+
+    # How credits are recovered when a manager releases a player as part of an
+    # offer. Fixed amount, or a fraction of the price he originally paid for the
+    # released player (rounded UP), frozen for the whole session.
+    RECOVERY_FIXED = "fixed"
+    RECOVERY_FRAC30 = "frac30"
+    RECOVERY_FRAC50 = "frac50"
+    RECOVERY_FRAC75 = "frac75"
+    RECOVERY_CHOICES = [
+        (RECOVERY_FIXED, "Credito fisso"),
+        (RECOVERY_FRAC30, "30% del prezzo d'acquisto"),
+        (RECOVERY_FRAC50, "50% del prezzo d'acquisto"),
+        (RECOVERY_FRAC75, "75% del prezzo d'acquisto"),
+    ]
+
+    league = models.ForeignKey(
+        FantasyLeague, on_delete=models.CASCADE, related_name="market_sessions")
+    name = models.CharField(max_length=120, default="Mercato di riparazione")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    opens_at = models.DateTimeField(default=timezone.now)
+    # Scheduled end. Null = indefinite: the admin opens and closes it by hand.
+    closes_at = models.DateTimeField(null=True, blank=True)
+    credit_recovery_mode = models.CharField(
+        max_length=10, choices=RECOVERY_CHOICES, default=RECOVERY_FIXED)
+    # Only meaningful when credit_recovery_mode == fixed.
+    fixed_recovery_amount = models.PositiveSmallIntegerField(default=1)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_market_sessions")
+    created_at = models.DateTimeField(default=timezone.now)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            # At most one live (open or suspended) session per league.
+            models.UniqueConstraint(
+                fields=["league"],
+                condition=models.Q(status__in=["open", "suspended"]),
+                name="uniq_live_market_session_per_league",
+            )
+        ]
+        indexes = [models.Index(fields=["league", "status"])]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.league_id}/{self.status})"
+
+
+class MarketOffer(models.Model):
+    STATUS_LEADING = "leading"    # current top offer for its target; timer runs
+    STATUS_OUTBID = "outbid"      # superseded by a higher offer on the same target
+    STATUS_ACCEPTED = "accepted"  # reached deadline (or admin picked it); awaits roster apply
+    STATUS_SETTLED = "settled"    # admin applied the roster swap
+    STATUS_REJECTED = "rejected"  # admin rejected it
+    STATUS_CANCELLED = "cancelled"  # session closed before resolution / admin cancelled
+    STATUS_CHOICES = [
+        (STATUS_LEADING, "In testa"), (STATUS_OUTBID, "Superata"),
+        (STATUS_ACCEPTED, "Accettata"), (STATUS_SETTLED, "Conclusa"),
+        (STATUS_REJECTED, "Rifiutata"), (STATUS_CANCELLED, "Annullata"),
+    ]
+    # Statuses that still commit ("reserve") credits and hold a roster pledge.
+    LIVE_STATUSES = (STATUS_LEADING, STATUS_ACCEPTED)
+
+    session = models.ForeignKey(
+        MarketSession, on_delete=models.CASCADE, related_name="offers")
+    team = models.ForeignKey(
+        FantasyTeam, on_delete=models.CASCADE, related_name="market_offers")
+    target_player = models.ForeignKey(
+        Player, on_delete=models.PROTECT, related_name="market_offers_in")
+    release_player = models.ForeignKey(
+        Player, on_delete=models.PROTECT, related_name="market_offers_out")
+    amount = models.IntegerField()
+    # Credits recovered from releasing release_player, snapshot at offer time
+    # under the session's recovery mode (recovery depends on the price paid, which
+    # is stable, but we store it so history renders without recomputation).
+    recovery_amount = models.IntegerField(default=0)
+    role = models.CharField(max_length=8)  # shared classic role of target & release
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_LEADING)
+    # now + 24h when this offer becomes leading; a higher rebid mints a new leading
+    # offer with a fresh deadline, so the countdown is effectively per-target.
+    deadline_at = models.DateTimeField()
+    created_at = models.DateTimeField(default=timezone.now)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="resolved_market_offers")
+    # Roster slots touched when the swap is applied, for audit/undo.
+    acquire_slot = models.ForeignKey(
+        FantasyRosterSlot, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="from_market_offer")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["session", "status"]),
+            models.Index(fields=["session", "target_player", "status"]),
+            models.Index(fields=["team", "status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"offer#{self.id} {self.amount} for {self.target_player_id} ({self.status})"
+
+
+class MarketEvent(models.Model):
+    """Append-only feed/audit of a market session (mirrors AuctionEvent)."""
+
+    TYPE_SESSION_CREATED = "session_created"
+    TYPE_SESSION_SUSPENDED = "session_suspended"
+    TYPE_SESSION_RESUMED = "session_resumed"
+    TYPE_SESSION_CLOSED = "session_closed"
+    TYPE_OFFER_PLACED = "offer_placed"
+    TYPE_OFFER_OUTBID = "offer_outbid"
+    TYPE_OFFER_ACCEPTED = "offer_accepted"      # promoted at deadline
+    TYPE_OFFER_SETTLED = "offer_settled"        # roster swap applied
+    TYPE_OFFER_REJECTED = "offer_rejected"
+    TYPE_OFFER_CANCELLED = "offer_cancelled"
+
+    session = models.ForeignKey(
+        MarketSession, on_delete=models.CASCADE, related_name="events")
+    offer = models.ForeignKey(
+        MarketOffer, on_delete=models.SET_NULL, null=True, blank=True, related_name="events")
+    event_type = models.CharField(max_length=32)
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="market_events")
+    payload = models.JSONField(default=dict)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [models.Index(fields=["session", "created_at"])]
+        ordering = ["-created_at", "-id"]

@@ -23,6 +23,9 @@ from vfoot.models.fantasy import (
     LeaguePlayerRole,
     CurrentPlayerRole,
     OfficeOverride,
+    MarketSession,
+    MarketOffer,
+    MarketEvent,
 )
 from vfoot.models.decisions import LeagueDecision, LeagueDecisionVote
 from vfoot.models.heatmap import HeatmapGrid
@@ -55,6 +58,9 @@ __all__ = [
     "LeagueMembership",
     "LeaguePlayerRole",
     "CurrentPlayerRole",
+    "MarketSession",
+    "MarketOffer",
+    "MarketEvent",
     "LeagueDecision",
     "LeagueDecisionVote",
     "OfficeOverride",

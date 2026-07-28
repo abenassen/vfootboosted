@@ -187,3 +187,19 @@ class AuctionAssignSerializer(serializers.Serializer):
     player_id = serializers.IntegerField()
     team_id = serializers.IntegerField()
     price = serializers.IntegerField(min_value=1)
+
+
+class CreateMarketSessionSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120, required=False,
+                                 default="Mercato di riparazione")
+    credit_recovery_mode = serializers.ChoiceField(
+        choices=["fixed", "frac30", "frac50", "frac75"], default="fixed")
+    fixed_recovery_amount = serializers.IntegerField(min_value=0, required=False, default=1)
+    # Scheduled end. Null/omitted = indefinite (admin opens and closes by hand).
+    closes_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class PlaceOfferSerializer(serializers.Serializer):
+    target_player_id = serializers.IntegerField()
+    release_player_id = serializers.IntegerField()
+    amount = serializers.IntegerField(min_value=1)
