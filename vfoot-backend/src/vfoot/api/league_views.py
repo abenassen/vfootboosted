@@ -238,6 +238,7 @@ class LeagueDetailView(APIView):
                 "max_substitutions": league.max_substitutions,
                 "defense_bonus_enabled": league.defense_bonus_enabled,
                 "defense_bonus_mode": league.defense_bonus_mode,
+                "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
                 "initial_budget": league.initial_budget,
                 "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
                                  "CEN": league.slots_mid, "ATT": league.slots_fwd},
@@ -437,6 +438,10 @@ class LeagueSettingsUpdateView(APIView):
             league.defense_bonus_mode = mode
             fields.append("defense_bonus_mode")
 
+        if "keeper_clean_sheet_enabled" in request.data:
+            league.keeper_clean_sheet_enabled = bool(request.data.get("keeper_clean_sheet_enabled"))
+            fields.append("keeper_clean_sheet_enabled")
+
         # Auction economy (budget + roster slots). Frozen once an auction started:
         # a mid-auction change would rewrite the affordability of bids already made.
         econ_keys = {"initial_budget", "slots_gk", "slots_def", "slots_mid", "slots_fwd"}
@@ -466,6 +471,7 @@ class LeagueSettingsUpdateView(APIView):
             "max_substitutions": league.max_substitutions,
             "defense_bonus_enabled": league.defense_bonus_enabled,
             "defense_bonus_mode": league.defense_bonus_mode,
+            "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
             "initial_budget": league.initial_budget,
             "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
                              "CEN": league.slots_mid, "ATT": league.slots_fwd},

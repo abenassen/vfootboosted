@@ -371,6 +371,7 @@ export interface LeagueSettingsPatch {
   max_substitutions?: number;
   defense_bonus_enabled?: boolean;
   defense_bonus_mode?: 'add_own' | 'subtract_opponent';
+  keeper_clean_sheet_enabled?: boolean;
 }
 
 export async function updateLeagueSettings(leagueId: number, settings: LeagueSettingsPatch) {

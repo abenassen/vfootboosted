@@ -806,6 +806,26 @@ export default function LeagueAdminPage() {
                       puri) → bonus a fasce.
                     </div>
                   </div>
+                  <div className="border-t pt-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={league.keeper_clean_sheet_enabled}
+                        onChange={(e) =>
+                          void run(async () => {
+                            if (!league) return;
+                            await updateLeagueSettings(league.league_id, { keeper_clean_sheet_enabled: e.target.checked });
+                            await loadLeagueDetail(league.league_id);
+                            setMsg(`Modificatore portiere imbattuto ${e.target.checked ? 'attivato' : 'disattivato'}.`);
+                          })
+                        }
+                      />
+                      <span>Modificatore portiere imbattuto</span>
+                    </label>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      +1 al fantatotale se il portiere schierato prende voto e non subisce gol.
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <div className="font-semibold">Membri</div>
