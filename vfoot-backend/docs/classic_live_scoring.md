@@ -1,6 +1,6 @@
 # Fantavoto live nelle partite di lega (classic) — piano
 
-Stato: **Fase 1 fatta** (motore + test verdi). Documento di riferimento, aggiornato man mano.
+Stato: **Fasi 1→4 fatte** (motore, snapshot, conclusione live, ricalcolo). Restano rifiniture (avviso deadline lato formazione; eventuale flag per disattivare il lock in leghe di test). Documento di riferimento.
 
 ## Il problema
 
