@@ -1,7 +1,14 @@
 # #10 — Mercato di riparazione a offerte (svincolati) — piano
 
-Stato: **da implementare**. Documento di partenza per una sessione dedicata. Basato sulla
-descrizione dell'utente in `commenti_28-07.txt` (punti su "apri/chiudi mercato" e offerte).
+Stato: **IMPLEMENTATO** (2026-07-28, branch `feature/offer-market`). Backend (modelli,
+`services/market_engine.py`, API `api/market_views.py`, command `market_tick`, 15 test in
+`tests_market.py`) + frontend (`pages/MarketPage.tsx`). Decisioni prese a inizio sessione:
+riserva crediti come l'asta; scadenza 24h → `accepted` con validazione admin che applica le
+rose; ritiro solo admin; recupero fisso configurabile (default 1). Vedi memory
+`offer-market-decisions`. Le sezioni sotto restano come riferimento del design originale.
+
+Stato originale: **da implementare**. Documento di partenza per una sessione dedicata. Basato
+sulla descrizione dell'utente in `commenti_28-07.txt` (punti su "apri/chiudi mercato" e offerte).
 
 ## Obiettivo
 
