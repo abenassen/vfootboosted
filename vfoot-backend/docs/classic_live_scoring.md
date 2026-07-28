@@ -24,6 +24,7 @@ Regole fisse (standard fantacalcio, versionate nel codice, tag `rules_version`):
 - Bonus/malus: gol +3, assist +1, rigore parato +3, autogol −2, rigore sbagliato −3, ammonizione −0.5, rosso/doppia gialla −1, portiere −1 per gol subìto.
 - Conversione 66/72/78/84/90/96 = 1/2/3/4/5/6, poi +1 ogni 6.
 - Formazione legale: 1 POR, 3‑5 DIF, 0‑5 CEN, 1‑3 ATT, 11 totali.
+- Fasce modificatore difesa: media (top‑3 difensori + portiere, voto puro)/4 → **+1 ogni 0,25 sopra 6,00**, lineare e senza tetto ((6,00–6,25]:+1 · (6,25–6,50]:+2 · (6,50–6,75]:+3 · (6,75–7,00]:+4 · (7,00–7,25]:+5 · …); solo con ≥4 difensori titolari.
 
 **Regola s.v. (DEC‑1)**: un s.v. **non è un valore** (né 0 né 6). Va sostituito; se non sostituibile, è **escluso** dal totale (la squadra somma < 11 voti).
 
@@ -43,9 +44,25 @@ Regole fisse (standard fantacalcio, versionate nel codice, tag `rules_version`):
 - **Fase 1b (pulizia, opzionale)**: rifattorizzare il seed perché usi questo motore (un solo scorer per Demo e leghe vere). Attenzione: la nuova regola s.v. cambierà i numeri della Demo (va ri-seedata).
 - **Fase 4 — ricalcolo**: endpoint `POST /leagues/<id>/matchdays/<fmd_id>/recompute` + bottone in Gestione lega (regole attuali vs snapshot).
 
-## Decisione ancora aperta
+## Formazione: termine, re-editing, assenza (decisi)
 
-**Squadra senza formazione impostata alla conclusione (Fase 3)**:
-- (a) formazione automatica di default (migliori per ruolo dalla rosa) — *consigliata*;
-- (b) forfait / tutti s.v.;
-- (c) blocco la conclusione finché tutti hanno schierato (o l'admin forza — esiste già `force`).
+**Squadra senza formazione impostata alla conclusione** — decisione dell'**admin caso per caso** (evento raro), tra:
+- **forfait** (fantatotale 0), oppure
+- **rischierare la formazione della giornata precedente** (se esiste; altrimenti forfait).
+
+NO auto-formazione ottimale: darebbe vantaggio a chi non schiera (otterrebbe l'XI migliore a posteriori).
+
+**Termine ultimo per schierare + re-editing** — due modelli (scelta di lega):
+- **Modello 1** (semplice, **default ora**): la formazione si blocca all'inizio della **prima partita reale** della giornata; dopo non è più modificabile.
+- **Modello 2b** (futuro): si può continuare a editare, ma ogni giocatore **già entrato in campo (o che ha giocato)** è **congelato nel suo slot** (titolare/panchina); si possono muovere solo i giocatori non ancora scesi in campo. *Caveat*: con panchina = tutta la rosa, basta che un giocatore giochi per congelare quasi tutto → significativo solo con panchina ridotta.
+- Modello 2a (editabile finché nessuno schierato entra in campo) **scartato**.
+
+**Separazione importante**: il termine/locking è **enforcement sull'endpoint di salvataggio formazione**, ORTOGONALE al motore di scoring. La conclusione (Fase 3) usa comunque la **formazione finale salvata**; il locking (Modello 1) è un task a parte (**Fase 3c**).
+
+## Contratto conclusione (Fase 3b) — da validare
+
+La conclusione diventa "consapevole delle formazioni mancanti":
+1. pre-check: individua le squadre della giornata **senza formazione**;
+2. se ce ne sono e l'admin non ha ancora deciso → risposta `400` con l'elenco `teams_without_lineup: [{team_id, name, has_previous_lineup}]` (come già fa per `missing_source`/`missing_goals`);
+3. l'admin richiama la conclusione con `lineup_resolutions: {team_id: "forfait" | "previous"}`;
+4. si scoraggia/congela tutto.

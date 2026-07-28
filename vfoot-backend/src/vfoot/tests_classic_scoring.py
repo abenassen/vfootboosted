@@ -11,7 +11,20 @@ from vfoot.services.classic_scoring import (
     score_team,
     resolve_fixture,
 )
+from vfoot.services.defense_bonus import defense_bonus_value
 from vfoot.services.scoring_engine import fantavote_to_goals
+
+
+class DefenseBandsTest(SimpleTestCase):
+    """+1 every 0.25 above 6.00, linear and uncapped (inclusive upper bound)."""
+
+    def test_bands(self):
+        cases = {
+            6.00: 0.0, 6.10: 1.0, 6.25: 1.0, 6.26: 2.0, 6.50: 2.0,
+            6.75: 3.0, 7.00: 4.0, 7.25: 5.0, 7.50: 6.0, 8.00: 8.0,
+        }
+        for avg, expected in cases.items():
+            self.assertEqual(defense_bonus_value(avg), expected, f"avg={avg}")
 
 
 def line(pid, role, vp, sv=False, conceded=0):
