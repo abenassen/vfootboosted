@@ -1935,65 +1935,22 @@ class LeagueMatchdayConcludeView(APIView):
             # goals (66/+6), NOT the real match scoreline. Freeze totals + per-player
             # payload + the ruleset used, all in this transaction.
             from vfoot.services.classic_scoring import Ruleset
-            from vfoot.services.classic_matchday_scoring import (
-                build_matchday_index,
-                score_composed_fixture,
-                team_lines_for_conclusion,
-            )
+            from vfoot.services.classic_matchday_scoring import score_and_persist_matchday
 
             ruleset = Ruleset.from_league(league)
-            index = build_matchday_index(md.real_competition_season_id, md.real_matchday, league)
-            resolutions = s.validated_data.get("lineup_resolutions", {}) or {}
-
-            # Pass 1: resolve each team's lineup; collect teams still without one.
-            team_lines: dict[tuple[int, str], tuple] = {}
-            missing_teams: dict[int, dict] = {}
-            for fx in fixtures:
-                for side, team in (("home", fx.home_team), ("away", fx.away_team)):
-                    res = resolutions.get(str(team.id))
-                    starters, bench, meta = team_lines_for_conclusion(
-                        league, team, fx.competition_id, md.real_matchday, index, res)
-                    if meta["source"] == "missing":
-                        missing_teams[team.id] = {"team_id": team.id, "name": team.name, **meta}
-                    else:
-                        team_lines[(fx.id, side)] = (starters, bench)
-
-            if missing_teams and not force:
+            result = score_and_persist_matchday(
+                md, league, ruleset, fixtures,
+                s.validated_data.get("lineup_resolutions", {}), force, update_snapshot=True)
+            if result["missing_teams"]:
                 return Response(
                     {
                         "detail": "Alcune squadre non hanno la formazione: scegli 'forfait' o 'previous' per ognuna.",
-                        "teams_without_lineup": list(missing_teams.values()),
+                        "teams_without_lineup": result["missing_teams"],
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
-            # Pass 2: score + persist (a still-missing team under force = forfait).
-            for fx in fixtures:
-                home_ln = team_lines.get((fx.id, "home")) or ([], [])
-                away_ln = team_lines.get((fx.id, "away")) or ([], [])
-                meta = {
-                    "fixture_id": fx.id, "fantasy_round": fx.round_no,
-                    "real_matchday": md.real_matchday, "stage": fx.stage_id,
-                    "home_team": fx.home_team.name, "away_team": fx.away_team.name,
-                }
-                payload = score_composed_fixture(home_ln, away_ln, ruleset, meta)
-                fx.home_total = float(payload["home_goals"])
-                fx.away_total = float(payload["away_goals"])
-                fx.status = FantasyFixture.STATUS_FINISHED
-                FantasyFixtureDetail.objects.update_or_create(
-                    fixture=fx,
-                    defaults={"vfoot_home": payload["home_total"],
-                              "vfoot_away": payload["away_total"], "payload": payload},
-                )
-                updated += 1
-                if fx.stage_id:
-                    stage_ids.add(fx.stage_id)
-
-            if fixtures:
-                FantasyFixture.objects.bulk_update(
-                    fixtures, ["home_total", "away_total", "status"], batch_size=500)
-            md.ruleset_snapshot = ruleset.to_snapshot()
-            md.save(update_fields=["ruleset_snapshot"])
+            updated = result["updated"]
+            stage_ids = result["stage_ids"]
         else:
             # Aura (and any non-classic mode): keep the real-scoreline behaviour.
             for fx in fixtures:
@@ -2066,6 +2023,70 @@ class LeagueMatchdayConcludeView(APIView):
                 "resolved_target_stages": resolved_targets,
             }
         )
+
+
+class LeagueMatchdayRecomputeView(APIView):
+    """Admin: re-score an already CONCLUDED classic matchday, rewriting totals + payload
+    (+ the ruleset snapshot when recomputing with current rules). This is the operative
+    answer to "I changed the rules / fixed a vote after the matchday": the result and the
+    tabellino are rewritten together, atomically, never leaving a stale detail.
+
+    Body: use = "current" (default; re-read the league's live ruleset, update the
+    snapshot) | "snapshot" (re-run with the frozen ruleset, e.g. after a vote fix);
+    lineup_resolutions {team_id: forfait|previous}; force.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, league_id: int, fantasy_matchday_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        md = get_object_or_404(FantasyMatchday, id=fantasy_matchday_id, league=league)
+
+        if league.mode != FantasyLeague.MODE_CLASSIC:
+            return Response({"detail": "Ricalcolo disponibile solo per le leghe classic."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if md.status != FantasyMatchday.STATUS_CONCLUDED:
+            return Response({"detail": "La giornata non è conclusa: usa 'Concludi'."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        from vfoot.services.classic_scoring import Ruleset
+        from vfoot.services.classic_matchday_scoring import score_and_persist_matchday
+
+        use = request.data.get("use", "current")
+        force = bool(request.data.get("force", False))
+        resolutions = request.data.get("lineup_resolutions", {}) or {}
+
+        if use == "snapshot" and md.ruleset_snapshot:
+            ruleset = Ruleset.from_snapshot(md.ruleset_snapshot)
+            update_snapshot = False
+        else:
+            ruleset = Ruleset.from_league(league)
+            update_snapshot = True
+
+        fixtures = list(
+            FantasyFixture.objects.filter(fantasy_matchday=md)
+            .select_related("home_team", "away_team", "competition", "stage")
+            .order_by("id")
+        )
+        result = score_and_persist_matchday(
+            md, league, ruleset, fixtures, resolutions, force, update_snapshot=update_snapshot)
+        if result["missing_teams"]:
+            return Response(
+                {
+                    "detail": "Alcune squadre non hanno la formazione: scegli 'forfait' o 'previous' per ognuna.",
+                    "teams_without_lineup": result["missing_teams"],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({
+            "fantasy_matchday_id": md.id,
+            "recomputed_with": "snapshot" if not update_snapshot else "current",
+            "fixtures_scored": result["updated"],
+            "fixtures_total": len(fixtures),
+        })
 
 
 class CompetitionDetailUpdateView(APIView):
@@ -3455,6 +3476,30 @@ class LeagueTeamLineupSaveView(APIView):
         if matchday is None:
             return Response({"detail": "matchday richiesto."}, status=status.HTTP_400_BAD_REQUEST)
         gk = request.data.get("gk_player_id")
+
+        # Deadline (Modello 1): the lineup locks at the FIRST confirmed kickoff of the
+        # real matchday — after it nobody sets a lineup with results already in hand.
+        try:
+            md_int = int(matchday)
+        except (TypeError, ValueError):
+            return Response({"detail": "matchday non valido."}, status=status.HTTP_400_BAD_REQUEST)
+        if league.reference_season_id is not None:
+            first_kick = (
+                Match.objects.filter(
+                    competition_season_id=league.reference_season_id,
+                    matchday=md_int,
+                    kickoff_provisional=False,
+                    kickoff__isnull=False,
+                )
+                .order_by("kickoff")
+                .values_list("kickoff", flat=True)
+                .first()
+            )
+            if first_kick is not None and first_kick <= timezone.now():
+                return Response(
+                    {"detail": f"Formazione bloccata: la giornata {md_int} è già iniziata."},
+                    status=status.HTTP_409_CONFLICT,
+                )
 
         # Classic mode: enforce the role constraints server-side using the FROZEN
         # listone roles, so a hand-crafted request can't bypass the client validator.

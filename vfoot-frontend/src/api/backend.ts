@@ -871,6 +871,23 @@ export async function concludeLeagueMatchday(
   return parseJsonOrThrow(res);
 }
 
+// Re-score a CONCLUDED classic matchday. use: 'current' = live rules (updates the
+// snapshot); 'snapshot' = the frozen rules (e.g. after a vote fix).
+export async function recomputeLeagueMatchday(
+  leagueId: number,
+  fantasyMatchdayId: number,
+  use: 'current' | 'snapshot' = 'current',
+  force = false,
+  lineupResolutions?: Record<string, 'forfait' | 'previous'>,
+) {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/matchdays/${fantasyMatchdayId}/recompute`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ use, force, lineup_resolutions: lineupResolutions ?? {} }),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function searchPlayers(q: string, leagueId?: number, limit = 20): Promise<PlayerSearchItem[]> {
   const params = new URLSearchParams();
   params.set('q', q);

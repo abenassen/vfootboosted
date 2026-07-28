@@ -715,6 +715,17 @@ export async function concludeLeagueMatchday(
   };
 }
 
+export async function recomputeLeagueMatchday(
+  _leagueId: number,
+  fantasyMatchdayId: number,
+  use: 'current' | 'snapshot' = 'current',
+  _force = false,
+  _lineupResolutions?: Record<string, 'forfait' | 'previous'>
+): Promise<{ fantasy_matchday_id: number; recomputed_with: string; fixtures_scored: number }> {
+  await sleep(100);
+  return { fantasy_matchday_id: fantasyMatchdayId, recomputed_with: use, fixtures_scored: 4 };
+}
+
 export async function getCompetitionStructure(_leagueId: number, competitionId: number) {
   await sleep(80);
   return { competition_id: competitionId, name: 'Mock', result_view: 'classifica' as const, sections: [] };

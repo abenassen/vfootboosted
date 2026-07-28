@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from realdata.models import Match, Player
 from vfoot.models import (
+    FantasyFixture,
+    FantasyFixtureDetail,
     FantasyRosterSlot,
     LeaguePlayerRole,
     SavedLineupSnapshot,
@@ -256,3 +258,62 @@ def score_composed_fixture(
     away = score_team(away_lines[0], away_lines[1], ruleset)
     resolve_fixture(home, away, ruleset)
     return build_fixture_payload(fixture_meta, home, away, ruleset)
+
+
+def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force, update_snapshot=True):
+    """Score every fixture of a classic matchday and FREEZE the results, atomically:
+    fx.home_total/away_total (classic goals) + FantasyFixtureDetail.payload (the full
+    tabellino) + (optionally) md.ruleset_snapshot. Shared by the conclusion and the
+    manual recompute.
+
+    If any team has no lineup and no resolution and not ``force``, nothing is persisted
+    and the return carries ``missing_teams`` (the caller should return a 400). Returns
+    {"updated", "stage_ids", "missing_teams"}.
+    """
+    index = build_matchday_index(md.real_competition_season_id, md.real_matchday, league)
+    resolutions = resolutions or {}
+
+    # Pass 1: resolve lineups, collect teams still without one.
+    team_lines: dict[tuple[int, str], tuple] = {}
+    missing_teams: dict[int, dict] = {}
+    for fx in fixtures:
+        for side, team in (("home", fx.home_team), ("away", fx.away_team)):
+            res = resolutions.get(str(team.id))
+            starters, bench, meta = team_lines_for_conclusion(
+                league, team, fx.competition_id, md.real_matchday, index, res)
+            if meta["source"] == "missing":
+                missing_teams[team.id] = {"team_id": team.id, "name": team.name, **meta}
+            else:
+                team_lines[(fx.id, side)] = (starters, bench)
+
+    if missing_teams and not force:
+        return {"updated": 0, "stage_ids": set(), "missing_teams": list(missing_teams.values())}
+
+    # Pass 2: score + persist (a still-missing team under force = forfait / empty).
+    updated = 0
+    stage_ids: set[int] = set()
+    for fx in fixtures:
+        home_ln = team_lines.get((fx.id, "home")) or ([], [])
+        away_ln = team_lines.get((fx.id, "away")) or ([], [])
+        payload = score_composed_fixture(home_ln, away_ln, ruleset, {
+            "fixture_id": fx.id, "fantasy_round": fx.round_no, "real_matchday": md.real_matchday,
+            "stage": fx.stage_id, "home_team": fx.home_team.name, "away_team": fx.away_team.name,
+        })
+        fx.home_total = float(payload["home_goals"])
+        fx.away_total = float(payload["away_goals"])
+        fx.status = FantasyFixture.STATUS_FINISHED
+        FantasyFixtureDetail.objects.update_or_create(
+            fixture=fx,
+            defaults={"vfoot_home": payload["home_total"],
+                      "vfoot_away": payload["away_total"], "payload": payload},
+        )
+        updated += 1
+        if fx.stage_id:
+            stage_ids.add(fx.stage_id)
+
+    if fixtures:
+        FantasyFixture.objects.bulk_update(fixtures, ["home_total", "away_total", "status"], batch_size=500)
+    if update_snapshot:
+        md.ruleset_snapshot = ruleset.to_snapshot()
+        md.save(update_fields=["ruleset_snapshot"])
+    return {"updated": updated, "stage_ids": stage_ids, "missing_teams": []}

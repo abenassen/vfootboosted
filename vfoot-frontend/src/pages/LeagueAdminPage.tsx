@@ -5,6 +5,7 @@ import {
   addRosterPlayer,
   buildDefaultCompetitionStages,
   concludeLeagueMatchday,
+  recomputeLeagueMatchday,
   createCompetitionStage,
   createCompetitionPrize,
   addCompetitionStageRule,
@@ -123,6 +124,8 @@ export default function LeagueAdminPage() {
   // to pick forfait/previous per team, then re-conclude with those resolutions.
   const [lineupPrompt, setLineupPrompt] = useState<{
     md: LeagueMatchdayItem;
+    kind: 'conclude' | 'recompute';
+    use?: 'current' | 'snapshot';
     teams: Array<{ team_id: number; name: string; has_previous_lineup: boolean; previous_lineup_stale: number }>;
     resolutions: Record<number, 'forfait' | 'previous'>;
   } | null>(null);
@@ -406,39 +409,69 @@ export default function LeagueAdminPage() {
     return null;
   }
 
-  // Conclude a matchday. If the backend reports classic teams without a lineup, open
-  // the resolution prompt instead of surfacing an error; the admin picks forfait or
-  // previous per team and re-runs. Non-lineup errors bubble up to run() as usual.
-  async function concludeAction(md: LeagueMatchdayItem, resolutions?: Record<number, 'forfait' | 'previous'>) {
-    if (!selectedLeagueId) return;
-    const payload = resolutions
+  // If a matchday op reports classic teams without a lineup, open the resolution
+  // prompt (per team: forfait/previous) instead of surfacing an error. Returns true
+  // when it handled the error; false lets the caller re-throw to run().
+  function openLineupPrompt(
+    md: LeagueMatchdayItem,
+    err: unknown,
+    kind: 'conclude' | 'recompute',
+    use?: 'current' | 'snapshot',
+  ): boolean {
+    if (!(err instanceof ApiError) || err.status !== 400) return false;
+    let body: unknown = null;
+    try {
+      body = JSON.parse(err.detail);
+    } catch {
+      return false;
+    }
+    const teams = (body as { teams_without_lineup?: unknown })?.teams_without_lineup;
+    if (!Array.isArray(teams) || !teams.length) return false;
+    const typed = teams as Array<{ team_id: number; name: string; has_previous_lineup: boolean; previous_lineup_stale: number }>;
+    const res: Record<number, 'forfait' | 'previous'> = {};
+    for (const t of typed) res[t.team_id] = t.has_previous_lineup ? 'previous' : 'forfait';
+    setLineupPrompt({ md, kind, use, teams: typed, resolutions: res });
+    return true;
+  }
+
+  function resolutionsPayload(resolutions?: Record<number, 'forfait' | 'previous'>) {
+    return resolutions
       ? (Object.fromEntries(Object.entries(resolutions).map(([k, v]) => [String(k), v])) as Record<string, 'forfait' | 'previous'>)
       : undefined;
+  }
+
+  async function concludeAction(md: LeagueMatchdayItem, resolutions?: Record<number, 'forfait' | 'previous'>) {
+    if (!selectedLeagueId) return;
     try {
-      await concludeLeagueMatchday(selectedLeagueId, md.fantasy_matchday_id, false, payload);
+      await concludeLeagueMatchday(selectedLeagueId, md.fantasy_matchday_id, false, resolutionsPayload(resolutions));
     } catch (err) {
-      if (err instanceof ApiError && err.status === 400) {
-        let body: unknown = null;
-        try {
-          body = JSON.parse(err.detail);
-        } catch {
-          /* not a JSON body */
-        }
-        const teams = (body as { teams_without_lineup?: unknown })?.teams_without_lineup;
-        if (Array.isArray(teams) && teams.length) {
-          const typed = teams as Array<{ team_id: number; name: string; has_previous_lineup: boolean; previous_lineup_stale: number }>;
-          const res: Record<number, 'forfait' | 'previous'> = {};
-          for (const t of typed) res[t.team_id] = t.has_previous_lineup ? 'previous' : 'forfait';
-          setLineupPrompt({ md, teams: typed, resolutions: res });
-          return;
-        }
-      }
+      if (openLineupPrompt(md, err, 'conclude')) return;
       throw err;
     }
     setLineupPrompt(null);
     await loadMatchdays(selectedLeagueId);
     await loadCompetitions(selectedLeagueId);
     setMsg(`Giornata ${md.real_matchday} conclusa`);
+  }
+
+  // Re-score a concluded matchday. use: 'current' = live rules (updates snapshot);
+  // 'snapshot' = the frozen rules (e.g. after fixing a vote).
+  async function recomputeAction(
+    md: LeagueMatchdayItem,
+    use: 'current' | 'snapshot',
+    resolutions?: Record<number, 'forfait' | 'previous'>,
+  ) {
+    if (!selectedLeagueId) return;
+    try {
+      await recomputeLeagueMatchday(selectedLeagueId, md.fantasy_matchday_id, use, false, resolutionsPayload(resolutions));
+    } catch (err) {
+      if (openLineupPrompt(md, err, 'recompute', use)) return;
+      throw err;
+    }
+    setLineupPrompt(null);
+    await loadMatchdays(selectedLeagueId);
+    await loadCompetitions(selectedLeagueId);
+    setMsg(`Giornata ${md.real_matchday} ricalcolata (${use === 'snapshot' ? 'regole congelate' : 'regole attuali'})`);
   }
 
   function formatRuleModeLabel(mode: 'winners' | 'losers' | 'table_range', rankFrom?: number | null, rankTo?: number | null): string {
@@ -1755,9 +1788,39 @@ export default function LeagueAdminPage() {
                                 {disabledReason ? (
                                   <span className="ml-2 text-xs text-amber-700">{disabledReason}</span>
                                 ) : null}
+                              </div>
+                            ) : null}
 
-                                {lineupPrompt && lineupPrompt.md.fantasy_matchday_id === md.fantasy_matchday_id ? (
-                                  <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+                            {md.phase === 'concluded' ? (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={busy}
+                                  onClick={() => {
+                                    if (window.confirm(`Ricalcolare la giornata ${md.real_matchday} con il regolamento ATTUALE della lega? Risultato e tabellini verranno riscritti.`))
+                                      void run(() => recomputeAction(md, 'current'));
+                                  }}
+                                >
+                                  Ricalcola (regole attuali)
+                                </Button>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => {
+                                    if (window.confirm(`Ricalcolare la giornata ${md.real_matchday} con il regolamento CONGELATO alla conclusione (es. dopo una correzione voti)?`))
+                                      void run(() => recomputeAction(md, 'snapshot'));
+                                  }}
+                                  className="text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                                >
+                                  …con regole congelate
+                                </button>
+                              </div>
+                            ) : null}
+
+                            {lineupPrompt && lineupPrompt.md.fantasy_matchday_id === md.fantasy_matchday_id ? (
+                              <div className="mt-3">
+                                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
                                     <div className="text-sm font-semibold text-amber-900">
                                       Alcune squadre non hanno schierato la formazione
                                     </div>
@@ -1808,9 +1871,15 @@ export default function LeagueAdminPage() {
                                       <Button
                                         size="sm"
                                         disabled={busy}
-                                        onClick={() => void run(() => concludeAction(md, lineupPrompt.resolutions))}
+                                        onClick={() =>
+                                          void run(() =>
+                                            lineupPrompt.kind === 'recompute'
+                                              ? recomputeAction(md, lineupPrompt.use ?? 'current', lineupPrompt.resolutions)
+                                              : concludeAction(md, lineupPrompt.resolutions),
+                                          )
+                                        }
                                       >
-                                        Concludi con queste scelte
+                                        {lineupPrompt.kind === 'recompute' ? 'Ricalcola con queste scelte' : 'Concludi con queste scelte'}
                                       </Button>
                                       <button
                                         type="button"
@@ -1820,8 +1889,7 @@ export default function LeagueAdminPage() {
                                         Annulla
                                       </button>
                                     </div>
-                                  </div>
-                                ) : null}
+                                </div>
                               </div>
                             ) : null}
                           </div>
