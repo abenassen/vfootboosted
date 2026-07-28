@@ -52,6 +52,8 @@ Regole fisse (standard fantacalcio, versionate nel codice, tag `rules_version`):
 
 NO auto-formazione ottimale: darebbe vantaggio a chi non schiera (otterrebbe l'XI migliore a posteriori).
 
+**"Previous" quando la rosa è cambiata** (mercato aperto nel frattempo): si riusa l'ultima formazione salvata **filtrata sui giocatori ancora in rosa**. I ceduti/svincolati → slot vuoti = **s.v.** → sostituzione automatica dai panchinari superstiti; slot scoperti = esclusi (nulla). I **nuovi acquisti non entrano automaticamente**. Il pre-check espone `previous_lineup_stale: N` (giocatori non più in rosa) così l'admin sceglie informato tra `previous` e `forfait`.
+
 **Termine ultimo per schierare + re-editing** — due modelli (scelta di lega):
 - **Modello 1** (semplice, **default ora**): la formazione si blocca all'inizio della **prima partita reale** della giornata; dopo non è più modificabile.
 - **Modello 2b** (futuro): si può continuare a editare, ma ogni giocatore **già entrato in campo (o che ha giocato)** è **congelato nel suo slot** (titolare/panchina); si possono muovere solo i giocatori non ancora scesi in campo. *Caveat*: con panchina = tutta la rosa, basta che un giocatore giochi per congelare quasi tutto → significativo solo con panchina ridotta.
