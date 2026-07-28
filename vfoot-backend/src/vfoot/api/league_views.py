@@ -740,35 +740,142 @@ class LeagueRosterImportCSVView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        teams = {t.name: t for t in FantasyTeam.objects.filter(league=league)}
-        teams_by_manager = {
-            t.manager.user.username: t
-            for t in FantasyTeam.objects.filter(league=league).select_related("manager__user")
-        }
-        created = 0
-        for row in reader:
-            team = teams.get((row.get("team_name") or "").strip())
-            if not team:
-                team = teams_by_manager.get((row.get("manager_username") or "").strip())
-            if not team:
-                continue
-            try:
-                player_id = int(row.get("player_id", "0"))
-                price = int((row.get("price") or row.get("purchase_price") or "1"))
-            except ValueError:
-                continue
+        rows = [
+            {
+                "team_name": row.get("team_name"),
+                "manager_username": row.get("manager_username"),
+                "player_id": row.get("player_id"),
+                "price": row.get("price") or row.get("purchase_price"),
+            }
+            for row in reader
+        ]
+        created, skipped = _apply_roster_assignments(league, rows)
+        return Response({"imported": created, "skipped": skipped})
 
-            player = Player.objects.filter(id=player_id).first()
-            if not player:
+
+def _apply_roster_assignments(league, rows):
+    """Apply a list of {team_name|manager_username, player_id, price} assignments.
+
+    Shared by the CSV and xlsx importers. Skips rows that don't resolve to a team
+    or player, and players already on a roster in this league. Returns (created,
+    skipped) counts.
+    """
+    teams = {t.name: t for t in FantasyTeam.objects.filter(league=league)}
+    teams_by_manager = {
+        t.manager.user.username: t
+        for t in FantasyTeam.objects.filter(league=league).select_related("manager__user")
+    }
+    created = 0
+    skipped = 0
+    for row in rows:
+        team = teams.get((row.get("team_name") or "").strip())
+        if not team:
+            team = teams_by_manager.get((row.get("manager_username") or "").strip())
+        if not team:
+            skipped += 1
+            continue
+        try:
+            player_id = int(row.get("player_id") or 0)
+            price = int(row.get("price") or 1)
+        except (ValueError, TypeError):
+            skipped += 1
+            continue
+        if not player_id:
+            skipped += 1
+            continue
+
+        player = Player.objects.filter(id=player_id).first()
+        if not player:
+            skipped += 1
+            continue
+
+        if FantasyRosterSlot.objects.filter(
+            team__league=league, player=player, released_at__isnull=True
+        ).exists():
+            skipped += 1
+            continue
+
+        FantasyRosterSlot.objects.create(team=team, player=player, purchase_price=max(1, price))
+        created += 1
+
+    return created, skipped
+
+
+class LeagueRosterImportXLSXView(APIView):
+    """Re-upload the filled listone .xlsx (see the frontend listoneXlsx exporter) to
+    assign rosters in one shot. Reads the "Listone" sheet, mapping the player_id,
+    "Assegnato a" (team name) and "Prezzo" columns to roster slots."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    LISTONE_SHEET = "Listone"
+    COL_PLAYER_ID = "player_id"
+    COL_ASSIGNED = "Assegnato a"
+    COL_PRICE = "Prezzo"
+
+    @transaction.atomic
+    def post(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": "Carica un file .xlsx."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            import openpyxl  # lazy: only needed for this endpoint
+        except ImportError:
+            return Response(
+                {"detail": "Import xlsx non disponibile sul server (manca openpyxl)."},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
+
+        try:
+            wb = openpyxl.load_workbook(upload, data_only=True, read_only=True)
+        except Exception:
+            return Response({"detail": "File .xlsx non valido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        ws = wb[self.LISTONE_SHEET] if self.LISTONE_SHEET in wb.sheetnames else wb.worksheets[0]
+
+        # Find the header row (the export puts an instruction on row 1, headers on
+        # row 2) by scanning the first few rows for the player_id header.
+        header_map = None
+        header_row_idx = None
+        for r_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=6, values_only=True), start=1):
+            labels = {str(v).strip(): i for i, v in enumerate(row) if v is not None}
+            if self.COL_PLAYER_ID in labels:
+                header_map = labels
+                header_row_idx = r_idx
+                break
+
+        if not header_map or self.COL_ASSIGNED not in header_map:
+            return Response(
+                {"detail": f"Il foglio deve contenere le colonne '{self.COL_PLAYER_ID}' e '{self.COL_ASSIGNED}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pid_i = header_map[self.COL_PLAYER_ID]
+        team_i = header_map[self.COL_ASSIGNED]
+        price_i = header_map.get(self.COL_PRICE)
+
+        rows = []
+        for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
+            if pid_i >= len(row):
                 continue
+            pid = row[pid_i]
+            team_name = row[team_i] if team_i < len(row) else None
+            if pid is None or not team_name or not str(team_name).strip():
+                continue  # unassigned player — skip
+            price = row[price_i] if (price_i is not None and price_i < len(row)) else None
+            rows.append({
+                "player_id": pid,
+                "team_name": str(team_name).strip(),
+                "price": price,
+            })
 
-            if FantasyRosterSlot.objects.filter(team__league=league, player=player, released_at__isnull=True).exists():
-                continue
-
-            FantasyRosterSlot.objects.create(team=team, player=player, purchase_price=max(1, price))
-            created += 1
-
-        return Response({"imported": created})
+        created, skipped = _apply_roster_assignments(league, rows)
+        return Response({"imported": created, "skipped": skipped})
 
 
 class PlayerSearchView(APIView):

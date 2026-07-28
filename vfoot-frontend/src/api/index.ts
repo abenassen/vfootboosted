@@ -72,6 +72,7 @@ type ApiImpl = {
   removeRosterPlayer: typeof backendApi.removeRosterPlayer;
   bulkAssignRoster: typeof backendApi.bulkAssignRoster;
   importRosterCsv: typeof backendApi.importRosterCsv;
+  importRosterXlsx: typeof backendApi.importRosterXlsx;
   createCompetitionTemplate: (leagueId: number, req: CompetitionTemplateRequest) => ReturnType<typeof backendApi.createCompetitionTemplate>;
   getCompetitions: (leagueId: number) => Promise<CompetitionItem[]>;
   updateCompetition: (competitionId: number, req: CompetitionUpdateRequest) => Promise<CompetitionItem>;
@@ -156,6 +157,7 @@ export const addRosterPlayer = typedImpl.addRosterPlayer;
 export const removeRosterPlayer = typedImpl.removeRosterPlayer;
 export const bulkAssignRoster = typedImpl.bulkAssignRoster;
 export const importRosterCsv = typedImpl.importRosterCsv;
+export const importRosterXlsx = typedImpl.importRosterXlsx;
 export const createCompetitionTemplate = typedImpl.createCompetitionTemplate;
 export const getCompetitions = typedImpl.getCompetitions;
 export const updateCompetition = typedImpl.updateCompetition;

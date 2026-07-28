@@ -335,7 +335,12 @@ export async function bulkAssignRoster(
 export async function importRosterCsv(_leagueId: number, csvText?: string, _file?: File | null) {
   await sleep(100);
   const rows = (csvText ?? '').trim().split('\n').slice(1).filter(Boolean).length;
-  return { imported: rows };
+  return { imported: rows, skipped: 0 };
+}
+
+export async function importRosterXlsx(_leagueId: number, _file: File) {
+  await sleep(100);
+  return { imported: 0, skipped: 0 };
 }
 
 export async function createCompetitionTemplate(_leagueId: number, req: CompetitionTemplateRequest) {

@@ -20,6 +20,7 @@ import {
   getRealSeasons,
   getTeamRoster,
   importRosterCsv,
+  importRosterXlsx,
   joinLeague,
   previewCompetitionSchedule,
   removeRosterPlayer,
@@ -80,6 +81,7 @@ export default function LeagueAdminPage() {
 
   const [csvText, setCsvText] = useState('team_name,manager_username,player_id,price\n');
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [rosterXlsxFile, setRosterXlsxFile] = useState<File | null>(null);
 
   const [compName, setCompName] = useState('');
   const [compCreateMacro, setCompCreateMacro] = useState<'none' | 'round_robin' | 'knockout'>('none');
@@ -999,6 +1001,39 @@ export default function LeagueAdminPage() {
                         }
                       >
                         Import CSV
+                      </Button>
+                    </div>
+
+                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+                      <div className="text-xs font-semibold text-slate-500">Import da listone .xlsx compilato</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Scarica il listone dalla pagina <Link to="/listone" className="underline">Listone</Link>,
+                        compila le colonne <b>Assegnato a</b> (menu a discesa) e <b>Prezzo</b>, poi ricaricalo
+                        qui: assegna le rose in un colpo solo, con gli <b>id</b> già corretti.
+                      </div>
+                      <label htmlFor="roster-xlsx-file" className="sr-only">Seleziona file xlsx del listone</label>
+                      <input
+                        id="roster-xlsx-file"
+                        type="file"
+                        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        className="mt-2 block w-full rounded-xl border px-3 py-2 text-xs"
+                        onChange={(e) => setRosterXlsxFile(e.target.files?.[0] ?? null)}
+                      />
+                      <Button
+                        size="sm"
+                        className="mt-2"
+                        disabled={!rosterXlsxFile}
+                        onClick={() =>
+                          void run(async () => {
+                            if (!selectedLeagueId || !rosterXlsxFile) return;
+                            const res = await importRosterXlsx(selectedLeagueId, rosterXlsxFile);
+                            if (selectedTeamId) await loadRoster(selectedLeagueId, selectedTeamId);
+                            setRosterXlsxFile(null);
+                            setMsg(`Import xlsx: ${res.imported} assegnati${res.skipped ? `, ${res.skipped} saltati` : ''}.`);
+                          })
+                        }
+                      >
+                        Importa da xlsx
                       </Button>
                     </div>
                   </Card>

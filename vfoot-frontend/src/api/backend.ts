@@ -444,6 +444,18 @@ export async function importRosterCsv(leagueId: number, csvText?: string, file?:
   return parseJsonOrThrow(res);
 }
 
+// Re-upload the filled listone .xlsx to assign rosters in one shot.
+export async function importRosterXlsx(leagueId: number, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/roster/import-xlsx`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', ...authHeaders() },
+    body: formData,
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function createCompetitionTemplate(leagueId: number, req: CompetitionTemplateRequest) {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/competitions/template`, {
     method: 'POST',

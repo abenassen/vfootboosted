@@ -44,6 +44,7 @@ from vfoot.api.league_views import (
     LeagueRealMatchDetailView,
     LeagueRosterBulkAssignView,
     LeagueRosterImportCSVView,
+    LeagueRosterImportXLSXView,
     PlayerSearchView,
     MarketToggleView,
     LeagueSettingsUpdateView,
@@ -142,6 +143,11 @@ urlpatterns = [
         "leagues/<int:league_id>/roster/import-csv",
         LeagueRosterImportCSVView.as_view(),
         name="league-roster-import-csv",
+    ),
+    path(
+        "leagues/<int:league_id>/roster/import-xlsx",
+        LeagueRosterImportXLSXView.as_view(),
+        name="league-roster-import-xlsx",
     ),
     path(
         "leagues/<int:league_id>/competitions/template",
