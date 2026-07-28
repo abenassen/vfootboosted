@@ -53,6 +53,8 @@ type ApiImpl = {
   register: (req: RegisterRequest) => Promise<RegisterResponse>;
   login: (req: LoginRequest) => Promise<AuthResponse>;
   getCurrentUser: () => Promise<AuthUser>;
+  updateProfile: typeof backendApi.updateProfile;
+  changePassword: typeof backendApi.changePassword;
   logout: () => Promise<void>;
   getLineupContext: typeof backendApi.getLineupContext;
   saveLineup: typeof backendApi.saveLineup;
@@ -134,6 +136,8 @@ export const hasStoredSession = typedImpl.hasStoredSession;
 export const register = typedImpl.register;
 export const login = typedImpl.login;
 export const getCurrentUser = typedImpl.getCurrentUser;
+export const updateProfile = typedImpl.updateProfile;
+export const changePassword = typedImpl.changePassword;
 export const logout = typedImpl.logout;
 
 export const getLineupContext = typedImpl.getLineupContext;

@@ -6,6 +6,7 @@ import CompetitionSwitcher from '../components/CompetitionSwitcher';
 import { useAuth } from '../auth/AuthContext';
 import { Button } from '../components/ui';
 import logo from '../assets/logo.png';
+import Avatar from '../components/Avatar';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { compColor } from '../league/competitionColors';
@@ -36,6 +37,7 @@ const USER_ADMIN_TO = '/league-admin?tab=user';
 function usePageTitle(pathname: string) {
   return useMemo(() => {
     if (pathname.startsWith('/home')) return 'Dashboard';
+    if (pathname.startsWith('/profilo')) return 'Profilo';
     if (pathname.startsWith('/league-admin')) return 'Amministrazione';
     if (pathname.startsWith('/league')) return 'Lega';
     if (pathname.startsWith('/squad/formation')) return 'Formazione';
@@ -178,10 +180,24 @@ export default function AppShell() {
             >
               <span>🧑‍💼</span> Le mie leghe
             </Link>
-            <div className="text-right text-xs leading-tight">
-              <div className="text-slate-500">{user?.username ?? 'Utente'}</div>
-              <div className="font-semibold text-slate-700">Squadra: {activeTeamName ?? 'non impostata'}</div>
-            </div>
+            <Link
+              to="/profilo"
+              className={clsx(
+                'flex items-center gap-2 rounded-xl px-1.5 py-1',
+                location.pathname.startsWith('/profilo') ? 'bg-slate-900' : 'hover:bg-slate-100',
+              )}
+              title="Profilo"
+            >
+              <Avatar descriptor={user?.avatar} username={user?.username} size={30} />
+              <div className="text-right text-xs leading-tight">
+                <div className={location.pathname.startsWith('/profilo') ? 'text-slate-300' : 'text-slate-500'}>
+                  {user?.username ?? 'Utente'}
+                </div>
+                <div className={clsx('font-semibold', location.pathname.startsWith('/profilo') ? 'text-white' : 'text-slate-700')}>
+                  Squadra: {activeTeamName ?? 'non impostata'}
+                </div>
+              </div>
+            </Link>
             <Button size="sm" variant="secondary" onClick={() => void logout()}>
               Logout
             </Button>
@@ -226,6 +242,16 @@ export default function AppShell() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Link
+                to="/profilo"
+                aria-label="Profilo"
+                className={clsx(
+                  'rounded-full',
+                  location.pathname.startsWith('/profilo') ? 'ring-2 ring-slate-900 ring-offset-1' : '',
+                )}
+              >
+                <Avatar descriptor={user?.avatar} username={user?.username} size={34} />
+              </Link>
               <Link
                 to={USER_ADMIN_TO}
                 aria-label="Le mie leghe"
@@ -281,12 +307,17 @@ export default function AppShell() {
         >
           {nav.map((it) => {
             const manual = leagueAdminActive(location.search, location.pathname, it.to);
+            // Active state must be unmistakable on a phone: a coloured top accent bar
+            // + a tinted background + darker text, not just a subtle text-colour shift.
+            // border-t-2 (transparent when inactive) keeps every item the same height.
             const cls = (active: boolean) =>
               clsx(
-                'flex shrink-0 basis-[20%] flex-col items-center justify-center gap-1 whitespace-nowrap px-1 py-2 text-[11px] font-semibold',
-                it.scope === 'competition'
-                  ? active ? color.text700 : color.text400
-                  : active ? 'text-slate-900' : 'text-slate-500'
+                'flex shrink-0 basis-[20%] flex-col items-center justify-center gap-1 whitespace-nowrap border-t-2 px-1 py-2 text-[11px] font-semibold transition-colors',
+                active
+                  ? it.scope === 'competition'
+                    ? clsx(color.text700, color.bg50, color.border600)
+                    : 'border-slate-900 bg-slate-100 text-slate-900'
+                  : clsx('border-transparent', it.scope === 'competition' ? color.text400 : 'text-slate-500')
               );
             const inner = (
               <>

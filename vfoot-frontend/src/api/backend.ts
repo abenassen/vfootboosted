@@ -10,6 +10,8 @@ import type {
   AuthResponse,
   AuthUser,
   LoginRequest,
+  PasswordChangeRequest,
+  ProfileUpdateRequest,
   RegisterRequest,
   RegisterResponse,
   VerifyEmailRequest,
@@ -230,6 +232,29 @@ export async function getCurrentUser(): Promise<AuthUser> {
     },
   });
   const data = (await parseJsonOrThrow(res)) as { user: AuthUser };
+  return data.user;
+}
+
+export async function updateProfile(patch: ProfileUpdateRequest): Promise<AuthUser> {
+  const res = await fetch(`${baseUrl()}/auth/me`, {
+    method: 'PATCH',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(patch),
+  });
+  const data = (await parseJsonOrThrow(res)) as { user: AuthUser };
+  return data.user;
+}
+
+export async function changePassword(req: PasswordChangeRequest): Promise<AuthUser> {
+  const res = await fetch(`${baseUrl()}/auth/password`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  });
+  // The server rotates the token on password change; keep the new one so the
+  // session survives without a re-login.
+  const data = (await parseJsonOrThrow(res)) as { token: string; user: AuthUser };
+  setToken(data.token);
   return data.user;
 }
 

@@ -1,7 +1,6 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { Badge, Button, Card } from '../components/ui';
-import { apiProvider } from '../api';
 import { ApiError, googleSignIn, resendVerification } from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
 import GoogleSignInButton from '../components/GoogleSignInButton';
@@ -104,30 +103,34 @@ export default function LandingPage() {
                 <img src={logo} alt="Vfoot logo" className="h-12 w-12 rounded-xl object-cover shadow-card" />
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vfoot Boosted</div>
-                  <div className="text-lg font-black">Spatial Fantasy Football</div>
+                  <div className="text-lg font-black">Il fantacalcio con i voti fatti da noi</div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <Badge tone="green">Vfoot Engine</Badge>
-                <Badge tone="slate">Provider: {apiProvider}</Badge>
-              </div>
-
               <h1 className="text-3xl font-black leading-tight md:text-5xl">
-                Fantacalcio tattico,
+                Due modi di giocare
                 <br />
-                guidato dalle zone.
+                al fantacalcio.
               </h1>
 
               <p className="max-w-2xl text-slate-600 md:text-lg">
-                In Vfoot il ruolo non e fissato: emerge dai dati reali di campo. Gestisci la tua squadra
-                per coprire le zone giuste, vincere i duelli e trasformare la strategia in punteggio.
+                Voti calcolati dai dati reali di ogni partita di Serie A, non copiati dai giornali.
+                Scegli come vivere la tua lega: alla maniera classica o con la modalità tattica a zone.
               </p>
 
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Feature title="Heatmap reali" text="Presenza per zona normalizzata, partita per partita." />
-                <Feature title="Duelli locali" text="Ogni zona genera un confronto casa/trasferta." />
-                <Feature title="Anti exploit" text="Overcrowding penalizzato con rinormalizzazione." />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Feature
+                  tag="Pronta"
+                  tone="green"
+                  title="Classic"
+                  text="Il fantacalcio di sempre — ruoli, formazione e bonus — con i nostri voti al posto di quelli della stampa."
+                />
+                <Feature
+                  tag="In arrivo"
+                  tone="slate"
+                  title="Aura"
+                  text="La sfida tattica per zone: copri il campo giusto e vinci i duelli casa/trasferta."
+                />
               </div>
             </div>
           </Card>
@@ -265,10 +268,23 @@ export default function LandingPage() {
   );
 }
 
-function Feature({ title, text }: { title: string; text: string }) {
+function Feature({
+  title,
+  text,
+  tag,
+  tone,
+}: {
+  title: string;
+  text: string;
+  tag?: string;
+  tone?: 'green' | 'slate';
+}) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white/80 p-3">
-      <div className="text-sm font-black">{title}</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-black">{title}</div>
+        {tag ? <Badge tone={tone ?? 'slate'}>{tag}</Badge> : null}
+      </div>
       <div className="mt-1 text-xs text-slate-600">{text}</div>
     </div>
   );

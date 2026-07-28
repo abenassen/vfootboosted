@@ -18,6 +18,8 @@ from vfoot.api.serializers import (
     LineupContextQuerySerializer,
     LoginSerializer,
     MatchesQuerySerializer,
+    PasswordChangeSerializer,
+    ProfileUpdateSerializer,
     RegisterSerializer,
     ResendVerificationSerializer,
     SaveLineupRequestSerializer,
@@ -35,7 +37,7 @@ from vfoot.services.google_auth import (
     get_or_create_user,
     verify_id_token,
 )
-from vfoot.models import SavedLineupSnapshot
+from vfoot.models import SavedLineupSnapshot, UserProfile
 from vfoot.services.duel_engine import compute_match_zone_duels
 
 
@@ -163,6 +165,43 @@ class MeView(APIView):
 
     def get(self, request):
         return Response({"user": UserSerializer(request.user).data}, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        """Update the caller's own username and/or avatar."""
+        serializer = ProfileUpdateSerializer(data=request.data, user=request.user)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            user = request.user
+            if "username" in data:
+                user.username = data["username"]
+                user.save(update_fields=["username"])
+            if "avatar" in data:
+                profile, _ = UserProfile.objects.get_or_create(user=user)
+                profile.avatar = data["avatar"]
+                profile.save(update_fields=["avatar", "updated_at"])
+
+        return Response({"user": UserSerializer(request.user).data}, status=status.HTTP_200_OK)
+
+
+class PasswordChangeView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PasswordChangeSerializer(data=request.data, user=request.user)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        user.set_password(serializer.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        # The password change invalidates other sessions' assumptions; re-issue a
+        # fresh token and hand it back so the caller stays logged in seamlessly.
+        Token.objects.filter(user=user).delete()
+        token = issue_token(user)
+        return Response({"token": token.key, "user": UserSerializer(user).data},
+                        status=status.HTTP_200_OK)
 
 
 class LogoutView(APIView):

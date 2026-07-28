@@ -61,20 +61,27 @@ export function ClassicMatchDetail({
   fixture,
   backTo,
   backLabel = '← Partite',
+  variant = 'fantasy',
 }: {
   fixture: ClassicFixtureDetail;
   backTo: string;
   backLabel?: string;
+  // 'real' renders the pagelle of an actual Serie A match: the per-player voto puro
+  // + bonus/malus is meaningful, but fantasy-scoring constructs (team fantavoto
+  // total, defence modifier, bench priority / s.v. replacement) are not — they
+  // belong to a vfoot fixture, not to the real game, so they are hidden here.
+  variant?: 'fantasy' | 'real';
 }) {
   const d = fixture;
+  const realMatch = variant === 'real';
   const header: MatchHeaderVM = {
     homeName: d.home_team,
     awayName: d.away_team,
     homeGoals: d.home_goals,
     awayGoals: d.away_goals,
     result: d.result,
-    homeSubtitle: `Fantavoto ${fmt(d.home_total)}`,
-    awaySubtitle: `Fantavoto ${fmt(d.away_total)}`,
+    homeSubtitle: realMatch ? undefined : `Fantavoto ${fmt(d.home_total)}`,
+    awaySubtitle: realMatch ? undefined : `Fantavoto ${fmt(d.away_total)}`,
   };
 
   return (
@@ -98,12 +105,18 @@ export function ClassicMatchDetail({
             <div className="text-[11px] text-slate-500">
               Fantavoto = <b>voto puro</b> + <span className="text-emerald-600">bonus</span> −{' '}
               <span className="text-rose-600">malus</span> (gol +3, assist +1, autogol −2, rig. sbagliato
-              −3, rig. parato +3, giallo −0,5, rosso −1, portiere −1 a gol subito). Un titolare <b>s.v.</b>{' '}
-              è rimpiazzato dal primo panchinaro utile (in ordine di panchina) che mantiene la formazione valida.
-              {d.defense_bonus_mode ? (
+              −3, rig. parato +3, giallo −0,5, rosso −1, portiere −1 a gol subito).
+              {!realMatch ? (
                 <>
                   {' '}
-                  Modificatore difesa: <b>{DEF_MODE_LABEL[d.defense_bonus_mode] ?? d.defense_bonus_mode}</b>.
+                  Un titolare <b>s.v.</b> è rimpiazzato dal primo panchinaro utile (in ordine di panchina)
+                  che mantiene la formazione valida.
+                  {d.defense_bonus_mode ? (
+                    <>
+                      {' '}
+                      Modificatore difesa: <b>{DEF_MODE_LABEL[d.defense_bonus_mode] ?? d.defense_bonus_mode}</b>.
+                    </>
+                  ) : null}
                 </>
               ) : null}
             </div>
@@ -112,39 +125,43 @@ export function ClassicMatchDetail({
       </Card>
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
-        <TeamColumn name={d.home_team} team={d.home} />
-        <TeamColumn name={d.away_team} team={d.away} />
+        <TeamColumn name={d.home_team} team={d.home} realMatch={realMatch} />
+        <TeamColumn name={d.away_team} team={d.away} realMatch={realMatch} />
       </div>
     </div>
   );
 }
 
-function TeamColumn({ name, team }: { name: string; team: ClassicTeamDetail }) {
+function TeamColumn({ name, team, realMatch }: { name: string; team: ClassicTeamDetail; realMatch: boolean }) {
   return (
     <Card className="p-4">
       <div className="flex items-baseline justify-between">
         <SectionTitle>{name}</SectionTitle>
         <div className="text-sm text-slate-600">
-          {team.goals} gol · <b>{fmt(team.total)}</b> fanta
+          {team.goals} gol{!realMatch ? <> · <b>{fmt(team.total)}</b> fanta</> : null}
         </div>
       </div>
-      <div className="mt-0.5 text-[11px]">
-        {team.defense.eligible ? (
-          <span className="text-slate-600">
-            🛡 Modificatore difesa: media <b>{fmt(team.defense.avg ?? 0)}</b> →{' '}
-            <b className="text-emerald-700">+{fmt(team.defense.bonus)}</b>
-          </span>
-        ) : (
-          <span className="text-slate-400">🛡 Modificatore difesa non attivo (servono ≥4 difensori titolari)</span>
-        )}
-        {team.defense.applied !== 0 ? (
-          <span className="text-slate-400">
-            {' '}
-            · totale {fmt(team.base_total)} {team.defense.applied >= 0 ? '+' : '−'}
-            {fmt(Math.abs(team.defense.applied))} = {fmt(team.total)}
-          </span>
-        ) : null}
-      </div>
+      {/* Defence modifier is a fantasy-scoring construct: it means nothing for a
+          real Serie A match, so it is only shown on vfoot fixtures. */}
+      {!realMatch ? (
+        <div className="mt-0.5 text-[11px]">
+          {team.defense.eligible ? (
+            <span className="text-slate-600">
+              🛡 Modificatore difesa: media <b>{fmt(team.defense.avg ?? 0)}</b> →{' '}
+              <b className="text-emerald-700">+{fmt(team.defense.bonus)}</b>
+            </span>
+          ) : (
+            <span className="text-slate-400">🛡 Modificatore difesa non attivo (servono ≥4 difensori titolari)</span>
+          )}
+          {team.defense.applied !== 0 ? (
+            <span className="text-slate-400">
+              {' '}
+              · totale {fmt(team.base_total)} {team.defense.applied >= 0 ? '+' : '−'}
+              {fmt(Math.abs(team.defense.applied))} = {fmt(team.total)}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Titolari</div>
       <div className="divide-y">
@@ -154,7 +171,7 @@ function TeamColumn({ name, team }: { name: string; team: ClassicTeamDetail }) {
       </div>
 
       <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-        Panchina · ordine = priorità
+        {realMatch ? 'Panchina' : 'Panchina · ordine = priorità'}
       </div>
       <div className="divide-y">
         {team.bench.map((p, i) => (
