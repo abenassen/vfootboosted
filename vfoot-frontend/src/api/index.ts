@@ -123,7 +123,7 @@ type ApiImpl = {
   saveTeamLineup: typeof backendApi.saveTeamLineup;
   syncLeagueMatchdays: (leagueId: number) => Promise<{ fixtures_linked: number; matchdays_touched: number }>;
   getLeagueMatchdays: (leagueId: number) => Promise<LeagueMatchdayItem[]>;
-  concludeLeagueMatchday: (leagueId: number, fantasyMatchdayId: number, force?: boolean) => Promise<unknown>;
+  concludeLeagueMatchday: (leagueId: number, fantasyMatchdayId: number, force?: boolean, lineupResolutions?: Record<string, 'forfait' | 'previous'>) => Promise<unknown>;
   getLeagueDecisions: typeof backendApi.getLeagueDecisions;
   voteLeagueDecision: typeof backendApi.voteLeagueDecision;
   resolveLeagueDecision: typeof backendApi.resolveLeagueDecision;

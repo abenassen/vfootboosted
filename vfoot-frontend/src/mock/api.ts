@@ -700,7 +700,8 @@ export async function getLeagueMatchdays(_leagueId: number): Promise<LeagueMatch
 export async function concludeLeagueMatchday(
   _leagueId: number,
   fantasyMatchdayId: number,
-  _force = false
+  _force = false,
+  _lineupResolutions?: Record<string, 'forfait' | 'previous'>
 ): Promise<{
   fantasy_matchday_id: number;
   status: 'concluded';

@@ -857,11 +857,16 @@ export async function getLeagueMatchdays(leagueId: number): Promise<LeagueMatchd
   return parseJsonOrThrow(res);
 }
 
-export async function concludeLeagueMatchday(leagueId: number, fantasyMatchdayId: number, force = false) {
+export async function concludeLeagueMatchday(
+  leagueId: number,
+  fantasyMatchdayId: number,
+  force = false,
+  lineupResolutions?: Record<string, 'forfait' | 'previous'>,
+) {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/matchdays/${fantasyMatchdayId}/conclude`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ force }),
+    body: JSON.stringify({ force, lineup_resolutions: lineupResolutions ?? {} }),
   });
   return parseJsonOrThrow(res);
 }

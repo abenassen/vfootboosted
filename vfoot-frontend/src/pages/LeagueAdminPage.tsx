@@ -32,6 +32,7 @@ import {
   updateCompetition,
   updateMemberRole,
 } from '../api';
+import { ApiError } from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
@@ -118,6 +119,13 @@ export default function LeagueAdminPage() {
   const [msg, setMsg] = useState<string>('');
   const [msgTone, setMsgTone] = useState<'info' | 'success' | 'warning' | 'error'>('info');
   const [busy, setBusy] = useState(false);
+  // When concluding a classic matchday hits teams with no lineup, we prompt the admin
+  // to pick forfait/previous per team, then re-conclude with those resolutions.
+  const [lineupPrompt, setLineupPrompt] = useState<{
+    md: LeagueMatchdayItem;
+    teams: Array<{ team_id: number; name: string; has_previous_lineup: boolean; previous_lineup_stale: number }>;
+    resolutions: Record<number, 'forfait' | 'previous'>;
+  } | null>(null);
 
   const selectedTeamName = useMemo(
     () => league?.teams.find((t) => t.team_id === selectedTeamId)?.name ?? '',
@@ -396,6 +404,41 @@ export default function LeagueAdminPage() {
     if (!md.real_completion.is_completed) return 'Giornata reale non ancora completata';
     if (md.fixtures.total === 0) return 'Nessuna fixture fantasy associata';
     return null;
+  }
+
+  // Conclude a matchday. If the backend reports classic teams without a lineup, open
+  // the resolution prompt instead of surfacing an error; the admin picks forfait or
+  // previous per team and re-runs. Non-lineup errors bubble up to run() as usual.
+  async function concludeAction(md: LeagueMatchdayItem, resolutions?: Record<number, 'forfait' | 'previous'>) {
+    if (!selectedLeagueId) return;
+    const payload = resolutions
+      ? (Object.fromEntries(Object.entries(resolutions).map(([k, v]) => [String(k), v])) as Record<string, 'forfait' | 'previous'>)
+      : undefined;
+    try {
+      await concludeLeagueMatchday(selectedLeagueId, md.fantasy_matchday_id, false, payload);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 400) {
+        let body: unknown = null;
+        try {
+          body = JSON.parse(err.detail);
+        } catch {
+          /* not a JSON body */
+        }
+        const teams = (body as { teams_without_lineup?: unknown })?.teams_without_lineup;
+        if (Array.isArray(teams) && teams.length) {
+          const typed = teams as Array<{ team_id: number; name: string; has_previous_lineup: boolean; previous_lineup_stale: number }>;
+          const res: Record<number, 'forfait' | 'previous'> = {};
+          for (const t of typed) res[t.team_id] = t.has_previous_lineup ? 'previous' : 'forfait';
+          setLineupPrompt({ md, teams: typed, resolutions: res });
+          return;
+        }
+      }
+      throw err;
+    }
+    setLineupPrompt(null);
+    await loadMatchdays(selectedLeagueId);
+    await loadCompetitions(selectedLeagueId);
+    setMsg(`Giornata ${md.real_matchday} conclusa`);
   }
 
   function formatRuleModeLabel(mode: 'winners' | 'losers' | 'table_range', rankFrom?: number | null, rankTo?: number | null): string {
@@ -1705,20 +1748,79 @@ export default function LeagueAdminPage() {
                                   size="sm"
                                   aria-label={`Concludi giornata ${md.real_matchday}`}
                                   disabled={!canConclude || busy}
-                                  onClick={() =>
-                                    void run(async () => {
-                                      if (!selectedLeagueId) return;
-                                      await concludeLeagueMatchday(selectedLeagueId, md.fantasy_matchday_id, false);
-                                      await loadMatchdays(selectedLeagueId);
-                                      if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                                      setMsg(`Giornata ${md.real_matchday} conclusa`);
-                                    })
-                                  }
+                                  onClick={() => void run(() => concludeAction(md))}
                                 >
                                   Concludi giornata attuale
                                 </Button>
                                 {disabledReason ? (
                                   <span className="ml-2 text-xs text-amber-700">{disabledReason}</span>
+                                ) : null}
+
+                                {lineupPrompt && lineupPrompt.md.fantasy_matchday_id === md.fantasy_matchday_id ? (
+                                  <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+                                    <div className="text-sm font-semibold text-amber-900">
+                                      Alcune squadre non hanno schierato la formazione
+                                    </div>
+                                    <div className="mt-1 text-xs text-amber-800">
+                                      Scegli per ciascuna: <b>forfait</b> (fantatotale 0) oppure <b>rischiera la precedente</b>
+                                      (filtrata sui giocatori ancora in rosa).
+                                    </div>
+                                    <div className="mt-2 space-y-1.5">
+                                      {lineupPrompt.teams.map((t) => (
+                                        <div key={t.team_id} className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2 py-1.5">
+                                          <span className="min-w-0 flex-1 text-sm font-medium">{t.name}</span>
+                                          <div className="inline-flex overflow-hidden rounded-lg border border-slate-300 text-xs">
+                                            {(['previous', 'forfait'] as const).map((opt) => {
+                                              const active = lineupPrompt.resolutions[t.team_id] === opt;
+                                              const disabled = opt === 'previous' && !t.has_previous_lineup;
+                                              return (
+                                                <button
+                                                  key={opt}
+                                                  type="button"
+                                                  disabled={disabled}
+                                                  onClick={() =>
+                                                    setLineupPrompt((p) =>
+                                                      p ? { ...p, resolutions: { ...p.resolutions, [t.team_id]: opt } } : p,
+                                                    )
+                                                  }
+                                                  className={
+                                                    (active ? 'bg-slate-900 text-white ' : 'bg-white text-slate-600 ') +
+                                                    (disabled ? 'cursor-not-allowed opacity-40 ' : 'hover:bg-slate-100 ') +
+                                                    'px-2.5 py-1 font-semibold'
+                                                  }
+                                                >
+                                                  {opt === 'previous' ? 'Precedente' : 'Forfait'}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                          {t.has_previous_lineup && t.previous_lineup_stale > 0 ? (
+                                            <span className="text-[11px] text-amber-700">
+                                              {t.previous_lineup_stale} non più in rosa
+                                            </span>
+                                          ) : !t.has_previous_lineup ? (
+                                            <span className="text-[11px] text-slate-500">nessuna precedente</span>
+                                          ) : null}
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="mt-2 flex gap-2">
+                                      <Button
+                                        size="sm"
+                                        disabled={busy}
+                                        onClick={() => void run(() => concludeAction(md, lineupPrompt.resolutions))}
+                                      >
+                                        Concludi con queste scelte
+                                      </Button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setLineupPrompt(null)}
+                                        className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                                      >
+                                        Annulla
+                                      </button>
+                                    </div>
+                                  </div>
                                 ) : null}
                               </div>
                             ) : null}
