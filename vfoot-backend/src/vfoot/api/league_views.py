@@ -60,6 +60,7 @@ from vfoot.models import (
     CompetitionPrize,
     FantasyCompetition,
     FantasyFixture,
+    FantasyFixtureDetail,
     FantasyLeague,
     FantasyMatchday,
     FantasyRosterSlot,
@@ -1928,33 +1929,101 @@ class LeagueMatchdayConcludeView(APIView):
         missing_goals = 0
         updated = 0
         stage_ids: set[int] = set()
-        for fx in fixtures:
-            src = fx.source_real_match
-            if not src:
-                missing_source += 1
-                continue
-            if src.home_goals is None or src.away_goals is None:
-                missing_goals += 1
-                continue
-            fx.home_total = float(src.home_goals)
-            fx.away_total = float(src.away_goals)
-            fx.status = FantasyFixture.STATUS_FINISHED
-            updated += 1
-            if fx.stage_id:
-                stage_ids.add(fx.stage_id)
 
-        if (missing_source > 0 or missing_goals > 0) and not force:
-            return Response(
-                {
-                    "detail": "Some fixtures are not scoreable yet (missing mapping or final real score).",
-                    "missing_source_real_match": missing_source,
-                    "missing_real_scores": missing_goals,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+        if league.mode == FantasyLeague.MODE_CLASSIC:
+            # Classic: the H2H result is the sum of the lineup's fantavoti converted to
+            # goals (66/+6), NOT the real match scoreline. Freeze totals + per-player
+            # payload + the ruleset used, all in this transaction.
+            from vfoot.services.classic_scoring import Ruleset
+            from vfoot.services.classic_matchday_scoring import (
+                build_matchday_index,
+                score_composed_fixture,
+                team_lines_for_conclusion,
             )
 
-        if fixtures:
-            FantasyFixture.objects.bulk_update(fixtures, ["home_total", "away_total", "status"], batch_size=500)
+            ruleset = Ruleset.from_league(league)
+            index = build_matchday_index(md.real_competition_season_id, md.real_matchday, league)
+            resolutions = s.validated_data.get("lineup_resolutions", {}) or {}
+
+            # Pass 1: resolve each team's lineup; collect teams still without one.
+            team_lines: dict[tuple[int, str], tuple] = {}
+            missing_teams: dict[int, dict] = {}
+            for fx in fixtures:
+                for side, team in (("home", fx.home_team), ("away", fx.away_team)):
+                    res = resolutions.get(str(team.id))
+                    starters, bench, meta = team_lines_for_conclusion(
+                        league, team, fx.competition_id, md.real_matchday, index, res)
+                    if meta["source"] == "missing":
+                        missing_teams[team.id] = {"team_id": team.id, "name": team.name, **meta}
+                    else:
+                        team_lines[(fx.id, side)] = (starters, bench)
+
+            if missing_teams and not force:
+                return Response(
+                    {
+                        "detail": "Alcune squadre non hanno la formazione: scegli 'forfait' o 'previous' per ognuna.",
+                        "teams_without_lineup": list(missing_teams.values()),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Pass 2: score + persist (a still-missing team under force = forfait).
+            for fx in fixtures:
+                home_ln = team_lines.get((fx.id, "home")) or ([], [])
+                away_ln = team_lines.get((fx.id, "away")) or ([], [])
+                meta = {
+                    "fixture_id": fx.id, "fantasy_round": fx.round_no,
+                    "real_matchday": md.real_matchday, "stage": fx.stage_id,
+                    "home_team": fx.home_team.name, "away_team": fx.away_team.name,
+                }
+                payload = score_composed_fixture(home_ln, away_ln, ruleset, meta)
+                fx.home_total = float(payload["home_goals"])
+                fx.away_total = float(payload["away_goals"])
+                fx.status = FantasyFixture.STATUS_FINISHED
+                FantasyFixtureDetail.objects.update_or_create(
+                    fixture=fx,
+                    defaults={"vfoot_home": payload["home_total"],
+                              "vfoot_away": payload["away_total"], "payload": payload},
+                )
+                updated += 1
+                if fx.stage_id:
+                    stage_ids.add(fx.stage_id)
+
+            if fixtures:
+                FantasyFixture.objects.bulk_update(
+                    fixtures, ["home_total", "away_total", "status"], batch_size=500)
+            md.ruleset_snapshot = ruleset.to_snapshot()
+            md.save(update_fields=["ruleset_snapshot"])
+        else:
+            # Aura (and any non-classic mode): keep the real-scoreline behaviour.
+            for fx in fixtures:
+                src = fx.source_real_match
+                if not src:
+                    missing_source += 1
+                    continue
+                if src.home_goals is None or src.away_goals is None:
+                    missing_goals += 1
+                    continue
+                fx.home_total = float(src.home_goals)
+                fx.away_total = float(src.away_goals)
+                fx.status = FantasyFixture.STATUS_FINISHED
+                updated += 1
+                if fx.stage_id:
+                    stage_ids.add(fx.stage_id)
+
+            if (missing_source > 0 or missing_goals > 0) and not force:
+                return Response(
+                    {
+                        "detail": "Some fixtures are not scoreable yet (missing mapping or final real score).",
+                        "missing_source_real_match": missing_source,
+                        "missing_real_scores": missing_goals,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if fixtures:
+                FantasyFixture.objects.bulk_update(
+                    fixtures, ["home_total", "away_total", "status"], batch_size=500)
 
         stage_ids_to_resolve: set[int] = set()
         done_stages = 0

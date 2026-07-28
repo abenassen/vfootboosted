@@ -137,6 +137,13 @@ class CompetitionPrizeCreateSerializer(serializers.Serializer):
 
 class MatchdayConcludeSerializer(serializers.Serializer):
     force = serializers.BooleanField(required=False, default=False)
+    # {team_id: "forfait" | "previous"} — how to score a team with no lineup for this
+    # matchday (classic). Keys are team ids as strings.
+    lineup_resolutions = serializers.DictField(
+        child=serializers.ChoiceField(choices=["forfait", "previous"]),
+        required=False,
+        default=dict,
+    )
 
 
 class ImportRosterCSVSerializer(serializers.Serializer):

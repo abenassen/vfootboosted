@@ -194,6 +194,57 @@ def build_fixture_payload(fixture_meta: dict, home: dict, away: dict, ruleset: R
     }
 
 
+def _snap_all_ids(snap) -> list[int]:
+    if snap is None:
+        return []
+    ids = [int(snap.gk_player_id)] if snap.gk_player_id else []
+    ids += [int(x) for x in (snap.starter_player_ids or [])]
+    ids += [int(x) for x in (snap.bench_player_ids or [])]
+    return ids
+
+
+def team_lines_for_conclusion(league, team, competition_id, real_matchday, index, resolution):
+    """Resolve a team's (starters, bench) line lists at conclusion.
+
+    Returns (starters, bench, meta). meta["source"] is one of:
+      - "lineup":  the team submitted a lineup for this matchday;
+      - "previous": no lineup, admin chose to reuse the previous one (filtered to
+                    still-owned players);
+      - "forfait":  no lineup, admin chose forfait (empty XI -> 0);
+      - "missing":  no lineup and no admin resolution yet — the caller must ask the
+                    admin (meta carries has_previous_lineup + previous_lineup_stale).
+    """
+    owned = owned_player_ids(team)
+    snap = read_saved_lineup(league.id, real_matchday, team.id, competition_id)
+    source = "lineup"
+
+    if snap is None:
+        if resolution == "forfait":
+            return [], [], {"source": "forfait", "stale": 0}
+        if resolution == "previous":
+            snap = read_previous_lineup(league.id, real_matchday, team.id, competition_id)
+            if snap is None:
+                return [], [], {"source": "forfait", "stale": 0}  # nothing earlier -> forfait
+            source = "previous"
+        else:
+            prev = read_previous_lineup(league.id, real_matchday, team.id, competition_id)
+            prev_ids = _snap_all_ids(prev)
+            return None, None, {
+                "source": "missing",
+                "has_previous_lineup": prev is not None,
+                "previous_lineup_stale": sum(1 for p in prev_ids if p not in owned),
+            }
+
+    gk = int(snap.gk_player_id) if snap.gk_player_id else None
+    outfield = [int(x) for x in (snap.starter_player_ids or [])]
+    bench = [int(x) for x in (snap.bench_player_ids or [])]
+    all_ids = ([gk] if gk else []) + outfield + bench
+    role_map = role_map_for(league, all_ids)
+    starters, bench_lines = compose_team_lines(gk, outfield, bench, index, role_map, owned)
+    stale = sum(1 for p in all_ids if p not in owned) if source == "previous" else 0
+    return starters, bench_lines, {"source": source, "stale": stale}
+
+
 def score_composed_fixture(
     home_lines: tuple[list[dict], list[dict]],
     away_lines: tuple[list[dict], list[dict]],
