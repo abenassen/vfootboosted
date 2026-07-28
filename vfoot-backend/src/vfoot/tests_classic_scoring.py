@@ -129,3 +129,58 @@ class ClassicScoringTest(SimpleTestCase):
         team = score_team(legal_xi(6.0, gk_conceded=0), [], rs)
         resolve_fixture(team, score_team(legal_xi(6.0), [], rs), rs)
         self.assertEqual(team["total"], 66.0)
+
+
+class ComposeLinesTest(SimpleTestCase):
+    """Pure lineup composition: sold players -> s.v. slots, absent players -> s.v.,
+    sold bench players dropped."""
+
+    def _index_and_roles(self):
+        # Full XI present at 6.0 (1 GK + 4 DEF + 4 MID + 2 ATT), plus two DEF bench at 7.0.
+        roles = ["GK"] + ["DEF"] * 4 + ["MID"] * 4 + ["ATT"] * 2  # players 1..11
+        role_map, index = {}, {}
+        for pid, r in enumerate(roles, start=1):
+            role_map[pid] = r
+            index[pid] = {"player_id": pid, "name": f"P{pid}", "lineup_role": r,
+                          "voto_puro": 6.0, "fantavoto": 6.0, "sv": False, "conceded": 0}
+        for b in (20, 21):
+            role_map[b] = "DEF"
+            index[b] = {"player_id": b, "name": f"B{b}", "lineup_role": "DEF",
+                        "voto_puro": 7.0, "fantavoto": 7.0, "sv": False, "conceded": 0}
+        return index, role_map
+
+    def test_sold_and_absent(self):
+        from vfoot.services.classic_matchday_scoring import compose_team_lines
+        index, role_map = self._index_and_roles()
+        del index[4]  # player 4 owned but did NOT play (absent from the index)
+        owned = (set(range(1, 12)) - {5}) | {20}  # player 5 sold; bench 21 sold; 20 owned
+        starters, bench = compose_team_lines(
+            1, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [20, 21], index, role_map, owned)
+        self.assertEqual(len(starters), 11)
+        by = {l["player_id"]: l for l in starters}
+        self.assertTrue(by[5]["sv"])   # sold -> s.v. slot
+        self.assertTrue(by[4]["sv"])   # absent -> s.v.
+        self.assertFalse(by[2]["sv"])  # owned + played
+        self.assertEqual([l["player_id"] for l in bench], [20])  # 21 (sold) dropped
+
+    def test_compose_then_score(self):
+        from vfoot.services.classic_matchday_scoring import (
+            compose_team_lines,
+            score_composed_fixture,
+        )
+        index, role_map = self._index_and_roles()
+        owned = set(range(1, 12)) | {20, 21}
+        # Home: DEF player 5 sold -> s.v.; bench 20 (DEF) subs in (7.0).
+        # 10 played at 6.0 (=60) + 7.0 = 67. Away: full XI at 6.0 = 66.
+        home = compose_team_lines(1, list(range(2, 12)), [20, 21], index, role_map, owned - {5})
+        away = compose_team_lines(1, list(range(2, 12)), [20, 21], index, role_map, owned)
+        rs = Ruleset(defense_enabled=False, max_substitutions=5)
+        payload = score_composed_fixture(home, away, rs, {
+            "fixture_id": 7, "fantasy_round": 1, "real_matchday": 3,
+            "home_team": "Alpha", "away_team": "Beta", "stage": None,
+        })
+        self.assertEqual(payload["mode"], "classic")
+        self.assertEqual(payload["home_total"], 67.0)  # sold DEF replaced by bench DEF 7.0
+        self.assertEqual(payload["away_total"], 66.0)  # full XI at 6.0
+        self.assertIn("home", payload)
+        self.assertIsInstance(payload["home"]["modifiers"], list)

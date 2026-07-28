@@ -269,6 +269,9 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
             "name": app.player.short_name or app.player.full_name or str(pid),
             "role": role or "CEN", "role_known": role_known,
             "lineup_role": lrole,
+            # Goals conceded while on the pitch (keepers only; 0 for outfielders) —
+            # consumed by the classic scoring keeper-clean-sheet modifier.
+            "conceded": conceded,
             "minutes": app.minutes_played, "entered": False,
             "entered_for": None, "replaced_by": None, "events": events}
 
