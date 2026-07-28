@@ -61,7 +61,7 @@ function writeUsers(users: Array<{ username: string; email: string; password: st
 }
 
 function toAuthUser(username: string, email: string): AuthUser {
-  return { id: Math.abs(hash(username)) + 1, username, email };
+  return { id: Math.abs(hash(username)) + 1, username, email, avatar: '' };
 }
 
 function hash(s: string): number {
@@ -117,6 +117,23 @@ export async function getCurrentUser(): Promise<AuthUser> {
   const raw = window.localStorage.getItem(MOCK_SESSION_KEY);
   if (!raw) throw new Error('No active session.');
   return JSON.parse(raw) as AuthUser;
+}
+
+export async function updateProfile(patch: { username?: string; avatar?: string }): Promise<AuthUser> {
+  await sleep(120);
+  const current = await getCurrentUser();
+  const updated: AuthUser = {
+    ...current,
+    username: patch.username?.trim() || current.username,
+    avatar: patch.avatar !== undefined ? patch.avatar : current.avatar,
+  };
+  setSession(updated);
+  return updated;
+}
+
+export async function changePassword(_req: { current_password: string; new_password: string }): Promise<AuthUser> {
+  await sleep(120);
+  return getCurrentUser();
 }
 
 export async function logout(): Promise<void> {

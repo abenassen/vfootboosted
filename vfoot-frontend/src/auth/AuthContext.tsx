@@ -17,6 +17,9 @@ type AuthContextValue = {
   /** Re-read the session from the stored token — used after email confirmation
    *  or a Google sign-in, which obtain a token outside of login(). */
   refresh: () => Promise<void>;
+  /** Apply an already-fetched user to the context (e.g. after a profile or
+   *  avatar update) without a round-trip to /auth/me. */
+  updateUser: (user: AuthUser) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -71,6 +74,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const updateUser = useCallback((u: AuthUser) => setUser(u), []);
+
   const value = useMemo(
     () => ({
       user,
@@ -79,8 +84,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       register,
       logout,
       refresh,
+      updateUser,
     }),
-    [login, loading, logout, refresh, register, user]
+    [login, loading, logout, refresh, register, user, updateUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

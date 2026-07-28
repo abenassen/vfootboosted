@@ -24,6 +24,7 @@ import RealMatchDetailPage from './pages/RealMatchDetailPage';
 import ListonePage from './pages/ListonePage';
 import DecisionsPage from './pages/DecisionsPage';
 import TeamRosterPage from './pages/TeamRosterPage';
+import ProfilePage from './pages/ProfilePage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -49,6 +50,7 @@ export default function App() {
         }
       >
         <Route path="home" element={<DashboardPage />} />
+        <Route path="profilo" element={<ProfilePage />} />
         <Route path="league" element={<LeaguePage />} />
         <Route path="squad" element={<SquadPage />} />
         <Route path="teams/:teamId" element={<TeamRosterPage />} />

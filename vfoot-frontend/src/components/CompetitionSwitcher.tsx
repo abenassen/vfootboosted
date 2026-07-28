@@ -15,12 +15,24 @@ export default function CompetitionSwitcher({ compact }: { compact?: boolean }) 
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    function onDown(e: MouseEvent) {
+    if (!open) return;
+    // Dismiss on an outside tap (touchstart, not just mousedown, so it works on a
+    // phone) or Escape. Only wired while open, so it costs nothing when closed.
+    function onDown(e: Event) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, []);
+    document.addEventListener('touchstart', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   if (!competitions.length) {
     return compact ? null : (
@@ -66,7 +78,7 @@ export default function CompetitionSwitcher({ compact }: { compact?: boolean }) 
                   setOpen(false);
                 }}
                 className={clsx(
-                  'flex w-full items-center gap-2 border-l-4 px-3 py-2 text-left text-sm',
+                  'flex min-h-[44px] w-full items-center gap-2 border-l-4 px-3 py-2 text-left text-sm',
                   cc.border600,
                   sel ? cc.bg50 : 'bg-white hover:bg-slate-50',
                 )}

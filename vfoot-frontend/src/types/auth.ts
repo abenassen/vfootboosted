@@ -2,6 +2,20 @@ export interface AuthUser {
   id: number;
   username: string;
   email: string;
+  /** Opaque, client-owned avatar descriptor (a JSON string of avataaars
+   *  options). Empty string => no avatar chosen; the UI falls back to a
+   *  deterministic default seeded from the username. */
+  avatar: string;
+}
+
+export interface ProfileUpdateRequest {
+  username?: string;
+  avatar?: string;
+}
+
+export interface PasswordChangeRequest {
+  current_password: string;
+  new_password: string;
 }
 
 export interface AuthResponse {

@@ -28,5 +28,5 @@ export default function RealMatchDetailPage() {
       </Card>
     );
   }
-  return <ClassicMatchDetail fixture={data} backTo="/serie-a" backLabel="← Serie A" />;
+  return <ClassicMatchDetail fixture={data} backTo="/serie-a" backLabel="← Serie A" variant="real" />;
 }

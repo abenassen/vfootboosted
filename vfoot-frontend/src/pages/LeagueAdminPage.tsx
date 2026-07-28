@@ -34,6 +34,7 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
+import Avatar from '../components/Avatar';
 import type {
   CompetitionItem,
   CompetitionSchedulePreview,
@@ -548,12 +549,17 @@ export default function LeagueAdminPage() {
       {activeTab === 'user' ? (
         <>
           <Card className="p-4">
-            <SectionTitle>User Profile</SectionTitle>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-              <Badge tone="slate">{user?.username ?? 'Utente'}</Badge>
-              <span className="text-slate-600">{user?.email || 'Email non impostata'}</span>
+            <SectionTitle>Profilo</SectionTitle>
+            <div className="mt-3 flex items-center gap-3">
+              <Avatar descriptor={user?.avatar} username={user?.username} size={48} />
+              <div className="min-w-0">
+                <div className="font-semibold text-slate-800">{user?.username ?? 'Utente'}</div>
+                <div className="truncate text-sm text-slate-500">{user?.email || 'Email non impostata'}</div>
+              </div>
+              <Link to="/profilo" className="ml-auto">
+                <Button size="sm" variant="secondary">Modifica profilo</Button>
+              </Link>
             </div>
-            <div className="mt-2 text-xs text-slate-500">Modifica profilo/password: da aggiungere con endpoint dedicati.</div>
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-2">
