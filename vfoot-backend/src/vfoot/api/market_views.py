@@ -300,6 +300,7 @@ class MarketActiveView(APIView):
                 "role": role_map.get(pid),
                 "locked": pid in locked,
                 "leading": None if not lead else {
+                    "offer_id": lead.id,
                     "amount": lead.amount, "team_id": lead.team_id,
                     "team_name": team_names.get(lead.team_id),
                     "deadline_at": lead.deadline_at.isoformat() if lead.deadline_at else None,

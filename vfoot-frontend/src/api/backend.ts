@@ -50,6 +50,11 @@ import type { SimFixtureDetail } from '../types/simulation';
 import type { ClassicFixtureDetail } from '../types/classic';
 import type { ChampionshipPlayersResponse, RealFixturesResponse } from '../types/realChampionship';
 import type { SaveTeamLineupRequest, TeamLineupContext } from '../types/lineup';
+import type {
+  MarketActive,
+  MarketRecoveryMode,
+  MarketSessionHistory,
+} from '../types/market';
 
 const DEFAULT_BASE_URL = 'http://localhost:8000/api/v1';
 const TOKEN_STORAGE_KEY = 'vfoot_auth_token';
@@ -725,6 +730,65 @@ export async function undoLastAuctionAction(auctionId: number) {
 
 export async function closeAuctionSession(auctionId: number) {
   return auctionPost(`/auctions/${auctionId}/close-session`);
+}
+
+// --- Repair market (offer-based sessions on free agents) -------------------
+
+export async function getMarketActive(leagueId: number): Promise<MarketActive> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/market/active`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getMarketSessions(
+  leagueId: number,
+): Promise<{ sessions: MarketSessionHistory[] }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/market/sessions`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function createMarketSession(
+  leagueId: number,
+  opts: {
+    name?: string;
+    credit_recovery_mode: MarketRecoveryMode;
+    fixed_recovery_amount?: number;
+    closes_at?: string | null;
+  },
+): Promise<{ session_id: number }> {
+  return auctionPost(`/leagues/${leagueId}/market/sessions/create`, opts);
+}
+
+export async function controlMarketSession(
+  leagueId: number,
+  sessionId: number,
+  action: 'suspend' | 'resume' | 'close',
+) {
+  return auctionPost(`/leagues/${leagueId}/market/sessions/${sessionId}/${action}`);
+}
+
+export async function placeMarketOffer(
+  leagueId: number,
+  targetPlayerId: number,
+  releasePlayerId: number,
+  amount: number,
+): Promise<{ offer_id: number; deadline_at: string }> {
+  return auctionPost(`/leagues/${leagueId}/market/offers`, {
+    target_player_id: targetPlayerId,
+    release_player_id: releasePlayerId,
+    amount,
+  });
+}
+
+export async function adminMarketOffer(
+  leagueId: number,
+  offerId: number,
+  action: 'accept' | 'reject' | 'cancel',
+) {
+  return auctionPost(`/leagues/${leagueId}/market/offers/${offerId}/${action}`);
 }
 
 /** ws(s):// URL for the live auction room, carrying the DRF token in the query string. */
