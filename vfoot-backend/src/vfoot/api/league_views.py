@@ -240,6 +240,7 @@ class LeagueDetailView(APIView):
                 "defense_bonus_enabled": league.defense_bonus_enabled,
                 "defense_bonus_mode": league.defense_bonus_mode,
                 "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
+                "enforce_lineup_deadline": league.enforce_lineup_deadline,
                 "initial_budget": league.initial_budget,
                 "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
                                  "CEN": league.slots_mid, "ATT": league.slots_fwd},
@@ -443,6 +444,10 @@ class LeagueSettingsUpdateView(APIView):
             league.keeper_clean_sheet_enabled = bool(request.data.get("keeper_clean_sheet_enabled"))
             fields.append("keeper_clean_sheet_enabled")
 
+        if "enforce_lineup_deadline" in request.data:
+            league.enforce_lineup_deadline = bool(request.data.get("enforce_lineup_deadline"))
+            fields.append("enforce_lineup_deadline")
+
         # Auction economy (budget + roster slots). Frozen once an auction started:
         # a mid-auction change would rewrite the affordability of bids already made.
         econ_keys = {"initial_budget", "slots_gk", "slots_def", "slots_mid", "slots_fwd"}
@@ -473,6 +478,7 @@ class LeagueSettingsUpdateView(APIView):
             "defense_bonus_enabled": league.defense_bonus_enabled,
             "defense_bonus_mode": league.defense_bonus_mode,
             "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
+            "enforce_lineup_deadline": league.enforce_lineup_deadline,
             "initial_budget": league.initial_budget,
             "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
                              "CEN": league.slots_mid, "ATT": league.slots_fwd},
@@ -3483,7 +3489,7 @@ class LeagueTeamLineupSaveView(APIView):
             md_int = int(matchday)
         except (TypeError, ValueError):
             return Response({"detail": "matchday non valido."}, status=status.HTTP_400_BAD_REQUEST)
-        if league.reference_season_id is not None:
+        if league.enforce_lineup_deadline and league.reference_season_id is not None:
             first_kick = (
                 Match.objects.filter(
                     competition_season_id=league.reference_season_id,

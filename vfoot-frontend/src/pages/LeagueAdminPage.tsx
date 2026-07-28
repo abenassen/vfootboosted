@@ -902,6 +902,27 @@ export default function LeagueAdminPage() {
                       +1 al fantatotale se il portiere schierato prende voto e non subisce gol.
                     </div>
                   </div>
+                  <div className="border-t pt-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={league.enforce_lineup_deadline}
+                        onChange={(e) =>
+                          void run(async () => {
+                            if (!league) return;
+                            await updateLeagueSettings(league.league_id, { enforce_lineup_deadline: e.target.checked });
+                            await loadLeagueDetail(league.league_id);
+                            setMsg(`Blocco formazione al calcio d'inizio ${e.target.checked ? 'attivo' : 'disattivato'}.`);
+                          })
+                        }
+                      />
+                      <span>Blocca la formazione al primo calcio d'inizio</span>
+                    </label>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      Attivo in una lega reale. <b>Disattivalo</b> per le leghe di test su una stagione già
+                      conclusa (altrimenti ogni formazione risulterebbe bloccata).
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <div className="font-semibold">Membri</div>

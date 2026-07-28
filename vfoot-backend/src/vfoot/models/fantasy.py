@@ -39,6 +39,10 @@ class FantasyLeague(models.Model):
     # effective goalkeeper played (has a vote) and conceded no goals. Off by default;
     # the defence modifier is the only one enabled out of the box.
     keeper_clean_sheet_enabled = models.BooleanField(default=False)
+    # When True (the real-league default), a lineup locks at the first confirmed
+    # kickoff of the real matchday. Turn OFF for test leagues played on an ALREADY
+    # FINISHED season, where every kickoff is in the past and would block editing.
+    enforce_lineup_deadline = models.BooleanField(default=True)
     # Real-world season this fantasy league is played on top of (e.g. Serie A
     # 2025-26). Competition rounds map to this season's real matchdays.
     reference_season = models.ForeignKey(

@@ -254,6 +254,7 @@ export async function createLeague(req: CreateLeagueRequest) {
     defense_bonus_enabled: true,
     defense_bonus_mode: 'add_own',
     keeper_clean_sheet_enabled: false,
+    enforce_lineup_deadline: true,
     invite_code: `MOCK${id}`,
     invite_link: `/join/MOCK${id}`,
     reference_season: null,
