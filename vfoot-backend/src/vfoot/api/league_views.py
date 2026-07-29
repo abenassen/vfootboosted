@@ -1773,9 +1773,22 @@ def _schedule_competition_rounds(
 
 
 def _real_matchday_stats(real_competition_season_id: int, real_matchday: int) -> dict:
-    qs = Match.objects.filter(competition_season_id=real_competition_season_id, matchday=real_matchday)
-    total = qs.count()
-    completed = qs.exclude(home_goals__isnull=True).exclude(away_goals__isnull=True).count()
+    # A postponed-and-replayed match appears TWICE in a real matchday: a stale
+    # 'postponed' placeholder with no score, plus the rescheduled row that was
+    # actually played (a different external_id, played weeks later — see Serie A
+    # 2025-26 md24 Milan-Como, md16 with four postponements). Counting raw rows
+    # makes the matchday look forever incomplete ("reale 10/11", "10/14"). Collapse by
+    # the team pairing so each real fixture counts once and is 'completed' when ANY
+    # of its rows has a final score. Within one matchday a (home, away) pairing is
+    # unique, and a replay keeps the same home/away, so the pairing is a safe key.
+    done_by_pair: dict[tuple[int, int], bool] = {}
+    for home_id, away_id, hg, ag in Match.objects.filter(
+        competition_season_id=real_competition_season_id, matchday=real_matchday
+    ).values_list("home_team_id", "away_team_id", "home_goals", "away_goals"):
+        key = (home_id, away_id)
+        done_by_pair[key] = done_by_pair.get(key, False) or (hg is not None and ag is not None)
+    total = len(done_by_pair)
+    completed = sum(1 for v in done_by_pair.values() if v)
     return {
         "total": total,
         "completed": completed,
