@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+#
+# Alterna lo sviluppo locale fra due assetti, riavviando i server:
+#
+#   ./vfoot-dev local    tutto su localhost: nessun altro dispositivo entra
+#   ./vfoot-dev lan      raggiungibile dal wifi di casa (telefono, tablet)
+#                        sull'IP di questo portatile, RILEVATO OGNI VOLTA:
+#                        se il router ne assegna uno nuovo, basta rilanciarlo
+#   ./vfoot-dev status   che assetto e' attivo, cosa gira, a quali indirizzi
+#   ./vfoot-dev restart  riavvia senza cambiare assetto
+#   ./vfoot-dev stop     ferma entrambi
+#
+# Perche' uno script e non due righe a mano: l'indirizzo compare in QUATTRO
+# posti (ALLOWED_HOSTS e CORS di Django, il base URL nei link delle email, il
+# VITE_API_BASE_URL del frontend) e i server lo leggono solo all'avvio.
+# Cambiarne uno e dimenticare gli altri da' sintomi che non assomigliano alla
+# causa: 400 DisallowedHost, chiamate bloccate dal CORS, o pagina bianca.
+
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_BACK="$REPO/.env"
+ENV_FRONT="$REPO/vfoot-frontend/.env.local"
+PY="$REPO/vfoot-backend/.venv/bin/python"
+LOGDIR="${TMPDIR:-/tmp}/vfoot-dev"
+BACK_PORT=8000
+FRONT_PORT=5173
+
+if [ -t 1 ]; then
+  OK=$'\033[32m'; WARN=$'\033[33m'; ERR=$'\033[31m'; DIM=$'\033[2m'; B=$'\033[1m'; X=$'\033[0m'
+else
+  OK=; WARN=; ERR=; DIM=; B=; X=
+fi
+
+die()  { printf '%serrore:%s %s\n' "$ERR" "$X" "$*" >&2; exit 1; }
+warn() { printf '%sattenzione:%s %s\n' "$WARN" "$X" "$*" >&2; }
+
+# --- lettura/scrittura dei file env ---------------------------------------
+# Confronto per prefisso letterale, non regex: la secret key contiene '=' e
+# altri caratteri che una sed ingenua interpreterebbe.
+
+get_env() { # file chiave
+  [ -f "$1" ] || return 0
+  awk -v k="$2" 'index($0, k "=") == 1 { print substr($0, length(k) + 2); exit }' "$1"
+}
+
+set_env() { # file chiave valore
+  local file="$1" key="$2" val="$3" tmp
+  [ -f "$file" ] || die "manca $file"
+  tmp="$(mktemp)"
+  if [ -n "$(get_env "$file" "$key")" ] || grep -q "^$key=" "$file"; then
+    awk -v k="$key" -v v="$val" 'index($0, k "=") == 1 { print k "=" v; next } { print }' \
+      "$file" > "$tmp"
+  else
+    cat "$file" > "$tmp"
+    printf '%s=%s\n' "$key" "$val" >> "$tmp"
+  fi
+  cat "$tmp" > "$file"   # riscrive il contenuto: conserva permessi e inode
+  rm -f "$tmp"
+}
+
+# --- rete ------------------------------------------------------------------
+
+detect_ip() {
+  # L'IP dell'interfaccia che regge la rotta di default: esclude da solo i
+  # bridge di docker e le VPN inattive. E' solo una query alla routing table,
+  # non serve che 1.1.1.1 risponda.
+  # Il `|| true` finale serve con `set -o pipefail`: senza rotta di default la
+  # pipeline fallisce, e un'assegnazione fallita fa uscire lo script invece di
+  # lasciarci dire "wifi spento". Vale anche per le due funzioni qui sotto:
+  # nessuna delle due deve considerare un errore il caso "non ho trovato nulla".
+  ip route get 1.1.1.1 2>/dev/null \
+    | sed -n 's/.*[[:space:]]src[[:space:]]\+\([0-9.]\+\).*/\1/p' | head -1 || true
+}
+
+pids_on_port() { ss -tlnpH "sport = :$1" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u || true; }
+
+port_busy() { [ -n "$(pids_on_port "$1")" ]; }
+
+wait_port() { # porta secondi
+  # Il `return 0` finale non e' decorativo: senza, il valore di ritorno del
+  # while sarebbe quello dell'ultimo comando del corpo, cioe' il test del
+  # timeout, che a regime e' falso -> la funzione fallirebbe proprio quando
+  # il server e' partito.
+  local port="$1" limit="${2:-30}" waited=0
+  while ! port_busy "$port"; do
+    if [ "$waited" -gt $((limit * 2)) ]; then return 1; fi
+    sleep 0.5
+    waited=$((waited + 1))
+  done
+  return 0
+}
+
+# --- avvio e arresto -------------------------------------------------------
+
+stop_port() { # porta etichetta
+  local port="$1" label="$2" pids pid
+  pids="$(pids_on_port "$port")"
+  [ -z "$pids" ] && { printf '  %s%-9s gia fermo%s\n' "$DIM" "$label" "$X"; return 0; }
+  for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+  for _ in $(seq 1 20); do port_busy "$port" || break; sleep 0.5; done
+  if port_busy "$port"; then
+    for pid in $(pids_on_port "$port"); do kill -9 "$pid" 2>/dev/null || true; done
+    sleep 1
+  fi
+  port_busy "$port" && die "non riesco a liberare la porta $port ($label)"
+  printf '  %-9s fermato\n' "$label"
+}
+
+start_backend() { # bind
+  mkdir -p "$LOGDIR"
+  # env -u: le variabili esportate nella shell VINCONO su quelle del .env,
+  # perche' load_dotenv non sovrascrive quello che trova gia' nell'ambiente.
+  # Ripulirle qui e' cio' che rende affidabile il passaggio fra i due assetti.
+  ( cd "$REPO/vfoot-backend/src" && \
+    env -u DJANGO_ALLOWED_HOSTS -u DJANGO_CORS_ORIGINS -u VFOOT_FRONTEND_BASE_URL \
+      setsid nohup "$PY" manage.py runserver "$1" \
+      > "$LOGDIR/backend.log" 2>&1 < /dev/null & )
+  wait_port "$BACK_PORT" 40 || { tail -20 "$LOGDIR/backend.log" >&2; die "backend non partito"; }
+}
+
+start_frontend() { # host
+  mkdir -p "$LOGDIR"
+  ( cd "$REPO/vfoot-frontend" && \
+    env -u VITE_API_BASE_URL -u VITE_API_PROVIDER \
+      setsid nohup npm run dev -- --host "$1" \
+      > "$LOGDIR/frontend.log" 2>&1 < /dev/null & )
+  wait_port "$FRONT_PORT" 40 || { tail -20 "$LOGDIR/frontend.log" >&2; die "frontend non partito"; }
+}
+
+# --- assetti ---------------------------------------------------------------
+
+apply_local() {
+  set_env "$ENV_BACK"  DJANGO_ALLOWED_HOSTS  "localhost,127.0.0.1,testserver"
+  set_env "$ENV_BACK"  DJANGO_CORS_ORIGINS   "http://localhost:$FRONT_PORT,http://127.0.0.1:$FRONT_PORT"
+  set_env "$ENV_BACK"  VFOOT_FRONTEND_BASE_URL "http://localhost:$FRONT_PORT"
+  set_env "$ENV_FRONT" VITE_API_BASE_URL     "http://localhost:$BACK_PORT/api/v1"
+}
+
+apply_lan() { # ip
+  local ip="$1"
+  set_env "$ENV_BACK"  DJANGO_ALLOWED_HOSTS  "localhost,127.0.0.1,testserver,$ip"
+  set_env "$ENV_BACK"  DJANGO_CORS_ORIGINS   "http://localhost:$FRONT_PORT,http://127.0.0.1:$FRONT_PORT,http://$ip:$FRONT_PORT"
+  set_env "$ENV_BACK"  VFOOT_FRONTEND_BASE_URL "http://$ip:$FRONT_PORT"
+  set_env "$ENV_FRONT" VITE_API_BASE_URL     "http://$ip:$BACK_PORT/api/v1"
+}
+
+current_mode() {
+  # L'assetto e' desumibile dal .env: se fra gli host ammessi c'e' un IP, siamo
+  # in lan. Non teniamo un file di stato a parte, che potrebbe mentire.
+  local hosts; hosts="$(get_env "$ENV_BACK" DJANGO_ALLOWED_HOSTS)"
+  local ip; ip="$(printf '%s' "$hosts" | tr ',' '\n' | grep -E '^[0-9]+(\.[0-9]+){3}$' | grep -v '^127\.' | head -1 || true)"
+  if [ -n "$ip" ]; then printf 'lan %s\n' "$ip"; else printf 'local\n'; fi
+}
+
+restart_for_mode() { # modo [ip]
+  printf '%sArresto:%s\n' "$B" "$X"
+  stop_port "$FRONT_PORT" frontend
+  stop_port "$BACK_PORT"  backend
+  printf '%sAvvio (%s):%s\n' "$B" "$1" "$X"
+  if [ "$1" = lan ]; then
+    start_backend "0.0.0.0:$BACK_PORT"; printf '  backend   ok\n'
+    start_frontend "0.0.0.0";           printf '  frontend  ok\n'
+  else
+    start_backend "localhost:$BACK_PORT"; printf '  backend   ok\n'
+    start_frontend "localhost";           printf '  frontend  ok\n'
+  fi
+}
+
+# --- comandi ---------------------------------------------------------------
+
+cmd_status() {
+  local mode ip hosts running_hosts pid
+  read -r mode ip <<<"$(current_mode)"
+  printf '%sAssetto configurato:%s %s' "$B" "$X" "$mode"
+  [ -n "${ip:-}" ] && printf ' (%s)' "$ip"
+  printf '\n'
+
+  local now; now="$(detect_ip)"
+  if [ -z "$now" ]; then
+    warn "nessuna rotta di default: IP non rilevabile (wifi spento?)"
+  else
+    printf 'IP attuale sul wifi:  %s' "$now"
+    if [ "$mode" = lan ] && [ "$now" != "$ip" ]; then
+      printf '  %s<- diverso da quello configurato: rilancia ./vfoot-dev lan%s' "$WARN" "$X"
+    fi
+    printf '\n'
+  fi
+
+  printf '\n%sServer:%s\n' "$B" "$X"
+  for spec in "backend:$BACK_PORT" "frontend:$FRONT_PORT"; do
+    local label="${spec%%:*}" port="${spec##*:}"
+    if port_busy "$port"; then
+      printf '  %s%-9s attivo%s   porta %s  (pid %s)\n' "$OK" "$label" "$X" "$port" "$(pids_on_port "$port" | tr '\n' ' ')"
+    else
+      printf '  %s%-9s fermo%s    porta %s\n' "$ERR" "$label" "$X" "$port"
+    fi
+  done
+
+  # Il guasto silenzioso da cui nasce questo script: il processo Django gira
+  # con variabili esportate a mano che non corrispondono piu' al .env, e nessun
+  # riavvio "normale" lo rivela finche' qualcuno non prova dal telefono.
+  pid="$(pids_on_port "$BACK_PORT" | head -1)"
+  if [ -n "$pid" ] && [ -r "/proc/$pid/environ" ]; then
+    running_hosts="$(tr '\0' '\n' < "/proc/$pid/environ" | sed -n 's/^DJANGO_ALLOWED_HOSTS=//p')"
+    hosts="$(get_env "$ENV_BACK" DJANGO_ALLOWED_HOSTS)"
+    if [ -n "$running_hosts" ] && [ "$running_hosts" != "$hosts" ]; then
+      printf '\n'
+      warn "il backend in esecuzione NON usa il .env attuale"
+      printf '    in esecuzione: %s\n    nel .env:      %s\n' "$running_hosts" "$hosts"
+      printf '    rimedio: ./vfoot-dev restart\n'
+    fi
+  fi
+
+  printf '\n%sIndirizzi:%s\n' "$B" "$X"
+  printf '  frontend  %s\n' "$(get_env "$ENV_FRONT" VITE_API_BASE_URL | sed "s#/api/v1##; s#:$BACK_PORT#:$FRONT_PORT#")"
+  printf '  API       %s\n' "$(get_env "$ENV_FRONT" VITE_API_BASE_URL)"
+  printf '  %slog: %s%s\n' "$DIM" "$LOGDIR" "$X"
+}
+
+cmd_lan() {
+  local ip; ip="$(detect_ip)"
+  [ -n "$ip" ] || die "nessuna rotta di default: il wifi e' spento? (serve un IP da annunciare)"
+  printf '%sIP rilevato:%s %s\n' "$B" "$X" "$ip"
+  apply_lan "$ip"
+  restart_for_mode lan "$ip"
+  printf '\n%sPronto.%s Dal telefono: %shttp://%s:%s/%s\n' "$OK" "$X" "$B" "$ip" "$FRONT_PORT" "$X"
+  if systemctl is-active --quiet ufw 2>/dev/null; then
+    printf '%sufw e attivo: se il telefono non si connette ->%s\n' "$DIM" "$X"
+    printf '  sudo ufw allow from %s.0/24 to any port %s,%s proto tcp\n' \
+      "$(printf '%s' "$ip" | cut -d. -f1-3)" "$FRONT_PORT" "$BACK_PORT"
+  fi
+}
+
+cmd_local() {
+  apply_local
+  restart_for_mode local
+  printf '\n%sPronto.%s Solo da questo portatile: %shttp://localhost:%s/%s\n' \
+    "$OK" "$X" "$B" "$FRONT_PORT" "$X"
+}
+
+cmd_restart() {
+  local mode ip; read -r mode ip <<<"$(current_mode)"
+  if [ "$mode" = lan ]; then
+    # Rileva di nuovo l'IP: un riavvio e' anche l'occasione in cui ci si
+    # accorge che il router ne ha assegnato un altro.
+    local now; now="$(detect_ip)"
+    if [ -n "$now" ] && [ "$now" != "$ip" ]; then
+      printf '%sIP cambiato:%s %s -> %s, aggiorno\n' "$WARN" "$X" "$ip" "$now"
+      apply_lan "$now"; ip="$now"
+    fi
+    restart_for_mode lan "$ip"
+    printf '\n%sPronto.%s Dal telefono: %shttp://%s:%s/%s\n' "$OK" "$X" "$B" "$ip" "$FRONT_PORT" "$X"
+  else
+    restart_for_mode local
+    printf '\n%sPronto.%s http://localhost:%s/\n' "$OK" "$X" "$FRONT_PORT"
+  fi
+}
+
+cmd_stop() {
+  printf '%sArresto:%s\n' "$B" "$X"
+  stop_port "$FRONT_PORT" frontend
+  stop_port "$BACK_PORT"  backend
+}
+
+usage() {
+  # Stampa l'intestazione di questo file fino alla prima riga non commentata,
+  # cosi' resta giusta anche se l'intestazione cambia di lunghezza.
+  awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' "${BASH_SOURCE[0]}"
+  exit "${1:-0}"
+}
+
+[ -f "$ENV_BACK" ]  || die "manca $ENV_BACK (copia .env.example)"
+[ -f "$ENV_FRONT" ] || die "manca $ENV_FRONT (copia vfoot-frontend/.env.example)"
+[ -x "$PY" ]        || die "manca il venv del backend: $PY"
+[ -d "$REPO/vfoot-frontend/node_modules" ] || die "manca node_modules: npm install in vfoot-frontend"
+
+case "${1:-status}" in
+  lan)      cmd_lan ;;
+  local)    cmd_local ;;
+  status)   cmd_status ;;
+  restart)  cmd_restart ;;
+  stop)     cmd_stop ;;
+  -h|--help|help) usage 0 ;;
+  *) printf '%scomando sconosciuto:%s %s\n\n' "$ERR" "$X" "$1" >&2; usage 1 ;;
+esac

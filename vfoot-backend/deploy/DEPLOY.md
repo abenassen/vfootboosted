@@ -18,6 +18,76 @@ gotchas below are ones that actually bit.
   proxies `/api`, `/admin`, `/ws` → `:8000`, serves `/static/` from Django's
   `staticfiles/`, and `try_files … /index.html` for client routes.
 
+## ⚠ Il sito è CHIUSO al pubblico (manutenzione) — dal 28/07/2026
+
+Finché siamo in testing, `vfoot.it` risponde **503** a tutti con una pagina di
+cortesia: SPA, `/api`, `/admin`, `/ws`, `/static` — tutto. L'app gira ancora
+(`vfoot.service` attivo), semplicemente non è esposta.
+
+- Interruttore: le tre righe `set $manutenzione` / `if …` in `vfoot.it.conf`.
+- Pagina servita: `/srv/vfoot-maintenance/maintenance.html` — **fuori** da
+  `/srv/vfoot-web` apposta, perché il passo 5 del deploy fa `rsync --delete`
+  e la cancellerebbe. Sorgente versionata in `deploy/maintenance/`.
+- Esente dal 503: solo `/.well-known/acme-challenge/`, altrimenti si romperebbe
+  il rinnovo del certificato.
+- La copia versionata della conf nginx è in `deploy/nginx/vfoot.it.conf`; sul
+  server c'è un backup del file pre-manutenzione in `/root/backups/`.
+
+**Per riaprire il sito:**
+```sh
+ssh root@139.162.144.123
+# commentare le tre righe set/if nel blocco MANUTENZIONE di
+# /etc/nginx/sites-available/vfoot.it.conf, poi:
+nginx -t && systemctl reload nginx
+curl -s -o /dev/null -w '%{http_code}\n' https://vfoot.it/   # 200
+```
+
+**Per vederlo mentre resta chiuso** (tunnel SSH, bypassa nginx):
+```sh
+ssh -N -L 8001:127.0.0.1:8000 root@139.162.144.123
+# poi apri http://127.0.0.1:8001/admin/ — l'API risponde, la SPA no
+# (quella la serve nginx: per la SPA usa `npm run dev` in locale)
+```
+
+Finché la manutenzione è attiva, i `curl` del passo **Verify** qui sotto
+restituiscono `503` invece di `200`/`401`: è il risultato atteso, non un deploy
+rotto. Per verificare davvero un deploy, usa il tunnel qui sopra.
+
+## Certificati TLS — rinnovo automatico (sistemato il 28/07/2026)
+
+Il rinnovo era **rotto in silenzio**: certbot non era nemmeno installato e, cosa più
+insidiosa, il DNS di tutti e quattro i nomi (`vfoot.it`, `www.vfoot.it`,
+`andreadeluca.online`, `www.andreadeluca.online`) ha un record **AAAA** verso
+`2a01:7e01::f03c:92ff:fe5e:d45f`, mentre nginx aveva solo `listen 80` / `listen 443`
+— che in nginx significa **solo IPv4**. I validatori di Let's Encrypt preferiscono
+IPv6 e prendevano `connection refused`. Effetto collaterale già in atto: il sito
+WordPress era irraggiungibile da qualunque client IPv6.
+
+Assetto attuale:
+
+- `certbot` 4.0.0 da apt; `certbot.timer` (2 esecuzioni/giorno) abilitato dal pacchetto.
+- Entrambi i domini usano **`authenticator = webroot`**, non il plugin nginx. Motivo:
+  il plugin riscrive il file di conf a ogni rinnovo, e `vfoot.it.conf` contiene il
+  blocco di manutenzione scritto a mano che non vogliamo far rimaneggiare.
+  - `vfoot.it` → `-w /var/www/html` (combacia con la `location ^~ /.well-known/…`)
+  - `andreadeluca.online` → `-w /var/www/html/andreadeluca.online/public_html`
+- `installer = None`, quindi **serve** l'hook che ricarica nginx dopo il rinnovo,
+  altrimenti si continua a servire il certificato vecchio:
+  `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh`.
+- `listen [::]:80` e `listen [::]:443 ssl` aggiunti a **entrambi** i siti.
+
+Se in futuro qualcosa non torna:
+```sh
+ssh root@139.162.144.123 'certbot certificates'      # scadenze
+ssh root@139.162.144.123 'certbot renew --dry-run'   # test completo, no rate limit
+ssh root@139.162.144.123 'systemctl list-timers certbot.timer'
+```
+Attenzione: **non rimuovere** l'esenzione `/.well-known/acme-challenge/` dal blocco di
+manutenzione, o il rinnovo torna a fallire.
+
+Backup pre-modifica sul server: `/root/backups/*.precert.20260728-155008` e
+`/root/backups/letsencrypt-renewal.20260728-155008/`.
+
 ## Deploy procedure
 
 ### 1. Build the frontend locally (server has no node)
