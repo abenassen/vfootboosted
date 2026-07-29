@@ -91,7 +91,12 @@ export default function AppShell() {
       if (it.to === '/standings')
         return { ...it, label: standingsLabel, icon: resultView === 'classifica' ? '📊' : '🗂️' };
       if (it.to === '/serie-a') return { ...it, label: refCompetition };
-      if (it.to === '/decisioni') return { ...it, badge: alerts.attention || alerts.blocking };
+      // One number per audience, and they must not be mixed: the admin's is his
+      // whole sign-off queue, the member's is only what he was asked. Falling back
+      // from one to the other made 17 pending sign-offs read as 1 the moment the
+      // admin opened a single consultation.
+      if (it.to === '/decisioni')
+        return { ...it, badge: alerts.isAdmin ? alerts.blocking : alerts.attention };
       return it;
     }),
     [standingsLabel, resultView, refCompetition, alerts],

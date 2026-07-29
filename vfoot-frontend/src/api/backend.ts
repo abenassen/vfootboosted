@@ -185,12 +185,31 @@ export function hasStoredSession(): boolean {
   return !!getToken();
 }
 
+/** POST with NO credentials. For the auth endpoints only: they are the ones you
+ *  call while signed out, and sending a stale token there would have DRF reject
+ *  the request before the view ever sees the login attempt. */
 function jsonPost(path: string, body: unknown): Promise<Response> {
   return fetch(`${baseUrl()}${path}`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST as the signed-in user. Everything that is not an auth endpoint wants
+ *  this one — without the token the request comes back 401, which the UI reports
+ *  as an expired session, so a missing header looks exactly like being logged
+ *  out and nothing on the page can be acted on. */
+function authedPost(path: string, body: unknown): Promise<Response> {
+  return fetch(`${baseUrl()}${path}`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...authHeaders(),
     },
     body: JSON.stringify(body),
   });
@@ -989,7 +1008,7 @@ export async function voteLeagueDecision(
   decisionId: number,
   option: string,
 ): Promise<LeagueDecision> {
-  const res = await jsonPost(`/leagues/${leagueId}/decisions/${decisionId}/vote`, { option });
+  const res = await authedPost(`/leagues/${leagueId}/decisions/${decisionId}/vote`, { option });
   return parseJsonOrThrow(res);
 }
 
@@ -998,7 +1017,7 @@ export async function resolveLeagueDecision(
   decisionId: number,
   option: string,
 ): Promise<LeagueDecision> {
-  const res = await jsonPost(`/leagues/${leagueId}/decisions/${decisionId}/resolve`, { option });
+  const res = await authedPost(`/leagues/${leagueId}/decisions/${decisionId}/resolve`, { option });
   return parseJsonOrThrow(res);
 }
 
@@ -1007,13 +1026,22 @@ export async function consultLeagueDecision(
   decisionId: number,
   open: boolean,
 ): Promise<LeagueDecision> {
-  const res = await jsonPost(`/leagues/${leagueId}/decisions/${decisionId}/consult`, { open });
+  const res = await authedPost(`/leagues/${leagueId}/decisions/${decisionId}/consult`, { open });
   return parseJsonOrThrow(res);
 }
 
 export async function acceptAllLeagueDecisions(
   leagueId: number,
 ): Promise<{ resolved: number; blocked_reason: string | null }> {
-  const res = await jsonPost(`/leagues/${leagueId}/decisions/accept-all`, {});
+  const res = await authedPost(`/leagues/${leagueId}/decisions/accept-all`, {});
+  return parseJsonOrThrow(res);
+}
+
+/** Re-read the real roster and raise whatever it turns up (a January signing has
+ *  no frozen role until this runs). Additive: nothing already decided moves. */
+export async function refreshLeagueDecisions(
+  leagueId: number,
+): Promise<{ seeded: number; opened: number; roster: number; blocked_reason: string | null }> {
+  const res = await authedPost(`/leagues/${leagueId}/decisions/refresh`, {});
   return parseJsonOrThrow(res);
 }

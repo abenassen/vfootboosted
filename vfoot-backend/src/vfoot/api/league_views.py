@@ -172,6 +172,15 @@ class LeagueListCreateView(APIView):
         )
         team = FantasyTeam.objects.create(league=league, manager=membership, name=data["team_name"])
 
+        # Draw the listone straight away: a classic league IS its frozen roles, and
+        # the questions the inference cannot answer are the admin's first piece of
+        # work, not a surprise on the morning of the auction. Deferring it to the
+        # market opening meant a freshly created league reported "nessuna decisione
+        # in sospeso" while a dozen were in fact waiting to be raised.
+        decisions = 0
+        if league.mode == FantasyLeague.MODE_CLASSIC and league.reference_season_id:
+            decisions = snapshot_league_listone(league).get("decisions_opened", 0)
+
         return Response(
             {
                 "league_id": league.id,
@@ -179,6 +188,7 @@ class LeagueListCreateView(APIView):
                 "invite_code": league.invite_code,
                 "invite_link": f"/join/{league.invite_code}",
                 "team_id": team.id,
+                "decisions_opened": decisions,
             },
             status=status.HTTP_201_CREATED,
         )

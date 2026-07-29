@@ -776,7 +776,14 @@ export async function saveTeamLineup(_leagueId: number, _req: unknown): Promise<
 // thing about what blocks a market.
 export async function getLeagueDecisions(): Promise<LeagueDecisionsResponse> {
   await sleep(60);
-  return { is_admin: true, blocked_reason: null, blocking_open: 0, attention: 0, decisions: [] };
+  return {
+    is_admin: true,
+    has_listone: false,
+    blocked_reason: null,
+    blocking_open: 0,
+    attention: 0,
+    decisions: [],
+  };
 }
 
 function mockDecisionsUnavailable(): never {
@@ -797,4 +804,13 @@ export async function consultLeagueDecision(): Promise<never> {
 export async function acceptAllLeagueDecisions(): Promise<{ resolved: number; blocked_reason: string | null }> {
   await sleep(60);
   return { resolved: 0, blocked_reason: null };
+}
+export async function refreshLeagueDecisions(): Promise<{
+  seeded: number;
+  opened: number;
+  roster: number;
+  blocked_reason: string | null;
+}> {
+  await sleep(60);
+  return { seeded: 0, opened: 0, roster: 0, blocked_reason: null };
 }

@@ -178,6 +178,16 @@ Transfermarkt market value clears `league_decisions.RELEVANCE_MIN_VALUE_EUR`
 (€5M) reach the admin's decision queue; everyone below auto-takes the layer-2
 proposal (no market value ⇒ obscure ⇒ auto-default). See `league_decisions.py`.
 
+When the queue is raised: `snapshot_league_listone` is the single entry point, and
+it runs at **league creation** (classic + reference season), on every **Transfermarkt
+import**, when the market or an offer session **opens**, and on the admin's explicit
+`decisions/refresh`. It is additive and idempotent — already-frozen roles never move.
+A player awaiting a decision is deliberately left WITHOUT a `LeaguePlayerRole` row,
+and that absence is the gate the auction and the offer market read; so the snapshot
+must exclude both `players_needing_decision` **and** `undecided_player_ids` (the
+first skips anyone already asked about, so on its own the next poll would seed him
+and answer the question by accident).
+
 Which measured players are ambiguous is decided by `CurrentPlayerRole.role_margin`,
 NOT by `confidence`. The latter says how firmly a player sits in his *category*
 (step 2 of the inference); what reaches the listone is step 3, the condensation of

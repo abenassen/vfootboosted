@@ -72,6 +72,10 @@ class LeagueDecisionListView(APIView):
             items = [i for i in items if i["consultation_open"] or i["status"] != "open"]
         return Response({
             "is_admin": admin,
+            # Whether a listone exists here at all — the refresh only means
+            # something in a classic league bound to a real season.
+            "has_listone": (league.mode == FantasyLeague.MODE_CLASSIC
+                            and league.reference_season_id is not None),
             "blocked_reason": market_blocked_reason(league),
             "blocking_open": sum(1 for i in items
                                  if i["blocks_market"] and i["status"] == "open"),
@@ -170,6 +174,14 @@ class LeagueDecisionRefreshView(APIView):
         if not _is_admin(league, request.user.id):
             return Response({"detail": "Solo l'amministratore."},
                             status=status.HTTP_403_FORBIDDEN)
+        # The listone is a classic-mode object: seeding one into an aura league
+        # would fill it with per-role rows nothing there reads, and needs a
+        # reference season to mean anything at all.
+        if league.mode != FantasyLeague.MODE_CLASSIC or not league.reference_season_id:
+            return Response(
+                {"detail": "Il listone esiste solo nelle leghe classic legate a una "
+                           "stagione reale."},
+                status=status.HTTP_400_BAD_REQUEST)
         summary = snapshot_league_listone(league)
         return Response({"seeded": summary.get("created", 0),
                          "opened": summary.get("decisions_opened", 0),

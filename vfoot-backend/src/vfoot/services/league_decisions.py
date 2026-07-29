@@ -40,7 +40,33 @@ METHOD_REASON = {
         "Non abbiamo ne' dati di gioco ne' una posizione affidabile.",
     CurrentPlayerRole.METHOD_TM:
         "Posizione del provider ambigua e nessun dato di gioco per scioglierla.",
+    CurrentPlayerRole.METHOD_SOFA:
+        "Posizione del provider ambigua e minutaggio troppo scarso per misurare come "
+        "gioca: il ruolo viene dalla sola casella in distinta, che su ali e trequartisti "
+        "indovina poco piu' di una volta su due.",
 }
+
+
+def decision_rationale(row) -> str:
+    """Why this player is being asked about, in the admin's terms.
+
+    Every case in the queue gets one. A question that says "decidi" without
+    saying what is missing reads as an obstacle rather than as a question — and
+    the two hardest cases (the coin-flip clustering and the lineup-only role) are
+    precisely the ones a bare title tells nothing about.
+    """
+    if row is None:
+        return ("Arrivato dopo l'ultimo calcolo dei ruoli: nessuno storico su cui "
+                "sciogliere una posizione ambigua.")
+    if row.method == CurrentPlayerRole.METHOD_CATEGORY:
+        # The measurement ran and came out split. Saying by how much is the whole
+        # point: 34% contro 30% is a different question from 60% contro 15%.
+        gap = f"{row.role_margin * 100:.0f}%"
+        style = f" (stile di gioco: {row.category})" if row.category else ""
+        return (f"Posizione del provider ambigua e misura in bilico{style}: il ruolo "
+                f"vincente stacca il secondo di appena {gap}, sotto la soglia oltre "
+                f"la quale ci fidiamo del dato.")
+    return METHOD_REASON.get(row.method, "")
 
 
 # Below this Transfermarkt market value an ambiguous player is NOT worth an admin
@@ -180,9 +206,7 @@ def open_role_decisions(league, *, opened_by=None,
         position = row.tm_position if row else stint_pos.get(pid, "")
         proposed = (row.role_for(league.role_mode) if row
                     else TM_DEFAULT.get(position, ""))
-        rationale = (METHOD_REASON.get(row.method, "") if row else
-                     "Arrivato dopo l'ultimo calcolo dei ruoli: nessuno storico "
-                     "su cui sciogliere una posizione ambigua.")
+        rationale = decision_rationale(row)
         name = names.get(pid) or fulls.get(pid) or str(pid)
         made.append(LeagueDecision(
             league=league, kind=LeagueDecision.KIND_PLAYER_ROLE, player_id=pid,

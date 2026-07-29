@@ -67,8 +67,16 @@ def snapshot_league_listone(league, *, reset: bool = False) -> dict:
     # the two states distinct is what lets "has a frozen role" mean "settled" —
     # which in turn is what stops a later recomputation from reopening a question
     # about someone who has since been bought.
-    from vfoot.services.league_decisions import players_needing_decision
-    undecidable = players_needing_decision(league)
+    from vfoot.services.league_decisions import (
+        players_needing_decision, undecided_player_ids,
+    )
+    # BOTH sets, and the second is not redundant: once a decision is OPEN the
+    # player counts as "settled" for ``players_needing_decision`` (it must not
+    # re-ask), so on the next poll he would fall through to the seed and get a
+    # frozen role while his question is still open — silently answering it, and
+    # putting him back in the offer-market pool, which uses exactly "has a frozen
+    # role" as its gate. He stays out of the listone until a human answers.
+    undecidable = players_needing_decision(league) | undecided_player_ids(league)
     # Seed roles only for currently-eligible players (open stint). Departed players
     # keep any existing frozen row (history) but get no NEW seed row.
     players = list(Player.objects.filter(id__in=eligible_player_ids(cs_id)))

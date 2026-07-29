@@ -4,6 +4,7 @@ import {
   acceptAllLeagueDecisions,
   consultLeagueDecision,
   getLeagueDecisions,
+  refreshLeagueDecisions,
   resolveLeagueDecision,
   voteLeagueDecision,
 } from '../api';
@@ -21,9 +22,10 @@ export default function DecisionsPage() {
   const leagueId = selectedLeague?.league_id ?? null;
   const [data, setData] = useState<LeagueDecisionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<number | 'all' | null>(null);
+  const [busy, setBusy] = useState<number | 'all' | 'refresh' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showResolved, setShowResolved] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (leagueId == null) return;
@@ -42,7 +44,7 @@ export default function DecisionsPage() {
     void load();
   }, [load]);
 
-  const act = async (key: number | 'all', fn: () => Promise<unknown>) => {
+  const act = async (key: number | 'all' | 'refresh', fn: () => Promise<unknown>) => {
     setBusy(key);
     try {
       await fn();
@@ -90,17 +92,44 @@ export default function DecisionsPage() {
         <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
       ) : null}
 
+      {notice ? (
+        <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700">{notice}</div>
+      ) : null}
+
       <Card className="p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <SectionTitle>Decisioni aperte</SectionTitle>
-          <label className="flex items-center gap-2 text-xs text-slate-500">
-            <input
-              type="checkbox"
-              checked={showResolved}
-              onChange={(e) => setShowResolved(e.target.checked)}
-            />
-            mostra anche quelle chiuse
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            {data?.is_admin && data?.has_listone ? (
+              /* The roster moves during the season while the roles stay frozen, so
+                 someone has to go and look: this is that look, on demand. */
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy === 'refresh'}
+                onClick={() =>
+                  void act('refresh', async () => {
+                    const r = await refreshLeagueDecisions(leagueId);
+                    setNotice(
+                      r.opened > 0
+                        ? `${r.opened} nuove decisioni dal mercato reale (${r.seeded} ruoli seminati).`
+                        : `Listone allineato: nessun nuovo caso da decidere (${r.seeded} ruoli seminati).`,
+                    );
+                  })
+                }
+              >
+                {busy === 'refresh' ? 'Controllo…' : 'Controlla il mercato reale'}
+              </Button>
+            ) : null}
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              <input
+                type="checkbox"
+                checked={showResolved}
+                onChange={(e) => setShowResolved(e.target.checked)}
+              />
+              mostra anche quelle chiuse
+            </label>
+          </div>
         </div>
         {open.length === 0 ? (
           <div className="mt-3 text-sm text-slate-500">
@@ -162,7 +191,9 @@ function DecisionRow({
     <div className="py-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold text-slate-800">{d.title}</span>
-        {d.blocks_market ? <Badge tone="amber">blocca il mercato</Badge> : null}
+        {/* Per PLAYER, not per league — same wording as the banner above, which
+            says in as many words that the market is open and he is not. */}
+        {d.blocks_market ? <Badge tone="amber">non acquistabile</Badge> : null}
         {d.consultation_open ? <Badge tone="green">consultazione aperta</Badge> : null}
       </div>
       {d.question ? <div className="mt-0.5 text-sm text-slate-600">{d.question}</div> : null}
@@ -187,7 +218,11 @@ function DecisionRow({
             >
               {o.label}
               {o.value === d.proposed ? <span className="ml-1 text-[10px] opacity-70">proposto</span> : null}
-              {votes > 0 ? <span className="ml-1 text-[10px] font-bold opacity-90">· {votes} voti</span> : null}
+              {votes > 0 ? (
+                <span className="ml-1 text-[10px] font-bold opacity-90">
+                  · {votes} {votes === 1 ? 'voto' : 'voti'}
+                </span>
+              ) : null}
             </button>
           );
         })}

@@ -13,21 +13,22 @@ import { getLeagueDecisions } from '../api';
  * pages that act reload it themselves.
  */
 export function useDecisionAlerts(leagueId: number | null) {
-  const [alerts, setAlerts] = useState({ attention: 0, blocking: 0 });
+  const [alerts, setAlerts] = useState({ attention: 0, blocking: 0, isAdmin: false });
 
   useEffect(() => {
     if (leagueId == null) {
-      setAlerts({ attention: 0, blocking: 0 });
+      setAlerts({ attention: 0, blocking: 0, isAdmin: false });
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
         const r = await getLeagueDecisions(leagueId);
-        if (!cancelled) setAlerts({ attention: r.attention, blocking: r.blocking_open });
+        if (!cancelled)
+          setAlerts({ attention: r.attention, blocking: r.blocking_open, isAdmin: r.is_admin });
       } catch {
         // A badge is not worth an error message: if we cannot count, show nothing.
-        if (!cancelled) setAlerts({ attention: 0, blocking: 0 });
+        if (!cancelled) setAlerts({ attention: 0, blocking: 0, isAdmin: false });
       }
     })();
     return () => {

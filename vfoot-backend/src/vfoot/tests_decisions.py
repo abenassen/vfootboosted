@@ -492,3 +492,142 @@ class QueueCriterionTests(TestCase):
                              role_data="ATT", role_mitigated="ATT", method="category",
                              tm_position="left winger", role_margin=0.9)
         self.assertFalse(r.needs_decision)
+
+
+class LimboSurvivesRepollTests(DecisionQueueTests):
+    """A player waiting on a decision must still be waiting after the next poll.
+
+    The listone snapshot runs on every Transfermarkt scrape and every market
+    opening. ``players_needing_decision`` deliberately skips anyone with an open
+    decision (it must not ask twice) — so without an explicit exclusion the second
+    run saw a roster player with no frozen role, no pending question as far as it
+    could tell, and seeded him from the raw map: the question was answered by the
+    poll rather than by the admin, and the offer market — which gates on exactly
+    "has a frozen role" — put him back on the shelf.
+    """
+
+    def _snapshot(self):
+        from vfoot.services.listone import snapshot_league_listone
+        return snapshot_league_listone(self.league)
+
+    def test_a_second_poll_does_not_seed_a_player_still_in_limbo(self):
+        p = self._player("In dubbio", method=CurrentPlayerRole.METHOD_DEFAULT)
+        first = self._snapshot()
+        self.assertEqual(first["decisions_opened"], 1)
+
+        second = self._snapshot()          # the nightly TM scrape
+        self.assertEqual(second["awaiting_decision"], 1)
+        self.assertFalse(
+            LeaguePlayerRole.objects.filter(league=self.league, player=p).exists())
+        self.assertEqual(undecided_player_ids(self.league), {p.id})
+
+    def test_the_limbo_ends_only_when_the_admin_answers(self):
+        p = self._player("In dubbio", method=CurrentPlayerRole.METHOD_DEFAULT)
+        self._snapshot()
+        resolve(LeagueDecision.objects.get(league=self.league, player=p), "ATT",
+                user=self.admin)
+        self._snapshot()
+
+        row = LeaguePlayerRole.objects.get(league=self.league, player=p)
+        self.assertEqual((row.role, row.source), ("ATT", LeaguePlayerRole.SOURCE_ADMIN))
+        self.assertEqual(undecided_player_ids(self.league), set())
+
+    def test_an_undecided_player_is_not_offerable_as_a_free_agent(self):
+        from vfoot.services.market_engine import free_agent_ids
+        p = self._player("In dubbio", method=CurrentPlayerRole.METHOD_DEFAULT)
+        self._snapshot()
+        # Even with a stray frozen row (a listone seeded before the gate existed),
+        # an open question keeps him off the market.
+        LeaguePlayerRole.objects.create(league=self.league, player=p, role="CEN",
+                                        source=LeaguePlayerRole.SOURCE_SEED)
+        self.assertNotIn(p.id, free_agent_ids(self.league))
+
+
+class DecisionRationaleTests(DecisionQueueTests):
+    """Every case in the queue says why it is there. The two the criterion added
+    last — the lineup-only role and the coin-flip clustering — used to arrive with
+    an empty explanation, which is the one thing an admin cannot act on."""
+
+    def test_a_lineup_only_role_says_the_measure_is_missing(self):
+        self._player("Solo distinta", method=CurrentPlayerRole.METHOD_SOFA)
+        open_role_decisions(self.league)
+        d = LeagueDecision.objects.get(league=self.league)
+        self.assertIn("distinta", d.rationale)
+
+    def test_a_torn_measure_reports_its_margin(self):
+        p = self._player("In bilico", method=CurrentPlayerRole.METHOD_CATEGORY)
+        CurrentPlayerRole.objects.filter(player=p).update(
+            role_margin=0.12, category="ala offensiva")
+        open_role_decisions(self.league)
+        d = LeagueDecision.objects.get(league=self.league)
+        self.assertIn("12%", d.rationale)
+        self.assertIn("ala offensiva", d.rationale)
+
+    def test_no_case_reaches_the_admin_without_an_explanation(self):
+        self._player("Distinta", method=CurrentPlayerRole.METHOD_SOFA)
+        self._player("Default", method=CurrentPlayerRole.METHOD_DEFAULT)
+        self._player("Ignoto", method=CurrentPlayerRole.METHOD_UNKNOWN)
+        torn = self._player("Bilico", method=CurrentPlayerRole.METHOD_CATEGORY)
+        CurrentPlayerRole.objects.filter(player=torn).update(role_margin=0.1)
+        open_role_decisions(self.league)
+        self.assertEqual(LeagueDecision.objects.filter(league=self.league).count(), 4)
+        for d in LeagueDecision.objects.filter(league=self.league):
+            self.assertTrue(d.rationale, f"{d.title} arriva senza motivazione")
+
+
+class LeagueCreationTests(DecisionQueueTests):
+    """The queue must exist from the first minute of a classic league.
+
+    Building the listone only when the market opened meant a freshly created
+    league answered "nessuna decisione in sospeso" while a dozen questions were
+    in fact waiting to be asked — and the admin met them on auction day.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+    def _create(self, mode):
+        return self.client.post("/api/v1/leagues", {
+            "name": f"Nuova {mode}", "team_name": "Squadra", "mode": mode,
+            "reference_season_id": self.cs.id}, format="json")
+
+    def test_creating_a_classic_league_raises_its_questions_at_once(self):
+        self._player("Da decidere", method=CurrentPlayerRole.METHOD_DEFAULT)
+        self._player("Centrale", method=CurrentPlayerRole.METHOD_TM,
+                     tm_position="centre-back", role="DIF")
+        r = self._create("classic")
+
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()["decisions_opened"], 1)
+        new = FantasyLeague.objects.get(id=r.json()["league_id"])
+        self.assertEqual(len(undecided_player_ids(new)), 1)   # in limbo from day one
+        self.assertEqual(
+            LeagueDecision.objects.filter(league=new, status="open").count(), 1)
+        # ...and the unambiguous one was frozen without asking anybody.
+        self.assertEqual(LeaguePlayerRole.objects.filter(league=new).count(), 1)
+
+    def test_an_aura_league_gets_no_listone_and_no_questions(self):
+        self._player("Da decidere", method=CurrentPlayerRole.METHOD_DEFAULT)
+        r = self._create("aura")
+
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()["decisions_opened"], 0)
+        new = FantasyLeague.objects.get(id=r.json()["league_id"])
+        self.assertFalse(LeaguePlayerRole.objects.filter(league=new).exists())
+        self.assertFalse(LeagueDecision.objects.filter(league=new).exists())
+
+    def test_the_refresh_is_refused_where_there_is_no_listone(self):
+        """The action is classic-only; running it on an aura league would seed it
+        with per-role rows nothing there reads."""
+        r = self._create("aura")
+        aura = FantasyLeague.objects.get(id=r.json()["league_id"])
+        LeagueMembership.objects.filter(league=aura, user=self.admin).update(role="admin")
+
+        listed = self.client.get(f"/api/v1/leagues/{aura.id}/decisions").json()
+        self.assertFalse(listed["has_listone"])
+        refresh = self.client.post(f"/api/v1/leagues/{aura.id}/decisions/refresh",
+                                   format="json")
+        self.assertEqual(refresh.status_code, 400)
+        self.assertFalse(LeaguePlayerRole.objects.filter(league=aura).exists())

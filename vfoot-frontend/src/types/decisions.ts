@@ -34,6 +34,9 @@ export interface LeagueDecision {
 
 export interface LeagueDecisionsResponse {
   is_admin: boolean;
+  /** False in aura leagues (and in any league with no reference season): there is
+   *  no listone to re-read, so the refresh action does not apply. */
+  has_listone: boolean;
   /** Non-null while the market must stay shut, and says what is missing. */
   blocked_reason: string | null;
   blocking_open: number;

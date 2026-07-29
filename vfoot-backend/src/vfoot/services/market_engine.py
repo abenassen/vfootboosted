@@ -81,7 +81,14 @@ def free_agent_ids(league: FantasyLeague) -> set[int]:
         from vfoot.services.listone import eligible_player_ids
 
         pool &= eligible_player_ids(league.reference_season_id)
-    return pool
+    # Belt and braces on the limbo. Membership in the listone is already the gate
+    # — someone still awaiting a role has no frozen row — but stating it here
+    # means a stray seed row cannot quietly reopen the market on a player whose
+    # role is an open question, and a role settled after the bidding is exactly
+    # what changes what people paid for.
+    from vfoot.services.league_decisions import undecided_player_ids
+
+    return pool - undecided_player_ids(league)
 
 
 @dataclass
