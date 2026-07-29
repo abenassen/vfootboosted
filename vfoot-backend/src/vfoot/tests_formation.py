@@ -116,15 +116,11 @@ class ClassicSubstitutionTests(SimpleTestCase):
 
 
 class DefenseBonusTests(SimpleTestCase):
-    def test_bands(self):
-        from vfoot.services.defense_bonus import defense_bonus_value
-        self.assertEqual(defense_bonus_value(6.0), 0.0)
-        self.assertEqual(defense_bonus_value(6.25), 1.0)
-        self.assertEqual(defense_bonus_value(6.26), 2.0)
-        self.assertEqual(defense_bonus_value(6.5), 2.0)
-        self.assertEqual(defense_bonus_value(6.75), 3.0)
-        self.assertEqual(defense_bonus_value(7.0), 3.5)
-        self.assertEqual(defense_bonus_value(7.01), 4.0)
+    """Eligibility for the defence modifier. The BANDS themselves are pinned in
+    ``tests_classic_scoring.DefenseBandsTest``, which is the only place that
+    should assert them: a duplicate lived here and survived the 2026-07-28 fix
+    that removed the wrong +3.5 half-step and the +4 cap, so it went on asserting
+    the behaviour that fix had just deleted."""
 
     def test_requires_four_starting_defenders(self):
         from vfoot.services.defense_bonus import compute_defense_bonus
