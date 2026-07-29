@@ -445,3 +445,50 @@ class DepartureReturnTests(DecisionQueueTests):
         snapshot_league_listone(self.league)
         self.assertEqual(
             LeaguePlayerRole.objects.get(league=self.league, player=p).role, "DIF")
+
+
+class QueueCriterionTests(TestCase):
+    """WHO reaches the admin queue. Every branch here is a measured claim, and the
+    measurements are in the docstring of ``role_inference.needs_decision``."""
+
+    def _role(self, **kw):
+        from realdata.models import Player
+        from vfoot.models import CurrentPlayerRole
+        p = Player.objects.create(full_name=kw.pop("name", "X"))
+        return CurrentPlayerRole.objects.create(player=p, **kw), p
+
+    def test_a_certain_tm_position_ends_the_question_however_torn_the_measurement(self):
+        """Nico Paz: TM says attacking midfield, our clustering says ATT at a margin
+        of 0.24. TM matched the listone 351/352 across EVERY margin band, so this is
+        not a doubt — it is our own wobble under an answer that is right."""
+        from vfoot.services.role_inference import PlayerRoleResult
+        r = PlayerRoleResult(player_id=1, category="ala offensiva", confidence=0.5,
+                             role_data="ATT", role_mitigated="CEN", method="category",
+                             tm_position="attacking midfield", role_margin=0.05)
+        self.assertFalse(r.needs_decision)
+
+    def test_an_ambiguous_position_with_a_torn_measurement_does_need_one(self):
+        """Berardi: TM says right winger (54% pure in the listone), so nobody
+        overrules the clustering — and the clustering split him CEN 56% / ATT 35%."""
+        from vfoot.services.role_inference import PlayerRoleResult
+        r = PlayerRoleResult(player_id=1, category="centrocampista offensivo",
+                             confidence=0.34, role_data="CEN", role_mitigated="CEN",
+                             method="category", tm_position="right winger",
+                             role_margin=0.21)
+        self.assertTrue(r.needs_decision)
+
+    def test_an_ambiguous_position_resolved_only_by_the_lineup_needs_one(self):
+        """The SofaScore position is F/M/D: for a winger it always reads ATT, and
+        against the listone that is right 8 times out of 15."""
+        from vfoot.services.role_inference import PlayerRoleResult
+        r = PlayerRoleResult(player_id=1, category="", confidence=0.0,
+                             role_data="ATT", role_mitigated="ATT", method="sofa",
+                             tm_position="right winger", role_margin=1.0)
+        self.assertTrue(r.needs_decision)
+
+    def test_a_confident_measurement_under_an_ambiguous_position_does_not(self):
+        from vfoot.services.role_inference import PlayerRoleResult
+        r = PlayerRoleResult(player_id=1, category="ala offensiva", confidence=0.8,
+                             role_data="ATT", role_mitigated="ATT", method="category",
+                             tm_position="left winger", role_margin=0.9)
+        self.assertFalse(r.needs_decision)

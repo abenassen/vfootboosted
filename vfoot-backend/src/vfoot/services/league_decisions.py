@@ -23,7 +23,9 @@ from vfoot.models import (
     LeagueDecision, LeagueDecisionVote, LeagueMembership, LeaguePlayerRole,
     CurrentPlayerRole,
 )
-from vfoot.services.role_inference import TM_AMBIGUOUS, TM_DEFAULT
+from vfoot.services.role_inference import (
+    ROLE_MARGIN_REVIEW, TM_AMBIGUOUS, TM_DEFAULT,
+)
 
 ROLE_LABELS = {Player.ROLE_GK: "Portiere", Player.ROLE_DEF: "Difensore",
                Player.ROLE_MID: "Centrocampista", Player.ROLE_FWD: "Attaccante"}
@@ -97,6 +99,20 @@ def players_needing_decision(league, *,
                              tm_position__in=TM_AMBIGUOUS)
                      .exclude(method=CurrentPlayerRole.METHOD_CATEGORY)
                      .values_list("player_id", flat=True))
+    # Measured, but the measurement itself was a coin flip. Only where the TM
+    # position is AMBIGUOUS: there nobody overrules the clustering, so a role
+    # decided by 56% against 35% is genuinely open. Under a certain TM position
+    # the same tight margin means nothing — TM matched the listone 351 times out
+    # of 352, in every margin band, so those cases (Nico Paz, McTominay) belong to
+    # TM and asking about them is work with nothing to correct. Same criterion as
+    # ``role_inference.needs_decision``; the two must not drift apart, since one
+    # reports what the other enforces.
+    torn = set(CurrentPlayerRole.objects
+               .filter(player_id__in=candidates,
+                       tm_position__in=TM_AMBIGUOUS,
+                       method=CurrentPlayerRole.METHOD_CATEGORY,
+                       role_margin__lt=ROLE_MARGIN_REVIEW)
+               .values_list("player_id", flat=True))
     # A player who arrived since the last inference run has NO CurrentPlayerRole at
     # all. Without this he would be seeded straight from Player.classic_role_seed —
     # the raw provider map, under which every winger is a midfielder — silently
@@ -113,7 +129,7 @@ def players_needing_decision(league, *,
                          player_id__in=candidates - known,
                          tm_position__in=TM_AMBIGUOUS)
                  .values_list("player_id", flat=True))
-    flagged = unresolved | unseen
+    flagged = unresolved | unseen | torn
     # Relevance gate: only players worth an admin's time reach the queue. The rest
     # (barely-featuring youngsters and squad filler) auto-take the system proposal.
     if min_market_value:

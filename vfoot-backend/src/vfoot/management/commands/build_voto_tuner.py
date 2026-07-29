@@ -131,6 +131,23 @@ class Command(BaseCommand):
                    .filter(match__competition_season_id=cs)
                    .values("match_id", "player_id", "side")}
 
+        # Which features are counted EVENTS (integer-valued) rather than continuous
+        # quantities. For those, "one sigma" can be a meaningless unit — an error
+        # leading to a goal has sigma 0.10, i.e. a tenth of an event, so the column
+        # D reading understates it by a factor of ten. The right question there is
+        # what ONE occurrence is worth, which is what column E answers.
+        is_event = {}
+        z_one = {}
+        for f in FEATS:
+            if f == cr.EXPOSURE_KEY or f in cr.DERIVED_FEATURES or f in cr.MERGED_FEATURES:
+                is_event[f] = False
+                continue
+            vals = [totals[k].get(f, 0.0) for k in totals]
+            is_event[f] = all(abs(v - round(v)) < 1e-9 for v in vals)
+            if is_event[f]:
+                # a count of 1, at 90' the per-90 scale is exactly 1.0
+                z_one[f] = cr._feature_z(f, 1.0, SCALES)
+
         def rawvec(tot, m, ex):
             """the feature values in provider units — for the readable sheets"""
             v = cr.raw_feature_values(tot, m, ex, gk=False)
@@ -312,7 +329,7 @@ class Command(BaseCommand):
                 break
 
         self._build_xlsx(out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows,
-                         cov_pooled=COV_POOLED)
+                         cov_pooled=COV_POOLED, is_event=is_event, z_one=z_one)
         self.stdout.write(self.style.SUCCESS(
             f"scritto {out} | casi: {len(casedata)} "
             f"(gol: {sum(1 for c in casedata if c['goals'])}, "
@@ -320,7 +337,9 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------
     def _build_xlsx(self, out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows=(),
-                    cov_pooled=None):
+                    cov_pooled=None, is_event=None, z_one=None):
+        is_event = is_event or {}
+        z_one = z_one or {}
         wb = openpyxl.Workbook()
         fillh = PatternFill("solid", fgColor=TEAL); yel = PatternFill("solid", fgColor=YEL)
 
@@ -471,7 +490,8 @@ class Command(BaseCommand):
         # not there (it happened: an xA of +0.9 sigma read as decisive when it was
         # worth 0.02 of a vote).
         tun["D6"] = "1σ in VOTI"
-        for cc in ("A6", "B6", "C6", "D6"):
+        tun["E6"] = "1 EVENTO in VOTI"
+        for cc in ("A6", "B6", "C6", "D6", "E6"):
             tun[cc].font = Font(bold=True, color="FFFFFF"); tun[cc].fill = fillh
         for i, f in enumerate(FEATS):
             tun.cell(7 + i, 1, f)
@@ -487,7 +507,19 @@ class Command(BaseCommand):
                           f"=ABS(C{7+i})/calc!$C${murow_dif}*{cr.VOTE_SPREAD_K}"
                           f"*90/(90+{cr.SHRINKAGE_MINUTES})")
             dc.number_format = "0.00"
-        KM = "Tuner!$B$5"; BB = "Tuner!$D$5"; c0 = 5
+            # SIGNED, unlike D: an error that costs half a vote should read -0.50,
+            # not 0.50. Blank for continuous features, where "one occurrence" of an
+            # xA or of conceded danger means nothing.
+            if is_event.get(f):
+                ec = tun.cell(7 + i, 5,
+                              f"={z_one[f]:.6f}*C{7+i}/calc!$C${murow_dif}"
+                              f"*{cr.VOTE_SPREAD_K}*90/(90+{cr.SHRINKAGE_MINUTES})")
+                ec.number_format = "+0.00;-0.00"
+            else:
+                tun.cell(7 + i, 5, "—")
+        # c0 = 6: le etichette di riga dei casi stanno in F, non in E, perche' la
+        # colonna E ora appartiene alla tabella dei pesi ("1 EVENTO in VOTI").
+        KM = "Tuner!$B$5"; BB = "Tuner!$D$5"; c0 = 6
         rowlab = [(7, "giocatore"), (8, "TIPO"), (9, "ruolo"), (10, "partita (gd, risultato, gol)"),
                   (11, "minuti"), (12, "fanta"), (13, "statistico"), (14, "sofascore"),
                   (15, "nostro(attuale)"), (16, "indice"), (17, "media INDICE ruolo"),
@@ -534,20 +566,20 @@ class Command(BaseCommand):
             tun.conditional_formatting.add(rng, FormulaRule(
                 formula=[cond], fill=PatternFill("solid", fgColor=bg),
                 font=Font(bold=True, size=12, color=fg)))
-        tun["E26"] = ("NOTE: 'media/sigma INDICE ruolo' sono media e dev.std dell'INDICE (somma pesata) "
+        tun["F26"] = ("NOTE: 'media/sigma INDICE ruolo' sono media e dev.std dell'INDICE (somma pesata) "
                       "tra i giocatori del ruolo → cambiano coi pesi. gd_on e red_adj sono FISSI. "
                       "'nostro(attuale)' (riga 15) è il deployato e dovrebbe ≈ VOTO FINALE (riga 24).")
-        tun["E27"] = ("TIPO: 'DISAC. 2x'=disaccordo con fanta E SofaScore (marcatori "
+        tun["F27"] = ("TIPO: 'DISAC. 2x'=disaccordo con fanta E SofaScore (marcatori "
                       "che sprecano: il gol è bonus +3, non voto base; loro fanno l'alone-gol, "
                       "noi no); 'DISAC. fanta'=disaccordo con fanta ma SofaScore ci dà ragione "
                       "(merito individuale in sconfitta vs punizione collettiva); "
                       "GOL=marcatore, 'KO netto'=sconfitta ≥3 gol, OUTLIER, buono=accordo; "
                       "'ESTREMO alto/basso'=i voti difensori più alti e più bassi della "
                       "stagione, ripescati a ogni rebuild (lì il modello è meno vincolato).")
-        tun["E28"] = ("Mitigazione: solo divergenze (voto>6 in sconfitta → giù; voto<6 in vittoria → su), "
+        tun["F28"] = ("Mitigazione: solo divergenze (voto>6 in sconfitta → giù; voto<6 in vittoria → su), "
                       "gravità = base + K·|gd_on|, cap ±1. K in B5, 'base sc/vitt' (contributo "
                       "discreto sconfitta/vittoria, oltre i gol) in D5. SGA_Pali: xgOT−xg + palo.")
-        tun["E29"] = (
+        tun["F29"] = (
             f"EXPOSURE (_exposure, peso {-cr.EXPOSURE_WEIGHT:.2f}): pericolo SUBITO addebitato "
             f"a chi era in quella zona. Per ogni tiro avversario (rigori esclusi, solo minuti "
             f"in campo) l'addebito è λ·esito + (1−λ)·xGOT con λ={cr.EXPOSURE_LAMBDA:.2f}; "
@@ -558,10 +590,11 @@ class Command(BaseCommand):
             f"{cr.EXPOSURE_KERNEL:.2f}× le adiacenti; le quote fanno 100%, il portiere è "
             f"escluso dalla divisione (il suo canale risponde già delle parate). Il valore in "
             f"colonna è FISSO (non dipende dai pesi), il PESO no: editalo in C.")
-        for a in ("E26", "E27", "E28", "E29"):
+        for a in ("F26", "F27", "F28", "F29"):
             tun[a].font = Font(italic=True, size=9)
         tun.column_dimensions["A"].width = 21; tun.column_dimensions["C"].width = 8
-        tun.column_dimensions["E"].width = 19
+        tun.column_dimensions["D"].width = 11; tun.column_dimensions["E"].width = 15
+        tun.column_dimensions["F"].width = 19
 
         # ---- medie (readable per-feature role means) ----
         med = wb.create_sheet("medie")

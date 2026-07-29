@@ -122,24 +122,35 @@ class PlayerRoleResult:
 
     @property
     def needs_decision(self) -> bool:
-        """A human should settle this one.
+        """A human should settle this one — and ONLY these, measured.
 
-        Two different ways of being unsure, and both must count:
+        An unambiguous Transfermarkt position ends the question whatever else we
+        know: over a full season it matched the fantacalcio listone 351 times out
+        of 352, and it did so in EVERY band of ``role_margin`` — 100% even where
+        our own measurement was a coin flip. So a tight margin under a certain TM
+        position says our clustering wobbled, not that TM is wrong, and asking a
+        human there is nine questions with nothing to correct. The one case in the
+        season where the measurement beat TM (De Ketelaere) had a margin of 0.76,
+        the most CONFIDENT of the disagreeing group — the exact opposite of what a
+        margin filter would have caught.
 
-        * the position is genuinely ambiguous AND we have nothing to resolve it
-          with — no measured category, no lineup position;
-        * or we DID measure him and the measurement does not separate his two
-          candidate roles (``role_margin``). This case used to pass silently:
-          ``method == "category"`` was treated as an answer we stand behind, so
-          Berardi — whose 60 clustering runs put him at CEN 56% / ATT 35%, the
-          2nd percentile of the whole population — was never put to anyone. The
-          stored ``confidence`` could not catch it either: it measures how firmly
-          he sits in his CATEGORY, and a player oscillating between two styles that
-          map to the same role is not a problem at all.
+        Where the TM position is ambiguous nobody overrules the measurement, so
+        the doubt is real and comes in two shapes:
+
+        * we could not measure him — the SofaScore lineup position is all we have,
+          and for a winger it is F/M/D, which cannot answer the CEN-or-ATT question
+          fantacalcio itself splits down the middle: it agrees 8 times out of 15;
+        * we did measure him and the clustering did not separate his two candidate
+          roles (``role_margin`` below ROLE_MARGIN_REVIEW). Berardi is this case:
+          60 runs put him at CEN 56% / ATT 35%. Note that ``confidence`` cannot see
+          it — it measures how firmly he sits in his CATEGORY, and oscillating
+          between two styles that condense to the SAME role is not a problem.
         """
-        if self.tm_position in TM_AMBIGUOUS and self.method not in ("category", "sofa"):
+        if self.tm_position not in TM_AMBIGUOUS:
+            return False
+        if self.method != "category":
             return True
-        return self.method == "category" and self.role_margin < ROLE_MARGIN_REVIEW
+        return self.role_margin < ROLE_MARGIN_REVIEW
 
 
 @dataclass
