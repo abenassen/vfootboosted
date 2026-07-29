@@ -631,3 +631,105 @@ class LeagueCreationTests(DecisionQueueTests):
                                    format="json")
         self.assertEqual(refresh.status_code, 400)
         self.assertFalse(LeaguePlayerRole.objects.filter(league=aura).exists())
+
+
+class ConsultationEmailTests(DecisionQueueTests):
+    """Being asked, and being told how it ended.
+
+    The badge only reaches someone who opens the app; a consultation nobody sees
+    is a survey with no respondents. Two messages, and only two: the question
+    addressed to you, and its answer.
+
+    ``captureOnCommitCallbacks`` everywhere on purpose — the sends are queued for
+    after the commit, and a test that did not run them would pass while the real
+    thing never left the building.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from django.core import mail
+        self.mail = mail
+        self.mail.outbox = []
+        for u in (self.admin, self.member):
+            u.email = f"{u.username}@example.com"
+            u.save(update_fields=["email"])
+
+    def _one_decision(self):
+        self._player("Da decidere", method=CurrentPlayerRole.METHOD_DEFAULT)
+        open_role_decisions(self.league)
+        return LeagueDecision.objects.get(league=self.league)
+
+    def _consult(self, decision, is_open=True, user=None):
+        from vfoot.services.league_decisions import set_consultation
+        with self.captureOnCommitCallbacks(execute=True):
+            set_consultation(decision, is_open, user=user or self.admin)
+
+    def _resolve(self, decision, option, user=None):
+        with self.captureOnCommitCallbacks(execute=True):
+            resolve(decision, option, user=user or self.admin)
+
+    def test_opening_a_consultation_asks_the_members_by_email(self):
+        d = self._one_decision()
+        self._consult(d)
+
+        self.assertEqual(len(self.mail.outbox), 1)          # not the admin himself
+        msg = self.mail.outbox[0]
+        self.assertEqual(msg.to, [self.member.email])
+        self.assertIn("parere", msg.subject)
+        self.assertIn(d.question, msg.body)
+        self.assertIn("/decisioni", msg.body)
+
+    def test_closing_a_consultation_mails_nobody(self):
+        d = self._one_decision()
+        self._consult(d)
+        self.mail.outbox = []
+        self._consult(d, False)
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_reopening_an_already_open_consultation_does_not_ask_twice(self):
+        d = self._one_decision()
+        self._consult(d)
+        self.mail.outbox = []
+        self._consult(d)
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_the_outcome_goes_back_to_whoever_was_asked(self):
+        d = self._one_decision()
+        self._consult(d)
+        cast_vote(d, self.member, "ATT")
+        self.mail.outbox = []
+
+        self._resolve(d, "CEN")
+        self.assertEqual(len(self.mail.outbox), 1)
+        msg = self.mail.outbox[0]
+        self.assertEqual(msg.to, [self.member.email])
+        self.assertIn("Centrocampista", msg.body)   # the outcome, in words
+        self.assertIn("Attaccante: 1", msg.body)    # and what the league thought
+
+    def test_a_routine_sign_off_mails_nobody(self):
+        """No consultation, no mail: the admin's own backlog is not news."""
+        self._resolve(self._one_decision(), "CEN")
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_a_member_without_an_address_is_simply_skipped(self):
+        d = self._one_decision()
+        User.objects.filter(id=self.member.id).update(email="")
+        self._consult(d)
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_a_broken_relay_does_not_break_the_admin_s_action(self):
+        """The mail is a courtesy; the decision is the point."""
+        from unittest.mock import patch
+        d = self._one_decision()
+        with patch("vfoot.services.league_notifications.get_connection",
+                   side_effect=OSError("relay down")):
+            self._consult(d)
+        d.refresh_from_db()
+        self.assertTrue(d.consultation_open)
+
+    def test_the_switch_silences_everything(self):
+        d = self._one_decision()
+        with self.settings(VFOOT_NOTIFY_EMAILS=False):
+            self._consult(d)
+            self._resolve(d, "CEN")
+        self.assertEqual(self.mail.outbox, [])

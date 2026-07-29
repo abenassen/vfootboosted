@@ -283,6 +283,24 @@ def resolve(decision, option: str, *, user=None) -> LeagueDecision:
     decision.resolved_by = user
     decision.resolved_at = timezone.now()
     decision.save(update_fields=["outcome", "status", "resolved_by", "resolved_at"])
+    # Whoever was asked is owed the answer. After the commit, never inside it.
+    from vfoot.services import league_notifications as notify
+    notify.on_commit(notify.notify_decision_resolved, decision, user)
+    return decision
+
+
+@transaction.atomic
+def set_consultation(decision, is_open: bool, *, user=None) -> LeagueDecision:
+    """Ask the league, or stop asking. Mails the members on the way IN only:
+    opening is a question addressed to them, closing is housekeeping."""
+    if decision.status != LeagueDecision.STATUS_OPEN:
+        raise ValueError("La decisione e' chiusa: non si puo' piu' consultare.")
+    was_open = decision.consultation_open
+    decision.consultation_open = bool(is_open)
+    decision.save(update_fields=["consultation_open"])
+    if decision.consultation_open and not was_open:
+        from vfoot.services import league_notifications as notify
+        notify.on_commit(notify.notify_consultation_opened, decision, user)
     return decision
 
 

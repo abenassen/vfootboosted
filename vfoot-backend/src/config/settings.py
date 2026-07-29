@@ -303,6 +303,11 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL",
 VFOOT_FRONTEND_BASE_URL = os.environ.get("VFOOT_FRONTEND_BASE_URL",
                                          "http://localhost:5173")
 
+# League notifications (a consultation opened, a decision settled). On by
+# default; a single switch to silence them while seeding, replaying a season or
+# testing against a real relay.
+VFOOT_NOTIFY_EMAILS = _env_bool("VFOOT_NOTIFY_EMAILS", True)
+
 # Empty means the Google button is simply not offered; the endpoint then refuses
 # rather than silently accepting unverifiable tokens.
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")

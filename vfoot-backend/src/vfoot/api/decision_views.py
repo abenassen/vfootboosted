@@ -17,7 +17,7 @@ from vfoot.models import (
 )
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
-    resolve,
+    resolve, set_consultation,
 )
 from vfoot.services.listone import snapshot_league_listone
 
@@ -132,8 +132,10 @@ class LeagueDecisionConsultView(APIView):
             return Response({"detail": "Solo l'amministratore puo' aprire una consultazione."},
                             status=status.HTTP_403_FORBIDDEN)
         d = get_object_or_404(LeagueDecision, id=decision_id, league=league)
-        d.consultation_open = bool(request.data.get("open", True))
-        d.save(update_fields=["consultation_open"])
+        try:
+            set_consultation(d, bool(request.data.get("open", True)), user=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(_serialize(d, request.user))
 
 

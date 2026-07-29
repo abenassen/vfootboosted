@@ -199,7 +199,47 @@ Da valutare anche la formazione, che su schermo piccolo è la pagina più densa.
 
 ---
 
-## 7. Coinvolgimento: commenti, chat, meme
+## 7. Notiziario della lega
+
+La home di lega oggi è statica: dice com'è messa la squadra, non che cosa è
+**successo**. Un flusso di notizie — acquisti e svincoli, offerte rilanciate e
+concluse, decisioni prese e consultazioni aperte, giornate chiuse, cambi di
+ruolo, arrivi e partenze dal listone reale — la rende il posto dove si torna,
+e insieme dà a chi non segue giorno per giorno tutto quello che gli serve.
+
+Buona notizia architetturale: **gli eventi in gran parte esistono già**, solo
+sparsi. `MarketEvent` e `AuctionEvent` sono log append-only con tipo, attore,
+payload JSON e istante, cioè già la forma giusta; `LeagueDecision` ha apertura,
+consultazione ed esito con chi ha deciso e quando; la rosa conserva lo storico
+dei contratti; le giornate hanno una conclusione datata. Manca il posto dove
+confluiscono e la resa in italiano.
+
+Due strade, e conviene sceglierle consapevolmente:
+
+- **Tabella unica `LeagueEvent`**, scritta dai servizi che già sanno (lo stesso
+  `record_event` del mercato a offerte, generalizzato). Lettura banale e
+  paginabile, un aggancio per sorgente, e lo storico esistente si recupera
+  rigiocando `MarketEvent` e le decisioni risolte.
+- **Aggregazione a lettura**, interrogando ogni sorgente e fondendo per data.
+  Nessuna migrazione e nessun backfill, ma una query che si allarga a ogni
+  sorgente nuova e paginazione scomoda.
+
+La prima, salvo sorprese: il costo è un hook per sorgente, una volta.
+
+Tre cose da decidere prima di scrivere codice, tutte di prodotto:
+
+1. **Il rumore.** Un'asta da 500 giocatori non può diventare 500 righe. Serve
+   aggregazione ("Panda ha chiuso l'asta con 25 acquisti") e probabilmente una
+   soglia di rilevanza, come già facciamo per la coda dell'admin.
+2. **La visibilità.** Tutto a tutti, o certi eventi solo a chi riguardano? Una
+   consultazione è di lega, un'offerta persa è personale.
+3. **Il rapporto con le notifiche.** Un flusso di eventi è esattamente ciò da
+   cui pesca un riepilogo per email o una push (§5): conviene disegnarlo
+   sapendo che quella sarà la seconda lettura, non solo la home.
+
+---
+
+## 8. Coinvolgimento: commenti, chat, meme
 
 Richiede scelte di prodotto prima che tecniche. Una nota architetturale utile: il
 meccanismo `LeagueDecision` costruito per i ruoli è **generico** (tipo, oggetto,
@@ -211,7 +251,7 @@ sono pubblici.
 
 ---
 
-## 8. Bot WhatsApp
+## 9. Bot WhatsApp
 
 Richiede un servizio esterno (API Business o simili), con costi e verifica del
 numero. Da valutare rispetto all'alternativa più semplice: notifiche push della
