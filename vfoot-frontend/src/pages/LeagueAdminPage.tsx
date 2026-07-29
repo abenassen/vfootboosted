@@ -38,6 +38,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import CopyButton from '../components/CopyButton';
+import MarketAdminPanel from '../components/MarketAdminPanel';
 import type {
   CompetitionItem,
   CompetitionSchedulePreview,
@@ -50,7 +51,7 @@ import type {
 } from '../types/league';
 
 type AdminTab = 'user' | 'league';
-type LeagueTab = 'overview' | 'roster' | 'competitions' | 'matchdays' | 'auction';
+type LeagueTab = 'overview' | 'roster' | 'competitions' | 'matchdays' | 'auction' | 'market';
 
 export default function LeagueAdminPage() {
   const [searchParams] = useSearchParams();
@@ -635,8 +636,8 @@ export default function LeagueAdminPage() {
                       <Badge tone={l.role === 'admin' ? 'green' : 'slate'}>
                         {l.role === 'admin' ? 'amministratore' : 'partecipante'}
                       </Badge>
-                      <Badge tone={l.market_open ? 'green' : 'red'}>
-                        Mercato {l.market_open ? 'aperto' : 'chiuso'}
+                      <Badge tone={l.market_open ? 'green' : 'slate'}>
+                        Rosa {l.market_open ? 'modificabile' : 'bloccata'}
                       </Badge>
                       <Button
                         size="sm"
@@ -776,7 +777,7 @@ export default function LeagueAdminPage() {
               <SectionTitle>
                 Gestione lega{selectedLeague ? <span className="ml-1 normal-case text-slate-800">· {selectedLeague.name}</span> : null}
               </SectionTitle>
-              {selectedLeague ? <Badge tone={selectedLeague.market_open ? 'green' : 'red'}>Mercato {selectedLeague.market_open ? 'aperto' : 'chiuso'}</Badge> : null}
+              {selectedLeague ? <Badge tone={selectedLeague.market_open ? 'green' : 'slate'}>Rosa {selectedLeague.market_open ? 'modificabile' : 'bloccata'}</Badge> : null}
             </div>
             <div className="mt-1 text-[11px] text-slate-400">
               Riferita alla lega selezionata in alto. Cambia lega dal selettore in cima alla pagina.
@@ -791,9 +792,10 @@ export default function LeagueAdminPage() {
                   </span>
                   <CopyButton value={league.invite_code} label="Copia codice" />
                 </div>
-                <div className="flex gap-2">
+                <div className="space-y-1">
                   <Button
                     size="sm"
+                    variant="secondary"
                     onClick={() =>
                       void run(async () => {
                         if (!league) return;
@@ -803,8 +805,12 @@ export default function LeagueAdminPage() {
                       })
                     }
                   >
-                    {league.market_open ? 'Chiudi mercato' : 'Apri mercato'}
+                    {league.market_open ? 'Blocca modifiche manuali alla rosa' : 'Consenti modifiche manuali alla rosa'}
                   </Button>
+                  <div className="text-[11px] text-slate-400">
+                    Abilita/blocca l’inserimento manuale e l’import di rose (add/rimuovi/bulk/CSV). Non è il
+                    mercato a offerte: quello si gestisce nella scheda <b>Mercato</b>.
+                  </div>
                 </div>
                 <div className="space-y-3 rounded-xl border px-3 py-2">
                   <div className="font-semibold">Opzioni partita</div>
@@ -984,6 +990,7 @@ export default function LeagueAdminPage() {
                     ['competitions', 'Competizioni'],
                     ['matchdays', 'Matchdays'],
                     ['auction', 'Asta'],
+                    ['market', 'Mercato'],
                   ] as Array<[LeagueTab, string]>).map(([id, label]) => (
                     <button
                       key={id}
@@ -1938,13 +1945,17 @@ export default function LeagueAdminPage() {
                   </Link>
                 </Card>
               ) : null}
+
+              {leagueTab === 'market' && league ? (
+                <MarketAdminPanel leagueId={league.league_id} />
+              ) : null}
             </>
           ) : (
             <div className="grid gap-4 lg:grid-cols-2">
               <Card className="p-4">
                 <SectionTitle>Funzioni di gestione lega</SectionTitle>
                 <ul className="mt-3 space-y-2 text-sm text-slate-700">
-                  <li>• Apri/chiudi mercato</li>
+                  <li>• Mercato di riparazione: apri/gestisci sessioni di offerte, valida gli scambi</li>
                   <li>• Modifica roster con ricerca giocatori per nome</li>
                   <li>• Crea competizioni (round robin/knockout)</li>
                   <li>• Gestione asta (prossimo chiamato, chiamati, budget)</li>
