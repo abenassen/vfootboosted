@@ -94,7 +94,17 @@ from vfoot.api.decision_views import (
     LeagueDecisionVoteView,
 )
 
+from vfoot.api.push_views import (
+    PushConfigView, PushSubscribeView, PushUnsubscribeView,
+)
+
 urlpatterns = [
+    # Web Push. The config is open (the public VAPID key identifies us, it does
+    # not authorise anything); subscribing needs the token, since a subscription
+    # belongs to a user.
+    path("push/config", PushConfigView.as_view(), name="push-config"),
+    path("push/subscribe", PushSubscribeView.as_view(), name="push-subscribe"),
+    path("push/unsubscribe", PushUnsubscribeView.as_view(), name="push-unsubscribe"),
     path("leagues/<int:league_id>/decisions", LeagueDecisionListView.as_view(),
          name="league-decisions"),
     path("leagues/<int:league_id>/decisions/accept-all",

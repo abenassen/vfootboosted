@@ -252,3 +252,42 @@ ssh root@139.162.144.123 '
 ```
 `vfoot-tm-poll` and `vfoot-egress-refill` are independent and can be enabled anytime;
 `vfoot-calendar`/`vfoot-tick` need the sudo bridge above.
+
+## Notifiche push / PWA (primo deploy che le porta)
+
+1. **Deps** — `pip install -r requirements.txt` aggiunge `pywebpush` (con
+   `py-vapid` e `http-ece`). Se manca, le push si spengono da sole: `push_channel`
+   lo importa in modo pigro e l'app parte comunque.
+2. **Migrazione** — `manage.py migrate` crea `vfoot_pushsubscription`.
+3. **Chiavi VAPID** — una volta sola, sul server:
+
+   ```sh
+   python manage.py vapid_keys        # stampa le due righe da mettere in .env
+   ```
+
+   **Non rigenerarle mai dopo**: ogni browser lega la propria subscription alla
+   chiave pubblica ricevuta al momento dell'iscrizione, quindi cambiarle zittisce
+   tutte le installazioni esistenti (il servizio push risponde 401/403) finché
+   ognuno non si re-iscrive. Con le chiavi vuote la funzione è semplicemente
+   spenta e gli avvisi viaggiano solo per email — stato normale, non guasto.
+4. **`.env`** — `VFOOT_VAPID_PUBLIC_KEY`, `VFOOT_VAPID_PRIVATE_KEY`, e
+   `VFOOT_VAPID_SUBJECT=mailto:...` (RFC 8292: serve un mailto o un https).
+   Controlla anche `VFOOT_FRONTEND_BASE_URL`, che è il link dentro le email e le
+   notifiche: in sviluppo punta all'IP locale.
+5. **nginx** — nessuna regola nuova, ma il service worker **deve** essere servito
+   dalla radice (`/sw.js`) con `Content-Type: application/javascript` e senza
+   cache lunga, altrimenti il suo scope si restringe o un aggiornamento non arriva
+   mai. La `location /` con `try_files ... /index.html` già lo copre, purché
+   `dist/sw.js` sia stato copiato col resto del build.
+6. **Verifica** dopo il restart:
+
+   ```sh
+   curl -s https://vfoot.it/api/v1/push/config          # {"enabled":true,...}
+   curl -s -o /dev/null -w '%{http_code} %{content_type}\n' https://vfoot.it/sw.js
+   curl -s https://vfoot.it/manifest.webmanifest | head -c 120
+   python manage.py send_test_push --user <username>    # dopo che si è iscritto
+   ```
+
+   HTTPS è un prerequisito assoluto (service worker e push non esistono in
+   chiaro), ed è già a posto con Let's Encrypt. `localhost` è l'unica eccezione,
+   ed è ciò che rende collaudabile lo sviluppo.

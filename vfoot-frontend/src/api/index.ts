@@ -131,6 +131,9 @@ type ApiImpl = {
   consultLeagueDecision: typeof backendApi.consultLeagueDecision;
   acceptAllLeagueDecisions: typeof backendApi.acceptAllLeagueDecisions;
   refreshLeagueDecisions: typeof backendApi.refreshLeagueDecisions;
+  getPushConfig: typeof backendApi.getPushConfig;
+  subscribePush: typeof backendApi.subscribePush;
+  unsubscribePush: typeof backendApi.unsubscribePush;
 };
 
 const typedImpl = impl as ApiImpl;
@@ -213,3 +216,6 @@ export const resolveLeagueDecision = typedImpl.resolveLeagueDecision;
 export const consultLeagueDecision = typedImpl.consultLeagueDecision;
 export const acceptAllLeagueDecisions = typedImpl.acceptAllLeagueDecisions;
 export const refreshLeagueDecisions = typedImpl.refreshLeagueDecisions;
+export const getPushConfig = typedImpl.getPushConfig;
+export const subscribePush = typedImpl.subscribePush;
+export const unsubscribePush = typedImpl.unsubscribePush;

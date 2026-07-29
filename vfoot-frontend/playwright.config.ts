@@ -10,6 +10,9 @@ export default defineConfig({
   reporter: 'line',
   use: {
     baseURL,
+    // The PWA specs need a real Chrome: the bundled headless shell has no service
+    // worker DevTools domain, so `ServiceWorker.deliverPushMessage` is unavailable.
+    channel: 'chrome',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },

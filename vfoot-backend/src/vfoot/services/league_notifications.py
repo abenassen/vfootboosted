@@ -18,6 +18,12 @@ Three rules the code enforces rather than trusts:
 Only the answer is worth an email, not every keystroke: opening a consultation
 (a question addressed to you) and settling it (the answer to it). Everything
 else belongs to the league feed, when there is one.
+
+Two channels, one decision about WHAT to say. Email reaches anyone with an
+address; a push reaches only who installed the app (on iOS, only from the Home
+Screen) — so push is an addition, never a replacement, and the two are sent
+together rather than one instead of the other. A user with both simply learns
+faster.
 """
 from __future__ import annotations
 
@@ -80,6 +86,8 @@ def notify_consultation_opened(decision, actor=None) -> None:
     users = _recipients(decision.league, exclude_user=actor)
     if not users:
         return
+    _push(users, title=f"Ti hanno chiesto un parere · {decision.league.name}",
+          body=decision.question or decision.title, tag=f"decision-{decision.id}")
     proposal = (f"\nLa proposta del sistema e': {_label(decision, decision.proposed)}.\n"
                 if decision.proposed else "")
     reason = f"\nPerche' lo chiediamo: {decision.rationale}\n" if decision.rationale else ""
@@ -108,6 +116,9 @@ def notify_decision_resolved(decision, actor=None) -> None:
         return
     tally = decision.tally()
     votes = ", ".join(f"{_label(decision, v)}: {n}" for v, n in tally.items() if n)
+    _push(users, title=f"Decisione presa · {decision.league.name}",
+          body=f"{decision.title}: {_label(decision, decision.outcome)}",
+          tag=f"decision-{decision.id}")
     body = (
         "{greeting}\n\n"
         f"Nella lega \"{decision.league.name}\" e' stata presa la decisione su cui "
@@ -118,6 +129,20 @@ def notify_decision_resolved(decision, actor=None) -> None:
     )
     _send([_message(u, f"Decisione presa · {decision.league.name}", body)
            for u in users])
+
+
+def _push(users: list, *, title: str, body: str, tag: str = "") -> None:
+    """The second channel. Silent when push is not configured, and never able to
+    stop the email: whoever installed the app hears sooner, nobody hears less."""
+    from vfoot.services import push_channel
+    if not push_channel.configured():
+        return
+    for user in users:
+        try:
+            push_channel.send_to_user(user, title=title, body=body,
+                                      url="/decisioni", tag=tag)
+        except Exception:                                 # noqa: BLE001
+            log.exception("Notifica push fallita per l'utente %s", user.id)
 
 
 def _message(user, subject: str, body_template: str) -> EmailMessage:

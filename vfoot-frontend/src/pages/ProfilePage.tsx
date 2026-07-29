@@ -2,6 +2,7 @@ import { FormEvent, useMemo, useState } from 'react';
 import { Button, Card, SectionTitle } from '../components/ui';
 import Avatar from '../components/Avatar';
 import AvatarBuilder from '../components/AvatarBuilder';
+import NotificationsCard from '../components/NotificationsCard';
 import { useAuth } from '../auth/AuthContext';
 import { changePassword, updateProfile } from '../api';
 import { ApiError } from '../api/backend';
@@ -119,6 +120,10 @@ export default function ProfilePage() {
           <div className="truncate text-sm text-slate-500">{user?.email || 'Email non impostata'}</div>
         </div>
       </Card>
+
+      {/* Notifications + install. High on the page on purpose: on iOS the
+          install is a prerequisite for notifications and nothing else announces it. */}
+      <NotificationsCard />
 
       {/* Avatar builder */}
       <Card className="p-4">

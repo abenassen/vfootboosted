@@ -11,6 +11,7 @@ import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { compColor } from '../league/competitionColors';
 import { useDecisionAlerts } from '../league/useDecisionAlerts';
+import UpdateBanner from '../components/UpdateBanner';
 
 // League-scoped navigation (left sidebar + mobile bar): everything here is about
 // the CURRENTLY selected league. User-level actions (Le mie leghe) and switching
@@ -156,6 +157,7 @@ export default function AppShell() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
+      <UpdateBanner />
       {/* Desktop top bar — cross-league: switcher + user admin + account */}
       <div className="hidden md:block border-b bg-white">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">

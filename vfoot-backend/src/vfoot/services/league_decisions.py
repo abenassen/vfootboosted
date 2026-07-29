@@ -274,7 +274,11 @@ def resolve(decision, option: str, *, user=None) -> LeagueDecision:
         raise ValueError("Questa decisione e' gia' stata chiusa.")
     if option not in {o.get("value") for o in decision.options}:
         raise ValueError(f"Opzione non ammessa: {option}")
-    if decision.kind == LeagueDecision.KIND_PLAYER_ROLE:
+    # A role decision needs a subject to apply the answer to. The model permits a
+    # null player (other kinds are not about one), so guard rather than trust:
+    # without this an inconsistent row dies on an IntegrityError deep in the ORM
+    # instead of saying what is wrong.
+    if decision.kind == LeagueDecision.KIND_PLAYER_ROLE and decision.player_id:
         LeaguePlayerRole.objects.update_or_create(
             league=decision.league, player_id=decision.player_id,
             defaults={"role": option, "source": LeaguePlayerRole.SOURCE_ADMIN})

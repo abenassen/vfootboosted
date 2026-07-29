@@ -177,14 +177,33 @@ dalla media del ruolo in **punti di voto**.
 
 ---
 
-## 5. Webapp installabile (PWA)
+## 5. Webapp installabile (PWA): FATTA — resta il collaudo su iPhone
 
-Manifest, icone, service worker: il sito appare come app su Android e iOS.
-Nessuna decisione di prodotto, nessun rischio, poche ore. È il candidato
-migliore per una sessione corta.
+Manifest, icone (comprese le *maskable*, che Android ritaglia), service worker
+scritto a mano perché deve gestire `push` e `notificationclick`, avviso di
+aggiornamento, e le notifiche push agganciate al canale che già esisteva per le
+email (`league_notifications`: due canali, una sola decisione su *cosa* dire).
 
-Attenzione a una cosa sola: il service worker non deve mettere in cache le
-risposte API, o un utente si ritrova voti vecchi senza capire perché.
+La cache è configurata come dice la nota di prima: si precarica **solo** l'output
+di build, con l'hash del contenuto nel nome, e nulla sotto `/api/`. Un test lo
+verifica (`grep -c "api/v1" dist/sw.js` deve dire 0).
+
+Come si prova, tutto in **`vfoot-backend/docs/PWA_TESTING.md`**. In breve:
+`npm run test:pwa` è offline in 5 secondi e include una push consegnata al worker
+via DevTools Protocol; `npm run test:pwa:roundtrip` fa l'anello vero con VAPID,
+cifratura e FCM; `manage.py send_test_push --user X` prova *questo* server verso
+il tuo telefono. Android si collauda dal cavo con `adb reverse` +
+`chrome://inspect`.
+
+**Cosa resta**: generare le chiavi VAPID in produzione (`manage.py vapid_keys`) e
+il collaudo su iOS, che da Linux non è simulabile — serve dieci minuti di un
+membro della lega con l'iPhone. Su iOS le push esistono solo dall'app aggiunta
+alla schermata Home, e Safari non lo propone: l'istruzione è in Profilo →
+Notifiche e installazione, ma il passaparola dell'admin resta il canale vero.
+
+Da sapere per non dubitare del codice: la **prima** iscrizione può richiedere una
+ventina di secondi (misurati 28 su un browser freddo), perché è il browser che si
+registra al proprio servizio push. L'interfaccia lo dice, altrimenti sembra rotta.
 
 ---
 

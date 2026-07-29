@@ -814,3 +814,18 @@ export async function refreshLeagueDecisions(): Promise<{
   await sleep(60);
   return { seeded: 0, opened: 0, roster: 0, blocked_reason: null };
 }
+
+// Push needs a real server (VAPID keys, a subscription store) and a real browser
+// endpoint; in mock mode it is simply reported as unavailable.
+export async function getPushConfig(): Promise<{ enabled: boolean; public_key: string }> {
+  await sleep(30);
+  return { enabled: false, public_key: '' };
+}
+export async function subscribePush(): Promise<{ id: number }> {
+  await sleep(30);
+  throw new Error('Le notifiche push richiedono il backend reale.');
+}
+export async function unsubscribePush(): Promise<{ removed: number }> {
+  await sleep(30);
+  return { removed: 0 };
+}

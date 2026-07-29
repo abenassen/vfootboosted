@@ -308,6 +308,21 @@ VFOOT_FRONTEND_BASE_URL = os.environ.get("VFOOT_FRONTEND_BASE_URL",
 # testing against a real relay.
 VFOOT_NOTIFY_EMAILS = _env_bool("VFOOT_NOTIFY_EMAILS", True)
 
+# --- Web Push (VAPID) -----------------------------------------------------
+# Generate once with `manage.py vapid_keys` and put both in the environment. The
+# PUBLIC key is handed to every browser that subscribes — it identifies this
+# application server to the push service, it does not authorise anything; the
+# PRIVATE key signs the sends and must stay here. Empty means push is simply off
+# (a normal state: the email channel carries everything on its own).
+VFOOT_VAPID_PUBLIC_KEY = os.environ.get("VFOOT_VAPID_PUBLIC_KEY", "")
+VFOOT_VAPID_PRIVATE_KEY = os.environ.get("VFOOT_VAPID_PRIVATE_KEY", "")
+# Identifies us to the push service operator if a delivery goes wrong; must be a
+# mailto: or an https: URL, per RFC 8292.
+VFOOT_VAPID_SUBJECT = os.environ.get("VFOOT_VAPID_SUBJECT",
+                                     "mailto:no-reply@vfoot.it")
+# How long the push service holds a message for a device that is offline.
+VFOOT_PUSH_TTL_SECONDS = int(os.environ.get("VFOOT_PUSH_TTL_SECONDS", "86400"))
+
 # Empty means the Google button is simply not offered; the endpoint then refuses
 # rather than silently accepting unverifiable tokens.
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")

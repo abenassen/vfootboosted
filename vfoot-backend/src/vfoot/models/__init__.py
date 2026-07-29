@@ -31,6 +31,7 @@ from vfoot.models.decisions import LeagueDecision, LeagueDecisionVote
 from vfoot.models.heatmap import HeatmapGrid
 from vfoot.models.lineup import SavedLineupSnapshot
 from vfoot.models.presence import PlayerZonePresence, ZoneDuel
+from vfoot.models.push import PushSubscription
 from vfoot.models.zones import Zone, ZoneSet
 
 __all__ = [
@@ -66,6 +67,7 @@ __all__ = [
     "OfficeOverride",
     "SavedLineupSnapshot",
     "PlayerZonePresence",
+    "PushSubscription",
     "Zone",
     "ZoneDuel",
     "ZoneSet",

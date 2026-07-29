@@ -29,3 +29,7 @@ curl_cffi
 # roster xlsx re-upload (listone import). Lazily imported by the import-xlsx
 # endpoint only, so the app still boots if it's missing.
 openpyxl==3.1.5
+# Web Push (PWA notifications). Lazily imported by push_channel, and the whole
+# feature is off unless the VAPID keys are set — so a missing wheel degrades to
+# "no push", never to a broken boot. Brings its own http-ece/py-vapid.
+pywebpush==2.3.0

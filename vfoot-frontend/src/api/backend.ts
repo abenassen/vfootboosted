@@ -1045,3 +1045,27 @@ export async function refreshLeagueDecisions(
   const res = await authedPost(`/leagues/${leagueId}/decisions/refresh`, {});
   return parseJsonOrThrow(res);
 }
+
+// --- Web Push ---------------------------------------------------------------
+
+/** Public: the VAPID key identifies this server to the push service, it does not
+ *  authorise anything, and the browser needs it before it can even subscribe. */
+export async function getPushConfig(): Promise<{ enabled: boolean; public_key: string }> {
+  const res = await fetch(`${baseUrl()}/push/config`, {
+    headers: { Accept: 'application/json' },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function subscribePush(subscription: {
+  endpoint: string;
+  keys: Record<string, string>;
+}): Promise<{ id: number }> {
+  const res = await authedPost('/push/subscribe', { subscription });
+  return parseJsonOrThrow(res);
+}
+
+export async function unsubscribePush(endpoint: string): Promise<{ removed: number }> {
+  const res = await authedPost('/push/unsubscribe', { endpoint });
+  return parseJsonOrThrow(res);
+}
