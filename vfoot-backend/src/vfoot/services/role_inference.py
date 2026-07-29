@@ -100,6 +100,13 @@ _COUNTERS = ("touches", "touches_in_box", "shots", "shots_on_target", "xg_shots"
              "big_chance_created")
 
 
+# A measured player goes to a human when the clustering cannot separate his TOP TWO
+# fantasy roles by more than this. See ``role_margin``: it is a margin between
+# ROLES, not the confidence in a category — a player can bounce between two styles
+# that condense to the SAME role and still be perfectly determined for us.
+ROLE_MARGIN_REVIEW = 0.25
+
+
 @dataclass
 class PlayerRoleResult:
     player_id: int
@@ -109,15 +116,30 @@ class PlayerRoleResult:
     role_mitigated: str      # TM wins where it is unambiguous
     method: str              # category | tm | default | unknown
     tm_position: str = ""
+    # How far the winning fantasy role is ahead of the runner-up, 0..1 (see
+    # ``role_margin``). 1.0 when the role did not come from the clustering at all.
+    role_margin: float = 1.0
 
     @property
     def needs_decision(self) -> bool:
-        """A human should settle this one: the position is genuinely ambiguous AND
-        we have nothing to resolve it with. Everything else has an answer we stand
-        behind (an unambiguous position needs no arbitration, a measured player has
-        a category, and a player who lined up has a SofaScore position)."""
-        return (self.tm_position in TM_AMBIGUOUS
-                and self.method not in ("category", "sofa"))
+        """A human should settle this one.
+
+        Two different ways of being unsure, and both must count:
+
+        * the position is genuinely ambiguous AND we have nothing to resolve it
+          with — no measured category, no lineup position;
+        * or we DID measure him and the measurement does not separate his two
+          candidate roles (``role_margin``). This case used to pass silently:
+          ``method == "category"`` was treated as an answer we stand behind, so
+          Berardi — whose 60 clustering runs put him at CEN 56% / ATT 35%, the
+          2nd percentile of the whole population — was never put to anyone. The
+          stored ``confidence`` could not catch it either: it measures how firmly
+          he sits in his CATEGORY, and a player oscillating between two styles that
+          map to the same role is not a problem at all.
+        """
+        if self.tm_position in TM_AMBIGUOUS and self.method not in ("category", "sofa"):
+            return True
+        return self.method == "category" and self.role_margin < ROLE_MARGIN_REVIEW
 
 
 @dataclass
@@ -329,6 +351,35 @@ def _role_for_category(name: str) -> str:
     return CATEGORY_ROLE.get(base, Player.ROLE_MID)
 
 
+def role_margins(M: np.ndarray, labels: np.ndarray, by_label: dict) -> np.ndarray:
+    """How firmly the clustering picks each player's FANTASY ROLE, 0..1.
+
+    ``confidence`` answers "which style is he?", which is step 2 of the pipeline;
+    what actually reaches the listone is step 3, the condensation of eight styles
+    into four roles. The two questions have different answers. A midfielder who
+    oscillates between 'mediano' and 'centrocampista' has a low category
+    confidence and a completely determined role — both condense to CEN — while a
+    winger split between 'centrocampista offensivo' and 'ala offensiva' is torn
+    across the CEN/ATT line, which is the only kind of doubt worth a human's time.
+
+    So the co-association mass is re-aggregated BY ROLE (how often, over the runs,
+    he lands with players who end up in that role) and the margin is the gap
+    between the top role and the runner-up. Berardi comes out at CEN 56% / ATT 35%
+    — margin 0.21, below ROLE_MARGIN_REVIEW — where his category confidence of
+    0.336 said nothing about which role was at stake.
+    """
+    role_of = {lab: _role_for_category(name) for lab, name in by_label.items()}
+    roles = sorted(set(role_of.values()))
+    if len(roles) < 2:
+        return np.ones(len(M))
+    mass = np.stack([M[:, np.array([role_of[int(l)] == r for l in labels])].sum(1)
+                     for r in roles], axis=1)
+    total = mass.sum(1, keepdims=True)
+    share = np.divide(mass, total, out=np.zeros_like(mass), where=total > 0)
+    top2 = np.sort(share, axis=1)[:, -2:]
+    return top2[:, 1] - top2[:, 0]
+
+
 # --------------------------------------------------------------------------
 # the pipeline
 # --------------------------------------------------------------------------
@@ -347,19 +398,22 @@ def infer_roles(roster_season_id: int, data_season_id: int, *,
     if len(ids):
         mu, sd = Z.mean(0), np.where(Z.std(0) == 0, 1, Z.std(0))
         Zs = (Z - mu) / sd
-        labels, conf, _ = consensus_categories(Zs, n_categories, runs)
+        labels, conf, M = consensus_categories(Zs, n_categories, runs)
         cats = describe_categories(Zs, labels)
         by_label = {v["label"]: k for k, v in cats.items()}
         for name, meta in cats.items():
             meta["role"] = _role_for_category(name)
         report.categories = cats
+        margins = role_margins(M, labels, by_label)
     else:
         labels, conf, by_label = np.zeros(0), np.zeros(0), {}
+        margins = np.zeros(0)
 
     measured = {}
     for i, pid in enumerate(ids):
         name = by_label[int(labels[i])]
-        measured[pid] = (name, float(conf[i]), _role_for_category(name))
+        measured[pid] = (name, float(conf[i]), _role_for_category(name),
+                         float(margins[i]))
 
     # Coarse SofaScore lineup position: too few minutes to cluster (< MIN_MINUTES)
     # is NOT the same as no data — a player who lined up at all has a position, and
@@ -369,8 +423,11 @@ def infer_roles(roster_season_id: int, data_season_id: int, *,
     everyone = set(tm_pos) | set(measured) | set(sofa_roles)
     for pid in sorted(everyone):
         pos = tm_pos.get(pid, "")
+        # margin 1.0 = the role did not come from the clustering, so there is no
+        # runner-up to be close to; only a measured player can be torn.
+        margin = 1.0
         if pid in measured:
-            cat, c, role = measured[pid]
+            cat, c, role, margin = measured[pid]
             method = "category"
             report.n_measured += 1
         elif pos in TM_DETERMINISTIC:
@@ -386,9 +443,17 @@ def infer_roles(roster_season_id: int, data_season_id: int, *,
             report.n_unknown += 1
         # The mitigated variant: an unambiguous TM position outranks the measured
         # style, so a full-back who plays like a winger stays a defender.
+        #
+        # It does NOT overwrite the margin. That was the first attempt and it was
+        # wrong: letting TM settle the DECISION is right, letting it erase the
+        # measurement's own uncertainty is not. Nico Paz (0.24) and McTominay (0.23)
+        # are as torn between roles as Berardi (0.22), and were being recorded as
+        # margin 1.0 — "no doubt at all" — purely because TM had an opinion. The
+        # margin is a diagnostic of the clustering; whoever wins the role, it stays
+        # what it measured.
         mitigated = TM_DETERMINISTIC.get(pos, role) if pos else role
         report.results.append(PlayerRoleResult(
             player_id=pid, category=cat, confidence=round(c, 3),
             role_data=role, role_mitigated=mitigated, method=method,
-            tm_position=pos))
+            tm_position=pos, role_margin=round(margin, 3)))
     return report

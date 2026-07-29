@@ -178,6 +178,15 @@ Transfermarkt market value clears `league_decisions.RELEVANCE_MIN_VALUE_EUR`
 (€5M) reach the admin's decision queue; everyone below auto-takes the layer-2
 proposal (no market value ⇒ obscure ⇒ auto-default). See `league_decisions.py`.
 
+Which measured players are ambiguous is decided by `CurrentPlayerRole.role_margin`,
+NOT by `confidence`. The latter says how firmly a player sits in his *category*
+(step 2 of the inference); what reaches the listone is step 3, the condensation of
+eight styles into four roles, and the two questions have different answers — a
+midfielder oscillating between `mediano` and `centrocampista` has a low confidence
+and a completely determined role. `role_margin` re-aggregates the co-association
+mass BY ROLE and reports the gap to the runner-up; below `ROLE_MARGIN_REVIEW` it
+goes to a human. See `role_inference.role_margins`.
+
 ## Invariants (Hard Constraints)
 
 Agents must NEVER:
@@ -296,12 +305,27 @@ Agents must NEVER:
 
 ### Dev Notes
 
--   Preferred local hosts for integration: use `localhost` for both
-    backend and frontend to match CORS defaults.
--   Backend run command:
+-   Preferred way to start/stop both servers: **`./vfoot-dev`** at the
+    repo root. It keeps the four places the host appears in sync
+    (`DJANGO_ALLOWED_HOSTS`, `DJANGO_CORS_ORIGINS`,
+    `VFOOT_FRONTEND_BASE_URL`, `VITE_API_BASE_URL`) and restarts:
+    -   `./vfoot-dev local` — localhost only (the default assetto)
+    -   `./vfoot-dev lan` — reachable from the home wifi on this
+        machine's IP, re-detected at every run (DHCP-proof)
+    -   `./vfoot-dev status` — mode, IP, what's running; also warns
+        when the running backend's env has drifted from `.env`
+-   Manual equivalents, if you need them:
     -   `cd vfoot-backend/src && ../.venv/bin/python manage.py runserver localhost:8000 --noreload`
--   Frontend run command:
     -   `cd vfoot-frontend && npm run dev -- --host localhost --port 5173`
+-   Gotcha that cost an afternoon: `load_dotenv` does **not** override
+    variables already exported in the shell, so a stale `export
+    DJANGO_ALLOWED_HOSTS=...` silently beats `.env`. `./vfoot-dev`
+    clears those before launching (`env -u`); `status` reports the
+    mismatch if a server was started some other way.
+-   Second gotcha: a Vite dev server left running for a day can serve a
+    stale module graph after edits (blank page, "does not provide an
+    export named X" for an export that plainly exists). Restart it and
+    clear `node_modules/.vite` — `./vfoot-dev restart` does the former.
 -   For heavy imports on SQLite, avoid running Django server in parallel
     with importer commands to reduce lock contention.
 -   StatsBomb import lock check can be bypassed only when needed:

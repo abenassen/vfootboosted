@@ -18,7 +18,9 @@ from django.core.management.base import BaseCommand, CommandError
 
 from realdata.models import CompetitionSeason, Match
 from vfoot.services.classic_pagella import compute_role_averages
-from vfoot.services.classic_rating import build_reference
+from vfoot.services.classic_rating import (
+    build_feature_scales, build_reference, clear_scales_cache,
+)
 from vfoot.services.vote_reference import (
     REFERENCE_PATH, clear_cache, save, weights_fingerprint,
 )
@@ -45,8 +47,14 @@ class Command(BaseCommand):
                 f"Attenzione: {finished}/{total} partite concluse. La reference "
                 "andrebbe calibrata su una stagione FINITA, non in corso."))
 
-        reference = build_reference(cs.id)
-        averages = compute_role_averages(cs.id)
+        # ORDER MATTERS. The per-feature spreads come first, because both the role
+        # reference and the explanation's role averages are computed FROM the index,
+        # and the index cannot be computed before the standardisation is fixed. They
+        # are passed explicitly rather than read back from the file, which at this
+        # point still holds the previous calibration.
+        scales = build_feature_scales(cs.id)
+        reference = build_reference(cs.id, scales=scales)
+        averages = compute_role_averages(cs.id, scales=scales)
         if not reference:
             raise CommandError("Nessun dato: impossibile calibrare.")
 
@@ -56,11 +64,14 @@ class Command(BaseCommand):
             if r:
                 self.stdout.write(f"   {role}: media {r['mean']:.3f}  "
                                   f"dev.std {r['std']:.3f}  (n={r['n']})")
+        for chan, sc in sorted(scales.items()):
+            self.stdout.write(f"   scale {chan}: {len(sc)} feature standardizzate")
         self.stdout.write(f"fingerprint pesi: {weights_fingerprint()}")
 
         if o["dry_run"]:
             self.stdout.write("[dry-run] nulla scritto")
             return
-        save(reference, averages, season_id=cs.id)
+        save(reference, averages, season_id=cs.id, feature_scales=scales)
         clear_cache()
+        clear_scales_cache()
         self.stdout.write(self.style.SUCCESS(f"Scritto {REFERENCE_PATH}"))

@@ -14,10 +14,12 @@ from vfoot.services.classic_rating import (
 
 
 class VoteExplanationTests(SimpleTestCase):
-    # Realistic v2 scale (cf. the calibrated season: DIF mean ~0.42 std ~0.22).
-    REFERENCE = {"DIF": {"mean": 0.42, "std": 0.22, "n": 100},
-                 "POR": {"mean": 0.7, "std": 2.1, "n": 100},
-                 "ATT": {"mean": 0.16, "std": 0.24, "n": 100}}
+    # The scale of the real calibration (see vote_reference.json), so a fixture
+    # vote means roughly what the same index would mean in production. Outfield
+    # roles share one spread by design — see POOLED_ROLE_SPREAD.
+    REFERENCE = {"DIF": {"mean": 0.28, "std": 0.44, "n": 100},
+                 "POR": {"mean": 0.66, "std": 2.17, "n": 100},
+                 "ATT": {"mean": 0.47, "std": 0.44, "n": 100}}
 
     def _averages(self, role, feats, minutes=90):
         return role_average_terms([(role, feats, minutes, 0.0)])
@@ -147,9 +149,13 @@ class VoteExplanationTests(SimpleTestCase):
     def test_a_clearly_poor_vote_drops_the_faint_positives(self):
         """Below 5.5 the "positives" are only least-bad deviations; naming them is
         faint praise for a bad game. They fold into "other" so the sum still holds."""
+        # Symmetrically to the good case: a bad game has to be bad for reasons the
+        # model weighs, not just a low touch count. Losing your duels and being
+        # charged with the danger conceded in your zone is what sinks a defender.
         average = self._averages("DIF", {"clearances": 6.0, "touches": 60.0})
-        feats = {"errors_led_to_goal": 1.0, "clearances": 30.0, "touches": 30.0}
-        e = explain("DIF", feats, 90, self.REFERENCE, average)
+        feats = {"errors_led_to_goal": 1.0, "clearances": 3.0, "touches": 30.0,
+                 "duels_lost": 8.0, "dribbled_past": 3.0}
+        e = explain("DIF", feats, 90, self.REFERENCE, average, exposure=0.6)
         self.assertLess(e["voto"], 5.5)
         self.assertEqual(e["positives"], [])
         self.assertNotIn("Bene", to_sentence(e))
@@ -160,9 +166,15 @@ class VoteExplanationTests(SimpleTestCase):
         """Above 6.5 the "negatives" are trivialities on a fine game (a striker's
         "dribbling concessi all'avversario"); a 7.5 should read as praise. They fold
         into "other" so the sum still holds."""
+        # A great game has to be great for a REASON the model weighs heavily, not
+        # just an absurd pile of volume: the compression is logarithmic, so 200
+        # clearances is worth barely more than 20 and the vote used to land on the
+        # 6.5 boundary by luck. A defender who scores while dominating is the case
+        # this test is about.
         average = self._averages("DIF", {"clearances": 8.0, "duels_won": 6.0,
                                          "touches": 60.0})
-        feats = {"clearances": 200.0, "duels_won": 60.0, "touches": 150.0,
+        feats = {"clearances": 12.0, "duels_won": 14.0, "touches": 95.0,
+                 "interceptions": 4.0, "shots_goal": 1.0, "xg_on_target": 0.6,
                  "dribbled_past": 3.0}
         e = explain("DIF", feats, 90, self.REFERENCE, average)
         self.assertGreater(e["voto"], 6.5)

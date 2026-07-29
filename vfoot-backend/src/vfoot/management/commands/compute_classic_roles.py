@@ -69,8 +69,13 @@ class Command(BaseCommand):
             if r.method == "category" and r.confidence < LOW_CONFIDENCE:
                 low += 1
             if r.needs_decision:
-                needed.append(names.get(r.player_id) or fulls.get(r.player_id)
-                              or str(r.player_id))
+                nm = (names.get(r.player_id) or fulls.get(r.player_id)
+                      or str(r.player_id))
+                # the margin says WHICH doubt it is, so the admin can triage:
+                # a measured player torn between two roles reads differently from
+                # one we simply have no evidence on.
+                needed.append(f"{nm} ({r.role_mitigated} {r.role_margin:.2f})"
+                              if r.method == "category" else nm)
 
         self.stdout.write(f"\ngiocatori trattati       : {len(rep.results)}")
         self.stdout.write(f"  misurati dai dati      : {rep.n_measured}")
@@ -99,6 +104,7 @@ class Command(BaseCommand):
                 CurrentPlayerRole(
                     player_id=r.player_id,
                     category=r.category, confidence=r.confidence,
+                    role_margin=r.role_margin,
                     role_data=r.role_data, role_mitigated=r.role_mitigated,
                     method=r.method, tm_position=r.tm_position)
                 for r in rep.results], batch_size=500)

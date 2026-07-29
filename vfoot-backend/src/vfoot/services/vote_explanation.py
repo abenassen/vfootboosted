@@ -21,10 +21,10 @@ after the voto puro, in the open, and the user can already see them.
 from __future__ import annotations
 
 from vfoot.services.classic_rating import (
-    DEF_EXPOSURE_WEIGHT, EXTRAP_FLOOR_MINUTES, GK_PER90_WEIGHTS, GK_TOTAL_WEIGHTS,
-    PER90_WEIGHTS, SHRINKAGE_MINUTES, SIGNED_FEATURES, SQRT_TOTAL_FEATURES,
-    TOTAL_WEIGHTS, VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K,
-    _compress, _compress_signed,
+    EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS, GK_TOTAL_WEIGHTS, GK_WEIGHTS,
+    PER90_WEIGHTS, SHRINKAGE_MINUTES, TOTAL_WEIGHTS, VOTE_CENTER, VOTE_MAX,
+    VOTE_MIN, VOTE_SPREAD_K, WEIGHTS,
+    _feature_z, feature_scales, raw_feature_values,
 )
 from realdata.models import Player
 
@@ -110,7 +110,7 @@ LABELS = {
     "gk_crosses_not_claimed": (COUNT, "cross non trattenuti", "mp"),
     "_exposure": (COUNT, "pericolo concesso nella sua zona", "ms"),
     # Merged into SIGNAL lines below — labels kept for coverage, never phrased alone.
-    "xg_on_target": (COUNT, "qualita' nelle conclusioni", "fp"),
+    "sga_post": (COUNT, "qualita' nelle conclusioni", "fp"),
     "xg_shots": (COUNT, "posizioni di tiro conquistate", "fp"),
     "shots_on_target": (COUNT, "tiri nello specchio", "mp"),
     "shots": (COUNT, "tiri tentati", "mp"),
@@ -126,7 +126,7 @@ LABELS = {
 # SIGNAL line, phrased "una o più ..." by the sign of the net. Scoring untouched.
 # (group_keys, phrase when net-positive, phrase when net-negative.)
 MERGES = [
-    (("xg_on_target", "xg_shots", "shots_on_target", "shots", "shots_blocked",
+    (("sga_post", "xg_shots", "shots_on_target", "shots", "shots_blocked",
       "shots_off"),
      "una o più conclusioni pericolose", "una o più occasioni fallite"),
     (("dribbles_won", "dribbles_attempted"),
@@ -135,15 +135,9 @@ MERGES = [
 
 
 def _weight_of(role: str, key: str) -> float:
-    if key == "_exposure":
-        return -DEF_EXPOSURE_WEIGHT
-    is_gk = role == Player.ROLE_GK
-    tables = ((GK_TOTAL_WEIGHTS, GK_PER90_WEIGHTS) if is_gk
-              else (TOTAL_WEIGHTS, PER90_WEIGHTS))
-    for table in tables:
-        if key in table:
-            return table[key]
-    return 0.0
+    if key == EXPOSURE_KEY:
+        return -EXPOSURE_WEIGHT
+    return (GK_WEIGHTS if role == Player.ROLE_GK else WEIGHTS).get(key, 0.0)
 
 
 def _phrase(role: str, key: str, term_delta: float, raw_value: float) -> str | None:
@@ -173,43 +167,43 @@ def _phrase(role: str, key: str, term_delta: float, raw_value: float) -> str | N
     return f"{high if more else low} {label}"
 
 
-def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0) -> dict:
-    """Each feature's raw contribution to the index, before comparison."""
+def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0,
+           scales: dict | None = None) -> dict:
+    """Each feature's contribution to the index, before comparison to the role mean.
+
+    Reads the feature values and the standardisation from ``classic_rating`` rather
+    than repeating them: the breakdown has to reconcile to the vote exactly, so any
+    divergence between the two pipelines would show up as a broken explanation."""
     if minutes <= 0:
         return {}
     is_gk = role == Player.ROLE_GK
-    total_w = GK_TOTAL_WEIGHTS if is_gk else TOTAL_WEIGHTS
-    per90_w = GK_PER90_WEIGHTS if is_gk else PER90_WEIGHTS
+    weights = GK_WEIGHTS if is_gk else WEIGHTS
+    if scales is None:
+        scales = feature_scales(gk=is_gk)
+    elif "outfield" in scales or "gk" in scales:
+        scales = scales.get("gk" if is_gk else "outfield", {})
+    values = raw_feature_values(totals, minutes, exposure, gk=is_gk)
     out = {}
-    for key, w in total_w.items():
-        raw = totals.get(key, 0.0)
-        # v2 selective-√: outfield totals are LINEAR (except shots_goal, √ for
-        # diminishing returns on multiple goals); the GK channel keeps √.
-        if is_gk:
-            val = _compress_signed(raw) if key in SIGNED_FEATURES else _compress(raw)
-        elif key in SQRT_TOTAL_FEATURES:
-            val = _compress(raw)
-        else:
-            val = raw
-        if val:
-            out[key] = w * val
-    scale = 90.0 / max(minutes, EXTRAP_FLOOR_MINUTES)
-    for key, w in per90_w.items():
-        squashed = _compress(totals.get(key, 0.0) * scale)
-        if squashed:
-            out[key] = w * squashed
-    if role == Player.ROLE_DEF and exposure > 0:
-        out["_exposure"] = -DEF_EXPOSURE_WEIGHT * exposure  # LINEAR (v2)
+    for key, w in weights.items():
+        if not w:
+            continue
+        z = _feature_z(key, values.get(key, 0.0), scales)
+        if z:
+            out[key] = w * z
+    if not is_gk:
+        z = _feature_z(EXPOSURE_KEY, values.get(EXPOSURE_KEY, 0.0), scales)
+        if z:
+            out[EXPOSURE_KEY] = -EXPOSURE_WEIGHT * z
     return out
 
 
-def role_average_terms(rows) -> dict:
+def role_average_terms(rows, scales: dict | None = None) -> dict:
     """{role: {feature: mean contribution}} — the yardstick every explanation is
     read against. ``rows`` is an iterable of (role, totals, minutes, exposure)."""
     sums: dict[str, dict[str, float]] = {}
     counts: dict[str, int] = {}
     for role, totals, minutes, exposure in rows:
-        terms = _terms(role, totals, minutes, exposure)
+        terms = _terms(role, totals, minutes, exposure, scales)
         if not terms:
             continue
         bucket = sums.setdefault(role, {})
@@ -260,9 +254,13 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         net = sum(points_by_key.pop(k, 0.0) for k in group)
         if abs(net) >= 1e-9:
             scored.append((net, group[0], label_pos if net > 0 else label_neg))
+    # The raw value the phrasing quotes comes from the SAME builder the index uses,
+    # so a derived feature (sga_post) or the exposure is quoted as what it actually
+    # is, not looked up in a totals dict that has never heard of it.
+    raw_values = raw_feature_values(totals, minutes, exposure,
+                                    gk=role == Player.ROLE_GK)
     for key, pts in points_by_key.items():
-        phrase = _phrase(role, key, pts,
-                         (totals.get(key, 0.0) if key != "_exposure" else exposure))
+        phrase = _phrase(role, key, pts, raw_values.get(key, 0.0))
         scored.append((pts, key, phrase))
 
     # The subtotal is the vote's OWN raw value, computed exactly as the scorer

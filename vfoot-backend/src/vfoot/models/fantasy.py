@@ -386,8 +386,12 @@ class CurrentPlayerRole(models.Model):
     # Human-readable playing style ("ala offensiva"), empty when unmeasured.
     category = models.CharField(max_length=40, blank=True, default="")
     # How firmly he belongs to that category (co-association with its core).
-    # Low values are what the admin is asked to review, not silently accepted.
     confidence = models.FloatField(default=0.0)
+    # How far his winning FANTASY ROLE is ahead of the runner-up (0..1). This, not
+    # ``confidence``, is what the admin is asked to review: bouncing between two
+    # styles that condense to the same role is harmless, being split across the
+    # CEN/ATT line is not. 1.0 when the role did not come from the clustering.
+    role_margin = models.FloatField(default=1.0)
     role_data = models.CharField(max_length=3, blank=True, default="")
     role_mitigated = models.CharField(max_length=3, blank=True, default="")
     method = models.CharField(max_length=10, choices=METHOD_CHOICES,

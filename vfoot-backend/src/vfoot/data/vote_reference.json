@@ -1,171 +1,444 @@
 {
   "calibrated_on_season": 2,
+  "feature_scales": {
+    "gk": {
+      "errors_bad_passes": {
+        "n": 764,
+        "sigma_raw": 5.891611573285034,
+        "sigma_z": 0.3858028999206619
+      },
+      "errors_led_to_goal": {
+        "n": 764,
+        "sigma_raw": 0.20383157826880796,
+        "sigma_z": 0.34952337129045413
+      },
+      "errors_led_to_shot": {
+        "n": 764,
+        "sigma_raw": 0.23327457062620763,
+        "sigma_z": 0.3352810565933761
+      },
+      "gk_crosses_not_claimed": {
+        "n": 764,
+        "sigma_raw": 0.1785891523196671,
+        "sigma_z": 0.33627001191141787
+      },
+      "gk_goals_prevented": {
+        "n": 764,
+        "sigma_raw": 0.7619090764398379,
+        "sigma_z": 0.6039314432550222
+      },
+      "gk_high_claims": {
+        "n": 764,
+        "sigma_raw": 1.0606458003729036,
+        "sigma_z": 0.48685069838399325
+      },
+      "gk_penalty_saves": {
+        "n": 764,
+        "sigma_raw": 0.16723221208046532,
+        "sigma_z": 0.32493340159086354
+      },
+      "gk_punches": {
+        "n": 764,
+        "sigma_raw": 0.6659949697502883,
+        "sigma_z": 0.49898756400082117
+      },
+      "gk_saves": {
+        "n": 764,
+        "sigma_raw": 1.9237836719695107,
+        "sigma_z": 0.41334222309247703
+      },
+      "gk_saves_inside_box": {
+        "n": 764,
+        "sigma_raw": 1.5200740037350897,
+        "sigma_z": 0.459196799084807
+      },
+      "gk_sweeper": {
+        "n": 764,
+        "sigma_raw": 0.7802955018403414,
+        "sigma_z": 0.4885294369178047
+      },
+      "passes_completed": {
+        "n": 764,
+        "sigma_raw": 7.896718056360794,
+        "sigma_z": 0.2687320616768079
+      }
+    },
+    "outfield": {
+      "_exposure": {
+        "n": 9303,
+        "sigma_raw": 0.13743163186377547,
+        "sigma_z": 0.43766407516560607
+      },
+      "aerials_lost": {
+        "n": 9303,
+        "sigma_raw": 1.6005445700790732,
+        "sigma_z": 0.47580004437345697
+      },
+      "aerials_won": {
+        "n": 9303,
+        "sigma_raw": 1.6573070980588862,
+        "sigma_z": 0.47225689947340255
+      },
+      "ball_recoveries": {
+        "n": 9303,
+        "sigma_raw": 2.32150666260017,
+        "sigma_z": 0.42658961167441395
+      },
+      "big_chance_created": {
+        "n": 9303,
+        "sigma_raw": 0.3634339013275185,
+        "sigma_z": 0.42582921232671356
+      },
+      "blocks": {
+        "n": 9303,
+        "sigma_raw": 0.6459567405431929,
+        "sigma_z": 0.46798159993891203
+      },
+      "clearances": {
+        "n": 9303,
+        "sigma_raw": 2.4473609974764963,
+        "sigma_z": 0.46750901774167763
+      },
+      "clearances_off_line": {
+        "n": 9303,
+        "sigma_raw": 0.08394735321933658,
+        "sigma_z": 0.21076202599018304
+      },
+      "crosses_completed": {
+        "n": 9303,
+        "sigma_raw": 0.8841270096940322,
+        "sigma_z": 0.45649402371253056
+      },
+      "defensive_value": {
+        "n": 9303,
+        "sigma_raw": 0.2268598097095643,
+        "sigma_z": 0.5912137276037017
+      },
+      "dribbled_past": {
+        "n": 9303,
+        "sigma_raw": 0.8886226933105519,
+        "sigma_z": 0.4949477221233665
+      },
+      "dribbles_attempted": {
+        "n": 9303,
+        "sigma_raw": 1.7057788716917799,
+        "sigma_z": 0.47250363771559767
+      },
+      "dribbles_won": {
+        "n": 9303,
+        "sigma_raw": 1.0279781833711574,
+        "sigma_z": 0.47502496164496133
+      },
+      "duels_lost": {
+        "n": 9303,
+        "sigma_raw": 2.910414102272669,
+        "sigma_z": 0.4000342887070194
+      },
+      "duels_won": {
+        "n": 9303,
+        "sigma_raw": 2.796730329922293,
+        "sigma_z": 0.4052401130388824
+      },
+      "errors_bad_passes": {
+        "n": 9303,
+        "sigma_raw": 3.3010330668399006,
+        "sigma_z": 0.382170693552952
+      },
+      "errors_dispossessed": {
+        "n": 9303,
+        "sigma_raw": 1.134966617042982,
+        "sigma_z": 0.48864339939182255
+      },
+      "errors_fouls_committed": {
+        "n": 9303,
+        "sigma_raw": 1.2554524988284927,
+        "sigma_z": 0.49033086147336
+      },
+      "errors_led_to_goal": {
+        "n": 9303,
+        "sigma_raw": 0.10105822527340029,
+        "sigma_z": 0.2413604094307985
+      },
+      "errors_led_to_shot": {
+        "n": 9303,
+        "sigma_raw": 0.18866343031008642,
+        "sigma_z": 0.33324820792456206
+      },
+      "errors_miscontrols": {
+        "n": 9303,
+        "sigma_raw": 1.6101224327362422,
+        "sigma_z": 0.4796015728059478
+      },
+      "expected_assists": {
+        "n": 9303,
+        "sigma_raw": 0.11193114184738087,
+        "sigma_z": 0.42008848098565243
+      },
+      "interceptions": {
+        "n": 9303,
+        "sigma_raw": 1.0029303419329783,
+        "sigma_z": 0.49661976570918537
+      },
+      "key_passes": {
+        "n": 9303,
+        "sigma_raw": 1.0300888050347772,
+        "sigma_z": 0.48491799901392146
+      },
+      "last_man_tackle": {
+        "n": 9303,
+        "sigma_raw": 0.1091951529053422,
+        "sigma_z": 0.23670117343662594
+      },
+      "long_balls_completed": {
+        "n": 9303,
+        "sigma_raw": 1.8079860399803702,
+        "sigma_z": 0.47305797155761936
+      },
+      "passes_completed": {
+        "n": 9303,
+        "sigma_raw": 19.555665288248235,
+        "sigma_z": 0.37468411501212456
+      },
+      "passes_opp_half": {
+        "n": 9303,
+        "sigma_raw": 11.118510277522729,
+        "sigma_z": 0.37924539856499784
+      },
+      "penalties_conceded": {
+        "n": 9303,
+        "sigma_raw": 0.10107994674379872,
+        "sigma_z": 0.23836285408857327
+      },
+      "penalties_won": {
+        "n": 9303,
+        "sigma_raw": 0.0813640033310344,
+        "sigma_z": 0.2104923814145587
+      },
+      "sga_post": {
+        "n": 9303,
+        "sigma_raw": 0.18861682474201844,
+        "sigma_z": 0.494115500386194
+      },
+      "shots": {
+        "n": 9303,
+        "sigma_raw": 1.2248720316822317,
+        "sigma_z": 0.48174293047680256
+      },
+      "shots_blocked": {
+        "n": 9303,
+        "sigma_raw": 0.5555774614415182,
+        "sigma_z": 0.47539202029165806
+      },
+      "shots_goal": {
+        "n": 9303,
+        "sigma_raw": 0.3089346594676393,
+        "sigma_z": 0.4160776665709723
+      },
+      "shots_off": {
+        "n": 9303,
+        "sigma_raw": 0.6539859431768414,
+        "sigma_z": 0.4903296440209941
+      },
+      "shots_on_target": {
+        "n": 9303,
+        "sigma_raw": 0.6178760511423014,
+        "sigma_z": 0.4822982306034652
+      },
+      "tackles_won": {
+        "n": 9303,
+        "sigma_raw": 1.0661602582090282,
+        "sigma_z": 0.4965078016262169
+      },
+      "touches": {
+        "n": 9303,
+        "sigma_raw": 21.87814667572437,
+        "sigma_z": 0.3046955660239727
+      },
+      "touches_in_box": {
+        "n": 9303,
+        "sigma_raw": 2.350782133821338,
+        "sigma_z": 0.4600094627523264
+      },
+      "was_fouled": {
+        "n": 9303,
+        "sigma_raw": 1.3001365583344113,
+        "sigma_z": 0.48979531704124446
+      },
+      "xg_shots": {
+        "n": 9303,
+        "sigma_raw": 0.20212893698529444,
+        "sigma_z": 0.42253308956049523
+      }
+    }
+  },
   "reference": {
     "ATT": {
-      "mean": 0.4018087959057144,
-      "n": 2098,
-      "std": 0.3621153006278644
+      "mean": 0.4881396915735714,
+      "n": 2139,
+      "std": 0.4747664728566414
     },
     "CEN": {
-      "mean": 0.48824345472804465,
-      "n": 3384,
-      "std": 0.3210950158111904
+      "mean": 0.4112489450684633,
+      "n": 3397,
+      "std": 0.4747664728566414
     },
     "DIF": {
-      "mean": 0.4887935093832434,
-      "n": 3821,
-      "std": 0.2825870320768601
+      "mean": 0.2772877778539287,
+      "n": 3767,
+      "std": 0.4747664728566414
     },
     "POR": {
-      "mean": 0.7140200729254219,
+      "mean": 0.6559343458849575,
       "n": 764,
-      "std": 2.157227520152759
+      "std": 2.171275177925764
     },
     "_OUTFIELD": {
-      "mean": 0.468976749861686,
+      "mean": 0.37468413692886043,
       "n": 9303,
-      "std": 0.31810064559398293
+      "std": 0.4747664728566414
     }
   },
   "role_averages": {
     "ATT": {
-      "aerials_lost": -0.051981382485509396,
-      "aerials_won": 0.03931208174161329,
-      "ball_recoveries": 0.03866570321619886,
-      "blocks": 0.0017422276576789478,
-      "clearances": 0.011836369301055487,
-      "clearances_off_line": 9.532888465204958e-05,
-      "crosses_completed": 0.012364756420189776,
-      "dribbled_past": -0.01985634331221741,
-      "dribbles_attempted": -0.03327637672685667,
-      "dribbles_won": 0.02931036158813275,
-      "duels_lost": -0.22378016926437974,
-      "duels_won": 0.18971465144741378,
-      "errors_bad_passes": -0.05784865256233325,
-      "errors_dispossessed": -0.024989504096181003,
-      "errors_fouls_committed": -0.015471329662674215,
-      "errors_led_to_goal": -0.0015014299332697808,
-      "errors_led_to_shot": -0.0010962821734985704,
-      "errors_miscontrols": -0.039780025181996165,
-      "expected_assists": 0.010898826833651093,
-      "interceptions": 0.008414309264533966,
-      "key_passes": 0.0,
-      "last_man_tackle": 9.532888465204958e-05,
-      "long_balls_completed": 0.019989442729052634,
-      "passes_completed": 0.03688262491822783,
-      "passes_opp_half": 0.15123825570059,
-      "penalties_conceded": -0.0009532888465204957,
-      "penalties_won": 0.004146806482364156,
-      "shots": 0.053702461108137985,
-      "shots_blocked": 0.013584366062917108,
-      "shots_goal": 0.054118994210354335,
-      "shots_off": 0.01164918970448029,
-      "shots_on_target": 0.031005719733078883,
-      "shots_post": 0.007550047664442335,
-      "tackles_won": 0.012808173601660889,
-      "touches": 0.05736729009513745,
-      "touches_in_box": 0.01731867883728543,
-      "was_fouled": 0.018616531718010476,
-      "xg_on_target": 0.060636448999046785,
-      "xg_shots": -0.020721396653408684
+      "_exposure": -0.06285165053865084,
+      "aerials_lost": -0.040125381119873765,
+      "aerials_won": 0.029713127339044562,
+      "ball_recoveries": 0.026621266056423523,
+      "big_chance_created": 0.032118581184756655,
+      "blocks": 0.001436888866721861,
+      "clearances": 0.007822554899985708,
+      "clearances_off_line": 0.00019860725300470402,
+      "crosses_completed": 0.00994505479374805,
+      "defensive_value": 0.02044602489414863,
+      "dribbled_past": -0.015907364731794407,
+      "dribbles_attempted": -0.02595285873713273,
+      "dribbles_won": 0.02338316817916344,
+      "duels_lost": -0.1564749285078081,
+      "duels_won": 0.13087335918298562,
+      "errors_bad_passes": -0.03842843431674115,
+      "errors_dispossessed": -0.019613081716975355,
+      "errors_fouls_committed": -0.011886394901324808,
+      "errors_led_to_goal": -0.0016376489470842188,
+      "errors_led_to_shot": -0.0011224711964487842,
+      "errors_miscontrols": -0.03116199248396275,
+      "expected_assists": 0.09705649391756575,
+      "interceptions": 0.006764197512097348,
+      "last_man_tackle": 0.0002289389515858046,
+      "long_balls_completed": 0.014241029919970904,
+      "passes_completed": 0.020431920632329455,
+      "passes_opp_half": 0.08829625891339081,
+      "penalties_conceded": -0.001182689913530835,
+      "penalties_won": 0.004065788009568488,
+      "sga_post": 0.0025329163706348423,
+      "shots": 0.08422282912476069,
+      "shots_blocked": 0.023560199274376848,
+      "shots_goal": 0.08588745434587022,
+      "shots_off": 0.018201381190018972,
+      "shots_on_target": 0.050945041247352975,
+      "tackles_won": 0.009960189190136809,
+      "touches": 0.037546448059730064,
+      "touches_in_box": 0.013189502772088121,
+      "was_fouled": 0.01445083776738294,
+      "xg_shots": 0.04034452883605669
     },
     "CEN": {
-      "aerials_lost": -0.03472686995791785,
-      "aerials_won": 0.031187235691189176,
-      "ball_recoveries": 0.05454265248314347,
-      "blocks": 0.005376345506381037,
-      "clearances": 0.022635616643241964,
-      "clearances_off_line": 0.0007092198581560283,
-      "crosses_completed": 0.014718231934823212,
-      "dribbled_past": -0.03850275817205515,
-      "dribbles_attempted": -0.02472563612506417,
-      "dribbles_won": 0.02279583627931215,
-      "duels_lost": -0.19679380139725364,
-      "duels_won": 0.1926467374797366,
-      "errors_bad_passes": -0.06922617142459679,
-      "errors_dispossessed": -0.018766945051110238,
-      "errors_fouls_committed": -0.016859879566306128,
-      "errors_led_to_goal": -0.0029994089834515353,
-      "errors_led_to_shot": -0.003959810874704483,
-      "errors_miscontrols": -0.027944211064966692,
-      "expected_assists": 0.010883560440602846,
-      "interceptions": 0.026377952343227914,
-      "key_passes": 0.0,
-      "last_man_tackle": 0.00035460992907801415,
-      "long_balls_completed": 0.04755304937465406,
-      "passes_completed": 0.05427585732016978,
-      "passes_opp_half": 0.20238678891832304,
-      "penalties_conceded": -0.004137115839243499,
-      "penalties_won": 0.001861702127659574,
-      "shots": 0.0365192954755037,
-      "shots_blocked": 0.008643617021276653,
-      "shots_goal": 0.025388721304153265,
-      "shots_off": 0.007671394799054248,
-      "shots_on_target": 0.015218676122931315,
-      "shots_post": 0.004355791962174946,
-      "tackles_won": 0.026845031478522827,
-      "touches": 0.07106940821283024,
-      "touches_in_box": 0.009651797952427382,
-      "was_fouled": 0.015915885119769192,
-      "xg_on_target": 0.026482056737588664,
-      "xg_shots": -0.00918100933121573
+      "_exposure": -0.1348159690921725,
+      "aerials_lost": -0.02594786917656779,
+      "aerials_won": 0.023090922323588517,
+      "ball_recoveries": 0.03933361277714157,
+      "big_chance_created": 0.025006373339145203,
+      "blocks": 0.004214591355985435,
+      "clearances": 0.015309989276898469,
+      "clearances_off_line": 0.0013756343997490966,
+      "crosses_completed": 0.011760491882626801,
+      "defensive_value": 0.005389426070347076,
+      "dribbled_past": -0.03046240574488709,
+      "dribbles_attempted": -0.01890796284978299,
+      "dribbles_won": 0.018246438881771455,
+      "duels_lost": -0.13533876678508538,
+      "duels_won": 0.13469656296674706,
+      "errors_bad_passes": -0.0472867939122153,
+      "errors_dispossessed": -0.014544374487586878,
+      "errors_fouls_committed": -0.013007860320672386,
+      "errors_led_to_goal": -0.0027841960447734723,
+      "errors_led_to_shot": -0.004086936249953615,
+      "errors_miscontrols": -0.021251946567064698,
+      "expected_assists": 0.10287631575497987,
+      "interceptions": 0.02054133121413208,
+      "last_man_tackle": 0.0008649403899476645,
+      "long_balls_completed": 0.035542786546090305,
+      "passes_completed": 0.03444144954325793,
+      "passes_opp_half": 0.12948635633721128,
+      "penalties_conceded": -0.004021424231742498,
+      "penalties_won": 0.001853878489151756,
+      "sga_post": -0.0013417802002432353,
+      "shots": 0.055359538292015904,
+      "shots_blocked": 0.01563852688652522,
+      "shots_goal": 0.04050844280002533,
+      "shots_off": 0.012715419615572945,
+      "shots_on_target": 0.026966576540689315,
+      "tackles_won": 0.02096630879725467,
+      "touches": 0.048658345990137464,
+      "touches_in_box": 0.006885263771227378,
+      "was_fouled": 0.012552046753556293,
+      "xg_shots": 0.020765659735436932
     },
     "DIF": {
-      "_exposure": -0.026181086851436473,
-      "aerials_lost": -0.04036823447918986,
-      "aerials_won": 0.04595919275552676,
-      "ball_recoveries": 0.050601081842631235,
-      "blocks": 0.01147679481575523,
-      "clearances": 0.048737920904389984,
-      "clearances_off_line": 0.002669458257000784,
-      "crosses_completed": 0.014697425154038284,
-      "dribbled_past": -0.02884854378702899,
-      "dribbles_attempted": -0.014936275628734213,
-      "dribbles_won": 0.01329757885050582,
-      "duels_lost": -0.1698024637683923,
-      "duels_won": 0.1867203811618531,
-      "errors_bad_passes": -0.0703357173523777,
-      "errors_dispossessed": -0.00822303816768461,
-      "errors_fouls_committed": -0.015609805137857376,
-      "errors_led_to_goal": -0.005312745354619211,
-      "errors_led_to_shot": -0.004213556660560053,
-      "errors_miscontrols": -0.018302742558566086,
-      "expected_assists": 0.007738946730306196,
-      "interceptions": 0.03385926536315235,
-      "key_passes": 0.0,
-      "last_man_tackle": 0.004867835645119071,
-      "long_balls_completed": 0.05476257074429681,
-      "passes_completed": 0.0587101988710289,
-      "passes_opp_half": 0.18130507505870674,
-      "penalties_conceded": -0.008113059408531798,
-      "penalties_won": 0.0009421617377649827,
-      "shots": 0.021505705228644846,
-      "shots_blocked": 0.003870714472651112,
-      "shots_goal": 0.011625574546861969,
-      "shots_off": 0.004480502486260077,
-      "shots_on_target": 0.007432609264590486,
-      "shots_post": 0.0019000261711593818,
-      "tackles_won": 0.026954961808024484,
-      "touches": 0.0764202733719024,
-      "touches_in_box": 0.009006981043377547,
-      "was_fouled": 0.01148023928114775,
-      "xg_on_target": 0.01248191572886679,
-      "xg_shots": -0.004464612757341019
+      "_exposure": -0.2158822795969177,
+      "aerials_lost": -0.029995914159937086,
+      "aerials_won": 0.03500942399554226,
+      "ball_recoveries": 0.03593174667909031,
+      "big_chance_created": 0.016994920089490856,
+      "blocks": 0.009271228931181858,
+      "clearances": 0.037353666206363684,
+      "clearances_off_line": 0.005780306651069736,
+      "crosses_completed": 0.01130552371197313,
+      "defensive_value": -0.0023479934704257735,
+      "dribbled_past": -0.022493251594807886,
+      "dribbles_attempted": -0.010321165464693749,
+      "dribbles_won": 0.009639650076666291,
+      "duels_lost": -0.11191947758491176,
+      "duels_won": 0.12771393977507256,
+      "errors_bad_passes": -0.04842995431015703,
+      "errors_dispossessed": -0.006054808330928843,
+      "errors_fouls_committed": -0.011822770346276523,
+      "errors_led_to_goal": -0.005486406550862103,
+      "errors_led_to_shot": -0.004267178421075613,
+      "errors_miscontrols": -0.012862134065821146,
+      "expected_assists": 0.07111074099522123,
+      "interceptions": 0.026711132352450553,
+      "last_man_tackle": 0.011605689535812706,
+      "long_balls_completed": 0.04166538314841681,
+      "passes_completed": 0.03834615419289483,
+      "passes_opp_half": 0.11301250405731578,
+      "penalties_conceded": -0.00822939636646391,
+      "penalties_won": 0.0009553074030336403,
+      "sga_post": -0.0024291537584102013,
+      "shots": 0.0310532987791264,
+      "shots_blocked": 0.007270489005099292,
+      "shots_goal": 0.01833086442077927,
+      "shots_off": 0.007633823765392034,
+      "shots_on_target": 0.013747616920393899,
+      "tackles_won": 0.02088386283374288,
+      "touches": 0.05307057619037769,
+      "touches_in_box": 0.006052577658120936,
+      "was_fouled": 0.008426022166417843,
+      "xg_shots": 0.010953212334571699
     },
     "POR": {
-      "errors_bad_passes": -0.29996139381381426,
-      "errors_led_to_goal": -0.05971377008319325,
-      "errors_led_to_shot": -0.02000031278292871,
-      "gk_crosses_not_claimed": -0.009834850824457956,
-      "gk_goals_prevented": 0.11034242917782104,
-      "gk_high_claims": 0.12224204863988976,
-      "gk_penalty_saves": 0.028795811518324606,
-      "gk_punches": 0.034829367023251456,
-      "gk_saves": 0.30579043594850575,
-      "gk_saves_inside_box": 0.3951225101120822,
-      "gk_sweeper": 0.061145930785880064,
-      "passes_completed": 0.0452618672240606
+      "errors_bad_passes": -0.2468722261761941,
+      "errors_led_to_goal": -0.05976869273964396,
+      "errors_led_to_shot": -0.02008606833066524,
+      "gk_crosses_not_claimed": -0.009839977804656319,
+      "gk_goals_prevented": 0.08036713848767892,
+      "gk_high_claims": 0.11785571076958383,
+      "gk_penalty_saves": 0.02879026490152064,
+      "gk_punches": 0.0345175020881484,
+      "gk_saves": 0.2673327653098297,
+      "gk_saves_inside_box": 0.36333844013622274,
+      "gk_sweeper": 0.06017264437341759,
+      "passes_completed": 0.040126844869715586
     }
   },
-  "weights_fingerprint": "88707c26c00e4dce"
+  "weights_fingerprint": "45a77315dc62e561"
 }

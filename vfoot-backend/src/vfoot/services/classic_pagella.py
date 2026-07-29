@@ -105,30 +105,21 @@ def get_role_averages(competition_season_id: int) -> dict:
     return data
 
 
-def compute_role_averages(competition_season_id: int) -> dict:
+def compute_role_averages(competition_season_id: int,
+                          scales: dict | None = None) -> dict:
     """Per-role average contribution of each feature, over one season's rated
     appearances. The building block behind both the cached live path and the
-    frozen calibration; kept separate so both use exactly the same computation."""
-    match_ids = list(Match.objects
-                     .filter(competition_season_id=competition_season_id)
-                     .values_list("id", flat=True))
-    totals = _per_match_player_totals(match_ids)
-    minutes = _minutes_map(match_ids)
-    exposure = defensive_exposure(match_ids, minutes)
-    # SAME disambiguated role source as build_reference, so the explanation's
-    # per-role means line up with the reference the vote is z-scored against.
-    from vfoot.services.classic_rating import MIN_MINUTES_REFERENCE, is_rated
-    roles = current_role_map(only_declared=True)
-    # SAME filter as build_reference (>= MIN_MINUTES_REFERENCE and rated): the
-    # explanation subtracts this mean, the vote subtracts build_reference's, and
-    # if the two sets differ the breakdown cannot sum to the vote.
-    rows = [(roles[pid], feats, minutes.get((mid, pid), 0),
-             exposure.get((mid, pid), 0.0))
-            for (mid, pid), feats in totals.items()
-            if roles.get(pid)
-            and minutes.get((mid, pid), 0) >= MIN_MINUTES_REFERENCE
-            and is_rated(minutes.get((mid, pid), 0), feats)]
-    return role_average_terms(rows)
+    frozen calibration; kept separate so both use exactly the same computation.
+
+    ``scales`` lets the calibration command pass the spreads it has just built:
+    reading the frozen file there would use the PREVIOUS calibration, so the
+    explanation's means would be on a different scale from the vote they explain.
+    Shares ``_reference_population`` with the reference itself, so the two can
+    never be computed over different games.
+    """
+    from vfoot.services.classic_rating import _reference_population
+    return role_average_terms(_reference_population(competition_season_id),
+                              scales=scales)
 
 
 def _cards_for_match(match_id: int) -> dict[int, dict]:

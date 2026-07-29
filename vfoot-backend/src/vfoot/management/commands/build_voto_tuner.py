@@ -45,8 +45,8 @@ SHOTMAP = {"post": "shots_post", "goal": "shots_goal", "save": "shots_saved",
 # Provider stats we ingest but do not weight — shown at weight 0 for inspection.
 # (crosses_completed / dribbles_attempted are now weighted; possession_lost was
 # dropped as 79% redundant with the errors_* it overlaps — see PER90_WEIGHTS.)
-# big_chance_created/missed were dropped (goal now weighted via shots_goal) — they're
-# TOTAL events, not shown here (UNUSED is treated as PER90); re-add to TOTAL_WEIGHTS.
+# big_chance_created IS weighted now (it is the passer's stat, see TOTAL_WEIGHTS) so
+# it arrives from there; big_chance_missed stays dropped, already in the SGA.
 UNUSED = ["tackles", "possession_lost"]
 # Emblematic cases to always show, tagged by disagreement type:
 #   "DISAC. 2x"    — we disagree with BOTH fantacalcio and SofaScore. Scorers who
@@ -76,9 +76,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--season", type=int, default=2)
-        parser.add_argument("--cases", type=int, default=24,
-                            help="Target number of case columns (emblematic + Statistico "
-                                 "discrepancies + fillers).")
+        parser.add_argument("--cases", type=int, default=28,
+                            help="Target number of case columns (emblematic + defender "
+                                 "extremes + Statistico discrepancies + fillers).")
         parser.add_argument("--dir", default=None,
                             help="Folder with the external fantacalcio .xlsx sheets.")
         parser.add_argument("--out", default=None,
@@ -92,22 +92,21 @@ class Command(BaseCommand):
         if not files:
             raise CommandError(f"No fantacalcio .xlsx in {ddir}")
 
-        # ---- feature set (deployed + shot detail) ----
+        # ---- feature set (exactly the deployed vector) ----
+        # Since the standardisation, a case column holds the STANDARDISED value of
+        # each feature, so the index is a plain SUMPRODUCT of weights and column:
+        # no RAW/SQRT duality to reconstruct in the sheet, and a weight in column C
+        # means the same thing as in the code — index points per 1σ.
         TOTAL = list(cr.TOTAL_WEIGHTS)
-        PER90 = list(cr.PER90_WEIGHTS) + UNUSED
-        # shots_post / shots_blocked are now WEIGHTED TOTAL features (their values
-        # arrive via _per_match_player_totals); only the UNWEIGHTED shot outcomes go
-        # here, shown at weight 0 for inspection — else they'd be double-counted.
-        SHOTDET = [f for f in SHOTMAP.values() if f not in cr.TOTAL_WEIGHTS]
-        FEATS = TOTAL + PER90 + ["_exposure"] + SHOTDET
+        PER90 = list(cr.PER90_WEIGHTS)
+        FEATS = TOTAL + PER90 + [cr.EXPOSURE_KEY]
         nF = len(FEATS)
         is_p90 = {f: (f in PER90) for f in FEATS}
-        # √ on PER90 and on the √-TOTAL features (shots_goal: diminishing returns).
-        sqmask = np.array([is_p90[f] or f in cr.SQRT_TOTAL_FEATURES for f in FEATS])
         curw = {**cr.TOTAL_WEIGHTS, **cr.PER90_WEIGHTS}
+        SCALES = cr.feature_scales(gk=False)
 
         def w_of(f):
-            return -cr.DEF_EXPOSURE_WEIGHT if f == "_exposure" else curw.get(f, 0.0)
+            return -cr.EXPOSURE_WEIGHT if f == cr.EXPOSURE_KEY else curw.get(f, 0.0)
 
         # ---- per-match data ----
         mids = list(Match.objects.filter(competition_season_id=cs).values_list("id", flat=True))
@@ -132,23 +131,18 @@ class Command(BaseCommand):
                    .filter(match__competition_season_id=cs)
                    .values("match_id", "player_id", "side")}
 
-        def scaledraw(tot, m, ex, role):
-            sc = 90.0 / max(m, cr.EXTRAP_FLOOR_MINUTES)
-            v = []
-            for f in FEATS:
-                if f == "_exposure":
-                    v.append(ex if role == "DIF" else 0.0)
-                elif is_p90[f]:
-                    v.append(tot.get(f, 0.0) * sc)
-                else:
-                    v.append(tot.get(f, 0.0))
-            return np.array(v)
+        def rawvec(tot, m, ex):
+            """the feature values in provider units — for the readable sheets"""
+            v = cr.raw_feature_values(tot, m, ex, gk=False)
+            return np.array([v.get(f, 0.0) for f in FEATS])
 
-        def sqrtv(M):
-            return np.where(sqmask, np.sign(M) * np.sqrt(np.abs(M)), M)
+        def zvec(tot, m, ex):
+            """the STANDARDISED values the index is actually built from"""
+            v = cr.raw_feature_values(tot, m, ex, gk=False)
+            return np.array([cr._feature_z(f, v.get(f, 0.0), SCALES) for f in FEATS])
 
-        # ---- population -> per-role mean/cov (raw + selective-√) ----
-        pop = defaultdict(list)
+        # ---- population -> per-role mean/cov of the STANDARDISED vector ----
+        pop, popraw = defaultdict(list), defaultdict(list)
         gp2mp = {}
         for (mid, pid), tot in totals.items():
             role = roles.get(pid)
@@ -158,12 +152,26 @@ class Command(BaseCommand):
             gp2mp[(md_of.get(mid), pid)] = (mid, pid)
             if m < cr.MIN_MINUTES_REFERENCE or not cr.is_rated(m, tot):
                 continue
-            pop[role].append(scaledraw(tot, m, expo.get((mid, pid), 0.0), role))
+            ex = expo.get((mid, pid), 0.0)
+            pop[role].append(zvec(tot, m, ex))
+            popraw[role].append(rawvec(tot, m, ex))
         STATS = {}
         for role in OUT_ROLES:
-            R = np.array(pop[role]); Sq = sqrtv(R)
-            STATS[role] = {"mean_raw": R.mean(0), "cov_raw": np.cov(R.T),
-                           "mean_sqrt": Sq.mean(0), "cov_sqrt": np.cov(Sq.T)}
+            Z = np.array(pop[role]); R = np.array(popraw[role])
+            # ddof=0: build_reference computes the POPULATION std, and a sheet
+            # that used the sample one would disagree with the deployed vote by a
+            # rounding step on cases sitting exactly on a 0.25 boundary.
+            STATS[role] = {"mean_z": Z.mean(0), "cov_z": np.cov(Z.T, ddof=0),
+                           "mean_raw": R.mean(0), "sd_raw": R.std(0),
+                           "n": len(Z)}
+        # With POOLED_ROLE_SPREAD the outfield roles share ONE spread: the std of
+        # the residuals pooled across them. Projected on a weight vector that is
+        # w'Cw with C the sample-weighted average of the WITHIN-role covariances —
+        # each role's residuals are already centred on its own mean, so pooling
+        # them is exactly this average. Stored as an extra block so the sheet's
+        # live sigma keeps matching the deployed one whatever the weights.
+        _n = sum(STATS[r]["n"] for r in OUT_ROLES)
+        COV_POOLED = sum(STATS[r]["n"] * STATS[r]["cov_z"] for r in OUT_ROLES) / _n
 
         # ---- discrepancy rows (reuses the external-sheet parsing) ----
         rows = DiscCmd().discrepancy_rows(cs, files)
@@ -206,6 +214,17 @@ class Command(BaseCommand):
             r = by_key.get((gd, pid))
             if r:
                 take(r, tag)
+        # THE EXTREMES OF THE DEFENDER SCALE. A defender reaching 9 (or dropping to
+        # 3) is where the model is least constrained by the reference and most
+        # likely to be caught out, so those cases belong in the sheet BY RULE rather
+        # than by remembering to add them: they are re-picked automatically on every
+        # rebuild, including after a reweighting that creates new ones. Both ends —
+        # the exposure term can push a defender down as hard as a goal lifts him up.
+        defenders = [x for x in cand if x["role"] == "DIF"]
+        for r in sorted(defenders, key=lambda x: -x["our"])[:2]:
+            take(r, "ESTREMO alto")
+        for r in sorted(defenders, key=lambda x: x["our"])[:2]:
+            take(r, "ESTREMO basso")
         # THE STRANGE-VOTE HUNT: biggest gaps vs the Statistico base vote. Statistico
         # is the goal-stripped algorithmic grade, so a large gap here is a pure
         # performance-read disagreement — exactly the votes to sanity-check.
@@ -254,14 +273,15 @@ class Command(BaseCommand):
         for r in sel:
             gd, pid = r["gd"], r["pid"]
             mid, _ = gp2mp[(gd, pid)]; tot = totals[(mid, pid)]; m = minutes[(mid, pid)]
-            role = roles[pid]; sd = scaledraw(tot, m, expo.get((mid, pid), 0.0), role)
+            role = roles[pid]; ex = expo.get((mid, pid), 0.0)
             M = Match.objects.get(id=mid)
             res = f"gd{gd}: {teamname.get(M.home_team_id,'?')} {M.home_goals}-{M.away_goals} {teamname.get(M.away_team_id,'?')}"
             if r["goals"]:
                 res += f" · {r['goals']}⚽"
             casedata.append({"name": name.get(pid, str(pid)), "tipo": r["tipo"], "role": role,
-                             "min": m, "match": res, "goals": r["goals"], "raw": sd,
-                             "sqrt": sqrtv(sd), "fanta": r["fanta"], "stat": r["statistico"],
+                             "min": m, "match": res, "goals": r["goals"],
+                             "raw": rawvec(tot, m, ex), "z": zvec(tot, m, ex),
+                             "fanta": r["fanta"], "stat": r["statistico"],
                              "sofa": r["sofa"], "our": r["our"],
                              "expl": r.get("explanation_text", ""),
                              # weight-independent inputs to the post-adjustment layer
@@ -291,40 +311,42 @@ class Command(BaseCommand):
             if len(expl_rows) >= 30:
                 break
 
-        self._build_xlsx(out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows)
+        self._build_xlsx(out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows,
+                         cov_pooled=COV_POOLED)
         self.stdout.write(self.style.SUCCESS(
             f"scritto {out} | casi: {len(casedata)} "
             f"(gol: {sum(1 for c in casedata if c['goals'])}, "
             f"KO netto: {sum(1 for c in casedata if c['tipo']=='KO netto')})"))
 
     # ------------------------------------------------------------------
-    def _build_xlsx(self, out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows=()):
+    def _build_xlsx(self, out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows=(),
+                    cov_pooled=None):
         wb = openpyxl.Workbook()
         fillh = PatternFill("solid", fgColor=TEAL); yel = PatternFill("solid", fgColor=YEL)
 
         # ---- ref: means as COLUMNS + covariance blocks ----
         ref = wb.create_sheet("ref")
         meancol = {}
-        for ci, (role, k) in enumerate([(r, k) for r in OUT_ROLES for k in ("raw", "sqrt")]):
-            c = 2 + ci; meancol[(role, k)] = col(c)
-            ref.cell(1, c, f"{role}_{k}")
-            for i, v in enumerate(STATS[role]["mean_" + k]):
+        for ci, role in enumerate(OUT_ROLES):
+            c = 2 + ci; meancol[role] = col(c)
+            ref.cell(1, c, f"{role}_z")
+            for i, v in enumerate(STATS[role]["mean_z"]):
                 ref.cell(2 + i, c, float(v))
         covpos = {}; rr = nF + 4
-        for role in OUT_ROLES:
-            for k in ("raw", "sqrt"):
-                covpos[(role, k)] = rr; C = STATS[role]["cov_" + k]
-                for i in range(nF):
-                    for j in range(nF):
-                        ref.cell(rr, 2 + j, float(C[i, j]))
-                    rr += 1
+        for role in list(OUT_ROLES) + ["_POOLED"]:
+            C = STATS[role]["cov_z"] if role in STATS else cov_pooled
+            covpos[role] = rr
+            for i in range(nF):
+                for j in range(nF):
+                    ref.cell(rr, 2 + j, float(C[i, j]))
                 rr += 1
+            rr += 1
 
-        def meanrng(role, k):
-            return f"ref!${meancol[(role,k)]}$2:${meancol[(role,k)]}${1+nF}"
+        def meanrng(role):
+            return f"ref!${meancol[role]}$2:${meancol[role]}${1+nF}"
 
-        def covrng(role, k):
-            p = covpos[(role, k)]
+        def covrng(role):
+            p = covpos[role]
             return f"ref!$B${p}:${col(1+nF)}${p+nF-1}"
 
         # ---- calc: w_outer + mu/sigma ----
@@ -333,13 +355,15 @@ class Command(BaseCommand):
             for j in range(nF):
                 calc.cell(2 + i, 2 + j, f"=Tuner!$C${7+i}*Tuner!$C${7+j}")
         wouter = f"calc!$B$2:${col(1+nF)}${1+nF}"; wvec = f"Tuner!$C$7:$C${6+nF}"
+        sigma_src = "_POOLED" if cr.POOLED_ROLE_SPREAD else None
         murow = {}; rr = nF + 4
         for role in OUT_ROLES:
             calc.cell(rr, 1, role)
-            calc.cell(rr, 2, f"=SUMPRODUCT({wvec},{meanrng(role,'raw')})")
-            calc.cell(rr, 3, f"=SUMPRODUCT({wvec},{meanrng(role,'sqrt')})")
-            calc.cell(rr, 4, f"=SQRT(SUMPRODUCT({covrng(role,'raw')},{wouter}))")
-            calc.cell(rr, 5, f"=SQRT(SUMPRODUCT({covrng(role,'sqrt')},{wouter}))")
+            calc.cell(rr, 2, f"=SUMPRODUCT({wvec},{meanrng(role)})")
+            # sigma dalla covarianza CONDIVISA (POOLED_ROLE_SPREAD): il centro
+            # resta per ruolo, la dispersione e' unica fra i ruoli di movimento.
+            calc.cell(rr, 3,
+                      f"=SQRT(SUMPRODUCT({covrng(sigma_src or role)},{wouter}))")
             murow[role] = rr; rr += 1
 
         # ---- cases: feature vectors + highlight + per-role mean/var/σ ----
@@ -357,16 +381,18 @@ class Command(BaseCommand):
         for ci, c in enumerate(casedata):
             S = STATS[c["role"]]
             for i in range(nF):
-                rc = cs.cell(2 + i, 2 + ci, float(c["raw"][i])); rc.number_format = "0.00"
-                f = zfill(c["raw"][i], S["mean_raw"][i], S["cov_raw"][i, i])
+                rc = cs.cell(2 + i, 2 + ci, float(c["z"][i])); rc.number_format = "0.00"
+                f = zfill(c["z"][i], S["mean_z"][i], S["cov_z"][i, i])
                 if f: rc.fill = f
-                qc = cs.cell(2 + nF + 2 + i, 2 + ci, float(c["sqrt"][i])); qc.number_format = "0.00"
-                f2 = zfill(c["sqrt"][i], S["mean_sqrt"][i], S["cov_sqrt"][i, i])
+                qc = cs.cell(2 + nF + 2 + i, 2 + ci, float(c["raw"][i]))
+                qc.number_format = "0.00"
+                f2 = zfill(c["raw"][i], S["mean_raw"][i], S["sd_raw"][i] ** 2)
                 if f2: qc.fill = f2
 
         def craw(ci): return f"cases!${col(2+ci)}$2:${col(2+ci)}${1+nF}"
-        def csq(ci): return f"cases!${col(2+ci)}${2+nF+2}:${col(2+ci)}${1+2*nF+2}"
-        cs["A1"] = "RAW block v (per-90 scaled)"; cs.cell(nF + 3, 1, "SQRT block v")
+        cs["A1"] = ("VALORI STANDARDIZZATI (entrano nell'indice: indice = "
+                    "SOMMAPRODOTTO(pesi, questa colonna))")
+        cs.cell(nF + 3, 1, "valori GREZZI (per-90 dove serve) — solo per leggerli")
         for i, f in enumerate(FEATS):
             cs.cell(2 + i, 1, f); cs.cell(nF + 4 + i, 1, f)
         for ci, c in enumerate(casedata):
@@ -380,11 +406,32 @@ class Command(BaseCommand):
                 cs.cell(hr, vc, f"{role} var").font = Font(bold=True, color=TEAL)
                 cs.cell(hr, sc, f"{role} σ").font = Font(bold=True, color=TEAL)
             for i in range(nF):
-                vr = STATS[role]["cov_raw"][i, i]; vs = STATS[role]["cov_sqrt"][i, i]
-                cs.cell(2 + i, mc, round(float(STATS[role]["mean_raw"][i]), 3))
-                cs.cell(2 + i, vc, round(float(vr), 4)); cs.cell(2 + i, sc, round(float(vr) ** 0.5, 3))
-                cs.cell(nF + 4 + i, mc, round(float(STATS[role]["mean_sqrt"][i]), 3))
-                cs.cell(nF + 4 + i, vc, round(float(vs), 4)); cs.cell(nF + 4 + i, sc, round(float(vs) ** 0.5, 3))
+                vz = STATS[role]["cov_z"][i, i]; sdr = STATS[role]["sd_raw"][i]
+                cs.cell(2 + i, mc, round(float(STATS[role]["mean_z"][i]), 3))
+                cs.cell(2 + i, vc, round(float(vz), 4))
+                cs.cell(2 + i, sc, round(float(vz) ** 0.5, 3))
+                cs.cell(nF + 4 + i, mc, round(float(STATS[role]["mean_raw"][i]), 3))
+                cs.cell(nF + 4 + i, vc, round(float(sdr) ** 2, 4))
+                cs.cell(nF + 4 + i, sc, round(float(sdr), 3))
+        # TERZO BLOCCO: il contributo vero, valore x peso. Vive di formule, quindi
+        # segue i pesi mentre li editi. Serve perche' il blocco standardizzato in
+        # cima invita a confrontare i NUMERI fra righe, mentre quello che arriva al
+        # voto e' il prodotto: un 1.36 su un peso 0.017 vale meno di uno 0.3 su 0.16.
+        r0 = 2 * nF + 5
+        cs.cell(r0 - 1, 1, "CONTRIBUTO all'indice (valore × peso, live)").font = Font(
+            bold=True, color=TEAL)
+        for i, f in enumerate(FEATS):
+            cs.cell(r0 + i, 1, f)
+        for ci, c in enumerate(casedata):
+            cs.cell(r0 - 1, 2 + ci, c["name"]).font = Font(bold=True)
+            for i in range(nF):
+                cc = cs.cell(r0 + i, 2 + ci,
+                             f"={col(2+ci)}{2+i}*Tuner!$C${7+i}")
+                cc.number_format = "0.000"
+            cs.cell(r0 + nF, 2 + ci,
+                    f"=SUM({col(2+ci)}{r0}:{col(2+ci)}{r0+nF-1})").font = Font(bold=True)
+        cs.cell(r0 + nF, 1, "TOTALE = indice").font = Font(bold=True)
+
         cs.cell(2 * nF + 6, 1, "Evidenziazione (vs media del RUOLO del caso): ambra=+1σ "
                 "arancio=+2σ (alto); azzurro=-1σ blu=-2σ (basso). Colonne a destra: "
                 "media/var/σ per ruolo.").font = Font(italic=True, size=9)
@@ -403,23 +450,44 @@ class Command(BaseCommand):
         tun["A3"] = ("Pipeline: voto base = 6+0.8·(min/(min+25))·(indice−media)/σ in [3,10]; "
                      "poi + mitigazione risultato (solo divergenze, cap ±1) + red/autogol; "
                      "poi clamp [3,10] e arrotondamento 0.5. gd_on e red/autogol sono FISSI "
-                     "(non dipendono dai pesi). SQRT applica √ alle PER90 e a shots_goal "
-                     "(rendimento decrescente sui gol multipli).")
-        tun["A4"] = "compressione:"; tun["B4"] = "SQRT"; tun["B4"].font = Font(bold=True); tun["B4"].fill = yel
-        dv = DataValidation(type="list", formula1='"RAW,SQRT"'); tun.add_data_validation(dv); dv.add(tun["B4"])
+                     "(non dipendono dai pesi).")
+        tun["A4"] = ("OGNI PESO = contributo all'indice di 1σ di quella feature. Le colonne "
+                     f"dei casi contengono i valori GIA' STANDARDIZZATI (standardizza → "
+                     f"comprimi con {cr.COMPRESS_K:g}·log(1+u/{cr.COMPRESS_K:g}) → "
+                     "ristandardizza), quindi indice = SOMMAPRODOTTO(pesi, colonna). "
+                     "Per far contare A la meta' di B, dai ad A meta' peso: adesso e' vero.")
+        tun["A4"].font = Font(italic=True, size=9)
         tun["A5"] = "K mitigazione:"; tun["B5"] = cr.RESULT_MITIGATION_K
         tun["C5"] = "base sc/vitt:"; tun["D5"] = cr.RESULT_MITIGATION_BASE
         for cell in ("B5", "D5"):
             tun[cell].font = Font(bold=True); tun[cell].fill = yel
             tun[cell].number_format = "0.00"
+        murow_dif = murow["DIF"]
         tun["A6"] = "feature"; tun["B6"] = "tipo"; tun["C6"] = "PESO"
-        for cc in ("A6", "B6", "C6"):
+        # Column D answers the question the sheet used to hide: a case column holds
+        # STANDARDISED values, so a 1.36 next to a 0.00 looks big — but what reaches
+        # the vote is value x weight, and the weights span a factor of 20. Without
+        # this column an analyst reads the value and infers an importance that is
+        # not there (it happened: an xA of +0.9 sigma read as decisive when it was
+        # worth 0.02 of a vote).
+        tun["D6"] = "1σ in VOTI"
+        for cc in ("A6", "B6", "C6", "D6"):
             tun[cc].font = Font(bold=True, color="FFFFFF"); tun[cc].fill = fillh
         for i, f in enumerate(FEATS):
             tun.cell(7 + i, 1, f)
             tun.cell(7 + i, 2, "PER90" if is_p90[f] else ("EXPOS" if f == "_exposure" else "TOT"))
-            wc = tun.cell(7 + i, 3, round(w_of(f), 3)); wc.fill = yel; wc.number_format = "0.000"
-        TOG = "Tuner!$B$4"; KM = "Tuner!$B$5"; BB = "Tuner!$D$5"; c0 = 5
+            # 4 decimals, not 3: the weights are now "index points per 1σ" and live
+            # around 0.01-0.15, where a third decimal is a 1% truncation and shows up
+            # as a rounding step on cases sitting near a 0.25 vote boundary.
+            wc = tun.cell(7 + i, 3, round(w_of(f), 4)); wc.fill = yel
+            wc.number_format = "0.0000"
+            # |peso| / sigma dell'indice x K x shrinkage a 90' = punti di voto che
+            # vale UNA sigma di quella feature. Live: segue i pesi che editi.
+            dc = tun.cell(7 + i, 4,
+                          f"=ABS(C{7+i})/calc!$C${murow_dif}*{cr.VOTE_SPREAD_K}"
+                          f"*90/(90+{cr.SHRINKAGE_MINUTES})")
+            dc.number_format = "0.00"
+        KM = "Tuner!$B$5"; BB = "Tuner!$D$5"; c0 = 5
         rowlab = [(7, "giocatore"), (8, "TIPO"), (9, "ruolo"), (10, "partita (gd, risultato, gol)"),
                   (11, "minuti"), (12, "fanta"), (13, "statistico"), (14, "sofascore"),
                   (15, "nostro(attuale)"), (16, "indice"), (17, "media INDICE ruolo"),
@@ -436,9 +504,9 @@ class Command(BaseCommand):
             tun.cell(9, cc, c["role"]); tun.cell(10, cc, c["match"]); tun.cell(11, cc, c["min"])
             tun.cell(12, cc, c["fanta"]); tun.cell(13, cc, c["stat"] if c["stat"] is not None else "-")
             tun.cell(14, cc, c["sofa"] if c["sofa"] is not None else "-"); tun.cell(15, cc, c["our"])
-            tun.cell(16, cc, f'=IF({TOG}="SQRT",SUMPRODUCT({wvec},{csq(ci)}),SUMPRODUCT({wvec},{craw(ci)}))')
-            tun.cell(17, cc, f'=IF({TOG}="SQRT",calc!$C${mr},calc!$B${mr})')
-            tun.cell(18, cc, f'=IF({TOG}="SQRT",calc!$E${mr},calc!$D${mr})')
+            tun.cell(16, cc, f'=SUMPRODUCT({wvec},{craw(ci)})')
+            tun.cell(17, cc, f'=calc!$B${mr}')
+            tun.cell(18, cc, f'=calc!$C${mr}')
             tun.cell(19, cc, c["gd_on"])
             tun.cell(20, cc, c["red_adj"])
             # voto base (clamp [3,10], pre-arrotondamento)
@@ -473,11 +541,24 @@ class Command(BaseCommand):
                       "che sprecano: il gol è bonus +3, non voto base; loro fanno l'alone-gol, "
                       "noi no); 'DISAC. fanta'=disaccordo con fanta ma SofaScore ci dà ragione "
                       "(merito individuale in sconfitta vs punizione collettiva); "
-                      "GOL=marcatore, 'KO netto'=sconfitta ≥3 gol, OUTLIER, buono=accordo.")
+                      "GOL=marcatore, 'KO netto'=sconfitta ≥3 gol, OUTLIER, buono=accordo; "
+                      "'ESTREMO alto/basso'=i voti difensori più alti e più bassi della "
+                      "stagione, ripescati a ogni rebuild (lì il modello è meno vincolato).")
         tun["E28"] = ("Mitigazione: solo divergenze (voto>6 in sconfitta → giù; voto<6 in vittoria → su), "
                       "gravità = base + K·|gd_on|, cap ±1. K in B5, 'base sc/vitt' (contributo "
                       "discreto sconfitta/vittoria, oltre i gol) in D5. SGA_Pali: xgOT−xg + palo.")
-        for a in ("E26", "E27", "E28"):
+        tun["E29"] = (
+            f"EXPOSURE (_exposure, peso {-cr.EXPOSURE_WEIGHT:.2f}): pericolo SUBITO addebitato "
+            f"a chi era in quella zona. Per ogni tiro avversario (rigori esclusi, solo minuti "
+            f"in campo) l'addebito è λ·esito + (1−λ)·xGOT con λ={cr.EXPOSURE_LAMBDA:.2f}; "
+            f"esito = 1 gol, {cr.EXPOSURE_POST_OUTCOME:.3f} legno (= shots_post/shots_goal dei "
+            f"nostri pesi d'attacco), 0 altrimenti — quindi tiri fuori/ribattuti costano zero. "
+            f"L'addebito è diviso fra i giocatori di MOVIMENTO in campo in quel minuto in "
+            f"proporzione alla presenza (heatmap) nella zona specchiata + "
+            f"{cr.EXPOSURE_KERNEL:.2f}× le adiacenti; le quote fanno 100%, il portiere è "
+            f"escluso dalla divisione (il suo canale risponde già delle parate). Il valore in "
+            f"colonna è FISSO (non dipende dai pesi), il PESO no: editalo in C.")
+        for a in ("E26", "E27", "E28", "E29"):
             tun[a].font = Font(italic=True, size=9)
         tun.column_dimensions["A"].width = 21; tun.column_dimensions["C"].width = 8
         tun.column_dimensions["E"].width = 19
@@ -485,13 +566,14 @@ class Command(BaseCommand):
         # ---- medie (readable per-feature role means) ----
         med = wb.create_sheet("medie")
         med["A1"] = "Medie per-FEATURE per ruolo (FISSE)."; med["A1"].font = Font(bold=True)
-        for j, h in enumerate(["feature", "DIF raw", "CEN raw", "ATT raw", "DIF sqrt", "CEN sqrt", "ATT sqrt"]):
+        for j, h in enumerate(["feature", "DIF grezza", "CEN grezza", "ATT grezza",
+                               "DIF σ grezza", "CEN σ grezza", "ATT σ grezza"]):
             hc = med.cell(3, 1 + j, h); hc.font = Font(bold=True, color="FFFFFF"); hc.fill = fillh
         for i, f in enumerate(FEATS):
             med.cell(4 + i, 1, f)
             for jr, role in enumerate(OUT_ROLES):
                 med.cell(4 + i, 2 + jr, round(float(STATS[role]["mean_raw"][i]), 3))
-                med.cell(4 + i, 5 + jr, round(float(STATS[role]["mean_sqrt"][i]), 3))
+                med.cell(4 + i, 5 + jr, round(float(STATS[role]["sd_raw"][i]), 3))
         med.column_dimensions["A"].width = 21
 
         # ---- spiegazioni: the strange-vote ledger with our generated text ----
