@@ -275,6 +275,16 @@ export async function joinLeague(req: JoinLeagueRequest) {
   return { league_id: l.league_id, team_id: teamId };
 }
 
+export async function updateMyTeam(leagueId: number, patch: { name?: string; crest?: string }) {
+  await sleep(120);
+  const l = mockLeagues.find((x) => x.league_id === leagueId);
+  const team = l?.teams[0];
+  if (!team) throw new Error('Team not found.');
+  if (patch.name !== undefined) team.name = patch.name;
+  if (patch.crest !== undefined) team.crest = patch.crest;
+  return { team_id: team.team_id, name: team.name, crest: team.crest ?? '' };
+}
+
 export async function getLeagueDetail(leagueId: number): Promise<LeagueDetail> {
   await sleep(100);
   const l = mockLeagues.find((x) => x.league_id === leagueId);

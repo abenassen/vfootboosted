@@ -46,6 +46,7 @@ from vfoot.api.league_serializers import (
     QualificationRuleCreateSerializer,
     RemoveRosterPlayerSerializer,
     UpdateMemberRoleSerializer,
+    UpdateMyTeamSerializer,
 )
 from vfoot.models import (
     AuctionBid,
@@ -138,6 +139,7 @@ class LeagueListCreateView(APIView):
                     "invite_code": m.league.invite_code,
                     "market_open": m.league.market_open,
                     "team_name": m.team.name if hasattr(m, "team") else None,
+                    "team_crest": m.team.crest if hasattr(m, "team") else "",
                     "reference_season": (
                         {
                             "id": season.id,
@@ -284,6 +286,7 @@ class LeagueDetailView(APIView):
                     {
                         "team_id": t.id,
                         "name": t.name,
+                        "crest": t.crest,
                         "manager_user_id": t.manager.user_id,
                         "manager_username": t.manager.user.username,
                         # Record aggregated across ALL competitions, not one chosen
@@ -298,6 +301,59 @@ class LeagueDetailView(APIView):
                 ],
             }
         )
+
+
+class LeagueMyTeamView(APIView):
+    """The caller's OWN team inside one league: rename it, give it a crest.
+
+    League-scoped on purpose, and deliberately not part of /auth/me. The avatar
+    identifies the MANAGER and there is one per account; the name and the crest
+    belong to one team in one league, and the same person fields a different team
+    in every league he joins. Putting these on the profile page would have meant
+    editing a league-scoped thing from a page that has no league.
+
+    Admins get no say here: a team's own name is the manager's business. What an
+    admin can already do league-wide is elsewhere.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        membership = _membership_or_404(league, request.user.id)
+        team = getattr(membership, "team", None)
+        if team is None:
+            raise Http404("No team in this league")
+
+        s = UpdateMyTeamSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        data = s.validated_data
+
+        updated = []
+        if "name" in data:
+            name = data["name"]
+            # unique_together is (league, name), so a clash would otherwise surface
+            # as an IntegrityError — a 500 for something the user can fix himself.
+            # Checked case-INSENSITIVELY: "Real Madrid" and "real madrid" in the
+            # same standings table is a bug report waiting to happen, even though
+            # the database would accept both.
+            taken = (FantasyTeam.objects.filter(league=league, name__iexact=name)
+                     .exclude(pk=team.pk).exists())
+            if taken:
+                return Response(
+                    {"name": ["In questa lega esiste già una squadra con questo nome."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            team.name = name
+            updated.append("name")
+        if "crest" in data:
+            team.crest = data["crest"]
+            updated.append("crest")
+
+        if updated:
+            team.save(update_fields=updated)
+        return Response({"team_id": team.id, "name": team.name, "crest": team.crest})
 
 
 def _league_wide_records(league) -> dict:
@@ -1586,8 +1642,10 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         "kickoff": fx.kickoff.isoformat() if fx.kickoff else None,
         "status": fx.status,
         "phase": _fixture_phase(fx, current_real_md),
-        "home_team": {"team_id": fx.home_team_id, "name": fx.home_team.name},
-        "away_team": {"team_id": fx.away_team_id, "name": fx.away_team.name},
+        "home_team": {"team_id": fx.home_team_id, "name": fx.home_team.name,
+                      "crest": fx.home_team.crest},
+        "away_team": {"team_id": fx.away_team_id, "name": fx.away_team.name,
+                      "crest": fx.away_team.crest},
         "score": {"home_total": fx.home_total, "away_total": fx.away_total} if fx.status == FantasyFixture.STATUS_FINISHED else None,
         "is_user_involved": bool(my_team_id and (fx.home_team_id == my_team_id or fx.away_team_id == my_team_id)),
     }
@@ -3006,6 +3064,7 @@ def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:
     """Ranked standings from a list of FINISHED fixtures (with .detail prefetched)."""
     rows: dict[int, dict] = {}
     names: dict[int, str] = {}
+    crests: dict[int, str] = {}
 
     def row(team_id: int) -> dict:
         return rows.setdefault(
@@ -3015,6 +3074,8 @@ def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:
     for fx in fixtures:
         names[fx.home_team_id] = fx.home_team.name
         names[fx.away_team_id] = fx.away_team.name
+        crests[fx.home_team_id] = fx.home_team.crest
+        crests[fx.away_team_id] = fx.away_team.crest
         h, a = row(fx.home_team_id), row(fx.away_team_id)
         hs, as_ = fx.home_total, fx.away_total
         h["played"] += 1
@@ -3038,6 +3099,7 @@ def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:
     return [
         {
             "rank": i + 1, "team_id": tid, "team": names.get(tid, str(tid)),
+            "crest": crests.get(tid, ""),
             "played": r["played"], "wins": r["w"], "draws": r["d"], "losses": r["l"],
             "goals_for": int(r["gf"]), "goals_against": int(r["ga"]),
             "goal_diff": int(r["gf"] - r["ga"]), "points": r["pts"],
@@ -3135,6 +3197,10 @@ class LeagueStandingsView(APIView):
         ) if comp else FantasyFixture.objects.none()
         rows: dict[int, dict] = {}
         names: dict[int, str] = {}
+        # NOTE: this whole block duplicates _compute_standings() above, crest map
+        # included. Adding a column to one and not the other is exactly the bug
+        # this comment exists to prevent — change both, or merge them.
+        crests: dict[int, str] = {}
 
         def row(team_id: int) -> dict:
             return rows.setdefault(
@@ -3145,6 +3211,8 @@ class LeagueStandingsView(APIView):
         for fx in fixtures:
             names[fx.home_team_id] = fx.home_team.name
             names[fx.away_team_id] = fx.away_team.name
+            crests[fx.home_team_id] = fx.home_team.crest
+            crests[fx.away_team_id] = fx.away_team.crest
             h, a = row(fx.home_team_id), row(fx.away_team_id)
             hs, as_ = fx.home_total, fx.away_total
             h["played"] += 1
@@ -3183,6 +3251,7 @@ class LeagueStandingsView(APIView):
                 "rank": i + 1,
                 "team_id": tid,
                 "team": names.get(tid, str(tid)),
+                "crest": crests.get(tid, ""),
                 "played": r["played"],
                 "wins": r["w"],
                 "draws": r["d"],

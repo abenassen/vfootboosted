@@ -114,6 +114,13 @@ class FantasyTeam(models.Model):
     league = models.ForeignKey(FantasyLeague, on_delete=models.CASCADE, related_name="teams")
     manager = models.OneToOneField(LeagueMembership, on_delete=models.PROTECT, related_name="team")
     name = models.CharField(max_length=120)
+    # Opaque, client-composed crest descriptor — same deal as UserProfile.avatar:
+    # the SPA owns the schema and draws the SVG, the server only stores and echoes
+    # it. Deliberately NOT an ImageField: uploads would mean files to serve, back
+    # up and deploy, and the dev-db release (a bare SQLite dump) would hand out
+    # rows pointing at images nobody has. Empty => the UI falls back to a crest
+    # seeded from the team name.
+    crest = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

@@ -77,6 +77,9 @@ function rows(s: LeagueStandingRow[], myTeam?: string | null): StandingRowVM[] {
     key: String(r.team_id),
     rank: r.rank,
     name: r.team,
+    // ?? '' and not `r.crest`: undefined means "this caller has no crests at all"
+    // and switches the column off for the whole table.
+    crest: r.crest ?? '',
     played: r.played,
     wins: r.wins,
     draws: r.draws,

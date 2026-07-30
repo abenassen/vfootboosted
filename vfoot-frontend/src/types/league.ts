@@ -5,6 +5,9 @@ export interface LeagueSummary {
   invite_code: string;
   market_open: boolean;
   team_name?: string | null;
+  /** Opaque crest descriptor of the caller's team in THIS league (see
+   *  utils/crest). One per team, unlike the avatar, which is one per account. */
+  team_crest?: string | null;
   reference_season?: ReferenceSeason | null;
 }
 
@@ -27,6 +30,7 @@ export interface TeamRecord {
 export interface LeagueTeam {
   team_id: number;
   name: string;
+  crest?: string | null;
   manager_user_id: number;
   manager_username: string;
   // W/D/L and goals aggregated across ALL competitions (no single table exists).
@@ -377,8 +381,8 @@ export interface LeagueFixtureItem {
   kickoff: string | null;
   status: 'scheduled' | 'live' | 'finished';
   phase: 'concluded' | 'current' | 'future' | 'unscheduled';
-  home_team: { team_id: number; name: string };
-  away_team: { team_id: number; name: string };
+  home_team: { team_id: number; name: string; crest?: string | null };
+  away_team: { team_id: number; name: string; crest?: string | null };
   score: { home_total: number; away_total: number } | null;
   is_user_involved: boolean;
 }
@@ -412,6 +416,7 @@ export interface LeagueStandingRow {
   rank: number;
   team_id: number;
   team: string;
+  crest?: string | null;
   played: number;
   wins: number;
   draws: number;

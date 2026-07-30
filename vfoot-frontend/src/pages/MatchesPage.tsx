@@ -4,6 +4,7 @@ import { getLeagueFixtures } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { Badge, Card, SectionTitle } from '../components/ui';
+import Crest from '../components/Crest';
 import type { LeagueFixtureItem } from '../types/league';
 
 // Calendar of the CURRENTLY selected competition (set via the competition switcher):
@@ -97,8 +98,9 @@ function FixtureRow({ f }: { f: LeagueFixtureItem }) {
     <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
       <Link to={`/matches/${f.fixture_id}`} className="block transition hover:opacity-80">
         <div className="flex items-center gap-3">
-          <div className="flex-1 text-right">
+          <div className="flex flex-1 items-center justify-end gap-2">
             <span className={homeWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.home_team.name}</span>
+            <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={24} />
           </div>
           <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 font-mono text-sm font-bold shadow-sm">
             {finished ? (
@@ -111,7 +113,8 @@ function FixtureRow({ f }: { f: LeagueFixtureItem }) {
               <span className="text-slate-400">vs</span>
             )}
           </div>
-          <div className="flex-1">
+          <div className="flex flex-1 items-center gap-2">
+            <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={24} />
             <span className={awayWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.away_team.name}</span>
           </div>
         </div>
