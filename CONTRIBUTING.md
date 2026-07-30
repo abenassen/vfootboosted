@@ -64,13 +64,20 @@ toccarlo: lo gestisce lo script del punto 6.
 ### 5. Il database
 
 Il DB non è nel repo: è un file SQLite da 51 MB, e i binari in git fanno solo
-danni. Sta come allegato di una release:
+danni. Sta come allegato della release `dev-db`, **in un archivio cifrato**: il
+repository è pubblico, e dentro ci sono dati di Serie A raccolti da Transfermarkt
+e SofaScore, che usare per sviluppare è una cosa e ripubblicare un'altra.
+
+**La passphrase te la dà Andrea** per canale privato. Non è nel repository, non è
+nelle note della release, e non deve finirci.
 
 ```sh
-gh release download dev-db --pattern 'vfoot-dev-db.sqlite3.gz'
-gunzip vfoot-dev-db.sqlite3.gz
+gh release download dev-db --pattern 'vfoot-dev-db.7z'
+7z x vfoot-dev-db.7z                                   # chiede la passphrase
 mv vfoot-dev-db.sqlite3 vfoot-backend/src/db.sqlite3
 ```
+
+Serve `7z` (`apt install p7zip-full`, `brew install p7zip`, o 7-Zip su Windows).
 
 Contiene la Serie A 2025/26 importata (1.706 giocatori, 1.145 partite, 34.523
 presenze) e una lega classic demo a 10 squadre con 36 giornate già giocate e
@@ -116,9 +123,24 @@ completo: si genera con `manage.py export_dev_db --keep-zones`.
 
 ```sh
 cd vfoot-backend/src
-../.venv/bin/python manage.py export_dev_db --gzip     # -> dist/ (gitignorato)
-gh release upload dev-db ../../dist/vfoot-dev-db.sqlite3.gz --clobber
+../.venv/bin/python manage.py export_dev_db           # -> dist/ (gitignorato)
+
+# Cifrare DA DENTRO dist/, non da fuori: altrimenti l'archivio si porta dietro il
+# percorso e chi lo apre si ritrova il file in una cartella `dist/` che non
+# aspettava — con le istruzioni sopra che non funzionano piu'.
+cd ../../dist
+7z a -t7z -mhe=on -p vfoot-dev-db.7z vfoot-dev-db.sqlite3
+gh release upload dev-db vfoot-dev-db.7z --clobber
 ```
+
+`-mhe=on` cifra anche l'indice: senza la passphrase l'archivio non rivela nemmeno
+cosa contiene. La **prima volta** la release va creata, non solo aggiornata:
+`gh release create dev-db <file> --notes-file <note> --latest=false`.
+
+Una passphrase lunga e casuale (25 caratteri va bene), mai riusata altrove, e
+mai nelle note. Quello che pubblichi è per sempre: se un domani la passphrase
+sfugge, la copia già scaricata da qualcuno resta leggibile, e l'unico rimedio è
+caricare un archivio nuovo con una passphrase nuova.
 
 Il comando usa l'API di backup di SQLite, quindi lo snapshot è coerente anche
 col dev server acceso, e anonimizza sempre (email, password, token API) a meno
