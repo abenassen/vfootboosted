@@ -199,18 +199,22 @@ test.describe('@pwa invito a installare', () => {
     await expect(page).toHaveURL(/\/home/);
   }
 
-  const BANNER = 'Installa Vfoot sul telefono';
+  /** Located by the close button's accessible name, not by the marketing copy:
+   *  the wording is meant to be tuned, and a test that breaks on a comma teaches
+   *  people to stop reading failures. */
+  const banner = (page: import('@playwright/test').Page) =>
+    page.getByRole('button', { name: "Chiudi l'invito a installare" });
 
   test('compare in Home e si può chiudere per sempre', async ({ page }) => {
     await signInMock(page);
-    await expect(page.getByText(BANNER)).toBeVisible();
+    await expect(banner(page)).toBeVisible();
 
-    await page.getByRole('button', { name: "Chiudi l'invito a installare" }).click();
-    await expect(page.getByText(BANNER)).toBeHidden();
+    await banner(page).click();
+    await expect(banner(page)).toBeHidden();
 
     // Remembered: an invitation that returns every visit is an advert.
     await page.goto('/home?api=mock');
-    await expect(page.getByText(BANNER)).toBeHidden();
+    await expect(banner(page)).toBeHidden();
     expect(await page.evaluate(() => localStorage.getItem('vfoot_install_banner_dismissed'))).toBe(
       '1',
     );
@@ -228,7 +232,7 @@ test.describe('@pwa invito a installare', () => {
     const page = await ctx.newPage();
     await signInMock(page);
 
-    await expect(page.getByText(BANNER)).toBeVisible();
+    await expect(banner(page)).toBeVisible();
     await expect(page.getByText("Su iPhone è l'unico modo per ricevere le notifiche.")).toBeVisible();
     await expect(page.getByRole('button', { name: 'Installa', exact: true })).toHaveCount(0);
 
@@ -251,7 +255,7 @@ test.describe('@pwa invito a installare', () => {
           : real(q)) as typeof window.matchMedia;
     });
     await signInMock(page);
-    await expect(page.getByText(BANNER)).toHaveCount(0);
+    await expect(banner(page)).toHaveCount(0);
     await ctx.close();
   });
 });

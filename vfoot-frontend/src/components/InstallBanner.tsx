@@ -57,9 +57,13 @@ export default function InstallBanner() {
     <Card className="border-l-4 border-sky-500 bg-sky-50 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-bold text-sky-900">📲 Installa Vfoot sul telefono</div>
+          <div className="text-sm font-bold text-sky-900">📲 Tieni Vfoot sul telefono</div>
+          {/* Deliberately not a feature list: what the app notifies about will grow
+              (mercato, asta, giornate), and copy that enumerates today's features
+              ages badly. The promise is "non ti perdi niente", which stays true. */}
           <div className="mt-1 text-sm text-sky-800">
-            Si apre a schermo intero e ti avvisa quando la lega ti chiede un parere.
+            Si apre in un tocco, come un'app, e ti avvisa di quello che succede nella
+            tua lega.
           </div>
         </div>
         <button

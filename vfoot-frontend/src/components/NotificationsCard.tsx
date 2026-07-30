@@ -34,8 +34,8 @@ export default function NotificationsCard() {
         <div className="mt-3 rounded-xl border-l-4 border-sky-500 bg-sky-50 p-3">
           <div className="text-sm font-bold text-sky-900">Installa l'app per ricevere le notifiche</div>
           <div className="mt-1 text-sm text-sky-800">
-            Su iPhone e iPad le notifiche funzionano solo dall'app aggiunta alla schermata Home.
-            Safari non lo propone da sé: va fatto una volta a mano.
+            Su iPhone e iPad gli avvisi arrivano solo dall'app aggiunta alla schermata
+            Home. Safari non lo propone da sé: va fatto una volta a mano.
           </div>
           <button
             type="button"
@@ -55,7 +55,7 @@ export default function NotificationsCard() {
               Installa l'app
             </Button>
             <span className="text-xs text-slate-500">
-              L'app si apre a schermo intero e resta connessa più a lungo.
+              Si apre in un tocco, come un'app, e ti tiene la lega a portata di mano.
             </span>
           </div>
         ) : (
@@ -64,8 +64,8 @@ export default function NotificationsCard() {
              browsers never fire it at all. Without this line the whole install
              option would silently disappear on a first visit. */
           <div className="mt-3 text-xs text-slate-500">
-            Puoi installare l'app dal menu del browser (⋮ → «Installa app»): si apre a
-            schermo intero e resta connessa più a lungo. Se la voce non c'è ancora,
+            Puoi installare l'app dal menu del browser (⋮ → «Installa app»): si apre in
+            un tocco e ti tiene la lega a portata di mano. Se la voce non c'è ancora,
             ricarica dopo qualche secondo di navigazione.
           </div>
         )
@@ -104,9 +104,11 @@ export default function NotificationsCard() {
                      makes the browser register with its push service, and a
                      silent half-minute reads as a broken button. */
                   'La prima volta può richiedere una ventina di secondi: il browser si sta registrando al servizio di notifiche.'
-                : push.subscribed
-                ? 'Riceverai un avviso quando la lega ti chiede un parere o prende una decisione.'
-                : 'Ti avviseremo solo di ciò che ti riguarda: consultazioni e decisioni della tua lega.'}
+                : /* Not a feature list: what we notify about will grow, and copy
+                     that enumerates today's features ages badly. */
+                  push.subscribed
+                  ? 'Ti avviseremo di quello che succede nella tua lega e ti riguarda.'
+                  : 'Solo quello che ti riguarda: niente avvisi inutili.'}
             </span>
           </div>
         )}
