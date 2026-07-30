@@ -8,6 +8,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from realdata.models import (
+    CARD_RED,
     CARD_YELLOW,
     Competition,
     CompetitionSeason,
@@ -390,12 +391,15 @@ class RealChampionshipTests(TestCase):
         self.assertFalse(line["sv"])
 
     def test_short_uninvolved_cameo_is_still_senza_voto(self):
-        """The counterpart: the touch gate must keep working where it belongs."""
+        """The counterpart: the touch gate must keep working where it belongs —
+        the 14-16' window, after the thresholds were set from fantacalcio's own
+        s.v. set (see MIN_MINUTES_RATED). At 18' the minutes alone now decide,
+        as they do for the pagelle we are agreeing with."""
         cameo = Player.objects.create(full_name="Cameo One", short_name="C. One",
                                       classic_role_seed="ATT")
         MatchAppearance.objects.create(match=self.match, player=cameo,
                                        team_season=self.home_ts, side="home",
-                                       minutes_played=18, is_starter=False)
+                                       minutes_played=15, is_starter=False)
         PlayerZoneFeature.objects.create(
             match=self.match, player=cameo, provider="sofascore",
             feature_key="touches", zone_key="z0101", value=4.0, team_side="home")
@@ -404,6 +408,41 @@ class RealChampionshipTests(TestCase):
                     ["bench"] if l["player_id"] == cameo.id)
         self.assertTrue(line["sv"])
         self.assertEqual(line["sv_reason"], "impiego_insufficiente")
+
+    def _booked_cameo(self, card_type):
+        """A 10' substitute with 4 touches who picks up ``card_type`` at the 90th."""
+        who = Player.objects.create(full_name=f"Carded {card_type}",
+                                    short_name=f"C. {card_type[:3]}",
+                                    classic_role_seed="CEN")
+        MatchAppearance.objects.create(match=self.match, player=who,
+                                       team_season=self.home_ts, side="home",
+                                       minutes_played=10, is_starter=False)
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=who, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=4.0, team_side="home")
+        MatchDisciplinaryEvent.objects.create(
+            match=self.match, player=who, team_season=self.home_ts,
+            team_side="home", card_type=card_type, minute=90, provider="sofascore",
+            provider_event_id=f"card-{card_type}-{who.id}")
+        return next(l for l in pagella_for_match(self.match, self.reference)["home"]
+                    ["bench"] if l["player_id"] == who.id)
+
+    def test_a_booking_does_not_earn_a_short_cameo_a_vote(self):
+        """Measured against the pagelle, not assumed: of the sub-threshold cameos
+        whose only event was a yellow, fantacalcio rates 7 of 39. Their convention
+        is coherent — an s.v. player is replaced, so his booking never scores — and
+        forcing a vote here would invent a performance reading purely to attach a
+        -0.5 the pagella declined to attach."""
+        line = self._booked_cameo(CARD_YELLOW)
+        self.assertTrue(line["sv"])
+        self.assertEqual(line["sv_reason"], "impiego_insufficiente")
+
+    def test_a_sending_off_still_earns_a_vote_however_short_the_cameo(self):
+        """The other side of the same measurement: 5 of 5 sent-off cameos are rated
+        by the pagelle. A red card is an event, a yellow is a footnote."""
+        line = self._booked_cameo(CARD_RED)
+        self.assertFalse(line["sv"])
+        self.assertIsNotNone(line["voto_puro"])
 
     def test_sv_distinguishes_missing_data_from_little_football(self):
         line = next(l for l in pagella_for_match(self.match, self.reference)["home"]

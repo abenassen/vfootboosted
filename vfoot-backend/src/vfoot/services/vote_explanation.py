@@ -21,10 +21,10 @@ after the voto puro, in the open, and the user can already see them.
 from __future__ import annotations
 
 from vfoot.services.classic_rating import (
-    EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS, GK_TOTAL_WEIGHTS, GK_WEIGHTS,
-    PER90_WEIGHTS, SHRINKAGE_MINUTES, TOTAL_WEIGHTS, VOTE_CENTER, VOTE_MAX,
-    VOTE_MIN, VOTE_SPREAD_K, WEIGHTS,
-    _feature_z, feature_scales, raw_feature_values,
+    DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
+    GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, SHRINKAGE_MINUTES, TOTAL_WEIGHTS,
+    VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, WEIGHTS,
+    _feature_z, exposure_z, feature_scales, raw_feature_values,
 )
 from realdata.models import Player
 
@@ -60,6 +60,27 @@ QUANTIFIERS = {"mp": ("tanti", "pochi"), "fp": ("tante", "poche"),
 # Suppressed items fold into "altre voci", so the breakdown still reconciles.
 POSITIVES_MIN_VOTE = 5.5   # below this: only what went wrong
 NEGATIVES_MAX_VOTE = 6.5   # above this: only what went well
+
+# An assist is paid as a BONUS (+1 on the fantavoto) and almost nothing in the base
+# vote, which reads the PASS and not its outcome. When the pass carried little
+# expected value the two readings part company, and that is worth saying out loud —
+# it is the single most common reason our base vote sits below a pagella's on a
+# player who "did something". Threshold from the distribution of the 581
+# assist-carrying appearances of 2025-26: median xA 0.14, first quartile 0.044, and
+# 29% of them combine xA < 0.15 with no clear chance created at all.
+ASSIST_LOW_XA = 0.15
+
+# How a sending-off's reason reads in Italian. The severity that scales the drop is
+# RED_CARD_SEVERITY on the same keys; naming the reason is how a reader can tell why
+# one sending-off cost 0.6 and another 1.5.
+RED_REASON_IT = {
+    "Professional foul last man": "fallo tattico da ultimo uomo",
+    "Foul": "fallo",
+    "Foul Committed": "fallo",
+    "Violent conduct": "condotta violenta",
+    "Bad Behaviour": "comportamento antisportivo",
+    "Argument": "protesta",
+}
 
 LABELS = {
     # SIGNAL — small high-value continuous; "una o più ...", (positive, negative)
@@ -124,14 +145,22 @@ LABELS = {
 # riusciti. Male: tanti dribbling tentati"; "Male: tante posizioni di tiro
 # conquistate", because xg_shots is subtracted by design). Merged into a single
 # SIGNAL line, phrased "una o più ..." by the sign of the net. Scoring untouched.
-# (group_keys, phrase when net-positive, phrase when net-negative.)
+# (group_keys, phrase when net-positive, phrase when net-negative, family name.)
+#
+# The family NAME exists so the merge can be SEEN. Someone reading the full
+# per-feature ledger who finds "una o più conclusioni pericolose +0.58" in the
+# summary and no such row in the table below is entitled to suspect one of the two
+# is wrong; the rows carrying this name are the ones that add up to it.
 MERGES = [
     (("sga_post", "xg_shots", "shots_on_target", "shots", "shots_blocked",
       "shots_off"),
-     "una o più conclusioni pericolose", "una o più occasioni fallite"),
+     "una o più conclusioni pericolose", "una o più occasioni fallite",
+     "conclusioni"),
     (("dribbles_won", "dribbles_attempted"),
-     "uno o più dribbling riusciti", "uno o più dribbling falliti"),
+     "uno o più dribbling riusciti", "uno o più dribbling falliti", "dribbling"),
 ]
+# {feature: family name} — the same table read the other way round.
+MERGE_FAMILY = {k: name for keys, _pos, _neg, name in MERGES for k in keys}
 
 
 def _weight_of(role: str, key: str) -> float:
@@ -167,6 +196,144 @@ def _phrase(role: str, key: str, term_delta: float, raw_value: float) -> str | N
     return f"{high if more else low} {label}"
 
 
+# Features that carry weight but are never NAMED in a sentence, so they have no
+# LABELS entry: one is a provider composite nobody would recognise from a pagella
+# ("tanto valore difensivo" explains nothing), the other only ever appears inside a
+# merged shooting line. A table that lists every feature still has to say what they
+# are, so they get a description here — and only here, which is why this is not in
+# LABELS: an entry there would put them into the spoken explanation too.
+TABLE_ONLY_LABELS = {
+    "defensive_value": "indice difensivo del provider (proxy sintetico)",
+    "shots_off": "tiri fuori",
+}
+
+
+def red_card_phrase(detail: dict | None) -> str:
+    """"espulsione al 63' per condotta violenta (27' in dieci)" — the three things
+    that set the size of the drop: WHY (severity), WHEN, and for HOW LONG the team
+    then played a man short. Falls back to the bare word when we have no detail."""
+    if not detail:
+        return "espulsione"
+    reason = RED_REASON_IT.get(detail.get("reason") or "", "")
+    if detail.get("second_yellow"):
+        reason = f"{reason} (secondo giallo)" if reason else "secondo giallo"
+    minute = detail.get("minute")
+    down = detail.get("man_down")
+    parts = ["espulsione"]
+    if minute is not None:
+        parts.append(f"al {int(round(minute))}'")
+    if reason:
+        parts.append(f"per {reason}")
+    if down:
+        parts.append(f"({int(round(down))}' in dieci)")
+    return " ".join(parts)
+
+
+def own_goal_phrase(detail: dict | None) -> str:
+    """An own goal turned in off him and an own goal he made himself are the same
+    event in the scoreline and different events in a vote — the drop differs by a
+    factor of 2.5, so the reason has to travel with it."""
+    if not detail:
+        return "autogol"
+    n = detail.get("count") or 1
+    head = "autogol" if n == 1 else f"{n} autogol"
+    kind = detail.get("kind")
+    if kind == "deflection":
+        return f"{head} su deviazione"
+    if kind == "solo":
+        return f"{head} in prima persona"
+    return head          # ungraded: no sub-minute timing, we claim nothing
+
+
+def assist_note(assists: int, xa: float, big_chances: float) -> str:
+    """Why an assist can leave the base vote where it was.
+
+    Not a claim about the finisher — measured on the case that prompted it (McKennie,
+    g14) the scorer's own shot quality was only +0.67σ, so "he did the exceptional
+    thing" would be inventing a merit. What IS measurable is the pass: an xA of 0.05
+    is a ball that did not, by itself, make a goal likely."""
+    if assists < 1 or big_chances > 0 or xa >= ASSIST_LOW_XA:
+        return ""
+    # Short on purpose: this rides inside ``to_sentence``, which is one line in the
+    # app's match detail, and a player who also scored an own goal already has two
+    # clauses ahead of it.
+    return (f"L'assist nasce da un passaggio di basso valore atteso (xA {xa:.2f}): "
+            f"conta come bonus, non nel voto base.")
+
+
+def readable_label(key: str) -> str:
+    """The feature's name in words, for a table that also shows its technical name.
+
+    Deliberately the NOUN and not the phrasing ``_phrase`` builds: a sentence wants
+    "tanti duelli vinti", a table column wants "duelli vinti"."""
+    entry = LABELS.get(key)
+    if entry is None:
+        return TABLE_ONLY_LABELS.get(key, "")
+    return entry[2] if entry[0] == EVENT else entry[1]
+
+
+def _all_terms(role: str, terms: dict, mean_terms: dict, per_unit: float,
+               totals: dict, minutes: int, exposure: float) -> list[dict]:
+    """Every feature of the channel, in the terms the weight tables use.
+
+    Same numbers as the summary breakdown, only nothing merged and nothing folded
+    into "altre voci": one row per weighted feature, with its technical name (the
+    one in the tuner spreadsheet), what the player did, where that sits on the
+    population scale, its weight, and what it moved the vote by. The rows sum to
+    (voto − 6) exactly, because they are the same slices ``explain`` shows — see the
+    reconciliation note in ``explain``."""
+    is_gk = role == Player.ROLE_GK
+    weights = dict(GK_WEIGHTS if is_gk else WEIGHTS)
+    total_keys = set(GK_TOTAL_WEIGHTS if is_gk else TOTAL_WEIGHTS)
+    if not is_gk:
+        weights[EXPOSURE_KEY] = -EXPOSURE_WEIGHT
+    scales = feature_scales(gk=is_gk)
+    values = raw_feature_values(totals, minutes, exposure, gk=is_gk)
+
+    out = []
+    for key, w in weights.items():
+        # Zero-weight features ARE listed: a weight deliberately set to zero (see
+        # last_man_tackle) is a decision, and a table that silently dropped it would
+        # hide the decision instead of showing it. It contributes 0 to every column
+        # that feeds the vote, so nothing else changes.
+        value = values.get(key, 0.0)
+        kind = ("EXPOS" if key == EXPOSURE_KEY
+                else "DERIV" if key in DERIVED_FEATURES
+                else "TOT" if key in total_keys else "PER90")
+        # The exposure is standardised ASYMMETRICALLY (EXPOSURE_CREDIT), so its σ has
+        # to be read through the same function the index used — otherwise the row
+        # shows a σ that does not produce the contribution printed beside it.
+        z = (exposure_z(value, scales) if key == EXPOSURE_KEY
+             else _feature_z(key, value, scales))
+        out.append({
+            "key": key,
+            "label": readable_label(key),
+            "kind": kind,
+            # the merged family this feature belongs to, if any: the summary shows
+            # one line for all of them, and this is how the two views match up
+            "family": MERGE_FAMILY.get(key, ""),
+            # For a COUNTED event, what ONE occurrence is worth on the index — the
+            # only readable unit for something that happens in 1% of matches, where
+            # a σ is a fraction of an occurrence and a per-σ weight reads ten times
+            # smaller than it acts. See the note on last_man_tackle.
+            "event": (LABELS.get(key) or (None,))[0] == EVENT,
+            "z_one": round(_feature_z(key, 1.0, scales), 3),
+            "value": round(value, 3),
+            "z": round(z, 3),
+            "weight": round(w, 4),
+            # w·z: what the feature puts into the index, in index points
+            "index": round(terms.get(key, 0.0), 4),
+            # the same for the AVERAGE player in this role — the yardstick, because
+            # what explains a 6.5 rather than a 6 is only the departure from peers
+            "index_avg": round(mean_terms.get(key, 0.0), 4),
+            "points": round((terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * per_unit, 3),
+        })
+    # Left in the order of the weight tables — the same order the tuner spreadsheet
+    # lists them in, so a row here can be found there. Callers that want the drivers
+    # first sort by ``points`` themselves.
+    return out
+
+
 def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0,
            scales: dict | None = None) -> dict:
     """Each feature's contribution to the index, before comparison to the role mean.
@@ -191,7 +358,9 @@ def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0,
         if z:
             out[key] = w * z
     if not is_gk:
-        z = _feature_z(EXPOSURE_KEY, values.get(EXPOSURE_KEY, 0.0), scales)
+        # exposure_z, not _feature_z: the asymmetric credit (EXPOSURE_CREDIT) is
+        # part of what the index consumed, so the breakdown must apply it too.
+        z = exposure_z(values.get(EXPOSURE_KEY, 0.0), scales)
         if z:
             out[EXPOSURE_KEY] = -EXPOSURE_WEIGHT * z
     return out
@@ -217,7 +386,10 @@ def role_average_terms(rows, scales: dict | None = None) -> dict:
 def explain(role: str, totals: dict, minutes: int, reference: dict,
             averages: dict, exposure: float = 0.0, *, top: int = 3,
             result_nudge: float = 0.0, red_adjustment: float = 0.0,
-            own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0) -> dict:
+            own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
+            evidence_weight: float = 1.0, full: bool = False,
+            red_detail: dict | None = None, own_goal_detail: dict | None = None,
+            assists: int = 0) -> dict:
     """Why this vote, decomposed so it ADDS UP to the vote.
 
     The vote is 6 + spread * shrink * (index - role_mean) / std. Every feature is
@@ -238,22 +410,37 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     ref = reference.get(role)
     if not terms or not ref or not ref.get("std"):
         return {"positives": [], "negatives": [], "contributions": [],
-                "base": VOTE_CENTER, "other_points": 0.0, "other_count": 0,
-                "minutes": minutes, "low_minutes": False, "note": ""}
+                "all_terms": [], "assist_note": "", "base": VOTE_CENTER,
+                "other_points": 0.0, "other_count": 0, "minutes": minutes,
+                "low_minutes": False, "note": ""}
 
     mean_terms = averages.get(role, {})
-    weight = minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0
+    # Same two shrinkages the vote applies: how long he played, and — for a keeper —
+    # how much of the match actually reached him (``evidence_weight``, see
+    # GK_EVIDENCE_FULL). Both scale every slice, so the breakdown keeps adding up.
+    weight = (minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0)
+    weight *= evidence_weight
     per_unit = VOTE_SPREAD_K * weight / ref["std"]
 
     points_by_key = {key: (terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * per_unit
                      for key in set(terms) | set(mean_terms)}
 
+    # The full ledger, before the families are merged and the tail folded away —
+    # every feature the channel weighs, named as the weight tables name it. Only
+    # built on request: it is four times the size of the vote it explains, which is
+    # fine for an analysis page and wasteful in a match-detail API response.
+    all_terms = (_all_terms(role, terms, mean_terms, per_unit, totals, minutes,
+                            exposure) if full else [])
+
     scored = []
     # Collapse the overlapping feature families (see MERGES) into one net line each.
-    for group, label_pos, label_neg in MERGES:
+    # ``family`` travels with the line so a reader can find the rows it stands for.
+    for group, label_pos, label_neg, family in MERGES:
+        present = [k for k in group if k in points_by_key]
         net = sum(points_by_key.pop(k, 0.0) for k in group)
         if abs(net) >= 1e-9:
-            scored.append((net, group[0], label_pos if net > 0 else label_neg))
+            scored.append((net, group[0], label_pos if net > 0 else label_neg,
+                           (family, len(present))))
     # The raw value the phrasing quotes comes from the SAME builder the index uses,
     # so a derived feature (sga_post) or the exposure is quoted as what it actually
     # is, not looked up in a totals dict that has never heard of it.
@@ -261,7 +448,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                                     gk=role == Player.ROLE_GK)
     for key, pts in points_by_key.items():
         phrase = _phrase(role, key, pts, raw_values.get(key, 0.0))
-        scored.append((pts, key, phrase))
+        scored.append((pts, key, phrase, None))
 
     # The subtotal is the vote's OWN raw value, computed exactly as the scorer
     # computes it (index z-scored against the reference mean), not re-derived from
@@ -279,7 +466,8 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                    + penalty_adjustment))
     voto = round(subtotal * 2) / 2
 
-    named = [(pts, ph) for pts, _, ph in scored if ph and abs(pts) >= 0.05]
+    named = [(pts, ph, fam) for pts, _, ph, fam in scored
+             if ph and abs(pts) >= 0.05]
     named.sort(key=lambda x: x[0], reverse=True)
     # One-sided at the extremes (see POSITIVES_MIN_VOTE / NEGATIVES_MAX_VOTE): a bad
     # game's "positives" are faint praise, a fine game's "negatives" are nitpicks.
@@ -290,34 +478,64 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                  else [x for x in (named[-top:][::-1]) if x[0] < 0])
     shown = positives + negatives
 
-    def entry(pts, label):
-        return {"label": label, "points": round(pts, 2)}
+    def entry(pts, label, family=None, kind=None):
+        """One visible line. ``family`` is set when the line is the NET of several
+        features (see MERGES): without it the summary shows a number that matches no
+        single row of the full ledger, which reads as an inconsistency. ``kind`` marks
+        the vote-level adjustments, which are not features at all."""
+        out = {"label": label, "points": round(pts, 2)}
+        if family:
+            out["family"], out["family_size"] = family
+        if kind:
+            out["kind"] = kind
+        return out
 
-    contributions = [entry(pts, ph) for pts, ph in shown]
+    contributions = [entry(pts, ph, fam) for pts, ph, fam in shown]
     # The result adjustment is a vote-level term, not a feature, so it rides on top
     # of the feature contributions and is named explicitly.
+    # ``kind`` rides along so ``to_sentence`` (and any caller) can recognise these
+    # lines without matching on their text — the labels now carry minute, reason and
+    # man-down time, and string-matching them was a trap waiting to spring.
     if abs(result_nudge) >= 0.005:
         contributions.append(entry(result_nudge,
-                                   "adeguamento al risultato di squadra"))
+                                   "adeguamento al risultato di squadra",
+                                   kind="result"))
     if abs(red_adjustment) >= 0.005:
-        contributions.append(entry(red_adjustment, "espulsione"))
+        contributions.append(entry(red_adjustment, red_card_phrase(red_detail),
+                                   kind="red"))
     if abs(own_goal_adjustment) >= 0.005:
-        contributions.append(entry(own_goal_adjustment, "autogol"))
+        contributions.append(entry(own_goal_adjustment,
+                                   own_goal_phrase(own_goal_detail),
+                                   kind="own_goal"))
     if abs(penalty_adjustment) >= 0.005:
         # "decisivo" when converting it would have flipped the result (the larger
         # drop); a plain miss when the result was already decided.
         pen_label = ("rigore decisivo sbagliato" if penalty_adjustment <= -0.75
                      else "rigore sbagliato")
-        contributions.append(entry(penalty_adjustment, pen_label))
+        contributions.append(entry(penalty_adjustment, pen_label, kind="penalty"))
     shown_rounded = sum(c["points"] for c in contributions)
     other_points = round(subtotal - VOTE_CENTER - shown_rounded, 2)
     low = minutes < SHRINKAGE_MINUTES * 2
     note = ("Con pochi minuti giocati ogni voce pesa meno: il voto resta piu' "
             "vicino al 6.") if low else ""
+    if evidence_weight < 1.0:
+        # A keeper who faced almost nothing: say so, or the muted breakdown reads
+        # as a bug. This is the same statement the vote itself is making.
+        note = ((note + " ") if note else "") + (
+            "Gli sono arrivati pochi tiri in porta: c'e' poco su cui giudicarlo, "
+            "quindi ogni voce pesa meno e il voto resta vicino al 6.")
     return {
-        "positives": [entry(p, ph) for p, ph in positives],
-        "negatives": [entry(p, ph) for p, ph in negatives],
+        # perche' un assist puo' non muovere il voto base: e' la ragione piu' comune
+        # per cui stiamo sotto una pagella su un giocatore che "ha fatto qualcosa"
+        "assist_note": assist_note(assists, raw_values.get("expected_assists", 0.0),
+                                   raw_values.get("big_chance_created", 0.0)),
+        "positives": [entry(p, ph, fam) for p, ph, fam in positives],
+        "negatives": [entry(p, ph, fam) for p, ph, fam in negatives],
         "contributions": contributions,
+        "all_terms": all_terms,
+        # vote points per index point for THIS appearance (it carries both
+        # shrinkages): the scale that turns the index into the vote.
+        "per_unit": round(per_unit, 6),
         "base": VOTE_CENTER,
         "other_points": other_points,
         "other_count": max(0, len(scored) - len(shown)),
@@ -342,14 +560,17 @@ def to_sentence(explanation: dict) -> str:
         core = f"Male: {names(neg)}."
     else:
         core = "Prestazione in linea con la media del suo ruolo."
-    # The sending-off is a vote-level fact, not a feature, so it is not in
-    # positives/negatives — call it out explicitly.
-    labels = {c["label"] for c in explanation.get("contributions", [])}
-    if "espulsione" in labels:
-        core += " Espulso."
-    if "autogol" in labels:
-        core += " Autogol."
-    pen = next((l for l in labels if l.startswith("rigore")), None)
-    if pen:
-        core += " " + pen.capitalize() + "."
+    # The vote-level facts (sending-off, own goal, missed penalty) are not features,
+    # so they are absent from positives/negatives — call them out, WITH the reason
+    # that set their size and the points they cost. Matched on ``kind``, not on the
+    # label text: the labels now carry minute and reason and would break a match.
+    by_kind = {c["kind"]: c for c in explanation.get("contributions", [])
+               if c.get("kind")}
+    for kind in ("red", "own_goal", "penalty"):
+        c = by_kind.get(kind)
+        if c:
+            core += f" {c['label'].capitalize()} ({c['points']:+.2f})."
+    note = explanation.get("assist_note")
+    if note:
+        core += " " + note
     return core

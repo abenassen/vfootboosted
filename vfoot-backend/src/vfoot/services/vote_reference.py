@@ -43,10 +43,18 @@ def weights_fingerprint() -> str:
         "gk_total": cr.GK_TOTAL_WEIGHTS, "gk_per90": cr.GK_PER90_WEIGHTS,
         "exposure": cr.EXPOSURE_WEIGHT, "exposure_lambda": cr.EXPOSURE_LAMBDA,
         "exposure_kernel": cr.EXPOSURE_KERNEL,
+        # Changes the exposure the INDEX consumes, hence the per-role mean and spread
+        # of the index: a change here invalidates the reference exactly as a weight
+        # change does.
+        "exposure_credit": cr.EXPOSURE_CREDIT,
         # The compression shape and the derived-feature recipe both change what the
         # stored per-feature spreads mean, so a change to either must invalidate the
         # calibration exactly as a weight change does.
         "compress_k": cr.COMPRESS_K, "sga_post_woodwork": cr.SGA_POST_WOODWORK,
+        # which features skip the compression changes their stored spreads and the
+        # index built from them — a reference computed under a different exemption
+        # set scores every vote on the wrong scale
+        "no_compress": sorted(cr.NO_COMPRESS_FEATURES),
         # Whether the outfield roles share one spread changes the stored per-role
         # std, so flipping it without recalibrating would score every vote against
         # the wrong scale — exactly the state this fingerprint exists to catch.

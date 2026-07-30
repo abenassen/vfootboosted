@@ -4,7 +4,7 @@ from __future__ import annotations
 from django.test import SimpleTestCase
 
 from vfoot.services.vote_explanation import (
-    COUNT, EVENT, SIGNAL, LABELS, QUANTIFIERS, _phrase, explain,
+    COUNT, EVENT, SIGNAL, LABELS, QUANTIFIERS, _phrase, explain, readable_label,
     role_average_terms, to_sentence,
 )
 from vfoot.services.classic_rating import (
@@ -130,7 +130,11 @@ class VoteExplanationTests(SimpleTestCase):
         self.assertIn("espulsione", labels)
         shown = e["base"] + sum(c["points"] for c in e["contributions"]) + e["other_points"]
         self.assertAlmostEqual(shown, e["subtotal"], places=2)
-        self.assertIn("Espulso.", to_sentence(e))
+        # the sentence now carries the cost, and is matched on ``kind`` rather than
+        # on its text (the label grew a minute and a reason)
+        self.assertIn("Espulsione (-1.00).", to_sentence(e))
+        self.assertEqual([c["kind"] for c in e["contributions"] if c.get("kind")],
+                         ["result", "red"])
 
     def test_missed_penalty_reconciles_and_is_named_by_relevance(self):
         average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0})
@@ -138,13 +142,188 @@ class VoteExplanationTests(SimpleTestCase):
         # a decisive miss (-1) reads "decisivo"; a dead-rubber miss (-0.5) does not
         dec = explain("DIF", feats, 90, self.REFERENCE, average, penalty_adjustment=-1.0)
         self.assertIn("rigore decisivo sbagliato", [c["label"] for c in dec["contributions"]])
-        self.assertIn("Rigore decisivo sbagliato.", to_sentence(dec))
+        self.assertIn("Rigore decisivo sbagliato (-1.00).", to_sentence(dec))
         shown = dec["base"] + sum(c["points"] for c in dec["contributions"]) + dec["other_points"]
         self.assertAlmostEqual(shown, dec["subtotal"], places=2)
         dead = explain("DIF", feats, 90, self.REFERENCE, average, penalty_adjustment=-0.5)
         self.assertIn("rigore sbagliato", [c["label"] for c in dead["contributions"]])
-        self.assertIn("Rigore sbagliato.", to_sentence(dead))
+        self.assertIn("Rigore sbagliato (-0.50).", to_sentence(dead))
         self.assertNotIn("decisivo", to_sentence(dead))
+
+    # --- the full per-feature ledger -------------------------------------
+    def test_the_full_ledger_covers_every_weighted_feature_and_adds_up(self):
+        """``full=True`` returns one row per weighted feature of the channel, with
+        nothing merged and nothing folded away. Its points must sum to the merit
+        vote minus 6 — that identity is the whole reason the table is trustworthy
+        enough to publish next to the vote."""
+        from vfoot.services.classic_rating import EXPOSURE_KEY, WEIGHTS
+
+        average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0})
+        # The identity holds under the condition production guarantees and this
+        # fixture otherwise would not: the reference mean of the INDEX and the
+        # per-feature averages describe the SAME population (see the note in
+        # ``explain`` about get_role_averages having to filter like build_reference).
+        # The average appearance's index is exactly the sum of its per-feature terms.
+        reference = {**self.REFERENCE,
+                     "DIF": {**self.REFERENCE["DIF"],
+                             "mean": sum(average["DIF"].values())}}
+        feats = {"clearances": 20.0, "touches": 90.0, "duels_won": 6.0}
+        e = explain("DIF", feats, 90, reference, average, full=True)
+
+        keys = {t["key"] for t in e["all_terms"]}
+        # every feature of the channel, zero-weight ones included: a deliberate zero
+        # is a decision the table has to show (see last_man_tackle)
+        self.assertEqual(keys, set(WEIGHTS) | {EXPOSURE_KEY})
+        zeroed = [t for t in e["all_terms"] if t["weight"] == 0]
+        self.assertTrue(all(t["points"] == 0 and t["index"] == 0 for t in zeroed))
+        total = sum(t["points"] for t in e["all_terms"])
+        # the merit vote before the adjustments the summary lists separately
+        self.assertAlmostEqual(6.0 + total, e["subtotal"], places=2)
+        # and it agrees with the summary's own accounting
+        shown = sum(c["points"] for c in e["contributions"]) + e["other_points"]
+        self.assertAlmostEqual(total, shown, places=2)
+
+    # --- the graded events explain their own size ------------------------
+    def test_a_sending_off_says_why_it_cost_what_it_cost(self):
+        """The drop is severity x man-down time plus a fixed extra: "espulsione"
+        alone leaves the whole of that unexplained. Two sendings-off costing 0.6 and
+        1.5 have to read differently."""
+        average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0})
+        feats = {"clearances": 20.0, "touches": 90.0}
+        violent = explain("DIF", feats, 90, self.REFERENCE, average,
+                          red_adjustment=-1.3,
+                          red_detail={"reason": "Violent conduct", "minute": 63,
+                                      "man_down": 32, "second_yellow": False})
+        label = next(c["label"] for c in violent["contributions"]
+                     if c.get("kind") == "red")
+        self.assertEqual(label, "espulsione al 63' per condotta violenta (32' in dieci)")
+        tactical = explain("DIF", feats, 90, self.REFERENCE, average,
+                           red_adjustment=-0.2,
+                           red_detail={"reason": "Professional foul last man",
+                                       "minute": 88, "man_down": 7,
+                                       "second_yellow": True})
+        label2 = next(c["label"] for c in tactical["contributions"]
+                      if c.get("kind") == "red")
+        self.assertIn("fallo tattico da ultimo uomo", label2)
+        self.assertIn("secondo giallo", label2)
+        self.assertIn("(7' in dieci)", label2)
+
+    def test_an_own_goal_says_which_kind_it_was(self):
+        """Deflection and own error differ by a factor of 2.5 in the drop, so the
+        label has to distinguish them; an ungraded one claims nothing."""
+        average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0})
+        feats = {"clearances": 20.0, "touches": 90.0}
+
+        def label(detail, adj):
+            e = explain("DIF", feats, 90, self.REFERENCE, average,
+                        own_goal_adjustment=adj, own_goal_detail=detail)
+            return next(c["label"] for c in e["contributions"]
+                        if c.get("kind") == "own_goal")
+
+        self.assertEqual(label({"kind": "deflection", "count": 1}, -0.2),
+                         "autogol su deviazione")
+        self.assertEqual(label({"kind": "solo", "count": 1}, -0.5),
+                         "autogol in prima persona")
+        self.assertEqual(label({"kind": "ungraded", "count": 1}, -0.3), "autogol")
+        self.assertEqual(label({"kind": "solo", "count": 2}, -1.0),
+                         "2 autogol in prima persona")
+
+    def test_an_assist_from_a_cheap_pass_says_so(self):
+        """The base vote reads the PASS, the bonus pays the outcome. When the two
+        part company — half of all assists come from a pass worth under 0.15 of xA —
+        the explanation says which of the two it was, or our vote looks broken next
+        to a pagella that rewarded the assist."""
+        average = self._averages("CEN", {"touches": 60.0})
+        cheap = explain("CEN", {"expected_assists": 0.05, "touches": 60.0}, 90,
+                        self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
+                        average, assists=1)
+        self.assertIn("basso valore atteso", cheap["assist_note"])
+        self.assertIn("xA 0.05", cheap["assist_note"])
+        self.assertIn("basso valore atteso", to_sentence(cheap))
+        # a real chance created, or a valuable pass, says nothing of the sort
+        rich = explain("CEN", {"expected_assists": 0.6, "touches": 60.0}, 90,
+                       self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
+                       average, assists=1)
+        self.assertEqual(rich["assist_note"], "")
+        clear = explain("CEN", {"expected_assists": 0.05, "big_chance_created": 1.0,
+                                "touches": 60.0}, 90,
+                        self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
+                        average, assists=1)
+        self.assertEqual(clear["assist_note"], "")
+        # and no assist, no note
+        none = explain("CEN", {"expected_assists": 0.05, "touches": 60.0}, 90,
+                       self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
+                       average, assists=0)
+        self.assertEqual(none["assist_note"], "")
+
+    def test_a_merged_line_says_it_is_a_sum_and_names_its_family(self):
+        """The summary collapses the shooting block into one line, so its number
+        matches no single row of the full ledger. Without saying so, that reads as
+        an inconsistency — it was reported as one. The line carries the family name
+        and how many features it stands for; the ledger rows carry the same name,
+        and they add up to it."""
+        from vfoot.services.vote_explanation import MERGE_FAMILY
+
+        average = self._averages("ATT", {"shots": 1.0, "touches": 40.0})
+        feats = {"shots": 4.0, "shots_on_target": 3.0, "xg_shots": 0.8,
+                 "xg_on_target": 1.1, "touches": 60.0}
+        e = explain("ATT", feats, 90, self.REFERENCE, average, full=True)
+        merged = [c for c in e["contributions"] if c.get("family")]
+        self.assertTrue(merged, "la riga fusa del blocco tiro dovrebbe esserci")
+        line = merged[0]
+        self.assertEqual(line["family"], "conclusioni")
+        self.assertGreater(line["family_size"], 1)
+        # the rows of that family, in the full ledger, sum to the merged line
+        rows = [t for t in e["all_terms"] if t["family"] == line["family"]]
+        self.assertEqual({t["key"] for t in rows},
+                         {k for k, f in MERGE_FAMILY.items() if f == line["family"]})
+        self.assertAlmostEqual(sum(t["points"] for t in rows), line["points"],
+                               places=2)
+
+    def test_an_ordinary_line_claims_no_family(self):
+        average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0})
+        e = explain("DIF", {"clearances": 25.0, "touches": 90.0}, 90,
+                    self.REFERENCE, average)
+        plain = [c for c in e["contributions"] if "clearances" not in c["label"]]
+        self.assertTrue(all("family" not in c for c in plain
+                            if "conclusioni" not in c["label"]
+                            and "dribbling" not in c["label"]))
+
+    def test_the_full_ledger_is_off_by_default(self):
+        """It is several times the size of the vote it explains, so an API response
+        must not carry it unasked."""
+        average = self._averages("DIF", {"clearances": 8.0})
+        e = explain("DIF", {"clearances": 20.0, "touches": 90.0}, 90,
+                    self.REFERENCE, average)
+        self.assertEqual(e["all_terms"], [])
+
+    def test_every_weighted_feature_can_be_named_in_a_table(self):
+        """A row with a technical name and no description is a row nobody can read.
+        Features never spoken in a sentence get their description from
+        TABLE_ONLY_LABELS instead."""
+        from vfoot.services.classic_rating import EXPOSURE_KEY, GK_WEIGHTS, WEIGHTS
+
+        every = ({k for k, w in WEIGHTS.items() if w} | {EXPOSURE_KEY}
+                 | {k for k, w in GK_WEIGHTS.items() if w})
+        missing = sorted(k for k in every if not readable_label(k))
+        self.assertEqual(missing, [])
+
+    def test_the_ledger_reports_the_scale_it_used(self):
+        """``per_unit`` is what the page multiplies by to go from index points to
+        vote points; if it did not travel with the rows they could not be read."""
+        average = self._averages("ATT", {"shots": 2.0, "touches": 40.0})
+        e = explain("ATT", {"shots": 5.0, "touches": 60.0}, 90, self.REFERENCE,
+                    average, full=True)
+        expected = VOTE_SPREAD_K * (90 / (90 + SHRINKAGE_MINUTES)) / self.REFERENCE["ATT"]["std"]
+        self.assertAlmostEqual(e["per_unit"], expected, places=5)
+        # a keeper with thin evidence carries the damper in the same number
+        thin = explain("POR", {"gk_saves": 1.0, "touches": 25.0}, 90, self.REFERENCE,
+                       self._averages("POR", {"gk_saves": 2.0, "touches": 25.0}),
+                       evidence_weight=0.25, full=True)
+        self.assertAlmostEqual(
+            thin["per_unit"],
+            VOTE_SPREAD_K * (90 / (90 + SHRINKAGE_MINUTES)) * 0.25
+            / self.REFERENCE["POR"]["std"], places=5)
 
     def test_a_clearly_poor_vote_drops_the_faint_positives(self):
         """Below 5.5 the "positives" are only least-bad deviations; naming them is

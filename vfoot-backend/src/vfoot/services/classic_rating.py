@@ -41,7 +41,7 @@ from collections import defaultdict
 from django.db.models import Sum
 
 from realdata.models import (
-    CARD_RED, CARD_SECOND_YELLOW, CARD_YELLOW,
+    CARD_RED, CARD_SECOND_YELLOW,
     MatchAppearance, Match, MatchDisciplinaryEvent, MatchShot, Player,
     PlayerOnPitchInterval, PlayerZoneFeature, PROVIDER_SOFASCORE,
 )
@@ -107,7 +107,7 @@ log = logging.getLogger(__name__)
 # shot. Its sibling big_chance_created is NOT the same statistic and is weighted
 # below: that earlier removal conflated the two faces of one event.
 TOTAL_WEIGHTS = {
-    "expected_assists": 0.11,   # xA: chance creation, credited to the CREATOR
+    "expected_assists": 0.05,   # xA: chance creation, credited to the CREATOR
     # The DISCRETE counterpart of xA, and the creator's side of a big chance —
     # verified as the PASSER's stat, not the shooter's: it never exceeds the
     # player's own key passes (0 violations in 10,067 player-matches), 36% of the
@@ -132,7 +132,33 @@ TOTAL_WEIGHTS = {
     # the point — but the monotone decline says some of it is noise, mostly a
     # defender's xA being the residue of a hopeful cross. If the defender vote ever
     # needs recovering, this is the first weight to look at.
-    "big_chance_created": 0.07,
+    #
+    # BOTH LOWERED AGAIN on 2026-07-30 (xA 0.11 -> 0.05, this one 0.07 -> 0.045), and
+    # this time not on agreement but on INTERNAL COHERENCE. The two terms overlap by
+    # construction — a pass that creates a clear chance has a high xA, and one big
+    # chance carries +0.18 of xA on average (r 0.58 between them) — so the same
+    # gesture was paid twice. Together they had reached 1.33 GOALS for a single
+    # created chance (xA 0.45 alone was 0.88 of a goal), while every external judge
+    # puts the pair at half a goal to two thirds: Redazione 0.47, Statistico 0.54,
+    # SofaScore rating 0.69. Creating a chance may reasonably be worth a large
+    # fraction of a goal; it cannot be worth more than one. Now: pair 0.69 of a goal,
+    # xA at 0.45 = 0.40, one big chance = 0.29.
+    #
+    # Which of the two was over-paid could NOT be settled by the linear fits — with
+    # r 0.58 between the regressors the ridge splits the credit by its own penalty,
+    # and it wrongly exonerated big_chance_created. The groups that SEPARATE them
+    # settled it: on appearances with a big chance and low xA (n=257, isolating this
+    # weight) we sat +0.22 above the pagelle; on appearances with high xA and no big
+    # chance (n=140, isolating xA) +0.36. Both were high.
+    # They differ in what the weight BUYS, and that is why only one moved far: xA is
+    # pure cost (lowering it improves MAE, r and the defender r monotonically),
+    # while big_chance_created earns its keep (dropping it to 0 costs 0.01 of r) —
+    # 0.045 is the value that beats 0.035 on all four criteria at once.
+    # OPEN, and known: the SofaScore rating — the one judge that does price xA —
+    # prefers the OLD 0.11 (r 0.7718 against 0.7676 here). Lowering xA is justified
+    # by the coherence argument, not by that judge, and 0.07 would have kept the
+    # pair under a goal at a third of the cost. 0.05 is the user's call.
+    "big_chance_created": 0.045,
     "shots_goal": 0.1386,         # the GOAL itself (own goals excluded), on top of +3 bonus
     "sga_post": 0.0905,           # = S: EXECUTION merit, derived (xGOT − xG + woodwork)
     "xg_shots": 0.0323,           # = β: the mass of chances occupied, β/S = 1/3
@@ -148,10 +174,61 @@ TOTAL_WEIGHTS = {
     # Winning one is the mirror image and equally unrewarded: the bonus goes to
     # whoever converts, never to the player who earned it.
     "penalties_won": 0.0244,
-    # Rare interventions that prevent a near-certain goal. Kept as impact totals,
-    # not per-90: their value does not scale with how long you played.
-    "clearances_off_line": 0.035,
-    "last_man_tackle": 0.05,
+    # Interventions in a dangerous position. Kept as impact totals, not per-90:
+    # their value does not scale with how long you played.
+    #
+    # THE TWO ARE NOT THE SAME EVENT, and the provider's own fields say so.
+    # ``clearanceOffLine`` comes with an ``outfielderBlock`` in 64 cases out of 64:
+    # it IS a shot stopped on the line, a goal prevented. ``lastManTackle`` is
+    # <= ``totalTackle`` in 103 cases out of 103: it is a TACKLE, flagged as made by
+    # the last defender — not an independent goal-saving event. Which is why it never
+    # turns up in the highlights: it is an ordinary defensive duel in a bad place, and
+    # the duel is ALREADY paid through tackles_won / duels_won. The "last man" flag
+    # adds nothing to it.
+    #
+    # Three independent judges price one occurrence like this (a goal = +1.0 for all
+    # three, which is what makes them comparable):
+    #                        Redazione  Statistico  SofaScore rating
+    #   goal                    +1.05      +1.10        +1.01
+    #   clearance off the line  +0.13      +0.08        +0.48
+    #   last-man tackle         -0.30      -0.36        -0.11
+    # Both events happen under siege (danger conceded in his zone 2.4x the average;
+    # goals conceded on the pitch 1.24 and 1.66 against 0.95), which is why the
+    # pagelle read them as symptoms rather than feats.
+    #
+    # So: the goal-line clearance keeps a real value, at 0.28 of a vote per
+    # occurrence — between the pagelle's ~0.10 and SofaScore's 0.48, the two
+    # defensible readings of the same act. The last-man tackle goes to ZERO, which is
+    # also the measured optimum of the whole pipeline (overall r 0.663 and defenders
+    # 0.641, both the best of the range; residual differential on the 102 appearances
+    # +0.065). Negative — what the linear fits above suggest — makes every metric
+    # worse (r 0.662, defenders 0.638) and would mean punishing a last-ditch tackle,
+    # which is not what the number says: it says the flag carries no information the
+    # tackle and the exposure do not already carry.
+    #
+    # SET BY WHAT ONE OCCURRENCE IS WORTH, NOT BY 1σ — and that distinction is the
+    # whole story of these two numbers. Every weight here means "index points per 1σ
+    # of the feature", which is the right unit for a quantity that varies
+    # continuously. For an event that happens in 1% of appearances σ is a TENTH of an
+    # occurrence (0.109 for a last-man tackle), so one occurrence is ~9.8σ and the
+    # weight gets multiplied by ten on its way to the vote. Raised by hand to 0.05
+    # and 0.035 while reading the tuner's σ column, they made ONE last-man tackle
+    # worth +0.65 of a vote and one goal-line clearance +0.56 — against +0.63 for a
+    # GOAL, and with the ladder inverted (clearing off the line prevents a goal, a
+    # last-man tackle prevents a chance).
+    #
+    # Measured on 2025-26: on the 102 appearances with a last-man tackle our vote sat
+    # +0.55 above fantacalcio's relative to our own average bias (9 standard errors),
+    # and on the 63 with a goal-line clearance +0.30 (4.3 σ). The tuner's
+    # "1 EVENTO in VOTI" column and the benchmark's per-feature table both show that
+    # figure: read THAT one when hand-tuning a rare event, never the σ column.
+    #
+    # Kept at weight 0 rather than deleted: the feature is still fetched, still shown
+    # in the per-feature table with its value, and its zero is a DECISION anyone can
+    # see and revisit — deleting the key would hide the question instead of answering
+    # it.
+    "clearances_off_line": 0.0175,
+    "last_man_tackle": 0.0,
     # An error that let the opponent SHOOT, without a goal following.
     "errors_led_to_shot": -0.0189,
     "shots_blocked": 0.0278,      # the defence intervened
@@ -319,32 +396,104 @@ def derived_features(totals: dict) -> dict:
 # Keepers produce almost none of the outfield features above, so they need their own
 # index. The anchor is goals_prevented (xG-on-target faced MINUS goals conceded): the
 # cleanest "did he do better or worse than expected" measure, and the only one that
-# accounts for shot difficulty. Save VOLUME is deliberately secondary — a keeper with
-# many saves may simply be behind a poor defence — and saves from inside the box
-# (harder) weigh more than saves overall.
+# accounts for shot difficulty. Saves from inside the box (harder) weigh more than
+# saves overall.
 # NOTE the raw goal count is NOT here: conceding goals is handled by the classic
 # -1/goal MALUS in the bonus layer, exactly as the voto-puro/bonus split requires.
+#
+# Reweighted 2026-07-29 against both fantacalcio sheets over the 764 keeper-matches
+# of 2025-26 (see build_voto_benchmark). The keeper channel was the model's weakest
+# (agreement r 0.60 against 0.64-0.74 for the outfield roles), and the diagnosis was
+# not that a term was missing but that ONE term was doing everything: goals_prevented
+# carried 87% of the channel, so the vote tracked the raw goal count harder than
+# either external vote does (our correlation with goals conceded -0.52, theirs -0.31
+# and -0.37) — and the -1/goal malus is then applied on top of that, as it is for
+# them, which is where the double count showed.
+#
+# A ridge fit of both external base votes on this same feature basis says what the
+# hand weights had wrong, and it says it twice with the same sign:
+#   * save VOLUME is worth ~0.15-0.29 of the anchor to them, 0.07 to us -> doubled;
+#   * an error leading to a goal is worth ~0.7-0.8 of the anchor to them, 0.16 to us
+#     -> tripled (the "papera"). Held at 0.60 rather than the fitted 1.2 because the
+#     season carries only 30 such matches: 0.60 is where the residual bias on those
+#     matches meets the channel's own average bias, i.e. where a keeper who lets one
+#     in is treated no differently from anyone else. Fitting it harder inverted the
+#     sign of that bias (-0.33) on 30 samples, which is chasing noise;
+#   * a keeper's "inaccurate passes" are mostly long distribution, a style, not an
+#     error: the external fit prices it POSITIVE (+0.06). We do not reward a misplaced
+#     ball, but we stop punishing it -> 0.
 GK_TOTAL_WEIGHTS = {
-    "gk_goals_prevented": 1.8842,   # SIGNED: negative when he underperforms the xG faced
-    "gk_penalty_saves": 0.1672,
-    "errors_led_to_goal": -0.2962,
-    # Same event, same anchor as the outfield channel (which already shares the
-    # -1.50 above). Calibrated on outfield players — keeper errors of this kind
-    # are too rare in one season to fit separately — so it rides on the symmetry,
-    # not on its own evidence.
+    "gk_goals_prevented": 1.60,     # SIGNED: negative when he underperforms the xG faced
+    # ZERO ON PURPOSE, and this one is a matter of principle rather than of fit.
+    #
+    # The model's rule everywhere else is: do not pay the FACT of an event, read the
+    # MERIT inside it — that is why a goal is priced through the shot's post-strike
+    # value (sga_post) and not by counting goals. A saved penalty already obeys that
+    # rule without any help: the penalty's xGOT enters xGOT-faced, so saving one adds
+    # its xGOT to gk_goals_prevented, GRADED BY DIFFICULTY — the 22 saved penalties of
+    # 2025-26 range from 0.587 to 0.899 of xGOT, so a well-placed one credits half
+    # again as much as a weak one, which is exactly the "was he good or was it a bad
+    # penalty?" question. In vote points that merit is already worth +0.50 for a
+    # keeper on zero goals prevented. A penalty missed WITHOUT a save (3 in the
+    # season) carries no xGOT and so credits nothing: right by construction.
+    #
+    # Anything on top of that is a blind prize for the outcome, and it is already
+    # paid in the open by the +3 fantavoto bonus. Briefly set to 0.357 on 2026-07-30
+    # chasing the pagelle, which price the fact at +0.63/+0.66 on top of the merit;
+    # reverted the same day. The cost of the principle, measured: MAE 0.3296 ->
+    # 0.3407, r 0.6517 -> 0.6271 against the Redazione and 0.6804 -> 0.6649 against
+    # the Statistico, and we sit 0.44 below them on those 22 appearances. The judge
+    # that reads EVENTS rather than outcomes agrees with the principle: SofaScore's
+    # rating correlates 0.7821 without the prize against 0.7808 with it.
+    #
+    # Kept as an explicit 0 rather than deleted: the feature is still fetched and
+    # still listed in the per-feature table, so the choice stays visible.
+    "gk_penalty_saves": 0.0,
+    "errors_led_to_goal": -0.60,    # the papera — see above
     "errors_led_to_shot": -0.102,
+    # THE KEEPER WHO GIFTS A CHANCE, verified 2026-07-30 rather than assumed. These
+    # two are how a misplaced ball from the keeper registers: 30 keeper-matches carry
+    # an error that led to a GOAL (3.9%, worth -0.87 of a vote each) and 29 an error
+    # that led to a SHOT (3.8%, -0.14 each). Both land within 0.04 of neutral against
+    # the pagelle on exactly those appearances (-0.03 and +0.04), and both are at the
+    # optimum of the range tested: dropping the goal one to -0.45 or -0.30 pushes the
+    # residual to +0.12 and +0.29 and costs 0.005-0.022 of correlation, while raising
+    # the shot one to -0.20/-0.30 overshoots to -0.08/-0.22. They need nothing.
+    # NB it is these two, and NOT ``errors_bad_passes``, that read the gift:
+    # inaccurate passes fire in 97.5% of keeper-matches (7,667 of them in a season) —
+    # that is long distribution, a style, which is why it carries no keeper weight.
 }
 GK_PER90_WEIGHTS = {
-    "gk_saves_inside_box": 0.2486,
-    "gk_saves": 0.1356,
+    "gk_saves_inside_box": 0.4972,
+    "gk_saves": 0.2712,
     "gk_high_claims": 0.1315,       # command of the area
     "gk_sweeper": 0.0848,           # sweeper-keeper interventions
     "gk_punches": 0.0528,
     "gk_crosses_not_claimed": -0.0535,
-    "errors_bad_passes": -0.103,
     "passes_completed": 0.0085,     # distribution, marginal
 }
 GK_WEIGHTS = {**GK_TOTAL_WEIGHTS, **GK_PER90_WEIGHTS}
+
+# How many shots ON TARGET a keeper must face before we trust the reading of his
+# match in full. Below it his deviation from 6 is scaled down in proportion, exactly
+# as few minutes already shrink an outfielder's.
+#
+# This is the second half of the same diagnosis. goals_prevented is a DIFFERENCE
+# against expectation, and a difference measured over one or two shots is mostly
+# noise: a keeper who faced a single shot and conceded it scores about -0.7 there and
+# used to come out at 5.0, while both external votes leave him at 6.0 — they are not
+# being generous, they are declining to judge a keeper who had nothing to do. Over
+# the season we sat 0.47 of a vote below fantacalcio on exactly those matches (<= 1
+# save, >= 1 goal conceded); with the damper, 0.23.
+#
+# 4 is the MEDIAN shots-on-target faced in Serie A 2025-26 (mean 4.00), so the
+# typical keeper-match is judged at full strength and 47% of matches are damped, by
+# half on average. Capped rather than smooth (min(1, faced/4), not faced/(faced+k))
+# on purpose: a smooth factor would shrink EVERY keeper including the busy ones and
+# flatten the whole scale, which buys agreement by saying less. With the cap our
+# spread stays wider than theirs (sigma 0.58 against 0.54) while the agreement
+# improves — the point is to stop over-reading thin evidence, not to hedge.
+GK_EVIDENCE_FULL = 4.0
 
 # --- Tail compression ---------------------------------------------------------
 # Applied to EVERY feature, in units of that feature's own spread (see
@@ -383,6 +532,38 @@ GK_WEIGHTS = {**GK_TOTAL_WEIGHTS, **GK_PER90_WEIGHTS}
 # happened" — the outcome-driven behaviour this model deliberately avoids. The
 # residual is therefore a choice, not a defect.
 COMPRESS_K = 1.0
+
+# Features that are NOT compressed. The compression exists to shorten FAT tails —
+# the xA that motivated it reached 13σ with excess kurtosis +16. Applied to a
+# well-behaved variable it does the opposite of its job: it removes resolution at
+# both ends and buys nothing.
+#
+# ``gk_goals_prevented`` is the one place where that mattered, for two reasons
+# together. Its raw excess kurtosis over the reference population is **+0.87** —
+# essentially Gaussian, against +12.5 for shots_goal, +16.0 for xA, +17.6 for
+# xg_shots — and the compression drives it to **-0.63**, i.e. BELOW Gaussian, with
+# its maximum falling from 3.74σ to 2.58σ. And it carries 60% of the keeper channel,
+# so its squashed tail was the keeper's squashed tail: no keeper could reach 8.0
+# because an 8.5 needs 3.99σ of index and the channel could not produce it.
+#
+# Measured, exempting it alone: both agreements improve (r 0.6293 -> 0.6330 against
+# the Redazione, 0.6669 -> 0.6690 against the Statistico) and the high tail lands
+# exactly on theirs (>= 7.5: 2.2% against 2.2%; >= 8.0: 0.7% against 0.7%), at a cost
+# of 0.003 in MAE. This is NOT a prize for an outcome — it is the same merit measure
+# (xGOT faced minus goals conceded, graded by shot difficulty) read without being
+# flattened.
+#
+# Deliberately NOT a blanket rule on kurtosis: a < 1.5 threshold would also catch
+# touches, ball_recoveries and duels_won in the outfield channel, which is calibrated
+# and asks for nothing. And exempting the two save-volume features as well was
+# measured and REJECTED — it overshoots (>= 7.5 to 3.0%) and makes both correlations
+# worse than this single exemption.
+NO_COMPRESS_FEATURES = frozenset({"gk_goals_prevented"})
+
+
+def _compression_of(key: str):
+    """The compression this feature goes through: the identity for the exempt ones."""
+    return (lambda u: u) if key in NO_COMPRESS_FEATURES else _compress
 
 # --- One spread for every outfield role ---------------------------------------
 # Each role keeps its own CENTRE (so a 6 means the same thing everywhere, which the
@@ -473,9 +654,23 @@ RED_CARD_FIXED = {"Violent conduct": 0.3, "Argument": 0.3, "Bad Behaviour": 0.3}
 # from a coincidental shot, so we fall back to a single FLAT penalty rather than
 # claim a gravity we cannot measure. The flat -2 fantacalcio malus applies ON TOP in
 # the bonus layer regardless. Re-scrape to backfill elapsed_seconds and unlock grading.
-OWN_GOAL_VOTE_DEFLECTION = -0.75
-OWN_GOAL_VOTE_SOLO = -1.5
-OWN_GOAL_VOTE_FLAT = -1.0          # when sub-minute timing is unavailable
+#
+# HALVED TWICE on 2026-07-30: the drop had grown to weigh more than a SCORED GOAL,
+# which no reading of the game supports. In the base vote a goal is worth +0.69, and
+# a solo own goal was costing -1.50 — and the -2 fantacalcio malus lands on top of
+# that, so an own goal was a 3.5-point event against a goal's 3.7.
+# Measured on the 22 own goals of 2025-26 (12 solo, 10 deflections, none ungraded):
+# at -1.50/-0.75 our vote on those appearances averaged 4.57 against the pagelle's
+# 5.30, a differential of -0.75 relative to our own average bias; at -0.50/-0.20 it
+# is 5.36 against 5.30, differential +0.04, and both the MAE (0.3375 -> 0.3367) and
+# the agreement (r 0.6690 -> 0.6696) are at their best over the range.
+# The penalty is NOT dropped to zero, and that was measured too: with no adjustment
+# at all we land at 5.73 against their 5.30 (+0.41), so the pagelle do read the own
+# goal in the base vote — about 0.7 below their own average — they simply do not
+# read it as the catastrophe we did.
+OWN_GOAL_VOTE_DEFLECTION = -0.20
+OWN_GOAL_VOTE_SOLO = -0.50
+OWN_GOAL_VOTE_FLAT = -0.30         # when sub-minute timing is unavailable
 OWN_GOAL_DEFLECTION_WINDOW_S = 3   # seconds between the OG and the shot it deflected;
 # kept tight (deflections sit at Δ1-2s, solo errors at Δ40s+) so a hectic sequence
 # with an unrelated close-by shot is not mistaken for a deflection.
@@ -571,22 +766,82 @@ EXPOSURE_KERNEL = 0.30      # weight of the four adjacent zones in the presence
 EXPOSURE_POST_OUTCOME = SGA_POST_WOODWORK
 _NEIGHBOURS = ((-1, 0), (1, 0), (0, -1), (0, 1))
 
+# How much CREDIT a player earns for danger that never arrived. 1.0 = the charge is
+# symmetric (below-average exposure earns as much as above-average exposure costs);
+# 0.0 = the danger conceded is charged in full and its absence earns nothing.
+#
+# Why it is not symmetric. The exposure is a TEAM quantity divided among the players
+# on the pitch, so a low value says two things at once — he defended his zone, and
+# the opponent never came. Measured on 2025-26, within a role the second dominates:
+# 53.7% of the variance of a defender's exposure is which team-match he was in
+# (59.2% for a midfielder, 76.0% for a forward), and a team's conceded danger
+# correlates 0.63 with the opponent's xG. The case that prompted this: Juventus 4-0
+# Pisa, where the whole Juventus side conceded 0.087 of danger against a league
+# average of 1.062 per team-match — every one of the eleven collected the credit, and
+# none of them had earned it individually.
+#
+# The obvious repair is the wrong one: subtracting the team average (making exposure
+# purely relative to team-mates) moves us away from ALL THREE external judges at once
+# and monotonically — MAE 0.340 -> 0.353, Redazione r 0.673 -> 0.647, defenders
+# 0.654 -> 0.613 at full removal — because the pagelle grade the collective too. A
+# defence that concedes nothing IS a merit in their eyes; the context is not noise to
+# them.
+#
+# The asymmetry is what works, and it is the honest statement of the asymmetry in the
+# evidence: danger that came through your zone is about you, danger that never came
+# may be about the opponent. At 0.0 the MAE improves (0.3400 -> 0.3378), agreement
+# with the SofaScore rating gains 0.013 (0.7676 -> 0.7804, the largest single gain of
+# the reweighting session — that rating is event-based and does not credit events that
+# did not happen either), the Redazione is flat (-0.0006), and the vote's tie to the
+# scoreline loosens (defender vote vs goals conceded -0.562 -> -0.522, further from
+# the -0.578 of the external references). It costs 0.005 of defender agreement with
+# the Redazione, which is precisely the collective clean-sheet credit being dropped.
+#
+# NOTE what it does NOT do: it does not zero the term for a clean match. Compressing
+# the lower half onto the mean RAISES the population mean of the feature (0.948 ->
+# 1.351 in σ units), so sitting at the mean still beats the average slightly: every
+# clean appearance gets the SAME +0.10 of a vote instead of up to +0.22. What goes to
+# zero is the spread WITHIN the clean group — the model stops distinguishing clean
+# from spotless, which is the point. It also softens the charge itself by ~17% for the
+# same reason (a shot-heavy match: -0.47 -> -0.39 of a vote); restoring the charge
+# exactly would need EXPOSURE_WEIGHT ~0.198, which was measured and is slightly worse
+# on every judge (MAE 0.3398, sofa 0.7723), so the softer charge is kept.
+EXPOSURE_CREDIT = 0.0
+
 # 'A voto' vs 'senza voto' (s.v.): classic fantacalcio rates a player only if he
 # played enough AND was involved enough; below that he gets NO vote (a bench player
 # replaces him), not a 6. Involvement is proxied by ball touches. Both tunable.
 # NB: this is only the MINUTES/INVOLVEMENT gate. A player involved in a decisive
-# event (goal, assist, own goal, penalty, booking, sending-off on the pitch) is
+# event (goal, assist, own goal, penalty, sending-off on the pitch — but NOT a
+# plain booking, see ``_SENDING_OFF_TYPES``) is
 # rated regardless — that override lives in ``voto_puro_for_match`` via
 # ``rating_forcing_event_players``, because those events are not in the zone totals.
-MIN_MINUTES_RATED = 12
-MIN_TOUCHES_RATED = 12
+MIN_MINUTES_RATED = 14
+MIN_TOUCHES_RATED = 6
 # Above this many minutes, minutes ALONE decide: the touch count is a proxy for
 # "was he involved enough to judge", and that question only makes sense for a
 # cameo. Anyone who is on the pitch this long has been judged by every pagella
 # that exists, however little he saw of the ball — he gets a LOW vote, not no
 # vote. Without this, 119 appearances a season (four of them full 90') were
 # declared unrated purely on a touch count.
-ALWAYS_RATED_MINUTES = 20
+ALWAYS_RATED_MINUTES = 16
+# Set 2026-07-29 from the only evidence that can settle it: WHO fantacalcio leaves
+# without a vote, over the 11.819 appearances of 2025-26 we can match to their
+# sheet. Read as a rule, their s.v. rate by minutes played is
+#     1-10'  93-98%   10-12'  87%   12-15'  55%   15-18'  13%   18-20'  2%   20'+  0%
+# i.e. the cut sits at about a quarter of an hour and the tail is short. Ours sat at
+# 12'/12 touches with the minutes override at 20', which said s.v. for 53% of the
+# 15-18' band and 45% of the 18-20' one against their 13% and 2% — 348 appearances a
+# season silenced that they graded, nearly all substitutes (166 attackers, 109
+# midfielders).
+# 14 / 6 / 16 raises the agreement on WHO gets a vote from 96.2% to 98.0% (F1 on the
+# s.v. class 81.6% -> 89.3%) with the two error directions balanced (143 s.v. only
+# ours, 95 only theirs). It also improves the VOTES, which is the check that
+# mattered: the 231 appearances that stop being silent get our 5.77 against their
+# 5.86, MAE 0.214 — better than our season average of 0.34 — so the overall vote MAE
+# ticks down to 0.342 on 205 more comparisons. We were withholding the easy ones.
+# The touch gate survives, narrowed to the 14-16' window: a player who comes on for a
+# quarter of an hour and touches the ball five times has genuinely not been seen.
 
 # Reference bucket for a player we could rate but whose ROLE we don't know (his
 # Player row has no classic_role_seed because the squad import never matched him).
@@ -661,17 +916,28 @@ def is_rated(minutes: int, totals: dict) -> bool:
             and totals.get("touches", 0.0) >= MIN_TOUCHES_RATED)
 
 
-_CARD_TYPES = (CARD_YELLOW, CARD_SECOND_YELLOW, CARD_RED)
+# A SENDING-OFF forces a rating; a plain booking does NOT. Measured, not assumed:
+# among the 2025-26 appearances below our minutes/touches gate, fantacalcio rates
+# 29/29 scorers, 26/26 assist-men, 5/5 sent-off players and 2/2 penalty takers — but
+# only 7 of the 39 whose sole event was a yellow card (17.9%). The convention makes
+# sense from their side: an s.v. player is replaced by a bench player, so his booking
+# never scores, and rating a ten-minute cameo BECAUSE he was booked invents a
+# performance reading in order to attach a -0.5 the pagella declined to attach.
+# Dropping the plain yellow moved agreement on who gets a vote from 97.99% to 98.19%
+# (31 disagreements resolved, 7 created) and left the Statistico untouched.
+_SENDING_OFF_TYPES = (CARD_SECOND_YELLOW, CARD_RED)
 
 
 def rating_forcing_event_players(match_id: int) -> set:
     """player_ids whose match carried a decisive event that forces a rating no
-    matter how few minutes/touches they had — classic fantacalcio never leaves such
-    a player 'senza voto'. Covers a goal, assist or own goal; a booking; and a
-    sending-off/booking taken ON THE PITCH (the card's minute falls inside the
-    player's on-pitch window, which drops the post-match/bench card anomalies at
-    minute -5). Penalties won/conceded are handled by the caller from the zone
-    totals it already holds. Own goals live in ``MatchAppearance.raw_stats``."""
+    matter how few minutes/touches they had — fantacalcio never leaves such a player
+    'senza voto', and that claim is now measured rather than assumed (see
+    ``_SENDING_OFF_TYPES``). Covers a goal, assist or own goal, and a SENDING-OFF
+    taken ON THE PITCH (the card's minute falls inside the player's on-pitch window,
+    which drops the post-match/bench card anomalies at minute -5). A plain booking
+    does NOT force a rating: on that one the pagelle disagree with us, 39 cases to 7.
+    Penalties won/conceded are handled by the caller from the zone totals it already
+    holds. Own goals live in ``MatchAppearance.raw_stats``."""
     apps = list(MatchAppearance.objects.filter(match_id=match_id)
                 .values("player_id", "side", "is_starter", "goals", "assists",
                         "minutes_played", "raw_stats"))
@@ -688,7 +954,7 @@ def rating_forcing_event_players(match_id: int) -> set:
                    for a in apps}
     windows = on_pitch_windows([match_id], minutes, appearances)
     for pid, minute in (MatchDisciplinaryEvent.objects
-                        .filter(match_id=match_id, card_type__in=_CARD_TYPES)
+                        .filter(match_id=match_id, card_type__in=_SENDING_OFF_TYPES)
                         .values_list("player_id", "minute")):
         lo, hi = windows.get((match_id, pid), (0.0, 0.0))
         if minute is not None and lo <= minute <= hi:
@@ -696,19 +962,19 @@ def rating_forcing_event_players(match_id: int) -> set:
     return forcing
 
 
-def red_card_adjustments(match_id: int) -> dict:
-    """{player_id: voto-puro adjustment (<= 0) for a sending-off taken on the pitch}.
+def red_card_details(match_id: int) -> dict:
+    """{player_id: {reason, minute, man_down, severity, fixed, penalty}} for a
+    sending-off taken ON THE PITCH.
 
-    Grades the sending-off by severity (how justifiable the reason) times how long
-    it left the team a man down, plus a fixed extra for the indefensible reasons
-    (see RED_CARD_*). Gated on the pitch: a post-match/bench card (minute < 0, or a
-    minute outside the player's on-pitch window) had no in-game impact and is
-    skipped — this drops the minute -5 anomalies. This is separate from and additive
-    to the flat fantacalcio red malus applied in the bonus layer."""
+    The ingredients, not just the number: a vote dropped by 1.2 for a sending-off
+    needs to be able to say WHICH sending-off and why that much (see RED_CARD_* and
+    ``red_card_penalty``). Gated on the pitch — a post-match/bench card (minute < 0,
+    or a minute outside the player's on-pitch window) had no in-game impact and is
+    skipped, which drops the minute -5 anomalies."""
     events = list(MatchDisciplinaryEvent.objects
                   .filter(match_id=match_id,
                           card_type__in=(CARD_RED, CARD_SECOND_YELLOW))
-                  .values_list("player_id", "minute", "reason"))
+                  .values_list("player_id", "minute", "reason", "card_type"))
     if not events:
         return {}
     apps = list(MatchAppearance.objects.filter(match_id=match_id)
@@ -719,11 +985,65 @@ def red_card_adjustments(match_id: int) -> dict:
     windows = on_pitch_windows([match_id], minutes, appearances)
     match_end = max((hi for _lo, hi in windows.values()), default=95.0)
     out = {}
-    for pid, minute, reason in events:
+    for pid, minute, reason, card_type in events:
         lo, hi = windows.get((match_id, pid), (0.0, 0.0))
         if minute is None or minute < 0 or not (lo <= minute <= hi):
             continue
-        out[pid] = out.get(pid, 0.0) - red_card_penalty(reason, minute, match_end)
+        out[pid] = {
+            "reason": reason or "",
+            "second_yellow": card_type == CARD_SECOND_YELLOW,
+            "minute": minute,
+            "man_down": max(0.0, match_end - minute),
+            "severity": RED_CARD_SEVERITY.get(reason, RED_CARD_SEVERITY_DEFAULT),
+            "fixed": RED_CARD_FIXED.get(reason, 0.0),
+            "penalty": red_card_penalty(reason, minute, match_end),
+        }
+    return out
+
+
+def red_card_adjustments(match_id: int) -> dict:
+    """{player_id: voto-puro adjustment (<= 0) for a sending-off taken on the pitch}.
+
+    Grades the sending-off by severity (how justifiable the reason) times how long
+    it left the team a man down, plus a fixed extra for the indefensible reasons
+    (see RED_CARD_*). This is separate from and additive to the flat fantacalcio red
+    malus applied in the bonus layer. The reasoning behind each number is in
+    ``red_card_details``, which this delegates to so the two cannot diverge."""
+    return {pid: -d["penalty"] for pid, d in red_card_details(match_id).items()}
+
+
+def own_goal_details(match_id: int) -> dict:
+    """{player_id: {kind, count, penalty}} for own goals, graded by fault.
+
+    ``kind`` is what the grading concluded — ``deflection`` (he turned in an
+    opponent's shot: unlucky), ``solo`` (no opponent shot at that moment: his own
+    error), ``ungraded`` (no sub-minute timing, so we decline to claim a gravity we
+    cannot measure). The vote drop differs by a factor of 2.5 between the first two,
+    so an explanation that only said "autogol" would be hiding the reason for most of
+    the number it reports."""
+    sides = {(match_id, a["player_id"]): a["side"]
+             for a in MatchAppearance.objects.filter(match_id=match_id)
+             .values("player_id", "side")}
+    shots = list(MatchShot.objects.filter(match_id=match_id)
+                 .values_list("player_id", "team_side", "is_goal", "shot_type",
+                              "elapsed_seconds"))
+    own_goals = [(pid, sec) for pid, ts, isg, st, sec in shots
+                 if isg and st == "goal" and sides.get((match_id, pid), ts) != ts]
+    out = {}
+    for pid, og_sec in own_goals:
+        if og_sec is None:
+            kind, pen = "ungraded", OWN_GOAL_VOTE_FLAT
+        else:
+            opp = "away" if sides.get((match_id, pid)) == "home" else "home"
+            deflection = any(ts == opp and sp != pid and sec is not None
+                             and abs(sec - og_sec) <= OWN_GOAL_DEFLECTION_WINDOW_S
+                             for sp, ts, _isg, _st, sec in shots)
+            kind = "deflection" if deflection else "solo"
+            pen = (OWN_GOAL_VOTE_DEFLECTION if deflection else OWN_GOAL_VOTE_SOLO)
+        prev = out.get(pid)
+        out[pid] = {"kind": kind if prev is None else prev["kind"],
+                    "count": (prev["count"] + 1) if prev else 1,
+                    "penalty": (prev["penalty"] if prev else 0.0) + pen}
     return out
 
 
@@ -736,29 +1056,11 @@ def own_goal_adjustments(match_id: int) -> dict:
     within OWN_GOAL_DEFLECTION_WINDOW_S seconds is the shot it deflected in — unlucky
     (OWN_GOAL_VOTE_DEFLECTION); none near reads as a solo error (OWN_GOAL_VOTE_SOLO).
     WITHOUT seconds, a minute is too coarse to tell them apart, so a single FLAT
-    penalty (OWN_GOAL_VOTE_FLAT) applies. Additive to the -2 fantacalcio malus."""
-    sides = {(match_id, a["player_id"]): a["side"]
-             for a in MatchAppearance.objects.filter(match_id=match_id)
-             .values("player_id", "side")}
-    shots = list(MatchShot.objects.filter(match_id=match_id)
-                 .values_list("player_id", "team_side", "is_goal", "shot_type",
-                              "elapsed_seconds"))
-    own_goals = [(pid, sec) for pid, ts, isg, st, sec in shots
-                 if isg and st == "goal" and sides.get((match_id, pid), ts) != ts]
-    if not own_goals:
-        return {}
-    out = {}
-    for pid, og_sec in own_goals:
-        if og_sec is None:
-            out[pid] = out.get(pid, 0.0) + OWN_GOAL_VOTE_FLAT
-            continue
-        opp = "away" if sides.get((match_id, pid)) == "home" else "home"
-        deflection = any(ts == opp and sp != pid and sec is not None
-                         and abs(sec - og_sec) <= OWN_GOAL_DEFLECTION_WINDOW_S
-                         for sp, ts, _isg, _st, sec in shots)
-        out[pid] = out.get(pid, 0.0) + (OWN_GOAL_VOTE_DEFLECTION if deflection
-                                        else OWN_GOAL_VOTE_SOLO)
-    return out
+    penalty (OWN_GOAL_VOTE_FLAT) applies. Additive to the -2 fantacalcio malus.
+
+    Delegates to ``own_goal_details`` so the number and the reason given for it can
+    never disagree."""
+    return {pid: d["penalty"] for pid, d in own_goal_details(match_id).items()}
 
 
 def penalty_missed_adjustments(match_id: int) -> dict:
@@ -844,7 +1146,23 @@ def _feature_z(key: str, value: float, scales: dict) -> float:
     s = scales.get(key)
     if not s or not s.get("sigma_raw") or not s.get("sigma_z"):
         return 0.0
-    return _compress(value / s["sigma_raw"]) / s["sigma_z"]
+    return _compression_of(key)(value / s["sigma_raw"]) / s["sigma_z"]
+
+
+def exposure_z(value: float, scales: dict) -> float:
+    """The standardised exposure as the INDEX consumes it: charged in full above the
+    average, credited only ``EXPOSURE_CREDIT`` of the way below it.
+
+    Lives here, in one function, because the vote and the vote's EXPLANATION both
+    have to apply it — a breakdown that used the raw z would not add up to the vote
+    it explains. ``mu_z`` comes from the frozen calibration, never from the match
+    being scored: "the average danger conceded" is a property of the population."""
+    z = _feature_z(EXPOSURE_KEY, value, scales)
+    mu = (scales.get(EXPOSURE_KEY) or {}).get("mu_z")
+    if mu is None or EXPOSURE_CREDIT >= 1.0:
+        return z          # no frozen mean (fresh checkout) -> symmetric, as before
+    d = z - mu
+    return mu + (d if d >= 0 else EXPOSURE_CREDIT * d)
 
 
 def index_for_role(role: str, totals: dict, minutes: int, exposure: float = 0.0,
@@ -867,8 +1185,7 @@ def index_for_role(role: str, totals: dict, minutes: int, exposure: float = 0.0,
     idx = sum(w * _feature_z(k, values.get(k, 0.0), scales)
               for k, w in weights.items() if w)
     if not gk:
-        idx -= EXPOSURE_WEIGHT * _feature_z(EXPOSURE_KEY,
-                                            values.get(EXPOSURE_KEY, 0.0), scales)
+        idx -= EXPOSURE_WEIGHT * exposure_z(values.get(EXPOSURE_KEY, 0.0), scales)
     return idx
 
 
@@ -1136,6 +1453,42 @@ def on_pitch_goal_difference(match_ids, minutes: dict) -> dict:
     conceded after he came off, nor a sub credited for a lead built before he came
     on. Goals are timed from the shot map (is_goal); presence from the same on-pitch
     windows the exposure uses. Only non-zero differences are returned."""
+    return {k: gf - ga for k, (gf, ga) in _on_pitch_goals(match_ids, minutes).items()
+            if gf != ga}
+
+
+def on_pitch_goals_against(match_ids, minutes: dict) -> dict:
+    """{(match_id, player_id): goals conceded WHILE he was on the pitch}.
+
+    The keeper's half of the same count: it feeds ``gk_evidence`` (shots on target
+    faced = saves + goals conceded), never a penalty of its own — conceding is
+    priced by goals_prevented in the index and by the -1/goal malus in the bonus
+    layer, and a third charge here would be the double count we are removing."""
+    return {k: ga for k, (_gf, ga) in _on_pitch_goals(match_ids, minutes).items() if ga}
+
+
+def gk_evidence(totals: dict, goals_against: int) -> float:
+    """Shots ON TARGET a keeper faced ≈ what he saved plus what went in.
+
+    The unit of evidence for a keeper's match: everything the keeper channel
+    measures well (goals prevented, saves) is a statement about the shots that
+    reached the goal, so that count is how much the match tells us about him. Shots
+    off target and blocked ones are deliberately absent — he had nothing to do with
+    them, and a keeper who watched fifteen wild efforts fly over still had a quiet
+    afternoon."""
+    return totals.get("gk_saves", 0.0) + max(0, goals_against)
+
+
+def gk_evidence_weight(evidence: float) -> float:
+    """How much of a keeper's deviation from 6 survives the thinness of his match.
+    1.0 from GK_EVIDENCE_FULL shots on target upward — see the constant."""
+    if GK_EVIDENCE_FULL <= 0:
+        return 1.0
+    return min(1.0, max(0.0, evidence) / GK_EVIDENCE_FULL)
+
+
+def _on_pitch_goals(match_ids, minutes: dict) -> dict:
+    """{(match_id, player_id): (goals_for, goals_against) while he was on the pitch}."""
     goals: dict[int, list] = defaultdict(list)  # match_id -> [(minute, side)]
     for mid, minute, side in (MatchShot.objects
                               .filter(match_id__in=match_ids, is_goal=True,
@@ -1162,8 +1515,7 @@ def on_pitch_goal_difference(match_ids, minutes: dict) -> dict:
                 gf += 1
             else:
                 ga += 1
-        if gf != ga:
-            out[key] = gf - ga
+        out[key] = (gf, ga)
     return out
 
 
@@ -1226,10 +1578,18 @@ def build_feature_scales(competition_season_id: int) -> dict:
             s_raw = _sd(values)
             if not s_raw:
                 continue  # a feature with no spread carries no information
-            s_z = _sd([_compress(v / s_raw) for v in values])
+            comp = _compression_of(k)
+            s_z = _sd([comp(v / s_raw) for v in values])
             if not s_z:
                 continue
-            scales[k] = {"sigma_raw": s_raw, "sigma_z": s_z, "n": len(values)}
+            # mu_z: where the AVERAGE appearance sits on the standardised scale.
+            # Needed by any transform that has to know what "average" means for a
+            # feature — today only the exposure's asymmetric credit
+            # (EXPOSURE_CREDIT); stored for every feature because it costs nothing
+            # and a frozen mean belongs next to the frozen spreads it goes with.
+            mu_z = sum(comp(v / s_raw) for v in values) / (len(values) * s_z)
+            scales[k] = {"sigma_raw": s_raw, "sigma_z": s_z, "mu_z": mu_z,
+                         "n": len(values)}
         out[channel] = scales
     return out
 
@@ -1312,10 +1672,16 @@ def build_reference(competition_season_id: int, *,
 
 
 def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
-                         spread_k: float = VOTE_SPREAD_K) -> float:
+                         spread_k: float = VOTE_SPREAD_K,
+                         evidence_weight: float = 1.0) -> float:
     """The vote before the 0.5-grid rounding (and before result mitigation), clamped
     to the pagella range. Split out so the mitigation nudge can be applied to the
-    raw value and the result rounded once."""
+    raw value and the result rounded once.
+
+    ``evidence_weight`` is a second shrinkage on the same footing as the minutes one
+    — how much the match tells us about the player, over and above how long he was
+    on it. Only the keeper channel uses it today (see GK_EVIDENCE_FULL); 1.0 leaves
+    the vote exactly as it was."""
     r = reference.get(ref_key)
     if not r:
         return VOTE_CENTER
@@ -1324,7 +1690,7 @@ def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: di
     # per-90 rate extrapolated from a short cameo, so the vote regresses to 6 in
     # proportion to the evidence. w -> 1 for full games, ~0.4 at 20', ~0.3 at 10'.
     w = minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0
-    raw = VOTE_CENTER + spread_k * w * z
+    raw = VOTE_CENTER + spread_k * w * evidence_weight * z
     return max(VOTE_MIN, min(VOTE_MAX, raw))
 
 
@@ -1374,15 +1740,21 @@ def voto_puro_for_match(match, reference: dict,
     minutes = _minutes_map([match.id])
     exposure = defensive_exposure([match.id], minutes)
     gd_on = on_pitch_goal_difference([match.id], minutes)
+    ga_on = on_pitch_goals_against([match.id], minutes)
     roles = current_role_map()
     keepers = dict(Player.objects.values_list("id", "is_goalkeeper"))
     names = dict(Player.objects.values_list("id", "short_name"))
     full = dict(Player.objects.values_list("id", "full_name"))
-    # Decisive-event override for s.v.: a scorer/assist-man/booked/sent-off (on the
-    # pitch) player is rated even below the minutes/touches gate.
+    # Decisive-event override for s.v.: a scorer/assist-man/sent-off (on the pitch)
+    # player is rated even below the minutes/touches gate. A booking alone is not
+    # such an event — the pagelle leave those cameos unrated too.
     forcing = rating_forcing_event_players(match.id)
-    red_adj = red_card_adjustments(match.id)
-    og_adj = own_goal_adjustments(match.id)
+    # the DETAILS, not just the magnitudes: the explanation has to be able to say
+    # which sending-off and which kind of own goal produced the drop it reports
+    red_info = red_card_details(match.id)
+    og_info = own_goal_details(match.id)
+    red_adj = {pid: -d['penalty'] for pid, d in red_info.items()}
+    og_adj = {pid: d['penalty'] for pid, d in og_info.items()}
     pen_adj = penalty_missed_adjustments(match.id)
     outfield_roles = (Player.ROLE_DEF, Player.ROLE_MID, Player.ROLE_FWD)
 
@@ -1398,11 +1770,15 @@ def voto_puro_for_match(match, reference: dict,
         # features identified him. Only an unknown outfielder needs the pool.
         ref_key = role if role else POOLED_OUTFIELD
         # Rated if he played/was involved enough, OR was in a decisive event
-        # (goal/assist/own goal/booking/sending-off), OR won/conceded a penalty.
+        # (goal/assist/own goal/sending-off), OR won/conceded a penalty.
         rated = (is_rated(mins, feats) or pid in forcing
                  or feats.get("penalties_won", 0.0) > 0
                  or feats.get("penalties_conceded", 0.0) > 0)
-        raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k)
+        # A keeper's match is also judged by HOW MUCH of it reached him: one shot on
+        # target is not enough to call him, whichever way it went (GK_EVIDENCE_FULL).
+        ev_w = (gk_evidence_weight(gk_evidence(feats, ga_on.get((mid, pid), 0)))
+                if role == Player.ROLE_GK else 1.0)
+        raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k, ev_w)
         # Result mitigation: divergence-only, outfield only (the GK channel already
         # reflects the result). Recorded so the vote explanation can reconcile.
         nudge = (result_mitigation(raw, gd_on[(mid, pid)])
@@ -1424,9 +1800,15 @@ def voto_puro_for_match(match, reference: dict,
             "touches": round(feats.get("touches", 0.0), 1),
             "index": round(idx, 2),
             "rated": rated,
+            # Passed on so the vote EXPLANATION shrinks its slices by the same
+            # factor the vote did — otherwise a damped keeper's breakdown would add
+            # up to a vote he did not get.
+            "evidence_weight": round(ev_w, 4),
             "result_nudge": round(nudge, 3),
             "red_adjustment": round(radj, 3),
             "own_goal_adjustment": round(oadj, 3),
+            "red_detail": red_info.get(pid),
+            "own_goal_detail": og_info.get(pid),
             "penalty_adjustment": round(padj, 3),
             "voto_puro": voto,
         })

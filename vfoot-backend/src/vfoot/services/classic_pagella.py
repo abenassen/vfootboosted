@@ -318,7 +318,8 @@ def _team_detail(starters: list[dict], bench: list[dict]) -> dict:
 
 
 def pagella_for_match(match, reference: dict | None = None, league=None,
-                      averages: dict | None = None) -> dict:
+                      averages: dict | None = None,
+                      full_explanation: bool = False) -> dict:
     """Full per-team pagella for a real match. Returns {'home': ClassicTeamDetail,
     'away': ClassicTeamDetail}. Only meaningful for a match with imported
     appearances (a finished, data-loaded fixture).
@@ -329,6 +330,11 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
     the next Transfermarkt import can rewrite — reading it here would let a league's
     match detail contradict its own listone. The league is tied to one reference
     season, so its snapshot already carries the season: no per-season role needed.
+
+    ``full_explanation`` attaches the per-feature ledger (every weighted feature with
+    its value, its standing on the population scale, its weight and the vote points
+    it moved) to each explained line. Off by default: it is several times the size of
+    the vote it explains, which suits an analysis page and bloats an API response.
     """
     if reference is None:
         reference = get_reference(match.competition_season_id)
@@ -382,7 +388,22 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           result_nudge=row.get("result_nudge", 0.0),
                           red_adjustment=row.get("red_adjustment", 0.0),
                           own_goal_adjustment=row.get("own_goal_adjustment", 0.0),
-                          penalty_adjustment=row.get("penalty_adjustment", 0.0))
+                          penalty_adjustment=row.get("penalty_adjustment", 0.0),
+                          # taken from the row that produced the vote, never
+                          # recomputed here: the two must not be able to disagree
+                          evidence_weight=row.get("evidence_weight", 1.0),
+                          # WHY the sending-off / own goal cost what it cost: the
+                          # drops are graded (severity x man-down time; deflection vs
+                          # own error), so naming only the event would leave most of
+                          # the number unexplained
+                          red_detail=row.get("red_detail"),
+                          own_goal_detail=row.get("own_goal_detail"),
+                          # an assist is a bonus, not a feature: the explanation says
+                          # so when the pass behind it carried little expected value
+                          assists=a.assists or 0,
+                          # the per-feature ledger: off by default (it is far bigger
+                          # than the vote it explains), on for the analysis report
+                          full=full_explanation)
         line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded, why,
                      missed_pens=missed_pens.get(a.player_id, 0),
                      saved_pens=saved_pens.get(a.player_id, 0))

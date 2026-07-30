@@ -40,6 +40,8 @@ data_fantacalcio/
 # Real league lineup exports (Fantaresilienza) + generated replay report: private data
 fantaresilienza2025-2026/
 fantaresilienza_report.html
+# Benchmark HTML del voto puro: rigenerabile, e ricopia i voti fantacalcio.it
+voto_benchmark/
 # Screenshots / scratch notes
 screenshot/
 claudesession
