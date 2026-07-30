@@ -54,15 +54,27 @@ export default function NotificationsCard() {
         </div>
       ) : null}
 
-      {!installed && !ios && canInstall ? (
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button size="sm" variant="secondary" onClick={() => void promptInstall()}>
-            Installa l'app
-          </Button>
-          <span className="text-xs text-slate-500">
-            L'app si apre a schermo intero e resta connessa più a lungo.
-          </span>
-        </div>
+      {!installed && !ios ? (
+        canInstall ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button size="sm" variant="secondary" onClick={() => void promptInstall()}>
+              Installa l'app
+            </Button>
+            <span className="text-xs text-slate-500">
+              L'app si apre a schermo intero e resta connessa più a lungo.
+            </span>
+          </div>
+        ) : (
+          /* No captured prompt does NOT mean "not installable": Chrome only fires
+             beforeinstallprompt once the user has engaged with the page, and some
+             browsers never fire it at all. Without this line the whole install
+             option would silently disappear on a first visit. */
+          <div className="mt-3 text-xs text-slate-500">
+            Puoi installare l'app dal menu del browser (⋮ → «Installa app»): si apre a
+            schermo intero e resta connessa più a lungo. Se la voce non c'è ancora,
+            ricarica dopo qualche secondo di navigazione.
+          </div>
+        )
       ) : null}
 
       {installed ? (

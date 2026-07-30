@@ -111,8 +111,11 @@ ripiego:
 1. Sul telefono: Impostazioni → Opzioni sviluppatore → Debug USB.
 2. Collega il cavo, poi `adb devices` (autorizza il popup sul telefono).
 3. `adb reverse tcp:5173 tcp:5173` e `adb reverse tcp:8000 tcp:8000` — così
-   `localhost:5173` sul telefono è il tuo dev server. **Serve**: senza HTTPS il
-   service worker gira solo su `localhost`, e l'IP di rete locale non basta.
+   `localhost:5173` sul telefono è il tuo dev server. **Non è una scorciatoia, è
+   l'unico modo**: misurato, su `http://192.168.1.223:5173` il browser riporta
+   `isSecureContext=false` e **`navigator.serviceWorker` non esiste affatto** —
+   quindi niente worker, niente installazione, niente push, niente offline. Solo
+   `localhost`/`127.0.0.1` sono esentati dal requisito HTTPS.
 4. Su Chrome desktop apri `chrome://inspect`, il telefono compare con le sue
    schede: hai console, rete e pannello Application del dispositivo reale.
 
@@ -168,6 +171,31 @@ sotto `/api/`, mai. Da verificare dopo ogni modifica alla configurazione:
 ```bash
 npm run build
 grep -c "api/v1" dist/sw.js     # deve dire 0
+```
+
+## L'identità dell'app è la sua ORIGINE
+
+Un'installazione appartiene a `schema://host:porta`, e tutto è per-origine: il
+service worker, le cache, il `localStorage` (quindi il token di sessione) e **la
+subscription push**. Conseguenze pratiche:
+
+- l'app installata in test da `http://localhost:5173` e quella da
+  `https://vfoot.it` sono **due app diverse**: due icone, due installazioni
+  indipendenti, e la subscription di test non vale in produzione. Non c'è
+  conflitto, ma non c'è nemmeno continuità: chi ha provato in test si cancella
+  l'icona vecchia e reinstalla dal dominio vero;
+- una volta in produzione l'origine deve restare **una sola**. Il 301 da
+  `www.vfoot.it` a `vfoot.it` in nginx serve anche a questo: senza, due utenti
+  potrebbero installare due app che non si riconoscono;
+- il campo `id: "/"` nel manifest esiste per lo stesso motivo, ma al livello
+  successivo: fissa l'identità *dentro* l'origine, così potremo cambiare
+  `start_url` in futuro senza che Android creda sia un'altra app.
+
+Verifica che Chrome la consideri installabile (zero errori attesi):
+
+```js
+// CDP, o pannello Application -> Manifest in DevTools
+Page.getInstallabilityErrors   // {"installabilityErrors":[]}
 ```
 
 ## Il secondo deploy, non il primo
