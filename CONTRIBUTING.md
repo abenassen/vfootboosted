@@ -124,6 +124,47 @@ Il comando usa l'API di backup di SQLite, quindi lo snapshot è coerente anche
 col dev server acceso, e anonimizza sempre (email, password, token API) a meno
 di `--no-anonymize`.
 
+## Lavorare sulla UI ora che c'è un service worker
+
+Da luglio 2026 il frontend è una PWA, e **il service worker gira anche in
+sviluppo**. È deliberato (è ciò che rende collaudabili installazione e notifiche
+senza un telefono), ma cambia una cosa nella vita di tutti i giorni:
+
+- **Se vedi contenuti vecchi che non corrispondono al codice, è lui.** DevTools →
+  Application → Service Workers → spunta **"Update on reload"** e lascialo
+  spuntato mentre sviluppi. In caso di dubbio, "Unregister" e ricarica.
+- In sviluppo il worker sta in `/dev-sw.js?dev-sw`, non in `/sw.js`: Vite lo
+  trasforma al volo. Se ne occupa `workerUrl()` in `src/pwa/registerSW.ts` — non
+  cambiare quel percorso senza leggere il commento.
+- **Nulla sotto `/api/` va messo in cache, mai.** Un worker che serve una risposta
+  API vecchia mostra i voti della settimana scorsa senza niente a schermo che lo
+  spieghi. Se tocchi `vite.config.ts`, riverifica:
+
+  ```sh
+  npm run build && grep -c "api/v1" dist/sw.js     # deve dire 0
+  ```
+
+Script utili, tutti da `vfoot-frontend`:
+
+```sh
+npm run test:pwa            # manifest, worker, notifiche — offline, 5 secondi
+npm run test:pwa:offline    # costruisce e prova che la shell si apra senza rete
+npm run test:pwa:roundtrip  # anello push completo: esce in rete, serve il venv
+```
+
+Servono **Chrome vero** (non lo shell headless di Playwright): è già configurato
+in `playwright.config.ts`. Il dettaglio di cosa provano e cosa no sta in
+`vfoot-backend/docs/PWA_TESTING.md`.
+
+Due cose che sembrano guasti e non lo sono:
+
+- in Profilo → Notifiche e installazione può comparire *"Le notifiche push non
+  sono attive su questo server"*: è lo stato normale finché non esistono le chiavi
+  VAPID (`manage.py vapid_keys`), e gli avvisi viaggiano per email;
+- `npm run test:e2e:mock` riporta **1 skipped**: quello smoke test guida
+  un'interfaccia precedente ed è marcato `fixme` con l'elenco di cosa è vecchio.
+  Riscriverlo è un lavoro a sé, non un tuo errore di setup.
+
 ## Note sparse
 
 - `?api=mock` in coda a qualsiasi URL fa girare la pagina sui dati finti senza
