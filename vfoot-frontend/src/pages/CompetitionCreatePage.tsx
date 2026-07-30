@@ -139,8 +139,11 @@ function StageFlow({ stages }: { stages: CompetitionStageItem[] }) {
               <div>
                 <div className="text-sm font-semibold text-slate-900">{s.name}</div>
                 <div className="mt-0.5 flex items-center gap-1.5">
+                  {/* The words the wizard itself used two screens earlier. A
+                      confirmation that renames what you just chose reads as a
+                      different thing from the one you asked for. */}
                   <Badge tone={s.stage_type === 'knockout' ? 'amber' : 'blue'}>
-                    {s.stage_type === 'knockout' ? 'Eliminazione' : 'Round-robin'}
+                    {s.stage_type === 'knockout' ? 'Eliminazione diretta' : 'Tutti contro tutti'}
                   </Badge>
                   {s.double_round ? <Badge tone="slate">Andata/Ritorno</Badge> : null}
                 </div>
