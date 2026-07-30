@@ -40,6 +40,24 @@ percorso di produzione durante `npm run dev` restituisce l'`index.html` della SP
 col MIME sbagliato e la registrazione fallisce in silenzio. Se ne occupa
 `workerUrl()` in `src/pwa/registerSW.ts`.
 
+### Offline: il test sta a parte, e serve
+
+```bash
+npm run test:pwa:offline     # costruisce, poi prova la build vera
+```
+
+Va separato perché **richiede la build di produzione**: in sviluppo il worker e
+il precache sono altri, quindi un verde su `npm run dev` non dice nulla su cosa
+riceve un utente.
+
+Il caso che conta è `/home`, lo `start_url` del manifest, cioè **quello che apre
+l'app installata**. Il precache da solo non lo copre: risponde per gli URL esatti
+che contiene, quindi `/` funzionava e ogni rotta lato client finiva sulla pagina
+di errore del browser. Serve una `NavigationRoute` legata alla shell — e questo è
+il test che ne avrebbe rivelato l'assenza (l'ha rivelata: era mancante).
+
+Controlla anche il rovescio: che `/api/…` **non** venga servito dalla cache.
+
 ## Livello 2 — l'anello completo, con la rete
 
 ```bash

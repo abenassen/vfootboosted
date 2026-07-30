@@ -66,14 +66,26 @@ test.describe('@pwa PWA', () => {
     await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#0f172a');
   });
 
-  test('il service worker si registra e prende il controllo', async ({ page }) => {
+  test('il service worker si registra e diventa attivo', async ({ page }) => {
     await page.goto('/');
-    const state = await page.evaluate(async () => {
-      const reg = await navigator.serviceWorker.ready;
-      return { scope: reg.scope, active: reg.active?.state ?? null };
-    });
-    expect(state.active).toBe('activated');
-    expect(state.scope).toBe(ORIGIN.replace(/\/$/, '') + '/');
+    // `ready` resolves as soon as a registration HAS an active worker, which can
+    // still be in `activating` for a moment — polling here rather than asserting
+    // on the instant avoids a race that is in the test, not in the app.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const reg = await navigator.serviceWorker.ready;
+            return reg.active?.state ?? null;
+          }),
+        { timeout: 10_000 },
+      )
+      .toBe('activated');
+
+    const scope = await page.evaluate(async () => (await navigator.serviceWorker.ready).scope);
+    // Scope must be the origin root: a worker registered from a subpath would
+    // only ever see part of the app.
+    expect(scope).toBe(ORIGIN.replace(/\/$/, '') + '/');
   });
 
   test('una push consegnata al worker diventa una notifica', async ({ page, context }) => {

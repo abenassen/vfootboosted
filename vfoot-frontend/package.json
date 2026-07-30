@@ -12,7 +12,8 @@
     "test:e2e:backend": "VFOOT_RUN_BACKEND_E2E=1 playwright test --grep @backend",
     "test:e2e:install": "playwright install chromium",
     "test:pwa": "playwright test --grep @pwa",
-    "test:pwa:roundtrip": "node tests/push-roundtrip.mjs"
+    "test:pwa:roundtrip": "node tests/push-roundtrip.mjs",
+    "test:pwa:offline": "npm run build && node tests/offline-shell.mjs"
   },
   "dependencies": {
     "@dicebear/collection": "^9.4.3",

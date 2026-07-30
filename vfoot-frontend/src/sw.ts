@@ -8,7 +8,12 @@
  *
  *  Deliberately NOT cached: anything under /api/. See vite.config.ts.
  */
-import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
+import {
+  cleanupOutdatedCaches,
+  createHandlerBoundToURL,
+  precacheAndRoute,
+} from 'workbox-precaching';
+import { NavigationRoute, registerRoute } from 'workbox-routing';
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
@@ -16,6 +21,20 @@ declare const self: ServiceWorkerGlobalScope & {
 
 precacheAndRoute(self.__WB_MANIFEST || []);
 cleanupOutdatedCaches();
+
+// Every client-side route has to resolve to the one shell we precached.
+// Without this the precache only answers for the exact URLs in it: `/` worked
+// and `/home` — the manifest's start_url, i.e. what the INSTALLED APP OPENS —
+// died on the browser's offline page. Measured before adding this.
+registerRoute(
+  new NavigationRoute(createHandlerBoundToURL('/index.html'), {
+    // A navigation to these must reach the server, not be answered with the SPA:
+    // /api and /ws are the backend, /admin is Django's own UI, /static its assets.
+    // (Fetches from the app carry mode:"cors" and never match a NavigationRoute
+    // anyway — this is about someone typing the URL or following a link.)
+    denylist: [/^\/api\//, /^\/admin\//, /^\/ws\//, /^\/static\//, /^\/media\//],
+  }),
+);
 
 // The page asks for this once the user has accepted the update prompt. Without
 // it a new deploy sits in "waiting" until every tab closes — which on a phone
