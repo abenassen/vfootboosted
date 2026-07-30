@@ -366,6 +366,20 @@ export async function joinLeague(req: JoinLeagueRequest): Promise<{ league_id: n
   return parseJsonOrThrow(res);
 }
 
+/** Rename the caller's own team in a league and/or set its crest. Both fields are
+ *  optional: saving a new name must not overwrite a crest the user never opened. */
+export async function updateMyTeam(
+  leagueId: number,
+  patch: { name?: string; crest?: string },
+): Promise<{ team_id: number; name: string; crest: string }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/team`, {
+    method: 'PATCH',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(patch),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function getLeagueDetail(leagueId: number): Promise<LeagueDetail> {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}`, {
     headers: { Accept: 'application/json', ...authHeaders() },

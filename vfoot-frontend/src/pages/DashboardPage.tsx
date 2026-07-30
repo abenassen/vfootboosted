@@ -4,6 +4,7 @@ import { getLeagueFixtures, getLeagueStandings } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import InstallBanner from '../components/InstallBanner';
+import Crest from '../components/Crest';
 import type { LeagueFixtureItem, LeagueStandingRow } from '../types/league';
 
 export default function DashboardPage() {
@@ -21,17 +22,31 @@ export default function DashboardPage() {
     void getLeagueFixtures(selectedLeagueId).then(setFixtures).catch(() => setFixtures([]));
   }, [selectedLeagueId]);
 
+  // No league => there is exactly ONE thing to do here, so the page is that one
+  // thing and nothing else. The rest of the app is hidden from the menu too (see
+  // AppShell): every other page would only answer "Seleziona una lega".
   if (!leagues.length) {
     return (
       <div className="space-y-4">
-      <InstallBanner />
-      <Card className="p-4">
-        <SectionTitle>Benvenuto</SectionTitle>
-        <div className="mt-2 text-sm text-slate-600">Non appartieni ancora a nessuna lega.</div>
-        <Link to="/league-admin" className="mt-3 inline-flex rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">
-          Crea o unisciti a una lega
-        </Link>
-      </Card>
+        <InstallBanner />
+        <Card className="p-6 text-center md:p-10">
+          <div className="text-4xl">🏆</div>
+          <div className="mt-3 text-2xl font-black md:text-3xl">Benvenuto in Vfoot Boosted</div>
+          <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
+            Non fai ancora parte di nessuna lega. Creane una e invita i tuoi amici col
+            codice che ti ritrovi, oppure entra in una lega esistente con il codice che
+            ti hanno dato.
+          </p>
+          <Link
+            to="/league-admin?tab=user"
+            className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-6 py-4 text-base font-bold text-white shadow-card transition hover:bg-slate-800 active:scale-[0.99]"
+          >
+            <span className="text-xl">🏟️</span> Crea o unisciti a una lega
+          </Link>
+          <div className="mt-4 text-xs text-slate-500">
+            Squadra, formazione, mercato e classifiche si attivano appena sei in una lega.
+          </div>
+        </Card>
       </div>
     );
   }
@@ -93,8 +108,12 @@ export default function DashboardPage() {
           {feature ? (
             <div className="mt-2 flex items-center justify-between gap-2">
               <div>
-                <div className="font-bold">
-                  {feature.home_team.name} <span className="text-slate-400">vs</span> {feature.away_team.name}
+                <div className="flex items-center gap-2 font-bold">
+                  <Crest descriptor={feature.home_team.crest} teamName={feature.home_team.name} size={24} />
+                  {feature.home_team.name}
+                  <span className="text-slate-400">vs</span>
+                  {feature.away_team.name}
+                  <Crest descriptor={feature.away_team.crest} teamName={feature.away_team.name} size={24} />
                 </div>
                 <div className="text-sm text-slate-500">
                   Giornata {feature.round_no}

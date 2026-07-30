@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Button, Card, SectionTitle } from '../components/ui';
+import { Button } from '../components/ui';
 import { useAsync } from '../utils/useAsync';
 import { getTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import RosterView from '../components/RosterView';
+import TeamIdentityCard from '../components/TeamIdentityCard';
 
 export default function SquadPage() {
   const { selectedLeagueId } = useLeagueContext();
@@ -19,13 +20,11 @@ export default function SquadPage() {
 
   return (
     <div className="space-y-4">
-      <Card className="p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <SectionTitle>Squadra</SectionTitle>
-            <div className="mt-1 text-xl font-black">{data.team.name}</div>
-            <div className="text-sm text-slate-500">{data.roster.length} giocatori in rosa</div>
-          </div>
+      <TeamIdentityCard
+        leagueId={selectedLeagueId}
+        initialName={data.team.name}
+        subtitle={`${data.roster.length} giocatori in rosa`}
+        action={
           <Button
             size="sm"
             variant="secondary"
@@ -40,8 +39,8 @@ export default function SquadPage() {
           >
             {exporting ? 'Preparo…' : '⬇ Scarica rosa (xlsx)'}
           </Button>
-        </div>
-      </Card>
+        }
+      />
       <RosterView data={data} />
     </div>
   );

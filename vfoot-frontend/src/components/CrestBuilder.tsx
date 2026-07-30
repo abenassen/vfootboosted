@@ -1,0 +1,175 @@
+import clsx from 'clsx';
+import Crest from './Crest';
+import {
+  CREST_COLORS,
+  CREST_PATTERNS,
+  CREST_SHAPES,
+  CREST_SYMBOLS,
+  type CrestOptions,
+  randomCrest,
+  serializeCrest,
+} from '../utils/crest';
+import { Button } from './ui';
+
+// Crest customizer, same idea as AvatarBuilder: every option is shown as a MINI
+// crest — the current one with that single trait swapped — so the effect of a
+// choice is visible before making it.
+
+const MINI = 40;
+
+const SHAPE_LABELS: Record<string, string> = {
+  shield: 'Scudo',
+  circle: 'Tondo',
+  pennant: 'Gagliardetto',
+};
+
+const PATTERN_LABELS: Record<string, string> = {
+  solid: 'Tinta unita',
+  stripes: 'Strisce',
+  halves: 'Metà',
+  sash: 'Banda',
+  hoops: 'Fasce',
+};
+
+function ColorRow({
+  label,
+  value,
+  onPick,
+}: {
+  label: string;
+  value: string;
+  onPick: (c: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="flex flex-wrap gap-2">
+        {CREST_COLORS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => onPick(c)}
+            aria-label={`${label} ${c}`}
+            aria-pressed={c === value}
+            className={clsx(
+              'h-9 w-9 rounded-full border transition',
+              c === value ? 'ring-2 ring-slate-900 ring-offset-2' : 'border-slate-200 hover:scale-105',
+            )}
+            style={{ backgroundColor: `#${c}` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A row of whole-crest previews, one per value of `field`. */
+function ChoiceRow<K extends keyof CrestOptions>({
+  label,
+  field,
+  options,
+  labels,
+  value,
+  teamName,
+  onPick,
+}: {
+  label: string;
+  field: K;
+  options: readonly CrestOptions[K][];
+  labels?: Record<string, string>;
+  value: CrestOptions;
+  teamName: string;
+  onPick: (v: CrestOptions[K]) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="flex flex-wrap gap-2">
+        {options.map((opt) => {
+          const active = value[field] === opt;
+          return (
+            <button
+              key={String(opt) || '—'}
+              type="button"
+              onClick={() => onPick(opt)}
+              aria-label={labels?.[String(opt)] ?? String(opt) ?? 'nessuno'}
+              aria-pressed={active}
+              title={labels?.[String(opt)]}
+              className={clsx(
+                'rounded-xl border p-1 transition',
+                active ? 'border-slate-900 bg-slate-100 ring-2 ring-slate-900' : 'border-slate-200 hover:bg-slate-50',
+              )}
+            >
+              <Crest
+                descriptor={serializeCrest({ ...value, [field]: opt })}
+                teamName={teamName}
+                size={MINI}
+              />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default function CrestBuilder({
+  value,
+  teamName,
+  onChange,
+}: {
+  value: CrestOptions;
+  teamName: string;
+  onChange: (next: CrestOptions) => void;
+}) {
+  const set = <K extends keyof CrestOptions>(field: K, v: CrestOptions[K]) =>
+    onChange({ ...value, [field]: v });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4">
+        <Crest descriptor={serializeCrest(value)} teamName={teamName} size={96} />
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-slate-800">{teamName || 'La tua squadra'}</div>
+          <div className="mt-1 text-xs text-slate-500">
+            Senza simbolo lo stemma porta le iniziali del nome squadra, e cambia se
+            rinomini la squadra.
+          </div>
+          <Button size="sm" variant="secondary" className="mt-2" onClick={() => onChange(randomCrest())}>
+            🎲 Sorprendimi
+          </Button>
+        </div>
+      </div>
+
+      <ChoiceRow
+        label="Forma"
+        field="shape"
+        options={CREST_SHAPES}
+        labels={SHAPE_LABELS}
+        value={value}
+        teamName={teamName}
+        onPick={(v) => set('shape', v)}
+      />
+      <ChoiceRow
+        label="Motivo"
+        field="pattern"
+        options={CREST_PATTERNS}
+        labels={PATTERN_LABELS}
+        value={value}
+        teamName={teamName}
+        onPick={(v) => set('pattern', v)}
+      />
+      <ColorRow label="Colore principale" value={value.primary} onPick={(c) => set('primary', c)} />
+      <ColorRow label="Colore secondario" value={value.secondary} onPick={(c) => set('secondary', c)} />
+      <ChoiceRow
+        label="Simbolo"
+        field="symbol"
+        options={CREST_SYMBOLS}
+        value={value}
+        teamName={teamName}
+        onPick={(v) => set('symbol', v)}
+      />
+      <ColorRow label="Colore delle iniziali" value={value.ink} onPick={(c) => set('ink', c)} />
+    </div>
+  );
+}

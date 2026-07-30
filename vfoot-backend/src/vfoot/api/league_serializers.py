@@ -22,6 +22,26 @@ class JoinLeagueSerializer(serializers.Serializer):
     team_name = serializers.CharField(max_length=120)
 
 
+class UpdateMyTeamSerializer(serializers.Serializer):
+    """Edits the caller's OWN team inside one league: display name and/or crest.
+
+    Both fields are optional so the UI can save one without touching the other —
+    renaming should not silently rewrite a crest the user never opened. The crest
+    is an opaque descriptor (see FantasyTeam.crest); blank means "back to the
+    default drawn from the team name", which is why it is allow_blank.
+    """
+
+    name = serializers.CharField(max_length=120, required=False)
+    crest = serializers.CharField(max_length=4000, required=False, allow_blank=True,
+                                  trim_whitespace=False)
+
+    def validate_name(self, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise serializers.ValidationError("Il nome della squadra non può essere vuoto.")
+        return name
+
+
 class UpdateMemberRoleSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=["admin", "manager"])
 

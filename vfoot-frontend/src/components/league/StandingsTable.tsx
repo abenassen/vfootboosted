@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import Crest from '../Crest';
 
 // Neutral standings row. Both the simulation and the real league map their own
 // data into this shape.
@@ -6,6 +7,9 @@ export interface StandingRowVM {
   key: string;
   rank: number;
   name: string;
+  /** Opaque crest descriptor. Left undefined by callers that have no crests (the
+   *  simulation report), and then no crest column is drawn at all. */
+  crest?: string | null;
   played: number;
   wins: number;
   draws: number;
@@ -30,6 +34,7 @@ export function StandingsTable({
   onRowClick?: (row: StandingRowVM) => void;
 }) {
   const showAvg = rows.some((r) => typeof r.avgScore === 'number');
+  const showCrest = rows.some((r) => r.crest !== undefined);
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -71,7 +76,16 @@ export function StandingsTable({
                   {s.rank}
                 </span>
               </td>
-              <td className="pr-2 font-semibold text-slate-900">{s.name}</td>
+              <td className="pr-2 font-semibold text-slate-900">
+                {showCrest ? (
+                  <span className="flex items-center gap-2">
+                    <Crest descriptor={s.crest} teamName={s.name} size={22} />
+                    <span className="truncate">{s.name}</span>
+                  </span>
+                ) : (
+                  s.name
+                )}
+              </td>
               <td className="px-1 text-center text-slate-600">{s.played}</td>
               <td className="px-1 text-center text-slate-600">{s.wins}</td>
               <td className="px-1 text-center text-slate-600">{s.draws}</td>

@@ -1,8 +1,10 @@
 import clsx from 'clsx';
 import type { PropsWithChildren } from 'react';
 
-export function Card({ children, className }: PropsWithChildren<{ className?: string }>) {
-  return <div className={clsx('rounded-2xl bg-white shadow-card', className)}>{children}</div>;
+export function Card({ children, className, id }: PropsWithChildren<{ className?: string; id?: string }>) {
+  // id is optional and exists so a card can be a scroll target: switching a tab
+  // that lives far down a long page otherwise changes nothing the user can see.
+  return <div id={id} className={clsx('rounded-2xl bg-white shadow-card', className)}>{children}</div>;
 }
 
 export function SectionTitle({ children, className }: PropsWithChildren<{ className?: string }>) {
@@ -17,6 +19,7 @@ export function Button({
   disabled,
   type = 'button',
   className,
+  title,
 }: PropsWithChildren<{
   onClick?: () => void;
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -24,6 +27,9 @@ export function Button({
   disabled?: boolean;
   type?: 'button' | 'submit' | 'reset';
   className?: string;
+  /** Native tooltip — the only way to explain a DISABLED button, which cannot
+   *  hold a click handler to say why it is disabled. */
+  title?: string;
 }>) {
   const base =
     'inline-flex items-center justify-center rounded-xl font-semibold transition active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100';
@@ -35,7 +41,7 @@ export function Button({
     danger: 'bg-red-600 text-white hover:bg-red-500'
   };
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={clsx(base, sizes, variants[variant], className)}>
+    <button type={type} onClick={onClick} disabled={disabled} title={title} className={clsx(base, sizes, variants[variant], className)}>
       {children}
     </button>
   );

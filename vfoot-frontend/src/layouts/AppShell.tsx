@@ -7,6 +7,7 @@ import { useAuth } from '../auth/AuthContext';
 import { Button } from '../components/ui';
 import logo from '../assets/logo.png';
 import Avatar from '../components/Avatar';
+import Crest from '../components/Crest';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { compColor } from '../league/competitionColors';
@@ -18,7 +19,16 @@ import UpdateBanner from '../components/UpdateBanner';
 // between leagues live in the top bar instead.
 // scope: 'competition' pages refer to the CURRENT competition (they follow the
 // competition switcher) and get an indigo accent; 'league' pages are global.
-type NavItem = { to: string; label: string; icon: string; scope: 'league' | 'competition'; badge?: number };
+type NavItem = {
+  to: string;
+  label: string;
+  icon: string;
+  scope: 'league' | 'competition';
+  badge?: number;
+  /** Marks the entry that has work waiting on it — a dot, where a badge would
+   *  have to invent a number the shell does not know. */
+  flag?: boolean;
+};
 
 const leagueNav = [
   { to: '/home', label: 'Home', icon: '🏠', scope: 'league' as const },
@@ -35,11 +45,21 @@ const leagueNav = [
 
 const USER_ADMIN_TO = '/league-admin?tab=user';
 
+// Someone in NO league gets no league menu at all. Every entry of leagueNav needs
+// a selected league to show anything — /serie-a and /listone included, because
+// both are scoped to the league's reference season — so for a brand-new account
+// the whole menu is ten links that all answer "Seleziona una lega". What is left
+// is enough: the logo goes home, "Le mie leghe" is in the bar, and Home itself
+// carries the create/join call to action.
+
 function usePageTitle(pathname: string) {
   return useMemo(() => {
     if (pathname.startsWith('/home')) return 'Dashboard';
     if (pathname.startsWith('/profilo')) return 'Profilo';
-    if (pathname.startsWith('/league-admin')) return 'Amministrazione';
+    // Resolved by the caller, which can see the tab in the query string: the same
+    // route is "Le mie leghe" or "Gestione lega" depending on it, and a single
+    // word for both ("Amministrazione") matched neither the menu nor the page.
+    if (pathname.startsWith('/league-admin')) return '';
     if (pathname.startsWith('/league')) return 'Lega';
     if (pathname.startsWith('/squad/formation')) return 'Formazione';
     if (pathname.startsWith('/squad')) return 'Squadra';
@@ -68,8 +88,13 @@ function leagueAdminActive(search: string, pathname: string, to: string): boolea
 export default function AppShell() {
   const location = useLocation();
   const { user, logout } = useAuth();
-  const { selectedLeague, leagues } = useLeagueContext();
-  const { competitions, selectedCompetitionId, selectedCompetition } = useCompetitionContext();
+  const { selectedLeague, leagues, loading: leaguesLoading } = useLeagueContext();
+  const {
+    competitions,
+    selectedCompetitionId,
+    selectedCompetition,
+    loading: competitionsLoading,
+  } = useCompetitionContext();
   const activeTeamName = selectedLeague?.team_name?.trim() || null;
   // the current competition's accent colour (distinct per competition in the league)
   const color = compColor(competitions.findIndex((c) => c.competition_id === selectedCompetitionId));
@@ -87,8 +112,17 @@ export default function AppShell() {
   // (year-independent, e.g. "Serie A"); the season/year lives on the page badge.
   // Falls back to "Serie A" only when the league has no reference season yet.
   const refCompetition = selectedLeague?.reference_season?.competition ?? 'Serie A';
-  const nav = useMemo<NavItem[]>(
-    () => leagueNav.map((it): NavItem => {
+  const hasLeagues = leagues.length > 0;
+  // A league with no competition is still being set up. Not the same case as
+  // having no league at all — Serie A, Listone and Squadra work perfectly well
+  // here, so blanking the menu would take away pages that do something. What is
+  // actually wrong is narrower: two entries cannot show anything without a
+  // calendar, and the page that HAS the pending work is the tenth of ten, behind
+  // a horizontal scroll on a phone.
+  const leagueInSetup = hasLeagues && !competitionsLoading && competitions.length === 0;
+
+  const nav = useMemo<NavItem[]>(() => {
+    const items = leagueNav.map((it): NavItem => {
       if (it.to === '/standings')
         return { ...it, label: standingsLabel, icon: resultView === 'classifica' ? '📊' : '🗂️' };
       if (it.to === '/serie-a') return { ...it, label: refCompetition };
@@ -99,9 +133,26 @@ export default function AppShell() {
       if (it.to === '/decisioni')
         return { ...it, badge: alerts.isAdmin ? alerts.blocking : alerts.attention };
       return it;
-    }),
-    [standingsLabel, resultView, refCompetition, alerts],
-  );
+    });
+
+    if (!leagueInSetup) return items;
+
+    // Partite and Classifica read the CURRENT competition; with none they can only
+    // report their own emptiness.
+    const usable = items.filter((it) => it.to !== '/matches' && it.to !== '/standings');
+    const adminIndex = usable.findIndex((it) => it.to.startsWith('/league-admin'));
+    if (adminIndex < 0) return usable;
+    // Straight after Home, flagged: it is the only place where the league can be
+    // moved forward, and it should not have to be hunted for.
+    const admin: NavItem = { ...usable[adminIndex], flag: true };
+    const rest = usable.filter((_, i) => i !== adminIndex);
+    return [rest[0], admin, ...rest.slice(1)];
+  }, [standingsLabel, resultView, refCompetition, alerts, leagueInSetup]);
+  // Also empty WHILE LOADING, not just when the list comes back empty: drawing the
+  // menu optimistically would flash ten dead links at exactly the brand-new
+  // account we are trying to spare them from.
+  const visibleNav = leaguesLoading || !hasLeagues ? [] : nav;
+
   const baseTitle = usePageTitle(location.pathname);
   const title = location.pathname.startsWith('/standings')
     ? standingsLabel
@@ -112,6 +163,13 @@ export default function AppShell() {
         : baseTitle;
 
   const isUserAdmin = location.pathname.startsWith('/league-admin') && location.search.includes('tab=user');
+  // Only the mobile header shows a page title (no sidebar there to say where you
+  // are). It has to match the words used in the menu and on the page itself.
+  const mobileTitle = location.pathname.startsWith('/league-admin')
+    ? isUserAdmin
+      ? 'Le mie leghe'
+      : 'Gestione lega'
+    : title;
 
   const navItemClass = (active: boolean, scope: 'league' | 'competition') =>
     clsx(
@@ -135,6 +193,12 @@ export default function AppShell() {
           <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
             {item.badge}
           </span>
+        ) : item.flag ? (
+          <span
+            className="ml-auto h-2 w-2 rounded-full bg-amber-500"
+            title="Ci sono passi da completare"
+            aria-label="Ci sono passi da completare"
+          />
         ) : null}
       </>
     );
@@ -161,15 +225,64 @@ export default function AppShell() {
       {/* Desktop top bar — cross-league: switcher + user admin + account */}
       <div className="hidden md:block border-b bg-white">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+          {/* Logo + wordmark are the way home, as everywhere else on the web —
+              so Home needs no menu entry of its own. No page title beside it:
+              the page already titles itself, and the two disagreed (this bar said
+              "Amministrazione" where the menu entry and the page both said
+              "Gestione lega"). */}
+          <Link to="/home" className="flex items-center gap-3 rounded-lg hover:opacity-80" aria-label="Vai alla home">
+            <img src={logo} alt="Vfoot logo" className="h-11 w-11 rounded-xl object-cover" />
+            <div className="font-black tracking-tight text-xl">Vfoot Boosted</div>
+          </Link>
+
           <div className="flex items-center gap-3">
-            <img src={logo} alt="Vfoot logo" className="h-8 w-8 rounded-lg object-cover" />
-            <div className="font-black tracking-tight text-lg">Vfoot Boosted</div>
-            <div className="text-slate-400">/</div>
-            <div className="font-semibold">{title}</div>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* "Le mie leghe" is the top-level entry (create/join leagues) and so comes
-                BEFORE the current-league switcher in the reading order. */}
+            {/* League context, in the order it is read: which league, which
+                competition inside it, which team is yours in it. */}
+            {hasLeagues ? (
+              <div className="flex items-end gap-2">
+                <label className="flex flex-col gap-0.5">
+                  <span className="px-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Lega</span>
+                  <LeagueSwitcher />
+                </label>
+                {competitions.length ? (
+                  <label className="flex flex-col gap-0.5">
+                    <span className={clsx('px-1 text-[11px] font-bold uppercase tracking-wide', color.text500)}>Competizione</span>
+                    <CompetitionSwitcher />
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* The team is a separate target from the account below: it belongs to
+                ONE league and changes with the switcher, and it leads to the page
+                where it can actually be renamed. */}
+            {hasLeagues ? (
+              <Link
+                to="/squad"
+                className={clsx(
+                  'flex items-center gap-2 rounded-xl px-2 py-1',
+                  location.pathname.startsWith('/squad') ? 'bg-slate-900' : 'hover:bg-slate-100',
+                )}
+                title="La tua squadra in questa lega"
+              >
+                <Crest descriptor={selectedLeague?.team_crest} teamName={activeTeamName} size={30} />
+                <div className="text-left text-xs leading-tight">
+                  <div className={location.pathname.startsWith('/squad') ? 'text-slate-300' : 'text-slate-400'}>
+                    Squadra
+                  </div>
+                  <div
+                    className={clsx(
+                      'font-semibold',
+                      location.pathname.startsWith('/squad') ? 'text-white' : 'text-slate-700',
+                      !activeTeamName && 'italic font-normal text-slate-400',
+                    )}
+                  >
+                    {activeTeamName ?? 'non impostata'}
+                  </div>
+                </div>
+              </Link>
+            ) : null}
+
             <Link
               to={USER_ADMIN_TO}
               className={clsx(
@@ -179,31 +292,29 @@ export default function AppShell() {
             >
               <span>🗂️</span> Le mie leghe
             </Link>
-            <div className="flex items-end gap-2">
-              <label className="flex flex-col gap-0.5">
-                <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Lega</span>
-                <LeagueSwitcher />
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className={clsx('px-1 text-[10px] font-semibold uppercase tracking-wide', color.text500)}>Competizione</span>
-                <CompetitionSwitcher />
-              </label>
-            </div>
+
+            <div className="h-8 w-px bg-slate-200" aria-hidden />
+
             <Link
               to="/profilo"
               className={clsx(
-                'flex items-center gap-2 rounded-xl px-1.5 py-1',
+                'flex items-center gap-2 rounded-xl px-2 py-1',
                 location.pathname.startsWith('/profilo') ? 'bg-slate-900' : 'hover:bg-slate-100',
               )}
-              title="Profilo"
+              title="Il tuo profilo"
             >
               <Avatar descriptor={user?.avatar} username={user?.username} size={30} />
-              <div className="text-right text-xs leading-tight">
-                <div className={location.pathname.startsWith('/profilo') ? 'text-slate-300' : 'text-slate-500'}>
-                  {user?.username ?? 'Utente'}
+              <div className="text-left text-xs leading-tight">
+                <div className={location.pathname.startsWith('/profilo') ? 'text-slate-300' : 'text-slate-400'}>
+                  Fantallenatore
                 </div>
-                <div className={clsx('font-semibold', location.pathname.startsWith('/profilo') ? 'text-white' : 'text-slate-700')}>
-                  Squadra: {activeTeamName ?? 'non impostata'}
+                <div
+                  className={clsx(
+                    'font-semibold',
+                    location.pathname.startsWith('/profilo') ? 'text-white' : 'text-slate-700',
+                  )}
+                >
+                  {user?.username ?? 'Utente'}
                 </div>
               </div>
             </Link>
@@ -220,17 +331,24 @@ export default function AppShell() {
           <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
             {selectedLeague?.name ?? 'Nessuna lega'}
           </div>
-          <nav className="space-y-1">{nav.map(renderNav)}</nav>
+          <nav className="space-y-1">{visibleNav.map(renderNav)}</nav>
 
           {/* No "active league" card here: name and role are already in the top
               bar, where they can also be CHANGED. Only the empty state needs a
               word, since then the sidebar links lead nowhere useful. */}
-          {!selectedLeague ? (
-            <div className="mt-6 rounded-2xl bg-white shadow-card p-4 text-xs text-slate-500">
-              {leagues.length
-                ? 'Seleziona una lega dal menu in alto.'
-                : 'Crea o unisciti a una lega da Le mie leghe.'}
-            </div>
+          {!selectedLeague && !leaguesLoading ? (
+            hasLeagues ? (
+              <div className="mt-6 rounded-2xl bg-white shadow-card p-4 text-xs text-slate-500">
+                Seleziona una lega dal menu in alto.
+              </div>
+            ) : (
+              <Link
+                to={USER_ADMIN_TO}
+                className="mt-6 block rounded-2xl bg-slate-900 p-4 text-center text-sm font-bold text-white shadow-card hover:bg-slate-800"
+              >
+                Crea o unisciti a una lega
+              </Link>
+            )
           ) : null}
         </aside>
 
@@ -239,13 +357,20 @@ export default function AppShell() {
           {/* Mobile header */}
           <div className="md:hidden mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <img src={logo} alt="Vfoot logo" className="h-8 w-8 rounded-lg object-cover" />
+              <Link to="/home" aria-label="Vai alla home" className="shrink-0">
+                <img src={logo} alt="Vfoot logo" className="h-8 w-8 rounded-lg object-cover" />
+              </Link>
               <div>
                 <div className="text-xs text-slate-500">Vfoot Boosted</div>
-                <div className="font-bold text-lg leading-tight">{title}</div>
+                <div className="font-bold text-lg leading-tight">{mobileTitle}</div>
                 {selectedLeague ? (
-                  <div className="text-[11px] text-slate-500 leading-tight">
-                    {selectedLeague.name} · Squadra: {activeTeamName ?? 'non impostata'}
+                  <div className="flex items-center gap-1 text-[11px] text-slate-500 leading-tight">
+                    {activeTeamName ? (
+                      <Crest descriptor={selectedLeague.team_crest} teamName={activeTeamName} size={14} />
+                    ) : null}
+                    <span className="truncate">
+                      {selectedLeague.name} · {activeTeamName ?? 'squadra non impostata'}
+                    </span>
                   </div>
                 ) : null}
               </div>
@@ -279,18 +404,22 @@ export default function AppShell() {
 
           {/* Mobile context bar: the active LEAGUE and COMPETITION, clearly labelled
               and full-width so the current selection is always obvious on a phone. */}
-          <div className="md:hidden mb-3 grid grid-cols-1 gap-2 rounded-2xl bg-white p-3 shadow-card">
-            <label className="block">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">Lega</span>
-              <LeagueSwitcher compact />
-            </label>
-            <label className="block">
-              <span className={clsx('mb-1 block text-[10px] font-semibold uppercase tracking-wide', color.text500)}>
-                Competizione
-              </span>
-              <CompetitionSwitcher compact />
-            </label>
-          </div>
+          {hasLeagues ? (
+            <div className="md:hidden mb-3 grid grid-cols-1 gap-2 rounded-2xl bg-white p-3 shadow-card">
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">Lega</span>
+                <LeagueSwitcher compact />
+              </label>
+              {competitions.length ? (
+                <label className="block">
+                  <span className={clsx('mb-1 block text-[10px] font-semibold uppercase tracking-wide', color.text500)}>
+                    Competizione
+                  </span>
+                  <CompetitionSwitcher compact />
+                </label>
+              ) : null}
+            </div>
+          ) : null}
 
           {/* Accent strip: signals at a glance that this page is scoped to the CURRENT
               competition (indigo), vs the neutral league-level pages. */}
@@ -309,12 +438,17 @@ export default function AppShell() {
       {/* Mobile tab bar — current league only. Too many items to share one row on a
           phone, so it scrolls horizontally with fixed-width, non-wrapping items
           (labels stay legible instead of overlapping). */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-white">
+      <div
+        className={clsx(
+          'md:hidden fixed bottom-0 left-0 right-0 border-t bg-white',
+          visibleNav.length ? '' : 'hidden',
+        )}
+      >
         <div
           className="flex overflow-x-auto"
           style={{ scrollbarWidth: 'none' }}
         >
-          {nav.map((it) => {
+          {visibleNav.map((it) => {
             const manual = leagueAdminActive(location.search, location.pathname, it.to);
             // Active state must be unmistakable on a phone: a coloured top accent bar
             // + a tinted background + darker text, not just a subtle text-colour shift.
@@ -336,6 +470,11 @@ export default function AppShell() {
                     <span className="absolute -right-2 -top-1 rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white">
                       {it.badge}
                     </span>
+                  ) : it.flag ? (
+                    <span
+                      className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-amber-500"
+                      aria-label="Ci sono passi da completare"
+                    />
                   ) : null}
                 </span>
                 <span className="mt-1">{it.label}</span>

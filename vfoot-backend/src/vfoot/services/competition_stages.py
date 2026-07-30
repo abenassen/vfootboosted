@@ -34,6 +34,20 @@ def _clear_stage_graph(competition: FantasyCompetition) -> None:
         CompetitionStage.objects.filter(id__in=stage_ids).delete()
 
 
+# Stage names are shown to the user as they are — the wizard speaks Italian
+# ("Campionato", "Coppa", "Turno preliminare"), so what it generates must too.
+# Keyed by the number of TEAMS still in the round; the API labels rounds by the
+# number of FIXTURES instead (_KO_ROUND_LABELS in league_views), which is why the
+# two tables look similar but are not the same mapping.
+_KO_STAGE_NAMES = {
+    2: "Finale",
+    4: "Semifinali",
+    8: "Quarti di finale",
+    16: "Ottavi di finale",
+    32: "Sedicesimi di finale",
+}
+
+
 def _round_robin_rounds(team_ids: list[int], seed: int = 42) -> list[list[tuple[int, int]]]:
     """
     Circle-method schedule:
@@ -248,7 +262,7 @@ def build_default_stage_graph(
     if competition.competition_type == FantasyCompetition.TYPE_ROUND_ROBIN:
         stage = CompetitionStage.objects.create(
             competition=competition,
-            name="Regular season",
+            name="Girone unico",
             stage_type=CompetitionStage.TYPE_ROUND_ROBIN,
             order_index=1,
             double_round=double_round,
@@ -285,7 +299,7 @@ def build_default_stage_graph(
 
         play_in = CompetitionStage.objects.create(
             competition=competition,
-            name="Play-in",
+            name="Turno preliminare",
             stage_type=CompetitionStage.TYPE_KNOCKOUT,
             order_index=stage_order,
         )
@@ -304,14 +318,7 @@ def build_default_stage_graph(
     round_size = base
     current_seed = seed + 17
     while round_size >= 2:
-        if round_size == 2:
-            name = "Final"
-        elif round_size == 4:
-            name = "Semifinal"
-        elif round_size == 8:
-            name = "Quarterfinal"
-        else:
-            name = f"Round of {round_size}"
+        name = _KO_STAGE_NAMES.get(round_size, f"Turno da {round_size}")
 
         stage = CompetitionStage.objects.create(
             competition=competition,
