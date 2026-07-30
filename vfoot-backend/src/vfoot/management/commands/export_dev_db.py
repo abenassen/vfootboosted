@@ -23,6 +23,11 @@ world-readable download, not a private channel. Emails are rewritten, every
 password becomes DEV_PASSWORD, and API tokens are dropped. Pass
 --no-anonymize only when the destination really is private.
 
+Push subscriptions are emptied in EVERY case, --no-anonymize included: they are
+device addresses rather than account data, and they would be useless to whoever
+receives the copy anyway (a subscription is bound to the origin and to the VAPID
+key it was created with).
+
 Usage:
     manage.py export_dev_db                  # -> dist/vfoot-dev-db.sqlite3
     manage.py export_dev_db --gzip           # also writes .gz (what you upload)
@@ -41,14 +46,19 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from realdata.models import PlayerZoneFeature, TeamZoneFeature
+from vfoot.models import PushSubscription
 
 # Emptied unless --keep-zones. Read from the models so a table rename can't
 # silently turn this command into a no-op that ships an 865 MB "slim" file.
 ZONE_TABLES = (PlayerZoneFeature._meta.db_table, TeamZoneFeature._meta.db_table)
 
-# Never useful in a copy: sessions belong to the machine that created them, and
-# API tokens are live credentials for the accounts they belong to.
-ALWAYS_EMPTIED = ("django_session", "authtoken_token")
+# Never useful in a copy: sessions belong to the machine that created them, API
+# tokens are live credentials for the accounts they belong to, and a push
+# subscription is a per-DEVICE address — the endpoint plus its two keys identify
+# somebody's actual browser, and this file goes to a world-readable release. They
+# also could not work for the recipient anyway: a subscription is bound to the
+# origin and to the VAPID key it was created with.
+ALWAYS_EMPTIED = ("django_session", "authtoken_token", PushSubscription._meta.db_table)
 
 # Every account in the shared copy gets this password, so whoever receives it
 # can log in as `andrea` (owner of the demo league) without a shell dance.

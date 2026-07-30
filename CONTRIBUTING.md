@@ -122,7 +122,14 @@ gh release upload dev-db ../../dist/vfoot-dev-db.sqlite3.gz --clobber
 
 Il comando usa l'API di backup di SQLite, quindi lo snapshot è coerente anche
 col dev server acceso, e anonimizza sempre (email, password, token API) a meno
-di `--no-anonymize`.
+di `--no-anonymize`. Le subscription push si svuotano **in ogni caso**, anche con
+`--no-anonymize`: sono indirizzi di un dispositivo preciso, non dati di un
+account, e questo file finisce in una release pubblica.
+
+Nella copia snella il **voto puro non è ricalcolabile** (mancano le zone
+feature): le giornate già concluse si vedono, ricalcolarne una no, e le pagelle
+di Serie A restano vuote. Per lavorare sul modello di voto serve
+`--keep-zones`.
 
 ## Lavorare sulla UI ora che c'è un service worker
 
