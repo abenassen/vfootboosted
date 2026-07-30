@@ -2,14 +2,8 @@ import { Link } from 'react-router-dom';
 import { Badge } from './ui';
 import { useLeagueContext } from '../league/LeagueContext';
 
-const ROLE_LABELS: Record<string, string> = {
-  admin: 'amministratore',
-  member: 'partecipante',
-  owner: 'proprietario',
-};
-
 export default function LeagueSwitcher({ compact }: { compact?: boolean }) {
-  const { leagues, selectedLeagueId, selectedLeague, setSelectedLeagueId, loading } = useLeagueContext();
+  const { leagues, selectedLeagueId, setSelectedLeagueId, loading } = useLeagueContext();
 
   if (!leagues.length) {
     if (compact) {
@@ -22,13 +16,11 @@ export default function LeagueSwitcher({ compact }: { compact?: boolean }) {
     return <Badge tone="amber">{loading ? 'Caricamento leghe...' : 'Nessuna lega'}</Badge>;
   }
 
+  // No role badge here any more. It sat between the label and the dropdown of the
+  // thing it described, and the role only matters where it is acted on — Le mie
+  // leghe already shows amministratore/partecipante per league.
   return (
     <div className={compact ? 'flex w-full items-center gap-2' : 'flex items-center gap-2'}>
-      {/* Prefixed: on its own, a bare "admin" next to the username reads as an
-          identity rather than as the role held in the selected league. */}
-      {!compact && selectedLeague ? (
-        <Badge tone="slate">{`Ruolo: ${ROLE_LABELS[selectedLeague.role] ?? selectedLeague.role}`}</Badge>
-      ) : null}
       <select
         value={selectedLeagueId ?? ''}
         onChange={(e) => setSelectedLeagueId(e.target.value ? Number(e.target.value) : null)}
