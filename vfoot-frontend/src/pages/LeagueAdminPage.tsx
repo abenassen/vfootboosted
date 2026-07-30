@@ -33,12 +33,14 @@ import {
   updateCompetition,
   updateMemberRole,
 } from '../api';
-import { ApiError } from '../api/backend';
+import { ApiError, type LeagueSettingsPatch } from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import CopyButton from '../components/CopyButton';
 import MarketAdminPanel from '../components/MarketAdminPanel';
+import LeagueSetupChecklist from '../components/LeagueSetupChecklist';
+import Crest from '../components/Crest';
 import type {
   CompetitionItem,
   CompetitionSchedulePreview,
@@ -65,7 +67,13 @@ export default function LeagueAdminPage() {
   const [league, setLeague] = useState<LeagueDetail | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [roster, setRoster] = useState<TeamRoster | null>(null);
-  const [maxSubsDraft, setMaxSubsDraft] = useState<number | null>(null);
+  // Match options are edited as a DRAFT and written only on "Salva". They used to
+  // save on every change: one stray tap on a checkbox rewrote a rule that decides
+  // how votes are counted, with no way back and nothing asking for confirmation.
+  const [optionsDraft, setOptionsDraft] = useState<LeagueSettingsPatch | null>(null);
+  // The manual competition builder is revealed only on request, and only while
+  // the league still has no competition — see the chooser in the Competizioni tab.
+  const [advancedCompOpen, setAdvancedCompOpen] = useState(false);
 
   const [createName, setCreateName] = useState('');
   const [createTeam, setCreateTeam] = useState('');
@@ -98,7 +106,7 @@ export default function LeagueAdminPage() {
   const [matchdays, setMatchdays] = useState<LeagueMatchdayItem[]>([]);
   const [competitionStages, setCompetitionStages] = useState<CompetitionStageItem[]>([]);
   const [leagueStageOptions, setLeagueStageOptions] = useState<Array<{ stage_id: number; competition_id: number; label: string }>>([]);
-  const [newStageName, setNewStageName] = useState('Regular season');
+  const [newStageName, setNewStageName] = useState('Girone unico');
   const [newStageType, setNewStageType] = useState<'round_robin' | 'knockout'>('round_robin');
   const [newStageOrder, setNewStageOrder] = useState('1');
   const [newStageTeamIds, setNewStageTeamIds] = useState<number[]>([]);
@@ -186,9 +194,36 @@ export default function LeagueAdminPage() {
     [league?.teams, newStageTeamIds]
   );
 
+  /** The saved values, i.e. what "Annulla" goes back to and what "dirty" is
+   *  measured against. */
+  function optionsOf(d: LeagueDetail): LeagueSettingsPatch {
+    return {
+      max_substitutions: d.max_substitutions,
+      defense_bonus_enabled: d.defense_bonus_enabled,
+      defense_bonus_mode: d.defense_bonus_mode,
+      keeper_clean_sheet_enabled: d.keeper_clean_sheet_enabled,
+      enforce_lineup_deadline: d.enforce_lineup_deadline,
+    };
+  }
+
+  /** Bring an element into view AFTER the click that reveals it has been painted.
+   *  Switching a sub-tab and scrolling in the same handler scrolls to something
+   *  that is not in the DOM yet; two frames is what it takes for React to commit
+   *  and lay out the new panel. */
+  function revealAfterRender(elementId: string) {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      ),
+    );
+  }
+
   async function loadLeagueDetail(leagueId: number) {
     const d = await getLeagueDetail(leagueId);
     setLeague(d);
+    // Reseed the draft from the server on every (re)load, so switching league
+    // never carries another league's unsaved options across.
+    setOptionsDraft(optionsOf(d));
     // Pick the first team when none is selected OR when the selected team belongs
     // to a previously-viewed league (otherwise the roster load 404s on switch).
     if (d.teams.length && !d.teams.some((t) => t.team_id === selectedTeamId)) {
@@ -586,8 +621,30 @@ export default function LeagueAdminPage() {
         <div className="mt-2 text-sm text-slate-600">
           {activeTab === 'user'
             ? 'Profilo utente e gestione delle tue leghe.'
-            : `Gestione della lega selezionata${selectedLeague ? ` · ${selectedLeague.name}` : ''}.`}
+            : selectedLeague
+              ? selectedLeague.name
+              : 'Nessuna lega selezionata.'}
         </div>
+
+        {/* Renders itself only while something is still missing, so it greets a
+            brand-new league and then gets out of the way for good. */}
+        {activeTab === 'league' && league ? (
+          <LeagueSetupChecklist
+            league={league}
+            competitions={competitions}
+            onGoToInvite={() => {
+              setLeagueTab('overview');
+              revealAfterRender('vfoot-invite-code');
+            }}
+            onGoToCompetitions={() => {
+              setLeagueTab('competitions');
+              // The tab BAR, not the panel: it lands with "Competizioni" visibly
+              // selected and the form starting right underneath, instead of
+              // dropping the user into the middle of a form with no context.
+              revealAfterRender('vfoot-league-tabs');
+            }}
+          />
+        ) : null}
 
         {msg ? (
           <div
@@ -675,7 +732,7 @@ export default function LeagueAdminPage() {
                       reference_season_id: createSeasonId,
                     });
                     setCreatedInvite(res.invite_code);
-                    setMsg('Lega creata. Definisci ora il regolamento (sostituzioni, modificatore difesa, rose).');
+                    setMsg('Lega creata. Seguendo i passi qui sotto diventa giocabile.');
                     setCreateName('');
                     setCreateTeam('');
                     await refreshLeagues();
@@ -688,7 +745,13 @@ export default function LeagueAdminPage() {
               >
                 <label className="block text-sm font-medium text-slate-700">
                   Nome lega <span className="text-red-500">*</span>
-                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Nome lega" value={createName} onChange={(e) => setCreateName(e.target.value)} required />
+                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="es. I Fenomeni del Lunedì" value={createName} onChange={(e) => setCreateName(e.target.value)} required />
+                  {/* Every place that shows the name already labels it as a league
+                      (the "Lega" label over the switcher, the Gestione lega page),
+                      so a name starting with "Lega" reads doubled everywhere. */}
+                  <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                    Non serve iniziare con «Lega»: compare già come etichetta accanto al nome.
+                  </span>
                 </label>
                 <label className="block text-sm font-medium text-slate-700">
                   Nome tua squadra <span className="text-red-500">*</span>
@@ -785,175 +848,253 @@ export default function LeagueAdminPage() {
 
             {league ? (
               <div className="mt-3 space-y-3 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
+                <div id="vfoot-invite-code" className="flex flex-wrap items-center gap-2 scroll-mt-24">
                   <span>
                     <span className="font-semibold">Invite code:</span>{' '}
                     <span className="font-mono font-semibold text-slate-800">{league.invite_code}</span>
                   </span>
                   <CopyButton value={league.invite_code} label="Copia codice" />
                 </div>
-                <div className="space-y-1">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() =>
-                      void run(async () => {
-                        if (!league) return;
-                        await setMarketStatus(league.league_id, !league.market_open);
-                        await loadLeagueDetail(league.league_id);
-                        await refreshLeagues();
-                      })
-                    }
-                  >
-                    {league.market_open ? 'Blocca modifiche manuali alla rosa' : 'Consenti modifiche manuali alla rosa'}
-                  </Button>
-                  <div className="text-[11px] text-slate-400">
-                    Abilita/blocca l’inserimento manuale e l’import di rose (add/rimuovi/bulk/CSV). Non è il
-                    mercato a offerte: quello si gestisce nella scheda <b>Mercato</b>.
+                {/* State first, action second. The button used to carry the whole
+                    sentence ("Blocca modifiche manuali alla rosa"), which reads
+                    just as easily as a description of how things ARE as of what
+                    the click will do — and the two readings are opposites. */}
+                <div className="rounded-xl border px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm">
+                        Modifiche manuali alla rosa:{' '}
+                        <b className={league.market_open ? 'text-emerald-700' : 'text-slate-700'}>
+                          {league.market_open ? 'abilitate' : 'bloccate'}
+                        </b>
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        Inserimento manuale e import di rose (add/rimuovi/bulk/CSV). Non è il mercato a
+                        offerte: quello si gestisce nella scheda <b>Mercato</b>.
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          if (!league) return;
+                          await setMarketStatus(league.league_id, !league.market_open);
+                          await loadLeagueDetail(league.league_id);
+                          await refreshLeagues();
+                        })
+                      }
+                    >
+                      {league.market_open ? 'Blocca' : 'Abilita'}
+                    </Button>
                   </div>
                 </div>
-                <div className="space-y-3 rounded-xl border px-3 py-2">
-                  <div className="font-semibold">Opzioni partita</div>
-                  <div>
-                    <label className="flex items-center gap-2 text-sm">
-                      <span>Sostituzioni massime per giornata</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={11}
-                        defaultValue={league.max_substitutions}
-                        key={`maxsub-${league.league_id}-${league.max_substitutions}`}
-                        onChange={(e) => setMaxSubsDraft(Number(e.target.value))}
-                        className="w-16 rounded-lg border px-2 py-1 text-sm"
-                      />
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() =>
-                          void run(async () => {
-                            if (!league) return;
-                            const v = maxSubsDraft ?? league.max_substitutions;
-                            await updateLeagueSettings(league.league_id, { max_substitutions: v });
-                            await loadLeagueDetail(league.league_id);
-                            setMsg(`Sostituzioni massime impostate a ${v}.`);
-                          })
-                        }
-                      >
-                        Salva
-                      </Button>
-                    </label>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      Un titolare senza voto viene rimpiazzato dal primo panchinaro utile, fino a questo numero.
+                {(() => {
+                  // Everything in here edits a DRAFT. These four rules decide how
+                  // votes are counted for the whole league, and they used to be
+                  // written to the server on the change event — one mis-tap on a
+                  // phone silently changed the regulation for everybody.
+                  const saved = optionsOf(league);
+                  const draft = optionsDraft ?? saved;
+                  const set = (patch: LeagueSettingsPatch) =>
+                    setOptionsDraft({ ...draft, ...patch });
+                  const changed = (Object.keys(saved) as Array<keyof LeagueSettingsPatch>)
+                    .filter((k) => draft[k] !== saved[k]);
+                  const dirty = changed.length > 0;
+
+                  return (
+                    <div
+                      className={clsx(
+                        'space-y-3 rounded-xl border px-3 py-2 transition',
+                        dirty ? 'border-amber-400 bg-amber-50/60' : '',
+                      )}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="font-semibold">Opzioni partita</div>
+                        {dirty ? (
+                          <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                            {changed.length} modifica{changed.length > 1 ? 'he' : ''} non salvata{changed.length > 1 ? 'e' : ''}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div>
+                        <label className="flex items-center gap-2 text-sm">
+                          <span>Sostituzioni massime per giornata</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={11}
+                            value={draft.max_substitutions ?? 0}
+                            onChange={(e) => set({ max_substitutions: Number(e.target.value) })}
+                            className="w-16 rounded-lg border px-2 py-1 text-sm"
+                          />
+                        </label>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          Un titolare senza voto viene rimpiazzato dal primo panchinaro utile, fino a questo numero.
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={!!draft.defense_bonus_enabled}
+                            onChange={(e) => set({ defense_bonus_enabled: e.target.checked })}
+                          />
+                          <span>Modificatore difesa</span>
+                        </label>
+                        <label className="mt-2 flex items-center gap-2 text-sm">
+                          <span>Applicazione</span>
+                          <select
+                            value={draft.defense_bonus_mode}
+                            disabled={!draft.defense_bonus_enabled}
+                            onChange={(e) =>
+                              set({ defense_bonus_mode: e.target.value as 'add_own' | 'subtract_opponent' })
+                            }
+                            className="rounded-lg border px-2 py-1 text-sm disabled:opacity-50"
+                          >
+                            <option value="add_own">Aggiunto alla propria squadra</option>
+                            <option value="subtract_opponent">Sottratto alla squadra avversaria</option>
+                          </select>
+                        </label>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          Premia chi schiera ≥4 difensori titolari: media dei 3 migliori difensori + portiere (voti
+                          puri) → bonus a fasce.
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={!!draft.keeper_clean_sheet_enabled}
+                            onChange={(e) => set({ keeper_clean_sheet_enabled: e.target.checked })}
+                          />
+                          <span>Modificatore portiere imbattuto</span>
+                        </label>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          +1 al fantatotale se il portiere schierato prende voto e non subisce gol.
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={!!draft.enforce_lineup_deadline}
+                            onChange={(e) => set({ enforce_lineup_deadline: e.target.checked })}
+                          />
+                          <span>Blocca la formazione al primo calcio d'inizio</span>
+                        </label>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          Attivo in una lega reale. <b>Disattivalo</b> per le leghe di test su una stagione già
+                          conclusa (altrimenti ogni formazione risulterebbe bloccata).
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+                        <Button
+                          size="sm"
+                          disabled={!dirty || busy}
+                          onClick={() =>
+                            void run(async () => {
+                              if (!league) return;
+                              // Only the fields that actually changed travel: the
+                              // rest are left alone rather than rewritten with the
+                              // same value.
+                              const patch: LeagueSettingsPatch = {};
+                              for (const k of changed) Object.assign(patch, { [k]: draft[k] });
+                              await updateLeagueSettings(league.league_id, patch);
+                              await loadLeagueDetail(league.league_id);
+                              setMsg('Opzioni partita salvate.');
+                            })
+                          }
+                        >
+                          Salva opzioni
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={!dirty || busy}
+                          onClick={() => setOptionsDraft(saved)}
+                        >
+                          Annulla
+                        </Button>
+                        {!dirty ? (
+                          <span className="text-[11px] text-slate-400">Nessuna modifica in sospeso.</span>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                  <div className="border-t pt-2">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={league.defense_bonus_enabled}
-                        onChange={(e) =>
-                          void run(async () => {
-                            if (!league) return;
-                            await updateLeagueSettings(league.league_id, { defense_bonus_enabled: e.target.checked });
-                            await loadLeagueDetail(league.league_id);
-                            setMsg(`Modificatore difesa ${e.target.checked ? 'attivato' : 'disattivato'}.`);
-                          })
-                        }
-                      />
-                      <span>Modificatore difesa</span>
-                    </label>
-                    <label className="mt-2 flex items-center gap-2 text-sm">
-                      <span>Applicazione</span>
-                      <select
-                        value={league.defense_bonus_mode}
-                        disabled={!league.defense_bonus_enabled}
-                        onChange={(e) =>
-                          void run(async () => {
-                            if (!league) return;
-                            await updateLeagueSettings(league.league_id, {
-                              defense_bonus_mode: e.target.value as 'add_own' | 'subtract_opponent',
-                            });
-                            await loadLeagueDetail(league.league_id);
-                            setMsg('Applicazione modificatore difesa aggiornata.');
-                          })
-                        }
-                        className="rounded-lg border px-2 py-1 text-sm disabled:opacity-50"
-                      >
-                        <option value="add_own">Aggiunto alla propria squadra</option>
-                        <option value="subtract_opponent">Sottratto alla squadra avversaria</option>
-                      </select>
-                    </label>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      Premia chi schiera ≥4 difensori titolari: media dei 3 migliori difensori + portiere (voti
-                      puri) → bonus a fasce.
-                    </div>
-                  </div>
-                  <div className="border-t pt-2">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={league.keeper_clean_sheet_enabled}
-                        onChange={(e) =>
-                          void run(async () => {
-                            if (!league) return;
-                            await updateLeagueSettings(league.league_id, { keeper_clean_sheet_enabled: e.target.checked });
-                            await loadLeagueDetail(league.league_id);
-                            setMsg(`Modificatore portiere imbattuto ${e.target.checked ? 'attivato' : 'disattivato'}.`);
-                          })
-                        }
-                      />
-                      <span>Modificatore portiere imbattuto</span>
-                    </label>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      +1 al fantatotale se il portiere schierato prende voto e non subisce gol.
-                    </div>
-                  </div>
-                  <div className="border-t pt-2">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={league.enforce_lineup_deadline}
-                        onChange={(e) =>
-                          void run(async () => {
-                            if (!league) return;
-                            await updateLeagueSettings(league.league_id, { enforce_lineup_deadline: e.target.checked });
-                            await loadLeagueDetail(league.league_id);
-                            setMsg(`Blocco formazione al calcio d'inizio ${e.target.checked ? 'attivo' : 'disattivato'}.`);
-                          })
-                        }
-                      />
-                      <span>Blocca la formazione al primo calcio d'inizio</span>
-                    </label>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      Attivo in una lega reale. <b>Disattivalo</b> per le leghe di test su una stagione già
-                      conclusa (altrimenti ogni formazione risulterebbe bloccata).
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
                 <div>
                   <div className="font-semibold">Membri</div>
                   <div className="mt-2 space-y-1">
                     {(() => {
                       const adminCount = league.members.filter((x) => x.role === 'admin').length;
+                      // A member is administered as a person, but recognised by his
+                      // team: in a league of ten, "gino" says far less than
+                      // "Deportivo Merenda", which is the name in every table and
+                      // fixture on the site.
+                      const teamOf = new Map(league.teams.map((t) => [t.manager_user_id, t]));
                       return league.members.map((m) => {
                         const demoting = m.role === 'admin';
                         const isLastAdmin = demoting && adminCount <= 1;
                         const nextRole = demoting ? 'manager' : 'admin';
+                        const team = teamOf.get(m.user_id) ?? null;
                         return (
-                          <div key={m.membership_id} className="flex items-center justify-between rounded-xl border px-3 py-2">
-                            <span>{m.username}</span>
-                            <div className="flex items-center gap-2">
-                              <Badge tone={m.role === 'admin' ? 'green' : 'slate'}>{m.role}</Badge>
+                          <div key={m.membership_id} className="flex items-center justify-between gap-2 rounded-xl border px-3 py-2">
+                            <div className="flex min-w-0 items-center gap-2">
+                              {/* No crest for someone without a team: the seeded
+                                  fallback would invent one for a team that does
+                                  not exist. */}
+                              {team ? (
+                                <Crest descriptor={team.crest} teamName={team.name} size={28} />
+                              ) : (
+                                <span className="h-7 w-7 shrink-0 rounded-full border border-dashed border-slate-300" />
+                              )}
+                              <div className="min-w-0">
+                                <div className="truncate font-semibold text-slate-800">
+                                  {team?.name ?? <span className="italic text-slate-400">nessuna squadra</span>}
+                                </div>
+                                <div className="truncate text-xs text-slate-500">{m.username}</div>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                              {/* "manager" is the value the database stores, not a
+                                  word to show: it grants nothing on its own — every
+                                  participant right comes from BEING a member — so a
+                                  badge naming it suggests a permission that does not
+                                  exist. "partecipante" is also what the Le mie leghe
+                                  tab already calls it. */}
+                              <Badge tone={m.role === 'admin' ? 'green' : 'slate'}>
+                                {m.role === 'admin' ? 'amministratore' : 'partecipante'}
+                              </Badge>
                               <Button
                                 size="sm"
                                 variant="secondary"
                                 disabled={isLastAdmin}
+                                title={
+                                  isLastAdmin
+                                    ? 'È l\'unico amministratore: promuovine un altro prima di togliergli il ruolo.'
+                                    : undefined
+                                }
                                 onClick={() =>
                                   void run(async () => {
                                     if (!league) return;
                                     if (m.user_id === user?.id && demoting) {
                                       const confirmed = window.confirm(
-                                        'Confermi di rimuovere il tuo ruolo admin? Potrai perdere accesso alle funzioni di amministrazione.'
+                                        'Confermi di rimuovere il tuo ruolo di amministratore? Perderai l\'accesso a questa pagina.'
+                                      );
+                                      if (!confirmed) return;
+                                    } else if (!demoting) {
+                                      // Promoting hands over the whole league: rose,
+                                      // regolamento, calendario, asta. Worth a
+                                      // question, and one mis-tap away otherwise.
+                                      const confirmed = window.confirm(
+                                        `Rendere ${m.username} amministratore? Potrà modificare regolamento, rose, calendario e ruoli, incluso il tuo.`
                                       );
                                       if (!confirmed) return;
                                     }
@@ -962,9 +1103,11 @@ export default function LeagueAdminPage() {
                                   })
                                 }
                               >
-                                Toggle
+                                {demoting ? 'Revoca amministratore' : 'Rendi amministratore'}
                               </Button>
-                              {isLastAdmin ? <span className="text-xs text-amber-600">last admin</span> : null}
+                              {isLastAdmin ? (
+                                <span className="text-xs text-amber-600">unico amministratore</span>
+                              ) : null}
                             </div>
                           </div>
                         );
@@ -982,7 +1125,7 @@ export default function LeagueAdminPage() {
 
           {league ? (
             <>
-              <Card className="p-4">
+              <Card id="vfoot-league-tabs" className="p-4 scroll-mt-4">
                 <div className="inline-flex rounded-xl bg-slate-100 p-1">
                   {([
                     ['overview', 'Overview'],
@@ -1009,7 +1152,7 @@ export default function LeagueAdminPage() {
                   <SectionTitle>Panoramica lega</SectionTitle>
                   <ul className="mt-3 space-y-2 text-sm text-slate-700">
                     <li>• Roster: gestione giocatori per ciascun team della lega.</li>
-                    <li>• Competizioni: crea round robin / knockout dai team partecipanti.</li>
+                    <li>• Competizioni: crea campionati o coppe dalle squadre partecipanti.</li>
                     <li>• Asta: controlla chiamate, cronologia e budget disponibili.</li>
                   </ul>
                 </Card>
@@ -1195,29 +1338,88 @@ export default function LeagueAdminPage() {
 
               {leagueTab === 'competitions' ? (
                 <div className="space-y-4">
-                  <Card className="p-4">
-                    <SectionTitle>Competition Builder</SectionTitle>
-                    <div className="mt-2 text-xs text-slate-600">
-                      Flusso lineare: 1) crea contenitore competizione, 2) aggiungi sottocompetizioni (stage), 3) collega qualificazioni tra stage, 4) pianifica round su matchday reali.
-                    </div>
-                  </Card>
+                  {/* The two routes used to sit one under the other, both open:
+                      the advanced form was visible immediately, so people started
+                      filling it in without ever registering that a guided flow
+                      existed. Now it is a choice, and the manual path costs one
+                      deliberate click. Only while the league has NO competition:
+                      once there is one, this same form is how it gets managed,
+                      and gating it would hide editing behind a create wizard. */}
+                  {!competitions.length && !advancedCompOpen ? (
+                    <Card className="p-4">
+                      <SectionTitle>Come vuoi creare la competizione?</SectionTitle>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <Link
+                          to="/league-admin/competitions/new"
+                          className="flex flex-col rounded-2xl bg-slate-900 p-4 text-white transition hover:bg-slate-800"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                              Consigliato
+                            </span>
+                          </div>
+                          <div className="mt-2 text-sm font-bold">✨ Flusso guidato</div>
+                          <div className="mt-1 text-xs text-slate-300">
+                            Scegli un template (Campionato, Coppa, o entrambi), andata-ritorno e
+                            qualificazioni. Stage e calendario li costruisce lui.
+                          </div>
+                          <span className="mt-3 text-sm font-semibold">Inizia →</span>
+                        </Link>
 
-                  <Link
-                    to="/league-admin/competitions/new"
-                    className="flex items-center justify-between rounded-2xl bg-slate-900 p-4 text-white transition hover:bg-slate-800"
-                  >
-                    <div>
-                      <div className="text-sm font-bold">✨ Crea competizione (flusso guidato)</div>
-                      <div className="text-xs text-slate-300">
-                        Template Campionato/Coppa, andata-ritorno, e qualificazione da un'altra competizione.
+                        <button
+                          type="button"
+                          onClick={() => setAdvancedCompOpen(true)}
+                          className="flex flex-col rounded-2xl border border-slate-200 p-4 text-left transition hover:bg-slate-50"
+                        >
+                          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            Per chi sa già cosa vuole
+                          </div>
+                          <div className="mt-2 text-sm font-bold text-slate-800">🔧 Costruzione manuale</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            Crei il contenitore, poi ogni stage, poi le qualificazioni fra stage, poi
+                            la mappatura dei round sulle giornate reali. Quattro passi separati, tutti a
+                            mano.
+                          </div>
+                          <span className="mt-3 text-sm font-semibold text-slate-700">Procedi →</span>
+                        </button>
                       </div>
+                    </Card>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        to="/league-admin/competitions/new"
+                        className="flex flex-1 items-center justify-between rounded-2xl bg-slate-900 p-4 text-white transition hover:bg-slate-800"
+                      >
+                        <div>
+                          <div className="text-sm font-bold">✨ Crea competizione (flusso guidato)</div>
+                          <div className="text-xs text-slate-300">
+                            Template Campionato/Coppa, andata-ritorno, e qualificazione da un'altra competizione.
+                          </div>
+                        </div>
+                        <span className="text-lg">→</span>
+                      </Link>
+                      {!competitions.length ? (
+                        <Button size="sm" variant="ghost" onClick={() => setAdvancedCompOpen(false)}>
+                          ← Torna alla scelta
+                        </Button>
+                      ) : null}
                     </div>
-                    <span className="text-lg">→</span>
-                  </Link>
+                  )}
 
+                  {competitions.length || advancedCompOpen ? (
                   <div className="grid gap-4 lg:grid-cols-2">
                     <Card className="p-4 lg:col-span-2">
                       <SectionTitle>1. Seleziona O Crea Competizione (avanzato)</SectionTitle>
+                      {/* The four steps used to be announced in a "Competition
+                          Builder" card at the top of the tab, where they read as
+                          the description of the whole page — including the guided
+                          flow, which does none of this. They belong here, to the
+                          manual path they actually describe. */}
+                      <div className="mt-2 text-xs text-slate-500">
+                        Percorso manuale in quattro passi: 1) crea il contenitore competizione,
+                        2) aggiungi le sottocompetizioni (stage), 3) collega le qualificazioni fra
+                        stage, 4) pianifica i round sulle giornate reali.
+                      </div>
                       <div className="mt-2 text-xs text-slate-500">Usa il menu per aprire una competizione esistente oppure scegli "Nuova competizione".</div>
                       <select
                         className="mt-3 w-full rounded-xl border px-3 py-2 text-sm"
@@ -1248,8 +1450,8 @@ export default function LeagueAdminPage() {
                           </div>
                           <select className="w-full rounded-xl border px-3 py-2 text-sm" value={compCreateMacro} onChange={(e) => setCompCreateMacro(e.target.value as 'none' | 'round_robin' | 'knockout')}>
                             <option value="none">Nessun macro: crea solo contenitore</option>
-                            <option value="round_robin">Macro: campionato round-robin (1 stage)</option>
-                            <option value="knockout">Macro: torneo knockout automatico</option>
+                            <option value="round_robin">Macro: campionato tutti contro tutti (1 stage)</option>
+                            <option value="knockout">Macro: torneo a eliminazione diretta</option>
                           </select>
                           <div className="text-xs text-slate-500">Con i macro, il sistema include tutti i team della lega e genera automaticamente stage/fixture iniziali.</div>
                           <Button
@@ -1313,6 +1515,7 @@ export default function LeagueAdminPage() {
                       )}
                     </Card>
                   </div>
+                  ) : null}
 
                   {selectedCompetition ? (
                     <div className="grid gap-4 lg:grid-cols-2">
@@ -1338,8 +1541,8 @@ export default function LeagueAdminPage() {
                             <div>
                               <label htmlFor="stage-editor-type" className="mb-1 block text-xs font-semibold text-slate-500">Formato stage</label>
                               <select id="stage-editor-type" className="w-full rounded-xl border px-3 py-2 text-sm" value={newStageType} onChange={(e) => setNewStageType(e.target.value as 'round_robin' | 'knockout')}>
-                                <option value="round_robin">Round robin</option>
-                                <option value="knockout">Knockout</option>
+                                <option value="round_robin">Tutti contro tutti</option>
+                                <option value="knockout">Eliminazione diretta</option>
                               </select>
                             </div>
                             <div>
@@ -1654,7 +1857,9 @@ export default function LeagueAdminPage() {
                                 <div key={st.stage_id} className="rounded-lg border px-2 py-2">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <span className="font-semibold">#{st.order_index} {st.name}</span>
-                                    <Badge tone={st.stage_type === 'knockout' ? 'amber' : 'slate'}>{st.stage_type}</Badge>
+                                    <Badge tone={st.stage_type === 'knockout' ? 'amber' : 'slate'}>
+                                      {st.stage_type === 'knockout' ? 'Eliminazione diretta' : 'Tutti contro tutti'}
+                                    </Badge>
                                     <Badge tone={st.status === 'done' ? 'green' : st.status === 'active' ? 'amber' : 'slate'}>{st.status}</Badge>
                                   </div>
                                   <div className="mt-1">partecipanti {st.participants.length} · fixture {st.fixtures.finished}/{st.fixtures.total}</div>
@@ -1957,7 +2162,7 @@ export default function LeagueAdminPage() {
                 <ul className="mt-3 space-y-2 text-sm text-slate-700">
                   <li>• Mercato di riparazione: apri/gestisci sessioni di offerte, valida gli scambi</li>
                   <li>• Modifica roster con ricerca giocatori per nome</li>
-                  <li>• Crea competizioni (round robin/knockout)</li>
+                  <li>• Crea competizioni (campionato o coppa)</li>
                   <li>• Gestione asta (prossimo chiamato, chiamati, budget)</li>
                 </ul>
               </Card>
