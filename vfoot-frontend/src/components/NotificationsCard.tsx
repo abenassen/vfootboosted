@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, SectionTitle } from './ui';
+import IosInstallSteps from './IosInstallSteps';
 import {
   installPromptAvailable,
   isIOS,
@@ -43,14 +44,7 @@ export default function NotificationsCard() {
           >
             {showIosSteps ? 'Nascondi i passaggi' : 'Come si fa'}
           </button>
-          {showIosSteps ? (
-            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-sky-900">
-              <li>Tocca il tasto Condividi in basso (il quadrato con la freccia verso l'alto).</li>
-              <li>Scorri e scegli «Aggiungi alla schermata Home».</li>
-              <li>Conferma: comparirà l'icona di Vfoot fra le tue app.</li>
-              <li>Apri Vfoot da quell'icona e torna qui per attivare le notifiche.</li>
-            </ol>
-          ) : null}
+          {showIosSteps ? <IosInstallSteps /> : null}
         </div>
       ) : null}
 

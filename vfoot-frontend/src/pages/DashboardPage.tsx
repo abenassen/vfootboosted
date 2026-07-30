@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { getLeagueFixtures, getLeagueStandings } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
+import InstallBanner from '../components/InstallBanner';
 import type { LeagueFixtureItem, LeagueStandingRow } from '../types/league';
 
 export default function DashboardPage() {
@@ -22,6 +23,8 @@ export default function DashboardPage() {
 
   if (!leagues.length) {
     return (
+      <div className="space-y-4">
+      <InstallBanner />
       <Card className="p-4">
         <SectionTitle>Benvenuto</SectionTitle>
         <div className="mt-2 text-sm text-slate-600">Non appartieni ancora a nessuna lega.</div>
@@ -29,10 +32,16 @@ export default function DashboardPage() {
           Crea o unisciti a una lega
         </Link>
       </Card>
+      </div>
     );
   }
   if (!selectedLeagueId) {
-    return <Card className="p-4 text-sm text-slate-600">Seleziona una lega dal selettore in alto.</Card>;
+    return (
+      <div className="space-y-4">
+        <InstallBanner />
+        <Card className="p-4 text-sm text-slate-600">Seleziona una lega dal selettore in alto.</Card>
+      </div>
+    );
   }
 
   const myName = selectedLeague?.team_name ?? null;
@@ -45,6 +54,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
+      {/* Above everything else on purpose: it is the one invitation the browser
+          will never issue on iOS, and it disappears for good once dismissed. */}
+      <InstallBanner />
       <Card className="p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>

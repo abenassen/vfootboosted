@@ -172,3 +172,86 @@ test.describe('@pwa PWA', () => {
     expect((await shown.jsonValue()) as string[]).toEqual(['Vfoot Boosted']);
   });
 });
+
+test.describe('@pwa invito a installare', () => {
+  /** The banner is the only invitation an iPhone user will ever get, so its
+   *  presence, its dismissal and the memory of that dismissal are behaviour, not
+   *  decoration.
+   *
+   *  Signed in through the MOCK provider (`?api=mock`, same trick as the GUI smoke
+   *  test): Home is behind auth, and borrowing the real backend would make a
+   *  front-end test depend on a database.
+   */
+
+  /** Seeds the mock provider's session directly instead of driving the sign-up
+   *  form: registering no longer signs you in (the mock mirrors the real
+   *  "confirm your email" flow), and this test is about the banner, not about
+   *  authentication. */
+  async function signInMock(page: import('@playwright/test').Page) {
+    await page.goto('/?api=mock');
+    await page.evaluate(() =>
+      localStorage.setItem(
+        'vfoot_mock_session',
+        JSON.stringify({ id: 1, username: 'tester', email: 'tester@example.com', avatar: '' }),
+      ),
+    );
+    await page.goto('/home?api=mock');
+    await expect(page).toHaveURL(/\/home/);
+  }
+
+  const BANNER = 'Installa Vfoot sul telefono';
+
+  test('compare in Home e si può chiudere per sempre', async ({ page }) => {
+    await signInMock(page);
+    await expect(page.getByText(BANNER)).toBeVisible();
+
+    await page.getByRole('button', { name: "Chiudi l'invito a installare" }).click();
+    await expect(page.getByText(BANNER)).toBeHidden();
+
+    // Remembered: an invitation that returns every visit is an advert.
+    await page.goto('/home?api=mock');
+    await expect(page.getByText(BANNER)).toBeHidden();
+    expect(await page.evaluate(() => localStorage.getItem('vfoot_install_banner_dismissed'))).toBe(
+      '1',
+    );
+  });
+
+  test('su iPhone spiega i passaggi invece di offrire un bottone', async ({ browser }) => {
+    // Safari has no install prompt at all, so the steps ARE the feature. Emulating
+    // the user agent exercises our branch; it says nothing about whether push works
+    // on a real iPhone, which needs a real iPhone.
+    const ctx = await browser.newContext({
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await ctx.newPage();
+    await signInMock(page);
+
+    await expect(page.getByText(BANNER)).toBeVisible();
+    await expect(page.getByText("Su iPhone è l'unico modo per ricevere le notifiche.")).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Installa', exact: true })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Come si fa su iPhone' }).click();
+    await expect(page.getByText('«Aggiungi alla schermata Home»')).toBeVisible();
+    await ctx.close();
+  });
+
+  test('installata, l\u2019invito non compare', async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await ctx.newPage();
+    // display-mode: standalone is how the app knows it was launched from the icon;
+    // asking someone to install what they already installed is the clearest way to
+    // look broken.
+    await page.addInitScript(() => {
+      const real = window.matchMedia.bind(window);
+      window.matchMedia = ((q: string) =>
+        q.includes('display-mode: standalone')
+          ? { matches: true, media: q, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }
+          : real(q)) as typeof window.matchMedia;
+    });
+    await signInMock(page);
+    await expect(page.getByText(BANNER)).toHaveCount(0);
+    await ctx.close();
+  });
+});
