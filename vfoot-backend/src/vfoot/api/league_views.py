@@ -1945,7 +1945,10 @@ def _fixture_phase(fx: FantasyFixture, current_real_md: int | None) -> str:
     return "future"
 
 
-def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_real_md: int | None = None) -> dict:
+def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_real_md: int | None = None,
+                           my_roster_ready: bool = False) -> dict:
+    mine = bool(my_team_id and (fx.home_team_id == my_team_id or fx.away_team_id == my_team_id))
+    played = fx.status == FantasyFixture.STATUS_FINISHED
     return {
         "fixture_id": fx.id,
         "competition_id": fx.competition_id,
@@ -1964,8 +1967,19 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
                       "crest": fx.home_team.crest},
         "away_team": {"team_id": fx.away_team_id, "name": fx.away_team.name,
                       "crest": fx.away_team.crest},
-        "score": {"home_total": fx.home_total, "away_total": fx.away_total} if fx.status == FantasyFixture.STATUS_FINISHED else None,
-        "is_user_involved": bool(my_team_id and (fx.home_team_id == my_team_id or fx.away_team_id == my_team_id)),
+        "score": {"home_total": fx.home_total, "away_total": fx.away_total} if played else None,
+        "is_user_involved": mine,
+        # Whether a lineup can be set for THIS fixture, decided here rather than in
+        # the UI: it also depends on the roster, which the calendar does not load.
+        # An empty roster has nothing to field, and offering the button anyway sent
+        # people to a formation page with no players in it.
+        "can_set_lineup": bool(
+            mine and my_roster_ready and not played and fx.fantasy_matchday_id is not None
+        ),
+        # A fixture that has not been played has no rich detail: /fixtures/<id>
+        # answers 404 "No rich detail for this fixture". Saying so here lets the
+        # calendar not offer a link that can only end on an error page.
+        "has_detail": played,
     }
 
 
@@ -1989,7 +2003,11 @@ class LeagueFixturesView(APIView):
 
         current = _current_matchday(league)
         current_real_md = current.real_matchday if current else None
-        items = [_serialize_fixture_row(fx, my_team_id, current_real_md) for fx in qs[:200]]
+        # One query for the whole calendar, not one per fixture.
+        my_roster_ready = bool(my_team_id) and FantasyRosterSlot.objects.filter(
+            team_id=my_team_id, released_at__isnull=True).exists()
+        items = [_serialize_fixture_row(fx, my_team_id, current_real_md, my_roster_ready)
+                 for fx in qs[:200]]
         return Response(items)
 
 

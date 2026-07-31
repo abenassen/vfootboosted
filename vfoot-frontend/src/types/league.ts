@@ -496,6 +496,12 @@ export interface LeagueFixtureItem {
   away_team: { team_id: number; name: string; crest?: string | null };
   score: { home_total: number; away_total: number } | null;
   is_user_involved: boolean;
+  /** Decided server-side: also depends on the roster, which the calendar does not
+   *  load. False on an empty roster — there would be nothing to field. */
+  can_set_lineup?: boolean;
+  /** A fixture that has not been played has no rich detail, and opening it can
+   *  only end on an error page. */
+  has_detail?: boolean;
 }
 
 export interface LeagueMatchdayItem {
