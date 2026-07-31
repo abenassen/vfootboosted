@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { getLeagueFixtures, getLeagueStandings } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Card, SectionTitle } from '../components/ui';
-import InstallBanner from '../components/InstallBanner';
+import SetupBanner from '../components/SetupBanner';
 import LeagueHome from '../components/LeagueHome';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import type { LeagueFixtureItem, LeagueStandingRow } from '../types/league';
@@ -30,7 +30,7 @@ export default function DashboardPage() {
   if (!leagues.length) {
     return (
       <div className="space-y-4">
-        <InstallBanner />
+        <SetupBanner />
         <Card className="p-6 text-center md:p-10">
           <div className="text-4xl">🏆</div>
           <div className="mt-3 text-2xl font-black md:text-3xl">Benvenuto in Vfoot Boosted</div>
@@ -55,7 +55,7 @@ export default function DashboardPage() {
   if (!selectedLeagueId) {
     return (
       <div className="space-y-4">
-        <InstallBanner />
+        <SetupBanner />
         <Card className="p-4 text-sm text-slate-600">Seleziona una lega dal selettore in alto.</Card>
       </div>
     );
@@ -69,9 +69,10 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      {/* Above everything else on purpose: it is the one invitation the browser
-          will never issue on iOS, and it disappears for good once dismissed. */}
-      <InstallBanner />
+      {/* Above everything else on purpose: e' l'unico invito che su iOS il browser
+          non fara' mai — ne' a installare, ne' ad accendere le notifiche — e sparisce
+          per sempre una volta chiuso. */}
+      <SetupBanner />
       <Card className="p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
