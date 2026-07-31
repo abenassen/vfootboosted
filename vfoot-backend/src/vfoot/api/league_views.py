@@ -2952,6 +2952,43 @@ class AuctionStateView(APIView):
         return Response(_serialize_auction_state(session))
 
 
+class AuctionPoolView(APIView):
+    """Everyone still callable in this auction, so the room can search offline.
+
+    The banditore's search used to hit /players/search on every keystroke, which
+    was both a request per letter and WRONG: that endpoint looks across every
+    Player in the database (1706 here) while only the league's frozen listone can
+    actually be nominated (660) — so it offered names that would be refused.
+
+    Kept OUT of the auction state on purpose: the socket only says "something
+    changed" and the client re-fetches the state on every single bid. Carrying the
+    pool there would re-download it each time. It changes only when a nomination
+    is settled, which `pool_remaining` in the state already signals.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, auction_id: int):
+        session = get_object_or_404(AuctionSession, id=auction_id)
+        _membership_or_404(session.league, request.user.id)
+
+        pool = _pool_remaining_ids(session)
+        roles = league_role_map(session.league, pool)
+        players = Player.objects.filter(id__in=pool).values_list("id", "short_name", "full_name")
+        by_id = {pid: (short, full) for pid, short, full in players}
+        return Response([
+            {
+                "player_id": pid,
+                "name": by_id.get(pid, ("", ""))[0] or by_id.get(pid, ("", ""))[1] or str(pid),
+                "full_name": by_id.get(pid, ("", ""))[1] or "",
+                "role": roles.get(pid),
+            }
+            for pid in pool
+            if pid in by_id
+        ])
+
+
 class AuctionNominateView(APIView):
     """Put a player up for auction, in one of three admin-chosen ways: pick him
     manually, draw one at random, or draw one at random within a role."""

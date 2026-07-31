@@ -762,6 +762,22 @@ export async function createAuction(leagueId: number, playerIds?: number[]) {
   return auctionPost(`/leagues/${leagueId}/auctions`, playerIds?.length ? { player_ids: playerIds } : {});
 }
 
+export interface AuctionPoolPlayer {
+  player_id: number;
+  name: string;
+  full_name: string;
+  role: string | null;
+}
+
+/** Everyone still callable in this auction. Fetched once and re-fetched only when
+ *  the pool shrinks, so the banditore's search costs no request per keystroke. */
+export async function getAuctionPool(auctionId: number): Promise<AuctionPoolPlayer[]> {
+  const res = await fetch(`${baseUrl()}/auctions/${auctionId}/pool`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function getActiveAuction(leagueId: number): Promise<ActiveAuctionInfo> {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/active-auction`, {
     headers: { Accept: 'application/json', ...authHeaders() },

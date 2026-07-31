@@ -13,15 +13,15 @@ import {
   nominatePlayer,
   placeBid,
   revertNomination,
-  searchPlayers,
   undoLastAuctionAction,
   voidBid,
 } from '../api';
+import { getAuctionPool, type AuctionPoolPlayer } from '../api/backend';
+import { foldedMatch } from '../utils/text';
 import type {
   ActiveAuctionInfo,
   AuctionState,
   ClassicRole,
-  PlayerSearchItem,
 } from '../types/league';
 
 const ROLE_LABEL: Record<ClassicRole, string> = {
@@ -213,7 +213,6 @@ export default function AuctionRoomPage() {
             {isAdmin && state.status === 'active' ? (
               <AdminControls
                 auctionId={auctionId}
-                leagueId={selectedLeagueId}
                 state={state}
                 busy={busy}
                 hasOpen={!!state.open_nomination}
@@ -428,14 +427,12 @@ function CurrentPlayerPanel({
 
 function AdminControls({
   auctionId,
-  leagueId,
   state,
   busy,
   hasOpen,
   run,
 }: {
   auctionId: number;
-  leagueId: number;
   state: AuctionState;
   busy: boolean;
   hasOpen: boolean;
@@ -443,26 +440,28 @@ function AdminControls({
 }) {
   const [role, setRole] = useState<ClassicRole>('DIF');
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<PlayerSearchItem[]>([]);
   const [assignTeam, setAssignTeam] = useState<number | ''>('');
   const [assignPrice, setAssignPrice] = useState('1');
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pool, setPool] = useState<AuctionPoolPlayer[]>([]);
 
-  const doSearch = (q: string) => {
-    setQuery(q);
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    if (q.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    searchTimer.current = setTimeout(async () => {
-      try {
-        setResults(await searchPlayers(q, leagueId, 12));
-      } catch {
-        setResults([]);
-      }
-    }, 250);
-  };
+  // The callable pool, fetched once and re-fetched only when it shrinks — which
+  // pool_remaining already tells us. The search then costs nothing: no request
+  // per keystroke, and it can only offer players that CAN be nominated (the
+  // old endpoint searched every Player in the database, not this listone).
+  useEffect(() => {
+    let alive = true;
+    void getAuctionPool(auctionId)
+      .then((p) => alive && setPool(p))
+      .catch(() => alive && setPool([]));
+    return () => {
+      alive = false;
+    };
+  }, [auctionId, state.pool_remaining]);
+
+  const results = useMemo(() => {
+    if (query.trim().length < 2) return [];
+    return pool.filter((p) => foldedMatch(query, [p.name, p.full_name])).slice(0, 12);
+  }, [pool, query]);
 
   return (
     <Card className="p-4">
@@ -527,7 +526,7 @@ function AdminControls({
           className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
           placeholder="Cerca per nome…"
           value={query}
-          onChange={(e) => doSearch(e.target.value)}
+          onChange={(e) => setQuery(e.target.value)}
           disabled={hasOpen}
         />
         {results.length ? (
@@ -541,7 +540,6 @@ function AdminControls({
                   run(async () => {
                     await nominatePlayer(auctionId, { mode: 'manual', player_id: p.player_id });
                     setQuery('');
-                    setResults([]);
                   }, `Chiamato ${p.name}.`)
                 }
               >
@@ -560,7 +558,7 @@ function AdminControls({
             className="w-40 rounded-xl border px-3 py-2 text-sm"
             placeholder="Cerca giocatore…"
             value={query}
-            onChange={(e) => doSearch(e.target.value)}
+            onChange={(e) => setQuery(e.target.value)}
             aria-label="Giocatore da assegnare"
           />
           <select
@@ -595,7 +593,6 @@ function AdminControls({
                   run(async () => {
                     await assignPlayer(auctionId, p.player_id, Number(assignTeam), Number(assignPrice));
                     setQuery('');
-                    setResults([]);
                   }, `${p.name} assegnato.`)
                 }
               >
