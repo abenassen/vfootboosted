@@ -76,6 +76,10 @@ export interface CreateLeagueRequest {
   team_name: string;
   // Real championship the league is played on: chosen ONCE at creation, then immutable.
   reference_season_id: number;
+  /** Chosen ONCE at creation, like the reference season, and not editable after:
+   *  it decides how points are made. Omitting it used to leave every league
+   *  created from the UI on the server default, 'aura'. */
+  mode?: 'classic' | 'aura';
 }
 
 export interface JoinLeagueRequest {

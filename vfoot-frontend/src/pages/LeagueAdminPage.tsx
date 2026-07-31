@@ -61,6 +61,10 @@ export default function LeagueAdminPage() {
   const [createTeam, setCreateTeam] = useState('');
   // Reference season is mandatory at creation and immutable afterwards.
   const [createSeasonId, setCreateSeasonId] = useState<number | ''>('');
+  // Same deal for the mode, and the form never asked: every league created from
+  // the UI took the server default ('aura'), so the classic fantacalcio — listone,
+  // asta, ruoli, vincoli di formazione — was unreachable from the interface.
+  const [createMode, setCreateMode] = useState<'classic' | 'aura'>('classic');
   const [realSeasons, setRealSeasons] = useState<RealSeasonItem[]>([]);
   // Invite code of the league we just created, shown with a copy button until dismissed.
   const [createdInvite, setCreatedInvite] = useState<string | null>(null);
@@ -431,6 +435,7 @@ export default function LeagueAdminPage() {
                       name: createName,
                       team_name: createTeam,
                       reference_season_id: createSeasonId,
+                      mode: createMode,
                     });
                     setCreatedInvite(res.invite_code);
                     setMsg('Lega creata. Seguendo i passi qui sotto diventa giocabile.');
@@ -458,6 +463,38 @@ export default function LeagueAdminPage() {
                   Nome tua squadra <span className="text-red-500">*</span>
                   <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Nome tua squadra" value={createTeam} onChange={(e) => setCreateTeam(e.target.value)} required />
                 </label>
+                <fieldset className="block text-sm font-medium text-slate-700">
+                  <legend>Come si fanno i punti <span className="text-red-500">*</span></legend>
+                  <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                    {([
+                      ['classic', 'Fantacalcio classico', 'Voti + bonus/malus, ruoli P/D/C/A, listone e asta. Quello a cui giocano tutti.'],
+                      ['aura', 'Aura (sperimentale)', 'Duelli per zona del campo: conta dove giocano i tuoi, non solo il voto.'],
+                    ] as const).map(([value, title, blurb]) => (
+                      <label
+                        key={value}
+                        className={clsx(
+                          'cursor-pointer rounded-xl border-2 p-3 transition',
+                          createMode === value ? 'border-slate-900 bg-slate-50' : 'border-slate-200 hover:border-slate-400',
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="league-mode"
+                            value={value}
+                            checked={createMode === value}
+                            onChange={() => setCreateMode(value)}
+                          />
+                          <span className="font-semibold">{title}</span>
+                        </div>
+                        <div className="mt-1 pl-6 text-xs font-normal text-slate-500">{blurb}</div>
+                      </label>
+                    ))}
+                  </div>
+                  <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                    Si sceglie ora e non si cambia più, come il campionato di riferimento.
+                  </span>
+                </fieldset>
                 <label className="block text-sm font-medium text-slate-700">
                   Campionato di riferimento <span className="text-red-500">*</span>
                   <select
