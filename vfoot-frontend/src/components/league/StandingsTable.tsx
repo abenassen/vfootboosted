@@ -24,19 +24,23 @@ export interface StandingRowVM {
 
 export function StandingsTable({
   rows,
-  /** Positions that lead somewhere: a prize, or qualification to a later stage.
-   *  Comes from the competition's own rules — it used to be "the top 4", a number
-   *  from real football that means nothing in a league with one winner. */
-  highlightRanks,
+  /** Positions that WIN something (green) and positions that merely go through
+   *  (outlined). Both come from the competition's own prize bands and
+   *  qualification rules — it used to be "the top 4", a number from real football
+   *  that means nothing in a league whose prizes go to three. */
+  prizeRanks,
+  qualifyRanks,
   selectedKey,
   onRowClick,
 }: {
   rows: StandingRowVM[];
-  highlightRanks?: number[];
+  prizeRanks?: number[];
+  qualifyRanks?: number[];
   selectedKey?: string | null;
   onRowClick?: (row: StandingRowVM) => void;
 }) {
-  const promoted = new Set(highlightRanks ?? []);
+  const prize = new Set(prizeRanks ?? []);
+  const qualify = new Set(qualifyRanks ?? []);
   const showAvg = rows.some((r) => typeof r.avgScore === 'number');
   const showCrest = rows.some((r) => r.crest !== undefined);
   return (
@@ -72,7 +76,11 @@ export function StandingsTable({
                 <span
                   className={clsx(
                     'inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold',
-                    promoted.has(s.rank) ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600',
+                    prize.has(s.rank)
+                      ? 'bg-green-100 text-green-800'
+                      : qualify.has(s.rank)
+                        ? 'border border-green-300 bg-white text-green-700'
+                        : 'bg-slate-100 text-slate-600',
                   )}
                 >
                   {s.rank}

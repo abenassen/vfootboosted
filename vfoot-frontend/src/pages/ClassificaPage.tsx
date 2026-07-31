@@ -59,7 +59,8 @@ export default function ClassificaPage() {
               <div className={tables.length > 1 || brackets.length ? 'mt-2' : ''}>
                 <StandingsTable
                   rows={rows(s.standings ?? [], selectedLeague?.team_name)}
-                  highlightRanks={s.highlight_ranks}
+                  prizeRanks={s.prize_ranks}
+                  qualifyRanks={s.qualify_ranks}
                 />
               </div>
             </Card>

@@ -142,9 +142,11 @@ export interface CompetitionSection {
   name: string;
   type: 'round_robin' | 'knockout';
   order: number;
-  /** Table positions that lead to a prize or to a later stage, from the
-   *  competition's own rules. Empty when nothing hangs on the placings. */
-  highlight_ranks?: number[];
+  /** Positions that WIN something, from the competition's prize bands. */
+  prize_ranks?: number[];
+  /** Positions that merely carry on to a later stage. Never overlaps with
+   *  prize_ranks: winning something is the stronger statement. */
+  qualify_ranks?: number[];
   standings?: LeagueStandingRow[];
   rounds?: { round_no: number; label: string; fixtures: LeagueFixtureItem[] }[];
 }

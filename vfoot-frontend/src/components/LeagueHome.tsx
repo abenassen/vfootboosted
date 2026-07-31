@@ -16,6 +16,7 @@ import clsx from 'clsx';
 import { useLeagueContext } from '../league/LeagueContext';
 import { competitionFormatLabel } from '../league/competitionFormat';
 import { compColor, type CompColor } from '../league/competitionColors';
+import { useDecisionAlerts } from '../league/useDecisionAlerts';
 import { Badge, Button, Card, SectionTitle } from './ui';
 import Crest from './Crest';
 import type {
@@ -56,7 +57,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     void getLeagueDetail(selectedLeagueId).then((d) => alive && setDetail(d)).catch(() => {});
     void getLeagueFixtures(selectedLeagueId).then((f) => alive && setFixtures(f)).catch(() => {});
     void getLeagueMatchdays(selectedLeagueId).then((m) => alive && setMatchdays(m)).catch(() => {});
-    void getLeagueActivity(selectedLeagueId, 8).then((a) => alive && setActivity(a)).catch(() => {});
+    void getLeagueActivity(selectedLeagueId, 5).then((a) => alive && setActivity(a)).catch(() => {});
     void getActiveAuction(selectedLeagueId).then((a) => alive && setAuction(a)).catch(() => {});
     void getMarketActive(selectedLeagueId)
       .then((m) => alive && setMarketSession(m.session))
@@ -113,6 +114,49 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     [mine],
   );
 
+  const alerts = useDecisionAlerts(selectedLeagueId ?? null);
+
+  // What is waiting on the reader, from data already on the page. Derived rather
+  // than fetched: every item here is something the page already knows, so the
+  // block cannot claim a chore that does not exist.
+  const todo = useMemo(() => {
+    const items: Array<{
+      key: string;
+      icon: string;
+      text: string;
+      detail?: string;
+      to: string;
+      className?: string;
+    }> = [];
+
+    for (const f of nextByCompetition) {
+      if (!f.can_set_lineup) continue;
+      items.push({
+        key: `lineup-${f.fixture_id}`,
+        icon: '📋',
+        text: `Formazione · ${compName.get(f.competition_id) ?? ''}`,
+        detail: `${f.home_team.name} vs ${f.away_team.name}`,
+        to: `/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`,
+        className: compColorById.get(f.competition_id)?.text700,
+      });
+    }
+
+    // The admin's number is his whole sign-off queue, a member's is only what he
+    // was asked — the same distinction the menu badge makes.
+    const pending = alerts.isAdmin ? alerts.blocking : alerts.attention;
+    if (pending) {
+      items.push({
+        key: 'decisions',
+        icon: '🗳️',
+        text: `${pending} ${pending === 1 ? 'decisione' : 'decisioni'} in sospeso`,
+        detail: alerts.isAdmin ? 'Bloccano il mercato finché non sono risolte.' : 'Ti è stato chiesto un parere.',
+        to: '/decisioni',
+      });
+    }
+
+    return items;
+  }, [nextByCompetition, compName, compColorById, alerts]);
+
   const currentMd = matchdays.find((m) => m.phase === 'current') ?? null;
   const canConclude =
     isAdmin && currentMd && currentMd.status === 'planned' && currentMd.real_completion.is_completed;
@@ -147,7 +191,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                     return Promise.all([
                       getLeagueMatchdays(selectedLeagueId).then(setMatchdays),
                       getLeagueFixtures(selectedLeagueId).then(setFixtures),
-                      getLeagueActivity(selectedLeagueId, 8).then(setActivity),
+                      getLeagueActivity(selectedLeagueId, 5).then(setActivity),
                     ]);
                   })
                   .catch((e: unknown) =>
@@ -257,7 +301,33 @@ export default function LeagueHome({ competitions }: { competitions: Competition
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* 2 — how the last ones went */}
+        {/* 2 — what is waiting for YOU. Beside the news, because one is what the
+            league did and the other is what it is waiting on you to do. */}
+        <Card className="p-4">
+          <SectionTitle>Da fare</SectionTitle>
+          {todo.length ? (
+            <ul className="mt-2 space-y-1.5">
+              {todo.map((t) => (
+                <li key={t.key}>
+                  <Link
+                    to={t.to}
+                    className="flex items-start gap-2 rounded-lg px-1 py-1 text-sm hover:bg-slate-50"
+                  >
+                    <span className="mt-0.5 shrink-0" aria-hidden>{t.icon}</span>
+                    <span className="min-w-0">
+                      <span className={clsx('block font-semibold', t.className ?? 'text-slate-700')}>{t.text}</span>
+                      {t.detail ? <span className="block text-xs text-slate-500">{t.detail}</span> : null}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="mt-2 text-sm text-slate-500">Sei in pari: niente che aspetti te.</div>
+          )}
+        </Card>
+
+        {/* 3 — how the last ones went */}
         {lastResults.length ? (
           <Card className="p-4">
             <SectionTitle>Ultimi risultati</SectionTitle>
@@ -276,10 +346,10 @@ export default function LeagueHome({ competitions }: { competitions: Competition
 
         {/* 3 — what has been happening */}
         <Card className="p-4">
-          <SectionTitle>Novità</SectionTitle>
+          <SectionTitle>News</SectionTitle>
           {activity.length ? (
             <ul className="mt-2 space-y-1.5">
-              {activity.map((a, i) => (
+              {activity.slice(0, 5).map((a, i) => (
                 <li key={`${a.kind}-${i}`} className="flex items-start gap-2 text-sm">
                   <span className="mt-0.5 shrink-0" aria-hidden>
                     {a.kind === 'acquisto' ? '🔁' : a.kind === 'decisione' ? '🗳️' : '🏁'}

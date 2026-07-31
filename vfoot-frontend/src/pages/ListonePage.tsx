@@ -279,14 +279,24 @@ function PlayerRow({
     <>
     <tr className="border-t border-slate-100">
       <td className="px-2 py-1.5">
-        <span className="inline-flex items-center gap-1.5">
+        {/* The name opens the detail too. Only the value column did, which is not
+            where anyone clicks to ask "who is this". */}
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          title="Chi è, e come è stato ottenuto il suo valore"
+          className="inline-flex items-center gap-1.5 text-left"
+        >
           {p.role ? (
             <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[p.role] ?? 'bg-slate-400'}`}>
               {p.role}
             </span>
           ) : null}
-          <span className="font-medium text-slate-800">{p.name}</span>
-        </span>
+          <span className="font-medium text-slate-800 underline decoration-slate-300 decoration-dotted underline-offset-2 hover:decoration-slate-600">
+            {p.name}
+          </span>
+        </button>
       </td>
       <td className="px-2 py-1.5 text-slate-600">{p.team ?? '—'}</td>
       <td className="px-2 py-1.5 text-right">

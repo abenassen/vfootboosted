@@ -3364,24 +3364,21 @@ def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:
 _KO_ROUND_LABELS = {1: "Finale", 2: "Semifinali", 4: "Quarti di finale", 8: "Ottavi di finale"}
 
 
-def _highlighted_ranks(stage) -> list[int]:
-    """Table positions that actually lead somewhere in THIS stage.
+def _highlighted_ranks(stage) -> tuple[list[int], list[int]]:
+    """Table positions that lead somewhere: (prize places, qualifying places).
 
-    Two sources, both explicit in the data: a qualification rule that takes a
-    range of the table into a later stage, and a prize awarded to a range of it.
-    Previously the UI just painted the top 4 green (top 2 with groups) — a number
-    borrowed from real football that means nothing in a fantasy league, and that
-    told a ten-team championship with a single winner that four places matter.
+    Kept apart because they are not the same promise. A prize is won there and
+    then; qualifying only means you carry on. Merging them painted the same green
+    on the first four of a championship whose prizes go to the first three, so the
+    fourth looked like it won something.
+
+    Both come from the competition's own data — prize bands and table-range
+    qualification rules — not from a number borrowed from real football.
     """
     if stage is None:
-        return []
-    ranks: set[int] = set()
+        return [], []
 
-    for rule in stage.rules_out.filter(mode=CompetitionStageRule.MODE_TABLE_RANGE):
-        lo = rule.rank_from or 1
-        hi = rule.rank_to or lo
-        ranks.update(range(lo, hi + 1))
-
+    prize_ranks: set[int] = set()
     for prize in stage.competition.prizes.all():
         if prize.condition_type == CompetitionPrize.CONDITION_STAGE_TABLE_RANGE:
             if prize.source_stage_id != stage.id:
@@ -3394,17 +3391,25 @@ def _highlighted_ranks(stage) -> list[int]:
             continue
         lo = prize.rank_from or 1
         hi = prize.rank_to or lo
-        ranks.update(range(lo, hi + 1))
+        prize_ranks.update(range(lo, hi + 1))
 
-    return sorted(ranks)
+    qualify_ranks: set[int] = set()
+    for rule in stage.rules_out.filter(mode=CompetitionStageRule.MODE_TABLE_RANGE):
+        lo = rule.rank_from or 1
+        hi = rule.rank_to or lo
+        qualify_ranks.update(range(lo, hi + 1))
+
+    # A place that wins something is not also merely "through".
+    return sorted(prize_ranks), sorted(qualify_ranks - prize_ranks)
 
 
 def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, pl,
              stage=None) -> dict:
     """One results section: a standings table (round-robin) or a bracket (knockout)."""
     fixtures = list(fixtures)
+    prize_ranks, qualify_ranks = _highlighted_ranks(stage)
     base = {"name": name, "type": stage_type, "order": order,
-            "highlight_ranks": _highlighted_ranks(stage)}
+            "prize_ranks": prize_ranks, "qualify_ranks": qualify_ranks}
     if stage_type == CompetitionStage.TYPE_KNOCKOUT:
         by_round: dict[int, list] = {}
         for f in fixtures:

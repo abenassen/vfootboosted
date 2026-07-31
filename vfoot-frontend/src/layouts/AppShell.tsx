@@ -341,7 +341,26 @@ export default function AppShell() {
           <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
             {selectedLeague?.name ?? 'Nessuna lega'}
           </div>
-          <nav className="space-y-1">{visibleNav.filter((it) => !it.aside).map(renderNav)}</nav>
+          {/* The two competition-scoped entries follow the switcher, and until now
+              only their COLOUR said so — you had to know the palette to know which
+              competition Partite and Classifica were about. Now they sit under a
+              heading that names it. */}
+          <nav className="space-y-1">
+            {visibleNav
+              .filter((it) => !it.aside && it.scope !== 'competition')
+              .map(renderNav)}
+          </nav>
+          {selectedCompetition && visibleNav.some((it) => it.scope === 'competition') ? (
+            <div className={clsx('mt-3 rounded-xl border-l-4 py-2 pl-2', color.border600, color.bg50)}>
+              <div className={clsx('flex items-center gap-1.5 px-1 pb-1 text-[10px] font-bold uppercase tracking-wide', color.text700)}>
+                <span className={clsx('h-2 w-2 rounded-full', color.dot)} aria-hidden />
+                <span className="truncate">{selectedCompetition.name}</span>
+              </div>
+              <nav className="space-y-1">
+                {visibleNav.filter((it) => it.scope === 'competition').map(renderNav)}
+              </nav>
+            </div>
+          ) : null}
           {visibleNav.some((it) => it.aside) ? (
             <nav className="mt-3 space-y-1 border-t pt-3">
               {visibleNav.filter((it) => it.aside).map(renderNav)}
