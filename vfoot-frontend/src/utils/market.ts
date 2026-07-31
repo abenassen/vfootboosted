@@ -18,6 +18,12 @@ export function recoveryText(mode: MarketRecoveryMode, fixed: number): string {
   return mode === 'fixed' ? `${fixed} credito${fixed === 1 ? '' : 'i'} fisso` : RECOVERY_LABEL[mode];
 }
 
+// Sempre fino ai secondi: il tick e' di 1s, e senza il campo che scorre un
+// countdown fermo su "3h 12m" per un minuto intero sembra un dato vecchio.
+// Minuti e secondi sono a due cifre quando li precede un'unita' piu' grande,
+// cosi' la stringa non cambia larghezza a ogni tick.
+const pad = (n: number) => String(n).padStart(2, '0');
+
 export function countdown(deadlineIso: string | null, nowMs: number): string {
   if (!deadlineIso) return '—';
   const ms = new Date(deadlineIso).getTime() - nowMs;
@@ -25,8 +31,8 @@ export function countdown(deadlineIso: string | null, nowMs: number): string {
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   const s = Math.floor((ms % 60_000) / 1000);
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
+  if (h > 0) return `${h}h ${pad(m)}m ${pad(s)}s`;
+  if (m > 0) return `${m}m ${pad(s)}s`;
   return `${s}s`;
 }
 
