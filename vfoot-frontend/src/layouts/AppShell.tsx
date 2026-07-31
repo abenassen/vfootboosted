@@ -34,7 +34,9 @@ type NavItem = {
 
 const leagueNav = [
   { to: '/home', label: 'Home lega', icon: '🏠', scope: 'league' as const },
-  { to: '/squad', label: 'Squadra', icon: '👥', scope: 'league' as const },
+  // "Rose" and not "Squadra": the page opens on your own, but the strip at the
+  // top browses every roster in the league, so the plural is what it does.
+  { to: '/squad', label: 'Rose', icon: '👥', scope: 'league' as const },
   { to: '/matches', label: 'Partite', icon: '🎯', scope: 'competition' as const },
   { to: '/standings', label: 'Classifica', icon: '📊', scope: 'competition' as const },
   { to: '/listone', label: 'Listone', icon: '📋', scope: 'league' as const },
@@ -65,7 +67,7 @@ function usePageTitle(pathname: string) {
     if (pathname.startsWith('/league-admin')) return '';
     if (pathname.startsWith('/league')) return 'Lega';
     if (pathname.startsWith('/squad/formation')) return 'Formazione';
-    if (pathname.startsWith('/squad')) return 'Squadra';
+    if (pathname.startsWith('/squad')) return 'Rose';
     if (pathname.startsWith('/matches/')) return 'Match';
     if (pathname.startsWith('/matches')) return 'Partite';
     if (pathname.startsWith('/standings')) return 'Classifica';
