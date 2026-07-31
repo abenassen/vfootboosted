@@ -13,6 +13,15 @@ import type {
 const XI = 11; // starters incl. exactly one goalkeeper
 
 const ROLE_LABEL: Record<PlayerRole, string> = { GK: 'POR', DEF: 'DIF', MID: 'CEN', ATT: 'ATT' };
+// Spelled out for the empty places: "Manca un DIF" reads like a code, "manca un
+// difensore" reads like a sentence.
+const ROLE_WORD: Record<PlayerRole, string> = {
+  GK: 'portiere',
+  DEF: 'difensore',
+  MID: 'centrocampista',
+  ATT: 'attaccante',
+};
+const ROLE_LABEL_SHORT = ROLE_LABEL;
 const ROLE_CHIP: Record<PlayerRole, string> = {
   GK: 'bg-amber-500',
   DEF: 'bg-blue-500',
@@ -120,6 +129,9 @@ export default function FormationPage() {
   // Explicit, ordered bench = substitution priority. Always stored (even in Aura,
   // where the substitute is the best available and order only breaks ties).
   const [benchOrder, setBenchOrder] = useState<number[]>([]);
+  // Places left open by a demoted starter, in the order they were vacated. They
+  // are what keeps the pitch at eleven while the module is still being decided.
+  const [vacancies, setVacancies] = useState<PlayerRole[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [allComps, setAllComps] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -189,6 +201,9 @@ export default function FormationPage() {
         }
         setStarterIds(starters);
         setBenchOrder(orderBench(d.roster, starters, saved?.bench_player_ids ?? []));
+        // A freshly loaded lineup has no vacated places: whatever it is short of
+        // was never chosen, so there is no role to attribute the gap to.
+        setVacancies([]);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -210,14 +225,29 @@ export default function FormationPage() {
 
   // Toggling a player keeps the ordered bench in sync: a demoted starter joins the
   // bench at the LOWEST priority (end); a promoted bench player leaves it.
+  //
+  // It also keeps the ELEVEN visible. The module is not fixed up front, it is read
+  // off the choices — so dropping a starter used to shrink his line and re-centre
+  // the pitch, leaving nine or ten dots and no sign of what was missing. Instead
+  // the vacated place stays, tagged with the role it came from.
   const toggleStarter = (id: number) => {
+    const role = byId.get(id)?.role;
     if (starterIds.includes(id)) {
       setStarterIds((s) => s.filter((x) => x !== id));
       setBenchOrder((b) => (b.includes(id) ? b : [...b, id]));
+      if (role) setVacancies((v) => [...v, role]);
     } else {
       if (starterIds.length >= XI) return;
       setStarterIds((s) => [...s, id]);
       setBenchOrder((b) => b.filter((x) => x !== id));
+      setVacancies((v) => {
+        // Same role => he takes the place that was left open and the module is
+        // unchanged. A different role => that place becomes his, which IS a change
+        // of module: the oldest vacancy is the one that gives way.
+        const same = role ? v.indexOf(role) : -1;
+        const drop = same >= 0 ? same : 0;
+        return v.length ? [...v.slice(0, drop), ...v.slice(drop + 1)] : v;
+      });
     }
   };
 
@@ -354,6 +384,7 @@ export default function FormationPage() {
           </div>
           <PitchLineup
             starterIds={starterIds}
+            vacancies={vacancies}
             byId={byId}
             gkId={gkId}
             selectedId={selected}
@@ -380,7 +411,21 @@ export default function FormationPage() {
                 onToggle={() => toggleStarter(p.player_id)}
               />
             ))}
-            {starters.length === 0 ? <div className="py-2 text-sm text-slate-400">Nessun titolare selezionato.</div> : null}
+            {/* The same empty places, in the list: "9/11" is a number you have to
+                read, a row that says "manca un difensore" is not. */}
+            {Array.from({ length: Math.max(0, XI - starters.length) }, (_, i) => (
+              <div key={`slot-${i}`} className="flex items-center gap-2 py-2.5 text-sm">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-dashed border-slate-300 text-[10px] font-bold text-slate-400">
+                  +
+                </span>
+                <span className="italic text-slate-400">
+                  {vacancies[i] ? `Manca un ${ROLE_WORD[vacancies[i]]}` : 'Posto libero'}
+                </span>
+              </div>
+            ))}
+            {starters.length === 0 && !vacancies.length ? (
+              <div className="py-2 text-sm text-slate-400">Nessun titolare selezionato.</div>
+            ) : null}
           </div>
 
           <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -538,6 +583,7 @@ const DOT_COLOR: Record<PlayerRole, string> = {
 // left, attack on the right; goalkeeper ringed in amber.
 function PitchLineup({
   starterIds,
+  vacancies = [],
   byId,
   gkId,
   selectedId,
@@ -545,6 +591,7 @@ function PitchLineup({
   regular = false,
 }: {
   starterIds: number[];
+  vacancies?: PlayerRole[];
   byId: Map<number, TeamLineupPlayer>;
   gkId: number | null;
   selectedId: number | null;
@@ -569,14 +616,29 @@ function PitchLineup({
       .map((id) => byId.get(id))
       .filter((p): p is TeamLineupPlayer => !!p)
       .forEach((p) => byRole.get(p.role)?.push(p));
+    // Empty places count towards their line's width, so the players around them
+    // do not slide over to close the gap: the hole is where the missing man goes.
+    const holesByRole = new Map<PlayerRole, number>(
+      lines.map((r) => [r, vacancies.filter((v) => v === r).length]),
+    );
     const regularDots = lines.flatMap((role) => {
       const group = byRole.get(role) ?? [];
-      return group.map((p, i) => ({
+      const holes = holesByRole.get(role) ?? 0;
+      const size = group.length + holes;
+      const spread = (i: number) => 50 + (i - (size - 1) / 2) * Math.min(26, 76 / Math.max(size, 1));
+      const filled = group.map((p, i) => ({
         p,
         left: ROLE_X[role],
-        top: 50 + (i - (group.length - 1) / 2) * Math.min(26, 76 / Math.max(group.length, 1)),
+        top: spread(i),
         isGk: p.player_id === gkId,
       }));
+      const empty = Array.from({ length: holes }, (_, k) => ({
+        empty: true as const,
+        role,
+        left: ROLE_X[role],
+        top: spread(group.length + k),
+      }));
+      return [...filled, ...empty];
     });
     const selRegular = selectedId != null ? byId.get(selectedId) : null;
     return (
@@ -648,7 +710,10 @@ function PitchCanvas({
   onSelect,
   footprint,
 }: {
-  dots: { p: TeamLineupPlayer; left: number; top: number; isGk: boolean }[];
+  dots: Array<
+    | { p: TeamLineupPlayer; left: number; top: number; isGk: boolean }
+    | { empty: true; role: PlayerRole; left: number; top: number }
+  >;
   selectedId: number | null;
   onSelect: (id: number) => void;
   footprint: Record<string, number> | null;
@@ -687,7 +752,33 @@ function PitchCanvas({
             );
           })
         : null}
-      {dots.map(({ p, left, top, isGk }) => (
+      {dots.map((d) =>
+        'empty' in d ? (
+          // A place waiting to be filled. Dashed and unlabelled, in the line of the
+          // role it was vacated from, so the eleven stay eleven and it is obvious
+          // where the missing man belongs.
+          <div
+            key={`hole-${d.role}-${d.top}`}
+            className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+            style={{ left: `${d.left}%`, top: `${d.top}%` }}
+            title={`Manca un ${ROLE_WORD[d.role]}`}
+          >
+            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-dashed border-white/80 bg-white/15 text-[9px] font-bold text-white">
+              +
+            </span>
+            <span className="mt-0.5 rounded bg-black/40 px-1 text-[8px] font-semibold leading-tight text-white/90">
+              {ROLE_LABEL_SHORT[d.role]}
+            </span>
+          </div>
+        ) : (
+          renderDot(d)
+        ),
+      )}
+    </div>
+  );
+
+  function renderDot({ p, left, top, isGk }: { p: TeamLineupPlayer; left: number; top: number; isGk: boolean }) {
+    return (
         <button
           key={p.player_id}
           onClick={() => onSelect(p.player_id)}
@@ -706,7 +797,6 @@ function PitchCanvas({
             {p.name.split(/\s+/).pop()}
           </span>
         </button>
-      ))}
-    </div>
-  );
+    );
+  }
 }
