@@ -207,6 +207,13 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
                 </b>
               ) : `chiude il ${new Date(s.closes_at).toLocaleString('it-IT')}`}
           </div>
+          {s.closes_at && (
+            // La regola che rende sensato rilanciare sul filo: va detta, o la
+            // scopre solo chi per caso e' collegato al momento giusto.
+            <div className="mt-1 text-xs text-slate-500">
+              Alla chiusura chi è in testa passa in validazione, anche senza aver compiuto 24 ore.
+            </div>
+          )}
           {data.my_budget && (
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-700">
               <span>Crediti: <b>{data.my_budget.remaining}</b></span>

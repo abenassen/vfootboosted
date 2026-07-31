@@ -36,6 +36,13 @@ dall'admin.
 - **Meccanica 24h**: un'offerta valida, se **non riceve rilanci per 24h**, è **accettata**
   (la validazione finale con aggiornamento rose spetta comunque agli admin). Un **rilancio**
   (altra offerta valida per lo stesso giocatore a cifra più alta) **resetta il contatore 24h**.
+- **Chiusura della sessione** (2026-07-31): la chiusura fa da **scadenza per tutte** le
+  offerte ancora in testa, che passano in **validazione** anche se non hanno compiuto le
+  24h. È una regola di gioco voluta: rende conveniente **rilanciare sul filo**, perché chi
+  arriva in testa all'ultimo non ha più 24 ore da difendere. Vale sia per la chiusura
+  programmata (`closes_at`, via `market_tick`) sia per quella manuale dell'admin — due
+  esiti diversi per lo stesso bottone sarebbero una trappola. L'admin mantiene comunque
+  l'ultima parola: dalla coda può rifiutare. Test in `tests_market_close.py`.
 - **Controlli admin**: **sospendere** la sessione (non si accettano offerte) o **chiuderla**
   (anche prima della scadenza). Non può creare una nuova sessione se ce n'è una aperta.
 - **Storico**: a sessione conclusa, lo **storico delle offerte** (accettate e non) resta

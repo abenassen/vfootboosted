@@ -103,7 +103,7 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
                     <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(() => controlMarketSession(leagueId, session.id, 'resume'))}>Riattiva</Button>
                   )}
                   <Button size="sm" variant="danger" disabled={busy}
-                    onClick={() => { if (window.confirm('Chiudere la sessione? Le offerte in testa non ancora scadute saranno annullate.')) void act(() => controlMarketSession(leagueId, session.id, 'close')); }}>
+                    onClick={() => { if (window.confirm('Chiudere la sessione? Ogni offerta ancora in testa passa in validazione, anche se non ha compiuto 24 ore: le troverai qui sotto da accettare o rifiutare.')) void act(() => controlMarketSession(leagueId, session.id, 'close')); }}>
                     Chiudi
                   </Button>
                 </div>
@@ -227,6 +227,10 @@ function CreateSessionCard({
           <label className="block text-sm">
             <span className="text-slate-600">Data/ora di chiusura</span>
             <input type="datetime-local" className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
+            <span className="mt-1 block text-xs text-slate-500">
+              Alla chiusura ogni offerta ancora in testa passa in validazione, anche se
+              non ha compiuto le sue 24 ore: aspettarsi rilanci sul filo è normale.
+            </span>
           </label>
         )}
         <Button disabled={busy || (scheduled && !closesAt)}

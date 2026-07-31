@@ -11,7 +11,7 @@ from io import StringIO
 from django.core.management import call_command
 from django.utils import timezone
 
-from vfoot.models import MarketOffer, MarketSession
+from vfoot.models import FantasyRosterSlot, MarketOffer, MarketSession
 from vfoot.services import market_engine as me
 from vfoot.tests_market import MarketBase
 
@@ -77,18 +77,76 @@ class ScheduledCloseTests(MarketBase):
         self.assertEqual(self.scaduta.status, MarketOffer.STATUS_ACCEPTED)
 
     # -- 2. la scadenza e' passata --------------------------------------------
-    def test_alla_scadenza_le_offerte_in_corso_finiscono_annullate(self):
+    def test_alla_scadenza_le_offerte_in_corso_passano_in_validazione(self):
+        """La chiusura fa da scadenza per tutte: chi e' in testa passa in coda
+        anche se il suo timer di 24h non e' compiuto. E' cio' che rende
+        conveniente offrire all'ultimo momento."""
         self._setup(closes_in=timedelta(hours=-1))
         print("\n[2] scadenza sessione gia' passata ->", self._tick())
         for k, v in self._statuses().items():
             print(f"      {k:36} {v}")
         self.session.refresh_from_db()
         self.assertEqual(self.session.status, MarketSession.STATUS_CLOSED)
-        # Un'offerta che non ha compiuto le sue 24h NON viene accettata dalla
-        # chiusura: viene annullata. Chi le 24h le aveva compiute passa in coda.
-        self.assertEqual(self.giovane.status, MarketOffer.STATUS_CANCELLED)
+        self.assertEqual(self.giovane.status, MarketOffer.STATUS_ACCEPTED)
         self.assertEqual(self.scaduta.status, MarketOffer.STATUS_ACCEPTED)
         self.assertEqual(self.accettata.status, MarketOffer.STATUS_ACCEPTED)
+        # Nessuna e' andata persa: la coda dell'admin le ha tutte e tre.
+        self.assertEqual(MarketOffer.objects.filter(
+            session=self.session, status=MarketOffer.STATUS_CANCELLED).count(), 0)
+
+    def test_offerta_dell_ultimo_minuto_arriva_in_coda(self):
+        """Lo scenario del cecchino: rilancio pochi minuti prima della chiusura,
+        nessuno fa in tempo a rispondere, il giocatore va all'admin per la
+        validazione con la mia offerta sopra."""
+        self._setup(closes_in=timedelta(minutes=1))
+        now = timezone.now()
+        # Il suo primo attaccante e' gia' impegnato sull'altra offerta.
+        secondo = self._player("Riserva t3", "ATT")
+        self._own(self.t3, secondo, 100)
+        cecchino = me.place_offer(
+            self.session, self.t3, self.free[0].id, secondo.id, 20,
+            now=now - timedelta(seconds=30))
+        self.giovane.refresh_from_db()
+        self.assertEqual(self.giovane.status, MarketOffer.STATUS_OUTBID)
+
+        self.session.closes_at = now - timedelta(seconds=1)
+        self.session.save(update_fields=["closes_at"])
+        print("\n[5] rilancio sul filo della chiusura ->", self._tick())
+        cecchino.refresh_from_db()
+        self.giovane.refresh_from_db()
+        print(f"      offerta del cecchino (30s di vita, 20 cr)   {cecchino.status}")
+        print(f"      offerta superata (10 cr)                    {self.giovane.status}")
+        self.assertEqual(cecchino.status, MarketOffer.STATUS_ACCEPTED)
+        self.assertEqual(self.giovane.status, MarketOffer.STATUS_OUTBID)
+
+    def test_anche_la_chiusura_a_mano_manda_in_coda(self):
+        """Stessa regola quando l'admin chiude dal pannello: due esiti diversi
+        per lo stesso bottone sarebbero solo una trappola."""
+        self._setup(closes_in=None)
+        c = self._as(self.admin)
+        r = c.post(f"/api/v1/leagues/{self.league.id}/market/sessions/{self.session.id}/close")
+        self.assertEqual(r.status_code, 200)
+        print("\n[6] chiusura a mano dall'admin:")
+        for k, v in self._statuses().items():
+            print(f"      {k:36} {v}")
+        self.assertEqual(self.giovane.status, MarketOffer.STATUS_ACCEPTED)
+
+    def test_la_coda_resta_validabile_a_sessione_chiusa(self):
+        """Accettare applica lo scambio anche dopo la chiusura: altrimenti la
+        promozione sarebbe un vicolo cieco."""
+        self._setup(closes_in=timedelta(hours=-1))
+        self._tick()
+        self.giovane.refresh_from_db()
+        c = self._as(self.admin)
+        r = c.post(f"/api/v1/leagues/{self.league.id}/market/offers/{self.giovane.id}/accept")
+        self.giovane.refresh_from_db()
+        print(f"\n[7] validazione a sessione chiusa: HTTP {r.status_code} -> {self.giovane.status}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.giovane.status, MarketOffer.STATUS_SETTLED)
+        self.assertTrue(FantasyRosterSlot.objects.filter(
+            team=self.t2, player_id=self.free[0].id, released_at__isnull=True).exists())
+        self.assertFalse(FantasyRosterSlot.objects.filter(
+            team=self.t2, player_id=self.mine[0].id, released_at__isnull=True).exists())
 
     # -- 3. senza il cron, la scadenza non fa nulla da sola -------------------
     def test_senza_tick_la_sessione_resta_aperta_oltre_la_scadenza(self):
@@ -113,4 +171,4 @@ class ScheduledCloseTests(MarketBase):
         for k, v in self._statuses().items():
             print(f"      {k:36} {v}")
         self.assertEqual(self.scaduta.status, MarketOffer.STATUS_ACCEPTED)
-        self.assertEqual(self.giovane.status, MarketOffer.STATUS_CANCELLED)
+        self.assertEqual(self.giovane.status, MarketOffer.STATUS_ACCEPTED)

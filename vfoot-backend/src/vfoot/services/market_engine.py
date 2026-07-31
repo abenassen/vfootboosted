@@ -429,18 +429,24 @@ def reject_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
 
 
 def close_session(session: MarketSession, actor=None, now=None) -> MarketSession:
-    """Close a session. Undecided (leading) offers are cancelled; already-accepted
-    offers stay in the admin's queue and can still be settled/rejected."""
+    """Close a session. Every offer still leading is promoted to `accepted` and
+    finisce in coda di validazione, esattamente come se avesse compiuto le sue
+    24h: la chiusura fa da scadenza per tutte insieme.
+
+    E' una regola di gioco, non una scorciatoia — rende sensato offrire
+    all'ultimo momento, perche' chi arriva in testa sul filo non ha piu' 24h da
+    difendere. L'admin conserva l'ultima parola: dalla coda puo' sempre
+    rifiutare. Le offerte gia' accettate restano dove sono."""
     from vfoot.models import MarketEvent
 
     now = now or timezone.now()
     for offer in MarketOffer.objects.filter(
         session=session, status=MarketOffer.STATUS_LEADING
     ):
-        offer.status = MarketOffer.STATUS_CANCELLED
+        offer.status = MarketOffer.STATUS_ACCEPTED
         offer.resolved_at = now
         offer.save(update_fields=["status", "resolved_at"])
-        record_event(session, MarketEvent.TYPE_OFFER_CANCELLED, actor,
+        record_event(session, MarketEvent.TYPE_OFFER_ACCEPTED, actor,
                      offer_payload(offer), offer=offer)
     session.status = MarketSession.STATUS_CLOSED
     session.closed_at = now

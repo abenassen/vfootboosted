@@ -15,12 +15,13 @@ export function OfferDeadline({
 
   if (!cappedBySession) return <>scade tra <span className="tabular-nums">{text}</span></>;
 
-  // Un'offerta che alla chiusura non ha compiuto le sue 24h viene annullata,
-  // non accettata: dirlo qui evita di scoprirlo a mercato chiuso.
+  // La chiusura del mercato fa da scadenza: chi e' in testa in quel momento
+  // passa in validazione, 24 ore compiute o no. Quindi non e' un avvertimento
+  // ma il vero conto alla rovescia — l'ultimo istante utile per rilanciare.
   return (
     <span className="text-amber-600"
-      title="Il mercato chiude prima che l’offerta compia 24 ore: se non le compie, viene annullata.">
-      mercato chiuso tra <span className="tabular-nums">{text}</span>
+      title="Il mercato chiude prima delle 24 ore: chi è in testa alla chiusura passa in validazione.">
+      il mercato chiude tra <span className="tabular-nums">{text}</span>
     </span>
   );
 }
