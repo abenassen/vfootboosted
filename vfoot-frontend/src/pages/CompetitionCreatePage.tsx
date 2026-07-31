@@ -54,6 +54,12 @@ const LEG_LABELS: Record<number, string> = {
   5: 'Cinque tornate',
 };
 
+// Mirrors MAX_LEGS in vfoot/services/competition_stages.py, where it is the point
+// past which a round-robin calendar has nowhere left to go (5 giri di 8 squadre
+// sono già 35 giornate). The buttons stop there because the server does.
+const MAX_LEGS = 5;
+const LEG_CHOICES = Array.from({ length: MAX_LEGS }, (_, i) => i + 1);
+
 // ---- small UI atoms ----
 
 function StepDots({ step, labels }: { step: number; labels: string[] }) {
@@ -177,6 +183,9 @@ export default function CompetitionCreatePage() {
 
   // format options
   const [legs, setLegs] = useState(1);
+  // Shown only after a click on Continua, so the form does not greet you in red.
+  const [showStep1Errors, setShowStep1Errors] = useState(false);
+
   const [groups, setGroups] = useState(1);
   const [advance, setAdvance] = useState(2);
   const [pointsWin, setPointsWin] = useState(3);
@@ -201,6 +210,23 @@ export default function CompetitionCreatePage() {
 
   const isAdmin = selectedLeague?.role === 'admin';
   const teams = detail?.teams ?? [];
+
+  // The real season's own bounds. season_real_matchdays is the list of matchdays
+  // that exist, so its ends are the only values the two inputs may take — typing
+  // 39 into a 38-matchday season used to be accepted and only failed later.
+  const seasonMatchdays = plan?.season_real_matchdays ?? [];
+  const seasonFirstMd = seasonMatchdays.length ? seasonMatchdays[0] : null;
+  const seasonLastMd = seasonMatchdays.length ? seasonMatchdays[seasonMatchdays.length - 1] : null;
+  const minStartMd = plan?.min_start_matchday ?? seasonFirstMd ?? 1;
+
+  /** Keep a typed matchday inside the season, so the range cannot be impossible. */
+  function clampMd(raw: string, floor: number): number | null {
+    if (!raw) return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    const hi = seasonLastMd ?? n;
+    return Math.max(floor, Math.min(hi, Math.round(n)));
+  }
 
   useEffect(() => {
     setDetail(null);
@@ -408,18 +434,39 @@ export default function CompetitionCreatePage() {
               />
             ))}
           </div>
+          {showStep1Errors && !format ? (
+            <div className="mt-2 text-xs font-semibold text-red-600">Scegli che competizione è.</div>
+          ) : null}
           <div className="mt-4">
             <Field label="Nome *">
               <input
-                className={inputCls + (name.trim() ? '' : ' border-amber-300')}
+                className={
+                  inputCls + (showStep1Errors && !name.trim() ? ' border-red-500 bg-red-50' : '')
+                }
+                aria-invalid={showStep1Errors && !name.trim()}
                 placeholder={format === 'league' ? 'es. Campionato' : 'es. Coppa dei Campioni'}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
+              {showStep1Errors && !name.trim() ? (
+                <div className="mt-1 text-xs font-semibold text-red-600">Dai un nome alla competizione.</div>
+              ) : null}
             </Field>
           </div>
           <div className="mt-4 flex justify-end">
-            <Button disabled={!format || !name.trim()} onClick={() => setStep(2)}>
+            {/* Not disabled: a dead button says nothing about WHY it will not go
+                on, and there is nowhere to click to find out. It accepts the
+                click and points at what is missing. */}
+            <Button
+              onClick={() => {
+                if (!format || !name.trim()) {
+                  setShowStep1Errors(true);
+                  return;
+                }
+                setShowStep1Errors(false);
+                setStep(2);
+              }}
+            >
               Continua
             </Button>
           </div>
@@ -567,12 +614,12 @@ export default function CompetitionCreatePage() {
                     plan
                       ? `${teamCount} squadre × ${legs} ${legs === 1 ? 'tornata' : 'tornate'} = ${
                           plan.stages.find((s) => s.type === 'round_robin')?.rounds ?? 0
-                        } giornate. Nelle tornate pari il campo si inverte.`
+                        } giornate. Nelle tornate pari il campo si inverte. Si possono cambiare finché non si gioca la prima partita.`
                       : 'Ogni tornata è un giro completo di tutti contro tutti.'
                   }
                 >
                   <div className="grid grid-cols-5 gap-1.5">
-                    {[1, 2, 3, 4, 5].map((n) => (
+                    {LEG_CHOICES.map((n) => (
                       <button
                         key={n}
                         type="button"
@@ -586,7 +633,17 @@ export default function CompetitionCreatePage() {
                       </button>
                     ))}
                   </div>
-                  <div className="mt-1.5 text-[11px] font-semibold text-slate-600">{LEG_LABELS[legs]}</div>
+                  <div className="mt-1.5 text-[11px] font-semibold text-slate-600">
+                    {LEG_LABELS[legs]}
+                    {/* 5 is not "the last button we drew", it is MAX_LEGS in
+                        services/competition_stages.py: oltre, il calendario non
+                        ha più dove stare. */}
+                    {legs === MAX_LEGS ? (
+                      <span className="ml-1 font-normal text-slate-400">
+                        · è il massimo consentito
+                      </span>
+                    ) : null}
+                  </div>
                 </Field>
 
                 {format === 'groups_knockout' ? (
@@ -683,24 +740,55 @@ export default function CompetitionCreatePage() {
                     <b>{plan.min_start_matchday}ª giornata reale</b>.
                   </div>
                 ) : null}
+                {/* How long the season actually is, said once: without it the two
+                    inputs are unbounded boxes and there is no way to know that 38
+                    is the end and 39 does not exist. */}
+                {seasonFirstMd != null && seasonLastMd != null ? (
+                  <div className="text-xs text-slate-500">
+                    {refSeason.competition} {refSeason.season} ha{' '}
+                    <b>{plan?.season_real_matchdays.length ?? 0} giornate</b>, dalla {seasonFirstMd}ª
+                    alla {seasonLastMd}ª.
+                  </div>
+                ) : null}
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Dalla giornata reale">
-                    <input
-                      type="number"
-                      min={plan?.min_start_matchday ?? 1}
-                      className={inputCls}
-                      value={startMd ?? ''}
-                      onChange={(e) => setStartMd(e.target.value ? Number(e.target.value) : null)}
-                    />
+                    <div className="flex gap-1.5">
+                      <input
+                        type="number"
+                        min={minStartMd}
+                        max={seasonLastMd ?? undefined}
+                        className={inputCls}
+                        value={startMd ?? ''}
+                        onChange={(e) => setStartMd(clampMd(e.target.value, minStartMd))}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setStartMd(minStartMd)}
+                        className="shrink-0 rounded-xl border border-slate-200 px-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        Prima
+                      </button>
+                    </div>
                   </Field>
                   <Field label="Alla giornata reale" hint="Vuoto = una dopo l'altra, senza soste.">
-                    <input
-                      type="number"
-                      className={inputCls}
-                      placeholder="di fila"
-                      value={endMd ?? ''}
-                      onChange={(e) => setEndMd(e.target.value ? Number(e.target.value) : null)}
-                    />
+                    <div className="flex gap-1.5">
+                      <input
+                        type="number"
+                        min={startMd ?? minStartMd}
+                        max={seasonLastMd ?? undefined}
+                        className={inputCls}
+                        placeholder="di fila"
+                        value={endMd ?? ''}
+                        onChange={(e) => setEndMd(clampMd(e.target.value, minStartMd))}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEndMd(seasonLastMd)}
+                        className="shrink-0 rounded-xl border border-slate-200 px-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        Ultima
+                      </button>
+                    </div>
                   </Field>
                 </div>
                 {plan ? (
