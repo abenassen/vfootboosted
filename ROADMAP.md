@@ -278,6 +278,42 @@ PWA, che non dipendono da terzi e arrivano sullo stesso telefono.
 
 ---
 
+## 10. Notifiche del mercato: il cron che serve davvero (31/07/2026)
+
+**Cosa non serve.** La scadenza di una sessione di mercato **non** ha bisogno di
+un processo che la sorvegli. `market_engine.sync_session` è chiamato da
+`_live_session`, e quindi da ogni endpoint del mercato: la sessione risulta
+chiusa alla prima richiesta che arriva dopo `closes_at`, e chi prova a offrire
+oltre il termine riceve «Nessuna sessione di mercato aperta». Nessun cron è
+richiesto per la correttezza — vedi `tests_market_close.py`.
+
+**Cosa serve.** Le notifiche. Alla chiusura ogni offerta ancora in testa passa in
+validazione, e le persone coinvolte vanno avvisate:
+
+- a chi era in testa: *ti sei aggiudicato X, in attesa di validazione*;
+- a chi è stato superato e non lo sa;
+- all'admin: *ci sono N offerte da validare*;
+- (a offerta matura per le 24h, lo stesso avviso senza aspettare la chiusura.)
+
+Queste **non possono partire da sole**: non c'è nessuna richiesta a cui
+agganciarle, ed è proprio quando nessuno sta guardando che l'avviso conta.
+`manage.py market_tick` esiste già, è idempotente, e oggi non è agganciato a
+nulla — nessun cron, nessun timer systemd, nessuna riga nel deploy.
+
+**Il lavoro**, in ordine:
+
+1. mettere `market_tick` nel cron del Linode (ogni 60–90 s), che è una riga;
+2. fargli emettere le notifiche sugli eventi che genera, sul canale
+   `league_notifications` che già serve email e push (§5) — una sola decisione su
+   *cosa* dire, due modi di dirlo;
+3. decidere **cosa merita un avviso**: la chiusura sì di sicuro; il singolo
+   sorpasso è utile ma può diventare rumore in una contesa vivace, e vale la pena
+   guardarlo dopo il primo mercato vero.
+
+Prerequisito condiviso con §5: le chiavi VAPID in produzione.
+
+---
+
 ## Debiti tecnici aperti
 
 - **Portieri: voto compresso.** Sette valori distinti contro i dodici dei
