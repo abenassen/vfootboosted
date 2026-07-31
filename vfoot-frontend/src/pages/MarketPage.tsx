@@ -8,6 +8,7 @@ import {
 } from '../api/backend';
 import { getActiveAuction } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
+import { foldedMatch } from '../utils/text';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import {
   OFFER_LABEL,
@@ -332,10 +333,11 @@ function FreeAgentsCard({
   const canOffer = data.session?.status === 'open' && data.my_team_id != null;
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return freeAgents.filter((f) =>
-      (!roleFilter || f.role === roleFilter) &&
-      (!needle || (f.name ?? '').toLowerCase().includes(needle)));
+    // Short AND full name, ignoring accents: the list shows "L. Martínez", plenty
+    // of players are known by the first name, and nobody types "Leão".
+    return freeAgents.filter(
+      (f) => (!roleFilter || f.role === roleFilter) && foldedMatch(q, [f.name, f.full_name]),
+    );
   }, [freeAgents, q, roleFilter]);
 
   const byRole = useMemo(() => {

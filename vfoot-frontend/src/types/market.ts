@@ -31,7 +31,10 @@ export interface MarketLeading {
 
 export interface MarketFreeAgent {
   player_id: number;
+  /** Short form, the one shown in the list ("L. Martínez"). */
   name: string | null;
+  /** Unabbreviated, so a search for the first name can match. */
+  full_name?: string | null;
   role: string | null;
   locked: boolean;
   leading: MarketLeading | null;
@@ -40,6 +43,7 @@ export interface MarketFreeAgent {
 export interface MarketRosterPlayer {
   player_id: number;
   name: string | null;
+  full_name?: string | null;
   role: string | null;
   price: number;
   recovery: number;

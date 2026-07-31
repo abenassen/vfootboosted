@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getChampionshipPlayers, getLeagueDetail } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
+import { foldedMatch } from '../utils/text';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import type { ChampionshipPlayer, ChampionshipPlayersResponse } from '../types/realChampionship';
 
@@ -83,14 +84,12 @@ export default function ListonePage() {
     if (role !== 'ALL') ps = ps.filter((p) => p.role === role);
     if (freeOnly) ps = ps.filter((p) => !p.owned);
     if (ratedOnly) ps = ps.filter((p) => typeof p.value === 'number');
-    const q = search.trim().toLowerCase();
-    // Every field on the row, not just the abbreviated name: the list shows
-    // "L. Martinez", so searching "Lautaro" used to find nothing, and neither did
-    // the role or the owning team — both of which are visible in the row.
-    if (q) {
+    // Every field on the row, not just the abbreviated name — the list shows
+    // "L. Martínez", so "Lautaro" used to find nothing, and neither did the role
+    // or the owning team. Accents are folded too: nobody types "Leão".
+    if (search.trim()) {
       ps = ps.filter((p) =>
-        [p.name, p.full_name, p.team, p.role, p.owner, p.value_basis]
-          .some((field) => (field ?? '').toLowerCase().includes(q)),
+        foldedMatch(search, [p.name, p.full_name, p.team, p.role, p.owner, p.value_basis]),
       );
     }
 

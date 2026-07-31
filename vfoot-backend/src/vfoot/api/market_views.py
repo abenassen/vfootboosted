@@ -49,6 +49,13 @@ def _label(player: Player) -> str:
     return player.short_name or player.full_name
 
 
+def _full_label(player: Player) -> str:
+    """The unabbreviated name, sent alongside the short one so a search can match
+    it. The lists show "L. Martínez"; plenty of players are known by the first
+    name, and typing "Lautaro" found nothing."""
+    return player.full_name or player.short_name or ""
+
+
 def _my_team(league: FantasyLeague, membership: LeagueMembership) -> FantasyTeam | None:
     return FantasyTeam.objects.filter(league=league, manager=membership).first()
 
@@ -287,7 +294,9 @@ class MarketActiveView(APIView):
                 need_ids.add(o.target_player_id)
                 need_ids.add(o.release_player_id)
 
-        names = {p.id: _label(p) for p in Player.objects.filter(id__in=need_ids)}
+        _players = list(Player.objects.filter(id__in=need_ids))
+        names = {p.id: _label(p) for p in _players}
+        full_names = {p.id: _full_label(p) for p in _players}
         team_names = dict(FantasyTeam.objects.filter(league=league)
                           .values_list("id", "name"))
 
@@ -297,6 +306,7 @@ class MarketActiveView(APIView):
             free_agents.append({
                 "player_id": pid,
                 "name": names.get(pid),
+                "full_name": full_names.get(pid),
                 "role": role_map.get(pid),
                 "locked": pid in locked,
                 "leading": None if not lead else {
@@ -313,7 +323,8 @@ class MarketActiveView(APIView):
         if my_state:
             for pid, info in my_state.roster.items():
                 my_roster.append({
-                    "player_id": pid, "name": names.get(pid), "role": info["role"],
+                    "player_id": pid, "name": names.get(pid),
+                    "full_name": full_names.get(pid), "role": info["role"],
                     "price": info["price"],
                     "recovery": recovery_for(session, info["price"]),
                 })
@@ -360,7 +371,9 @@ class MarketSessionListView(APIView):
         for o in offers:
             need_ids.add(o.target_player_id)
             need_ids.add(o.release_player_id)
-        names = {p.id: _label(p) for p in Player.objects.filter(id__in=need_ids)}
+        _players = list(Player.objects.filter(id__in=need_ids))
+        names = {p.id: _label(p) for p in _players}
+        full_names = {p.id: _full_label(p) for p in _players}
         team_names = dict(FantasyTeam.objects.filter(league=league)
                           .values_list("id", "name"))
 

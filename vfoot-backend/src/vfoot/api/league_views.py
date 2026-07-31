@@ -82,6 +82,7 @@ from functools import lru_cache as _lru_cache
 
 from django.conf import settings as _settings
 
+from vfoot.services.name_search import matches as name_matches
 from vfoot.services.player_profiles import player_profiles
 from vfoot.services.vector_zone_scoring import load_calibration
 from vfoot.services.fantasy_simulation import (
@@ -1056,13 +1057,25 @@ class PlayerSearchView(APIView):
                 released_at__isnull=True,
             ).values_list("player_id", flat=True)
 
-        players = (
-            Player.objects.filter(
-                Q(full_name__icontains=query) | Q(short_name__icontains=query)
-            )
-            .exclude(id__in=assigned_in_league)
+        # Two passes. The database narrows with what SQL can do cheaply — an
+        # icontains on either name — and if that finds nothing we fall back to the
+        # forgiving matcher over the (bounded) candidate set. icontains is neither
+        # accent- nor typo-tolerant, so "Leao" and "Mkitarian" used to come back
+        # empty from the auction room while the listone, which filters in the
+        # browser, found them. Same rules on both sides now.
+        base = Player.objects.exclude(id__in=assigned_in_league)
+        players = list(
+            base.filter(Q(full_name__icontains=query) | Q(short_name__icontains=query))
             .order_by("short_name", "full_name")[:limit]
         )
+        if not players:
+            candidates = base.order_by("short_name", "full_name").values_list(
+                "id", "short_name", "full_name")
+            hit_ids = [pid for pid, short, full in candidates
+                       if name_matches(query, short, full)][:limit]
+            if hit_ids:
+                by_id = Player.objects.in_bulk(hit_ids)
+                players = [by_id[i] for i in hit_ids if i in by_id]
 
         return Response(
             [
