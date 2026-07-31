@@ -5,10 +5,13 @@ import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import InstallBanner from '../components/InstallBanner';
 import Crest from '../components/Crest';
+import LeagueHome from '../components/LeagueHome';
+import { useCompetitionContext } from '../league/CompetitionContext';
 import type { LeagueFixtureItem, LeagueStandingRow } from '../types/league';
 
 export default function DashboardPage() {
   const { leagues, selectedLeagueId, selectedLeague } = useLeagueContext();
+  const { competitions } = useCompetitionContext();
   const [standings, setStandings] = useState<LeagueStandingRow[]>([]);
   const [fixtures, setFixtures] = useState<LeagueFixtureItem[]>([]);
 
@@ -101,6 +104,11 @@ export default function DashboardPage() {
           </div>
         </div>
       </Card>
+
+      {/* Everything the old "Lega" page was for, and the part of it that was not
+          a shortcut to somewhere else: what is being played right now in each
+          competition, how each stands, and who is in the league. */}
+      <LeagueHome competitions={competitions} />
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="p-4">

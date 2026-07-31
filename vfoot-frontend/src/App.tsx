@@ -2,7 +2,6 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import AppShell from './layouts/AppShell';
 import DashboardPage from './pages/DashboardPage';
-import LeaguePage from './pages/LeaguePage';
 import SquadPage from './pages/SquadPage';
 import FormationPage from './pages/FormationPage';
 import MatchesPage from './pages/MatchesPage';
@@ -53,7 +52,10 @@ export default function App() {
       >
         <Route path="home" element={<DashboardPage />} />
         <Route path="profilo" element={<ProfilePage />} />
-        <Route path="league" element={<LeaguePage />} />
+        {/* "Lega" was a hub of links to pages that already existed; what only it
+            had — the round being played, the standings, who is in the league —
+            now lives on the home page. Kept as a redirect for bookmarks. */}
+        <Route path="league" element={<Navigate to="/home" replace />} />
         <Route path="squad" element={<SquadPage />} />
         <Route path="teams/:teamId" element={<TeamRosterPage />} />
         <Route path="squad/formation" element={<FormationPage />} />

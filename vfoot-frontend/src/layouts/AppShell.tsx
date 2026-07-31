@@ -33,8 +33,7 @@ type NavItem = {
 };
 
 const leagueNav = [
-  { to: '/home', label: 'Home', icon: '🏠', scope: 'league' as const },
-  { to: '/league', label: 'Lega', icon: '🏆', scope: 'league' as const },
+  { to: '/home', label: 'Home lega', icon: '🏠', scope: 'league' as const },
   { to: '/squad', label: 'Squadra', icon: '👥', scope: 'league' as const },
   { to: '/matches', label: 'Partite', icon: '🎯', scope: 'competition' as const },
   { to: '/standings', label: 'Classifica', icon: '📊', scope: 'competition' as const },
@@ -58,7 +57,7 @@ const USER_ADMIN_TO = '/league-admin?tab=user';
 
 function usePageTitle(pathname: string) {
   return useMemo(() => {
-    if (pathname.startsWith('/home')) return 'Dashboard';
+    if (pathname.startsWith('/home')) return 'Home lega';
     if (pathname.startsWith('/profilo')) return 'Profilo';
     // Resolved by the caller, which can see the tab in the query string: the same
     // route is "Le mie leghe" or "Gestione lega" depending on it, and a single
@@ -125,19 +124,26 @@ export default function AppShell() {
   // a horizontal scroll on a phone.
   const leagueInSetup = hasLeagues && !competitionsLoading && competitions.length === 0;
 
+  // Gestione lega is admin-only: the page itself already refuses everyone else,
+  // so leaving it in the menu offered every participant a door to a "serve il
+  // ruolo admin".
+  const isLeagueAdmin = selectedLeague?.role === 'admin';
+
   const nav = useMemo<NavItem[]>(() => {
-    const items = leagueNav.map((it): NavItem => {
-      if (it.to === '/standings')
-        return { ...it, label: standingsLabel, icon: resultView === 'classifica' ? '📊' : '🗂️' };
-      if (it.to === '/serie-a') return { ...it, label: refCompetition };
-      // One number per audience, and they must not be mixed: the admin's is his
-      // whole sign-off queue, the member's is only what he was asked. Falling back
-      // from one to the other made 17 pending sign-offs read as 1 the moment the
-      // admin opened a single consultation.
-      if (it.to === '/decisioni')
-        return { ...it, badge: alerts.isAdmin ? alerts.blocking : alerts.attention };
-      return it;
-    });
+    const items = leagueNav
+      .filter((it) => isLeagueAdmin || !it.to.startsWith('/league-admin'))
+      .map((it): NavItem => {
+        if (it.to === '/standings')
+          return { ...it, label: standingsLabel, icon: resultView === 'classifica' ? '📊' : '🗂️' };
+        if (it.to === '/serie-a') return { ...it, label: refCompetition };
+        // One number per audience, and they must not be mixed: the admin's is his
+        // whole sign-off queue, the member's is only what he was asked. Falling back
+        // from one to the other made 17 pending sign-offs read as 1 the moment the
+        // admin opened a single consultation.
+        if (it.to === '/decisioni')
+          return { ...it, badge: alerts.isAdmin ? alerts.blocking : alerts.attention };
+        return it;
+      });
 
     if (!leagueInSetup) return items;
 
@@ -151,7 +157,7 @@ export default function AppShell() {
     const admin: NavItem = { ...usable[adminIndex], flag: true };
     const rest = usable.filter((_, i) => i !== adminIndex);
     return [rest[0], admin, ...rest.slice(1)];
-  }, [standingsLabel, resultView, refCompetition, alerts, leagueInSetup]);
+  }, [standingsLabel, resultView, refCompetition, alerts, leagueInSetup, isLeagueAdmin]);
   // Also empty WHILE LOADING, not just when the list comes back empty: drawing the
   // menu optimistically would flash ten dead links at exactly the brand-new
   // account we are trying to spare them from.
