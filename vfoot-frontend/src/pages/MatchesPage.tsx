@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { getLeagueFixtures } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
+import { competitionFormatLabel } from '../league/competitionFormat';
 import { Badge, Card, SectionTitle } from '../components/ui';
 import Crest from '../components/Crest';
 import type { LeagueFixtureItem } from '../types/league';
@@ -48,7 +49,9 @@ export default function MatchesPage() {
       <Card className="p-4">
         <div className="flex items-center gap-2">
           <SectionTitle>{selectedCompetition?.name ?? 'Calendario'}</SectionTitle>
-          <Badge tone={isKnockout ? 'amber' : 'blue'}>{isKnockout ? 'Coppa' : 'Campionato'}</Badge>
+          <Badge tone={isKnockout ? 'amber' : 'blue'}>
+            {selectedCompetition ? competitionFormatLabel(selectedCompetition) : ''}
+          </Badge>
         </div>
         <div className="mt-1 text-sm text-slate-600">
           {fixtures.length} partite · {rounds.length} {isKnockout ? 'turni' : 'giornate'}

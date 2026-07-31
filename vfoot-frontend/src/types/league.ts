@@ -114,11 +114,15 @@ export interface CompetitionRule {
 export interface CompetitionPrizeItem {
   prize_id: number;
   name: string;
+  icon: string;
   condition_type: 'final_table_range' | 'stage_table_range' | 'stage_winner' | 'stage_loser';
+  condition_label: string;
   source_stage_id: number | null;
   source_stage_name: string | null;
   rank_from: number | null;
   rank_to: number | null;
+  winner_team_ids: number[];
+  winner_team_names: string[];
 }
 
 export type ResultView = 'classifica' | 'tabellone' | 'risultati';
@@ -138,12 +142,41 @@ export interface CompetitionSection {
   rounds?: { round_no: number; label: string; fixtures: LeagueFixtureItem[] }[];
 }
 
+export type CompetitionFormat = 'league' | 'cup' | 'groups_knockout' | 'custom';
+
+/** One round of a competition, named the way the user named its stage. */
+export interface CompetitionRoundRow {
+  round_no: number;
+  stage_id: number | null;
+  stage_name: string;
+  stage_type: 'round_robin' | 'knockout';
+  local_round: number;
+  local_rounds: number;
+  label: string;
+  real_matchday: number | null;
+}
+
+export interface CompetitionDependency {
+  kind: 'stage_rule' | 'qualification_rule';
+  source_competition_id: number;
+  source_competition_name: string;
+  source_stage_name: string | null;
+  source_round: number | null;
+  real_matchday: number | null;
+  target_stage_id: number | null;
+}
+
 export interface CompetitionItem {
   competition_id: number;
   name: string;
   competition_type: 'round_robin' | 'knockout';
+  format: CompetitionFormat;
   result_view: ResultView;
   status: 'draft' | 'active' | 'done';
+  structure_locked: boolean;
+  rounds: CompetitionRoundRow[];
+  round_calendar: Record<string, number>;
+  dependencies: CompetitionDependency[];
   points: { win: number; draw: number; loss: number };
   starts_at: string | null;
   ends_at: string | null;
@@ -162,6 +195,7 @@ export interface CompetitionStageRuleIn {
   source_competition_id?: number;
   source_competition_name?: string;
   mode: 'table_range' | 'winners' | 'losers';
+  source_round: number | null;
   rank_from: number | null;
   rank_to: number | null;
 }
@@ -170,21 +204,24 @@ export interface CompetitionStageCreateRequest {
   name: string;
   stage_type: 'round_robin' | 'knockout';
   order_index?: number;
-  double_round?: boolean;
+  legs?: number;
   team_ids?: number[];
+  expected_participants?: number;
 }
 
 export interface CompetitionStageUpdateRequest {
   name?: string;
   stage_type?: 'round_robin' | 'knockout';
   order_index?: number;
-  double_round?: boolean;
+  legs?: number;
   team_ids?: number[];
+  expected_participants?: number;
 }
 
 export interface CompetitionStageRuleCreateRequest {
   source_stage_id: number;
   mode: 'table_range' | 'winners' | 'losers';
+  source_round?: number | null;
   rank_from?: number;
   rank_to?: number;
 }
@@ -206,6 +243,7 @@ export interface CompetitionStageRuleCreateResult {
 
 export interface CompetitionPrizeCreateRequest {
   name: string;
+  icon?: string;
   condition_type: 'final_table_range' | 'stage_table_range' | 'stage_winner' | 'stage_loser';
   source_stage_id?: number;
   rank_from?: number;
@@ -219,10 +257,74 @@ export interface CompetitionStageItem {
   stage_type: 'round_robin' | 'knockout';
   status: 'draft' | 'active' | 'done';
   order_index: number;
-  double_round: boolean;
+  legs: number;
+  round_offset: number;
+  planned_rounds: number;
+  expected_participants: number;
+  first_matchday: number | null;
+  last_matchday: number | null;
   participants: CompetitionParticipant[];
   rules_in: CompetitionStageRuleIn[];
   fixtures: { total: number; finished: number };
+}
+
+// ---- guided creation ----
+
+export type WizardPrizeCondition = 'winner' | 'runner_up' | 'rank';
+
+export interface WizardPrizeSpec {
+  name: string;
+  icon?: string;
+  condition: WizardPrizeCondition;
+  rank_from?: number;
+  rank_to?: number;
+}
+
+export interface WizardQualificationSpec {
+  source_stage_id: number;
+  mode: 'table_range' | 'winners' | 'losers';
+  source_round?: number | null;
+  rank_from?: number;
+  rank_to?: number;
+}
+
+export interface CompetitionWizardRequest {
+  name: string;
+  format: 'league' | 'cup' | 'groups_knockout';
+  team_ids?: number[];
+  qualification?: WizardQualificationSpec | null;
+  legs?: number;
+  groups?: number;
+  advance_per_group?: number;
+  points?: { win: number; draw: number; loss: number };
+  start_matchday?: number | null;
+  end_matchday?: number | null;
+  prizes?: WizardPrizeSpec[];
+}
+
+export interface CompetitionWizardPlanStage {
+  name: string;
+  type: 'round_robin' | 'knockout';
+  order_index: number;
+  teams: number;
+  rounds: number;
+  matches: number;
+}
+
+export interface CompetitionWizardPlan {
+  teams: number;
+  stages: CompetitionWizardPlanStage[];
+  total_rounds: number;
+  min_start_matchday: number | null;
+  constraint: string | null;
+  season_real_matchdays: number[];
+}
+
+export interface CompetitionWizardResult {
+  competition: CompetitionItem;
+  stages: CompetitionStageItem[];
+  schedule: CompetitionScheduleApplyResult;
+  resolution: { stages_filled: number; stages_waiting: number };
 }
 
 export interface CompetitionUpdateRequest {
@@ -244,11 +346,18 @@ export interface CompetitionSchedulePreview {
   ends_at: string | null;
   start_matchday: number | null;
   end_matchday: number | null;
+  /** Earliest real matchday allowed by what this competition depends on. */
+  min_start_matchday: number | null;
+  constraints: string[];
+  dependencies: CompetitionDependency[];
   rounds: number[];
+  round_rows: Omit<CompetitionRoundRow, 'real_matchday'>[];
   available_real_matchdays: number[];
+  season_real_matchdays: number[];
   real_competition_season_id: number | null;
   proposed_mapping: Record<string, number>;
   current_mapping: Record<string, number>;
+  warnings: string[];
 }
 
 export interface CompetitionScheduleApplyResult {
@@ -257,6 +366,8 @@ export interface CompetitionScheduleApplyResult {
   rounds: number;
   real_matchdays: number[];
   mapped_rounds: Record<string, number>;
+  min_start_matchday?: number | null;
+  warnings?: string[];
 }
 
 export interface QualificationRuleCreateRequest {

@@ -22,6 +22,9 @@ import type {
   CompetitionStageItem,
   CompetitionUpdateRequest,
   CompetitionTemplateRequest,
+  CompetitionWizardPlan,
+  CompetitionWizardRequest,
+  CompetitionWizardResult,
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueDetail,
@@ -360,6 +363,54 @@ export async function createCompetitionTemplate(_leagueId: number, req: Competit
   return { competition_id: 1, name: req.name, competition_type: req.competition_type, participants: req.team_ids?.length ?? 0, fixtures_created: 1 };
 }
 
+export async function previewCompetitionPlan(
+  _leagueId: number,
+  req: { format: 'league' | 'cup' | 'groups_knockout'; team_ids?: number[]; legs?: number }
+): Promise<CompetitionWizardPlan> {
+  await sleep(60);
+  const teams = req.team_ids?.length ?? 8;
+  const legs = req.legs ?? 1;
+  const rounds = (teams % 2 === 0 ? teams - 1 : teams) * legs;
+  return {
+    teams,
+    stages: [
+      {
+        name: 'Campionato',
+        type: 'round_robin',
+        order_index: 1,
+        teams,
+        rounds,
+        matches: ((teams * (teams - 1)) / 2) * legs,
+      },
+    ],
+    total_rounds: rounds,
+    min_start_matchday: null,
+    constraint: null,
+    season_real_matchdays: Array.from({ length: 38 }, (_, i) => i + 1),
+  };
+}
+
+export async function createCompetitionGuided(
+  leagueId: number,
+  req: CompetitionWizardRequest
+): Promise<CompetitionWizardResult> {
+  await sleep(150);
+  const [competition] = await getCompetitions(leagueId);
+  const stages = await getCompetitionStages(competition.competition_id);
+  return {
+    competition: { ...competition, name: req.name, format: req.format },
+    stages,
+    schedule: {
+      competition_id: competition.competition_id,
+      scheduled_fixtures: 6,
+      rounds: stages.length,
+      real_matchdays: [1, 2, 3],
+      mapped_rounds: { 1: 1, 2: 2, 3: 3 },
+    },
+    resolution: { stages_filled: req.qualification ? 0 : 1, stages_waiting: req.qualification ? 1 : 0 },
+  };
+}
+
 export async function getCompetitions(_leagueId: number): Promise<CompetitionItem[]> {
   await sleep(100);
   return [
@@ -368,7 +419,12 @@ export async function getCompetitions(_leagueId: number): Promise<CompetitionIte
       name: 'Campionato Mock',
       result_view: 'classifica',
       competition_type: 'round_robin',
+      format: 'league',
       status: 'active',
+      structure_locked: false,
+      rounds: [],
+      round_calendar: {},
+      dependencies: [],
       points: { win: 3, draw: 1, loss: 0 },
       starts_at: null,
       ends_at: null,
@@ -389,7 +445,12 @@ export async function updateCompetition(competitionId: number, req: CompetitionU
     name: req.name ?? 'Campionato Mock',
     result_view: 'classifica',
     competition_type: 'round_robin',
+    format: 'league',
     status: req.status ?? 'active',
+    structure_locked: false,
+    rounds: [],
+    round_calendar: {},
+    dependencies: [],
     points: {
       win: req.points_win ?? 3,
       draw: req.points_draw ?? 1,
@@ -437,11 +498,17 @@ export async function previewCompetitionSchedule(
     ends_at: payload.ends_at ?? null,
     start_matchday: null,
     end_matchday: null,
+    min_start_matchday: null,
+    constraints: [],
+    dependencies: [],
     rounds: [1, 2, 3],
+    round_rows: [],
     available_real_matchdays: [24, 25, 26, 27],
+    season_real_matchdays: [24, 25, 26, 27],
     real_competition_season_id: 1,
     proposed_mapping: { 1: 24, 2: 25, 3: 26 },
     current_mapping: { 1: 24, 2: 25, 3: 26 },
+    warnings: [],
   };
 }
 
@@ -465,7 +532,12 @@ export async function getCompetitionStages(_competitionId: number): Promise<Comp
       stage_type: 'round_robin',
       status: 'active',
       order_index: 1,
-      double_round: false,
+      legs: 1,
+      round_offset: 0,
+      planned_rounds: 3,
+      expected_participants: 4,
+      first_matchday: null,
+      last_matchday: null,
       participants: [],
       rules_in: [],
       fixtures: { total: 6, finished: 2 },
@@ -485,7 +557,12 @@ export async function createCompetitionStage(
     stage_type: req.stage_type,
     status: 'draft',
     order_index: req.order_index ?? 1,
-    double_round: req.double_round ?? false,
+    legs: req.legs ?? 1,
+    round_offset: 0,
+    planned_rounds: 1,
+    expected_participants: req.expected_participants ?? 0,
+    first_matchday: null,
+    last_matchday: null,
     participants: [],
     rules_in: [],
     fixtures: { total: 0, finished: 0 },
@@ -504,7 +581,12 @@ export async function updateCompetitionStage(
     stage_type: req.stage_type ?? 'round_robin',
     status: 'draft',
     order_index: req.order_index ?? 1,
-    double_round: req.double_round ?? false,
+    legs: req.legs ?? 1,
+    round_offset: 0,
+    planned_rounds: 1,
+    expected_participants: req.expected_participants ?? 0,
+    first_matchday: null,
+    last_matchday: null,
     participants: [],
     rules_in: [],
     fixtures: { total: 0, finished: 0 },
@@ -536,11 +618,15 @@ export async function createCompetitionPrize(
   return {
     prize_id: Date.now(),
     name: req.name,
+    icon: req.icon ?? '\u{1F3C6}',
     condition_type: req.condition_type,
+    condition_label: req.condition_type,
     source_stage_id: req.source_stage_id ?? null,
     source_stage_name: null,
     rank_from: req.rank_from ?? null,
     rank_to: req.rank_to ?? null,
+    winner_team_ids: [],
+    winner_team_names: [],
   };
 }
 

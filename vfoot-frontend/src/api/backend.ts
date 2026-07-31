@@ -33,6 +33,9 @@ import type {
   CompetitionStageItem,
   CompetitionUpdateRequest,
   CompetitionTemplateRequest,
+  CompetitionWizardPlan,
+  CompetitionWizardRequest,
+  CompetitionWizardResult,
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueDetail,
@@ -505,6 +508,31 @@ export async function createCompetitionTemplate(leagueId: number, req: Competiti
   return parseJsonOrThrow(res);
 }
 
+/** Guided creation: one call builds shape, field, calendar and prizes together. */
+export async function createCompetitionGuided(
+  leagueId: number,
+  req: CompetitionWizardRequest
+): Promise<CompetitionWizardResult> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/competitions/wizard`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function previewCompetitionPlan(
+  leagueId: number,
+  req: Omit<CompetitionWizardRequest, 'name' | 'prizes' | 'points' | 'start_matchday' | 'end_matchday'>
+): Promise<CompetitionWizardPlan> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/competitions/wizard/preview`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function getCompetitions(leagueId: number): Promise<CompetitionItem[]> {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/competitions`, {
     headers: { Accept: 'application/json', ...authHeaders() },
@@ -686,12 +714,12 @@ export async function buildDefaultCompetitionStages(
   competitionId: number,
   allowRepechage = false,
   randomSeed = 42,
-  doubleRound = false
+  legs = 1
 ) {
   const res = await fetch(`${baseUrl()}/competitions/${competitionId}/stages/default-build`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ allow_repechage: allowRepechage, random_seed: randomSeed, double_round: doubleRound }),
+    body: JSON.stringify({ allow_repechage: allowRepechage, random_seed: randomSeed, legs }),
   });
   return parseJsonOrThrow(res);
 }

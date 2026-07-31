@@ -35,6 +35,8 @@ from vfoot.api.league_serializers import (
     CompetitionPrizeCreateSerializer,
     CompetitionUpdateSerializer,
     CompetitionTemplateSerializer,
+    CompetitionWizardPreviewSerializer,
+    CompetitionWizardSerializer,
     CreateAuctionSerializer,
     CreateLeagueSerializer,
     ImportRosterCSVSerializer,
@@ -86,7 +88,18 @@ from vfoot.services.fantasy_simulation import (
     generate_knockout_fixtures,
     generate_round_robin_fixtures,
 )
-from vfoot.services.competition_stages import build_default_stage_graph, resolve_stage
+from vfoot.services import competition_calendar
+from vfoot.services.competition_prizes import describe_condition, prize_winner_team_ids
+from vfoot.services.competition_stages import (
+    MAX_LEGS,
+    build_default_stage_graph,
+    competition_round_rows,
+    recompute_round_layout,
+    resolve_pending_stages,
+    resolve_stage,
+    stage_has_results,
+)
+from vfoot.services.competition_wizard import WizardError, create_competition, qualified_team_count
 from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic_lineup
 from vfoot.services.classic_pagella import get_reference, pagella_for_match
 from vfoot.services.league_decisions import (
@@ -1059,6 +1072,230 @@ class CompetitionTemplateCreateView(APIView):
         )
 
 
+class CompetitionWizardCreateView(APIView):
+    """Create a competition whole: shape, field, calendar and honours in one call."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+
+        s = CompetitionWizardSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        data = s.validated_data
+
+        try:
+            result = create_competition(
+                league,
+                name=data["name"],
+                fmt=data["format"],
+                team_ids=data.get("team_ids"),
+                qualification=data.get("qualification"),
+                legs=data.get("legs", 1),
+                groups=data.get("groups", 1),
+                advance_per_group=data.get("advance_per_group", 2),
+                points=data.get("points"),
+                start_matchday=data.get("start_matchday"),
+                end_matchday=data.get("end_matchday"),
+                prizes=data.get("prizes"),
+                seed=data.get("random_seed", 42),
+            )
+        except WizardError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        comp = result["competition"]
+        return Response(
+            {
+                "competition": _serialize_competition(comp),
+                "stages": _serialize_stages(comp),
+                "schedule": result["schedule"],
+                "resolution": result["resolution"],
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CompetitionWizardPreviewView(APIView):
+    """What a spec would produce, before anything is written.
+
+    The wizard needs to answer "how many rounds is that, and from which real
+    matchday can it start" while the user is still choosing — and the honest way
+    to answer is with the same arithmetic that will build it.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        s = CompetitionWizardPreviewSerializer(data=request.data or {})
+        s.is_valid(raise_exception=True)
+        data = s.validated_data
+
+        fmt = data["format"]
+        legs = max(1, min(MAX_LEGS, data.get("legs", 1)))
+        groups = max(1, data.get("groups", 1))
+        advance = max(1, data.get("advance_per_group", 2))
+
+        qualification = data.get("qualification")
+        floor = None
+        constraint = None
+        if qualification:
+            source_stage = (
+                CompetitionStage.objects.filter(id=qualification.get("source_stage_id"))
+                .select_related("competition")
+                .first()
+            )
+            if source_stage is None or source_stage.competition.league_id != league.id:
+                return Response({"detail": "Stage di qualificazione non valido."}, status=status.HTTP_400_BAD_REQUEST)
+            n = qualified_team_count(
+                source_stage,
+                qualification.get("mode") or CompetitionStageRule.MODE_TABLE_RANGE,
+                qualification.get("rank_from"),
+                qualification.get("rank_to"),
+            )
+            source_comp = source_stage.competition
+            cut = qualification.get("source_round")
+            rows = competition_round_rows(source_comp)
+            valid = {r["round_no"] for r in rows}
+            if cut is not None and int(cut) not in valid:
+                return Response(
+                    {"detail": f"«{source_comp.name}» arriva alla giornata {max(valid) if valid else 0}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            cut = cut or (max(valid) if valid else None)
+            source_md = (source_comp.round_calendar or {}).get(str(cut)) if cut else None
+            if source_md:
+                floor = int(source_md) + 1
+                constraint = (
+                    f"i partecipanti si decidono alla giornata {cut} di «{source_comp.name}» "
+                    f"(giornata reale {source_md})"
+                )
+        else:
+            n = len(
+                list(FantasyTeam.objects.filter(league=league, id__in=data.get("team_ids") or []).values_list("id", flat=True))
+            )
+
+        if n < 2:
+            return Response({"detail": "Servono almeno 2 squadre."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            stages = _plan_preview(fmt, n, legs, groups, advance)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        total_rounds = 0
+        order_spans: dict[int, int] = {}
+        for st in stages:
+            order_spans[st["order_index"]] = max(order_spans.get(st["order_index"], 0), st["rounds"])
+        total_rounds = sum(order_spans.values())
+
+        season = league.reference_season
+        season_matchdays: list[int] = []
+        if season is not None:
+            season_matchdays = [
+                int(md)
+                for md in Match.objects.filter(competition_season_id=season.id, matchday__isnull=False)
+                .order_by("matchday")
+                .values_list("matchday", flat=True)
+                .distinct()
+                if md is not None
+            ]
+
+        return Response(
+            {
+                "teams": n,
+                "stages": stages,
+                "total_rounds": total_rounds,
+                "min_start_matchday": floor,
+                "constraint": constraint,
+                "season_real_matchdays": season_matchdays,
+            }
+        )
+
+
+def _plan_preview(fmt: str, n: int, legs: int, groups: int, advance: int) -> list[dict]:
+    """Stage-by-stage shape of a spec, with no side effects."""
+    from vfoot.services.competition_stages import knockout_stage_name, rounds_per_leg
+
+    def bracket(entry: int, start_order: int) -> list[dict]:
+        out: list[dict] = []
+        order = start_order
+        base = 1
+        while base * 2 <= entry:
+            base *= 2
+        if entry != base:
+            out.append(
+                {
+                    "name": "Turno preliminare",
+                    "type": "knockout",
+                    "order_index": order,
+                    "teams": (entry - base) * 2,
+                    "rounds": 1,
+                    "matches": entry - base,
+                }
+            )
+            order += 1
+        size = base
+        while size >= 2:
+            out.append(
+                {
+                    "name": knockout_stage_name(size),
+                    "type": "knockout",
+                    "order_index": order,
+                    "teams": size,
+                    "rounds": 1,
+                    "matches": size // 2,
+                }
+            )
+            order += 1
+            size //= 2
+        return out
+
+    if fmt == FantasyCompetition.FORMAT_LEAGUE:
+        rounds = rounds_per_leg(n) * legs
+        return [
+            {
+                "name": "Campionato",
+                "type": "round_robin",
+                "order_index": 1,
+                "teams": n,
+                "rounds": rounds,
+                "matches": (n * (n - 1) // 2) * legs,
+            }
+        ]
+
+    if fmt == FantasyCompetition.FORMAT_CUP:
+        return bracket(n, 1)
+
+    if groups > n // 2:
+        raise ValueError("Troppi gironi per il numero di squadre.")
+    qualified = groups * advance
+    if qualified < 2:
+        raise ValueError("Devono qualificarsi almeno 2 squadre.")
+    if qualified > n:
+        raise ValueError("Non possono qualificarsi più squadre di quante partecipano.")
+    out: list[dict] = []
+    for gi in range(groups):
+        size = n // groups + (1 if gi < n % groups else 0)
+        if advance > size:
+            raise ValueError("Da ogni girone non possono passare più squadre di quante lo compongono.")
+        out.append(
+            {
+                "name": "Girone unico" if groups == 1 else f"Girone {chr(ord('A') + gi)}",
+                "type": "round_robin",
+                "order_index": 1,
+                "teams": size,
+                "rounds": rounds_per_leg(size) * legs,
+                "matches": (size * (size - 1) // 2) * legs,
+            }
+        )
+    return out + bracket(qualified, 2)
+
+
 def _result_view(comp: FantasyCompetition) -> str:
     """Which results view a competition needs: a round-robin → 'classifica' (table),
     a knockout → 'tabellone' (bracket), a mix of stages → 'risultati' (both)."""
@@ -1070,18 +1307,37 @@ def _result_view(comp: FantasyCompetition) -> str:
     return "risultati"
 
 
+def _team_names(team_ids: list[int]) -> list[str]:
+    if not team_ids:
+        return []
+    by_id = dict(FantasyTeam.objects.filter(id__in=team_ids).values_list("id", "name"))
+    return [by_id.get(tid, str(tid)) for tid in team_ids]
+
+
 def _serialize_competition(comp: FantasyCompetition) -> dict:
     participants = list(comp.participants.select_related("team", "team__manager__user"))
     rules = list(comp.qualification_rules.select_related("source_competition"))
     prizes = list(comp.prizes.select_related("source_stage"))
     fixture_count = comp.fixtures.count()
     finished_count = comp.fixtures.filter(status=FantasyFixture.STATUS_FINISHED).count()
+    calendar = {str(k): int(v) for k, v in (comp.round_calendar or {}).items() if str(k).isdigit()}
+    rounds = [
+        {**row, "real_matchday": calendar.get(str(row["round_no"]))}
+        for row in competition_round_rows(comp)
+    ]
     return {
         "competition_id": comp.id,
         "name": comp.name,
         "competition_type": comp.competition_type,
+        "format": comp.format,
         "result_view": _result_view(comp),
         "status": comp.status,
+        # Structure is frozen once a result exists: a redraw would erase games that
+        # have been played. The UI reads this to know which edits to offer.
+        "structure_locked": finished_count > 0,
+        "rounds": rounds,
+        "round_calendar": calendar,
+        "dependencies": competition_calendar.dependencies(comp),
         "points": {
             "win": comp.points_win,
             "draw": comp.points_draw,
@@ -1114,27 +1370,17 @@ def _serialize_competition(comp: FantasyCompetition) -> dict:
             }
             for r in rules
         ],
-        "prizes": [
-            {
-                "prize_id": p.id,
-                "name": p.name,
-                "condition_type": p.condition_type,
-                "source_stage_id": p.source_stage_id,
-                "source_stage_name": p.source_stage.name if p.source_stage_id else None,
-                "rank_from": p.rank_from,
-                "rank_to": p.rank_to,
-            }
-            for p in prizes
-        ],
+        "prizes": [_serialize_prize(p) for p in prizes],
         "fixtures": {"total": fixture_count, "finished": finished_count},
     }
 
 
-def _serialize_stage(stage: CompetitionStage) -> dict:
+def _serialize_stage(stage: CompetitionStage, bounds: dict | None = None) -> dict:
     participants = list(stage.participants.select_related("team", "team__manager__user"))
     rules = list(stage.rules_in.select_related("source_stage", "source_stage__competition"))
     fixtures_total = stage.fixtures.count()
     fixtures_finished = stage.fixtures.filter(status=FantasyFixture.STATUS_FINISHED).count()
+    span = bounds or {}
     return {
         "stage_id": stage.id,
         "competition_id": stage.competition_id,
@@ -1142,7 +1388,12 @@ def _serialize_stage(stage: CompetitionStage) -> dict:
         "stage_type": stage.stage_type,
         "status": stage.status,
         "order_index": stage.order_index,
-        "double_round": stage.double_round,
+        "legs": stage.legs,
+        "round_offset": stage.round_offset,
+        "planned_rounds": stage.planned_rounds,
+        "expected_participants": stage.expected_participants,
+        "first_matchday": span.get("first_matchday"),
+        "last_matchday": span.get("last_matchday"),
         "participants": [
             {
                 "team_id": p.team_id,
@@ -1161,6 +1412,7 @@ def _serialize_stage(stage: CompetitionStage) -> dict:
                 "source_competition_id": r.source_stage.competition_id,
                 "source_competition_name": r.source_stage.competition.name,
                 "mode": r.mode,
+                "source_round": r.source_round,
                 "rank_from": r.rank_from,
                 "rank_to": r.rank_to,
             }
@@ -1170,6 +1422,16 @@ def _serialize_stage(stage: CompetitionStage) -> dict:
     }
 
 
+def _serialize_stages(comp: FantasyCompetition) -> list[dict]:
+    bounds = competition_calendar.stage_round_bounds(comp)
+    stages = (
+        CompetitionStage.objects.filter(competition=comp)
+        .prefetch_related("participants__team__manager__user", "rules_in__source_stage__competition", "fixtures")
+        .order_by("order_index", "id")
+    )
+    return [_serialize_stage(s, bounds.get(s.id)) for s in stages]
+
+
 class CompetitionStageListView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -1177,12 +1439,7 @@ class CompetitionStageListView(APIView):
     def get(self, request, competition_id: int):
         comp = get_object_or_404(FantasyCompetition, id=competition_id)
         _membership_or_404(comp.league, request.user.id)
-        stages = (
-            CompetitionStage.objects.filter(competition=comp)
-            .prefetch_related("participants__team__manager__user", "rules_in__source_stage__competition", "fixtures")
-            .order_by("order_index", "id")
-        )
-        return Response([_serialize_stage(s) for s in stages])
+        return Response(_serialize_stages(comp))
 
 
 class CompetitionStageBuildDefaultView(APIView):
@@ -1200,7 +1457,7 @@ class CompetitionStageBuildDefaultView(APIView):
             comp,
             allow_repechage=data.get("allow_repechage", False),
             seed=data.get("random_seed", 42),
-            double_round=data.get("double_round", False),
+            legs=data.get("legs", 1),
         )
         return Response(result, status=status.HTTP_201_CREATED)
 
@@ -1222,7 +1479,7 @@ class CompetitionStageCreateView(APIView):
             name=data["name"],
             stage_type=data["stage_type"],
             order_index=data.get("order_index", 1),
-            double_round=data.get("double_round", False),
+            legs=max(1, min(MAX_LEGS, data.get("legs", 1))),
         )
         team_ids = data.get("team_ids") or []
         valid_team_ids = list(FantasyTeam.objects.filter(league=comp.league, id__in=team_ids).values_list("id", flat=True))
@@ -1232,13 +1489,21 @@ class CompetitionStageCreateView(APIView):
                 for tid in valid_team_ids
             ]
         )
+        if data.get("expected_participants"):
+            stage.expected_participants = int(data["expected_participants"])
+            stage.save(update_fields=["expected_participants"])
 
         seed_raw = request.data.get("random_seed", 42)
         try:
             seed = int(seed_raw)
         except (TypeError, ValueError):
             seed = 42
+        # A new stage renumbers everything after it: layout first, fixtures second.
+        recompute_round_layout(comp)
+        stage.refresh_from_db()
         resolve_stage(stage, seed=seed)
+        competition_calendar.schedule(comp)
+        stage.refresh_from_db()
         return Response(_serialize_stage(stage), status=status.HTTP_201_CREATED)
 
 
@@ -1254,17 +1519,34 @@ class CompetitionStageDetailUpdateView(APIView):
         s.is_valid(raise_exception=True)
         data = s.validated_data
 
+        structural = {"stage_type", "order_index", "legs", "team_ids", "expected_participants"} & set(data)
+        if structural and stage_has_results(stage):
+            return Response(
+                {
+                    "detail": (
+                        "Questo turno ha già risultati: si può cambiare solo il nome. "
+                        "Per rifarne la struttura elimina la competizione e ricreala."
+                    ),
+                    "locked_fields": sorted(structural),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         changed_fields: list[str] = []
-        for field in ["name", "stage_type", "order_index", "double_round"]:
+        for field in ["name", "stage_type", "order_index", "legs", "expected_participants"]:
             if field in data:
-                setattr(stage, field, data[field])
+                value = max(1, min(MAX_LEGS, data[field])) if field == "legs" else data[field]
+                setattr(stage, field, value)
                 changed_fields.append(field)
         if changed_fields:
             stage.save(update_fields=changed_fields)
-        # Re-generate fixtures if the leg setting changed and the stage already
-        # has its participants resolved (so toggling andata/ritorno takes effect).
-        if "double_round" in data and "team_ids" not in data:
-            resolve_stage(stage, seed=int(data.get("random_seed", 42)))
+        # Rounds move when the number of legs or the stage order changes, and every
+        # later stage moves with them.
+        if {"legs", "order_index", "stage_type", "expected_participants"} & set(data):
+            recompute_round_layout(stage.competition)
+            stage.refresh_from_db()
+            if "team_ids" not in data:
+                resolve_stage(stage, seed=int(data.get("random_seed", 42)))
 
         if "team_ids" in data:
             team_ids = data.get("team_ids") or []
@@ -1295,9 +1577,14 @@ class CompetitionStageDetailUpdateView(APIView):
             )
 
             seed = int(data.get("random_seed", 42))
+            recompute_round_layout(stage.competition)
+            stage.refresh_from_db()
             resolve_stage(stage, seed=seed)
 
-        return Response(_serialize_stage(stage))
+        competition_calendar.schedule(stage.competition)
+        stage.refresh_from_db()
+        bounds = competition_calendar.stage_round_bounds(stage.competition)
+        return Response(_serialize_stage(stage, bounds.get(stage.id)))
 
     @transaction.atomic
     def delete(self, request, stage_id: int):
@@ -1351,7 +1638,10 @@ class CompetitionStageDetailUpdateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        competition = stage.competition
         stage.delete()
+        recompute_round_layout(competition)
+        competition_calendar.schedule(competition)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -1370,24 +1660,45 @@ class CompetitionStageAddRuleView(APIView):
         source_stage = get_object_or_404(CompetitionStage, id=data["source_stage_id"])
         if source_stage.competition.league_id != stage.competition.league_id:
             return Response({"detail": "Source and target stages must belong to the same league."}, status=status.HTTP_400_BAD_REQUEST)
+        if source_stage.id == stage.id:
+            return Response({"detail": "Uno turno non può qualificare se stesso."}, status=status.HTTP_400_BAD_REQUEST)
+
+        source_round = data.get("source_round")
+        if source_round is not None:
+            valid = {r["round_no"] for r in competition_round_rows(source_stage.competition)}
+            if int(source_round) not in valid:
+                return Response(
+                    {
+                        "detail": (
+                            f"«{source_stage.competition.name}» arriva alla giornata "
+                            f"{max(valid) if valid else 0}: la {source_round}ª non esiste."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         rule = CompetitionStageRule.objects.create(
             target_stage=stage,
             source_stage=source_stage,
             mode=data["mode"],
+            source_round=source_round,
             rank_from=data.get("rank_from"),
             rank_to=data.get("rank_to"),
         )
         result = resolve_stage(stage, seed=data.get("random_seed", 42))
+        # A dependency moves the earliest matchday this competition may start on.
+        schedule_result = competition_calendar.schedule(stage.competition)
         return Response(
             {
                 "rule_id": rule.id,
                 "target_stage_id": stage.id,
                 "source_stage_id": source_stage.id,
                 "mode": rule.mode,
+                "source_round": rule.source_round,
                 "rank_from": rule.rank_from,
                 "rank_to": rule.rank_to,
                 "resolve": result,
+                "schedule": schedule_result,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -1411,14 +1722,19 @@ class CompetitionStageResolveView(APIView):
 
 
 def _serialize_prize(prize: CompetitionPrize) -> dict:
+    winners = prize_winner_team_ids(prize)
     return {
         "prize_id": prize.id,
         "name": prize.name,
+        "icon": prize.icon or "🏆",
         "condition_type": prize.condition_type,
+        "condition_label": describe_condition(prize),
         "source_stage_id": prize.source_stage_id,
         "source_stage_name": prize.source_stage.name if prize.source_stage_id else None,
         "rank_from": prize.rank_from,
         "rank_to": prize.rank_to,
+        "winner_team_ids": winners,
+        "winner_team_names": _team_names(winners),
     }
 
 
@@ -1465,6 +1781,7 @@ class CompetitionPrizeListCreateView(APIView):
         prize = CompetitionPrize.objects.create(
             competition=comp,
             name=data["name"],
+            icon=data.get("icon") or "🏆",
             condition_type=cond,
             source_stage=source_stage,
             rank_from=rank_from,
@@ -1572,6 +1889,7 @@ def _resolve_rule_participants_and_regenerate(competition: FantasyCompetition) -
         # top-N) gets a proper structure once its participants resolve.
         result = build_default_stage_graph(competition)
         fixtures_created = result.get("fixtures_created", 0)
+        competition_calendar.schedule(competition)
 
     return {
         "competition_id": competition.id,
@@ -1676,168 +1994,7 @@ class LeagueFixturesView(APIView):
 
 
 def _competition_round_nos(comp: FantasyCompetition) -> list[int]:
-    return sorted(set(FantasyFixture.objects.filter(competition=comp).values_list("round_no", flat=True)))
-
-
-def _pick_real_competition_and_matchdays(starts_at, ends_at):
-    if not starts_at or not ends_at:
-        return None, []
-
-    base = Match.objects.filter(
-        kickoff__date__gte=starts_at,
-        kickoff__date__lte=ends_at,
-        matchday__isnull=False,
-    )
-    if not base.exists():
-        return None, []
-
-    top = (
-        base.values("competition_season_id")
-        .annotate(c=Count("id"))
-        .order_by("-c", "competition_season_id")
-        .first()
-    )
-    if not top:
-        return None, []
-    csid = int(top["competition_season_id"])
-    matchdays = list(
-        base.filter(competition_season_id=csid)
-        .order_by("matchday")
-        .values_list("matchday", flat=True)
-        .distinct()
-    )
-    return csid, [int(x) for x in matchdays if x is not None]
-
-
-def _reference_matchdays(comp: FantasyCompetition, start_md=None, end_md=None):
-    """Real matchdays available for this competition, taken from the league's
-    reference season within the [start, end] matchday span. Falls back to the
-    legacy date-window inference when the league has no reference season set."""
-    season = comp.league.reference_season
-    if season is None:
-        return _pick_real_competition_and_matchdays(comp.starts_at, comp.ends_at)
-    csid = season.id
-    lo = start_md if start_md is not None else comp.start_matchday
-    hi = end_md if end_md is not None else comp.end_matchday
-    qs = Match.objects.filter(competition_season_id=csid, matchday__isnull=False)
-    if lo is not None:
-        qs = qs.filter(matchday__gte=lo)
-    if hi is not None:
-        qs = qs.filter(matchday__lte=hi)
-    matchdays = list(qs.order_by("matchday").values_list("matchday", flat=True).distinct())
-    return csid, [int(x) for x in matchdays if x is not None]
-
-
-def _current_round_mapping(comp: FantasyCompetition) -> dict[int, int]:
-    rows = (
-        FantasyFixture.objects.filter(competition=comp, fantasy_matchday__isnull=False)
-        .select_related("fantasy_matchday")
-        .values_list("round_no", "fantasy_matchday__real_matchday")
-        .distinct()
-    )
-    mapping: dict[int, int] = {}
-    for rno, real_md in rows:
-        if rno is None or real_md is None:
-            continue
-        mapping[int(rno)] = int(real_md)
-    return mapping
-
-
-def _build_uniform_round_mapping(round_nos: list[int], real_matchdays: list[int]) -> dict[int, int]:
-    mapping: dict[int, int] = {}
-    if not round_nos or not real_matchdays:
-        return mapping
-    if len(round_nos) == 1:
-        mapping[round_nos[0]] = real_matchdays[0]
-        return mapping
-    rm = len(real_matchdays)
-    rr = len(round_nos)
-    for idx, rno in enumerate(round_nos):
-        ridx = int(round((idx * (rm - 1)) / max(1, rr - 1)))
-        mapping[rno] = real_matchdays[min(max(ridx, 0), rm - 1)]
-    return mapping
-
-
-def _schedule_preview(comp: FantasyCompetition, start_md=None, end_md=None) -> dict:
-    round_nos = _competition_round_nos(comp)
-    csid, real_matchdays = _reference_matchdays(comp, start_md, end_md)
-    uniform = _build_uniform_round_mapping(round_nos, real_matchdays)
-    current = _current_round_mapping(comp)
-    return {
-        "competition_id": comp.id,
-        "competition_name": comp.name,
-        "starts_at": comp.starts_at.isoformat() if comp.starts_at else None,
-        "ends_at": comp.ends_at.isoformat() if comp.ends_at else None,
-        "start_matchday": start_md if start_md is not None else comp.start_matchday,
-        "end_matchday": end_md if end_md is not None else comp.end_matchday,
-        "rounds": round_nos,
-        "available_real_matchdays": real_matchdays,
-        "real_competition_season_id": csid,
-        "proposed_mapping": uniform,
-        "current_mapping": current,
-    }
-
-
-@transaction.atomic
-def _schedule_competition_rounds(
-    comp: FantasyCompetition,
-    round_mapping: dict[int, int] | None = None,
-    start_md=None,
-    end_md=None,
-) -> dict:
-    round_nos = _competition_round_nos(comp)
-    if not round_nos:
-        return {"competition_id": comp.id, "scheduled_fixtures": 0, "rounds": 0, "real_matchdays": []}
-
-    # Persist the span so later reschedules/previews are consistent.
-    span_fields = []
-    if start_md is not None and start_md != comp.start_matchday:
-        comp.start_matchday = start_md
-        span_fields.append("start_matchday")
-    if end_md is not None and end_md != comp.end_matchday:
-        comp.end_matchday = end_md
-        span_fields.append("end_matchday")
-    if span_fields:
-        comp.save(update_fields=span_fields)
-
-    csid, real_matchdays = _reference_matchdays(comp, start_md, end_md)
-    if not csid or not real_matchdays:
-        return {"competition_id": comp.id, "scheduled_fixtures": 0, "rounds": len(round_nos), "real_matchdays": []}
-
-    mapping = _build_uniform_round_mapping(round_nos, real_matchdays)
-    if round_mapping:
-        valid = set(real_matchdays)
-        for rno, md in round_mapping.items():
-            if rno in round_nos and md in valid:
-                mapping[rno] = md
-
-    scheduled = 0
-    for rno in round_nos:
-        real_md = mapping[rno]
-        fmd, _ = FantasyMatchday.objects.get_or_create(
-            league=comp.league,
-            real_competition_season_id=csid,
-            real_matchday=real_md,
-        )
-        kickoff = (
-            Match.objects.filter(competition_season_id=csid, matchday=real_md, kickoff__isnull=False)
-            .order_by("kickoff")
-            .values_list("kickoff", flat=True)
-            .first()
-        )
-        updated = FantasyFixture.objects.filter(competition=comp, round_no=rno).update(
-            fantasy_matchday=fmd,
-            kickoff=kickoff,
-        )
-        scheduled += int(updated or 0)
-
-    return {
-        "competition_id": comp.id,
-        "scheduled_fixtures": scheduled,
-        "rounds": len(round_nos),
-        "real_matchdays": real_matchdays,
-        "mapped_rounds": mapping,
-    }
+    return [row["round_no"] for row in competition_round_rows(comp)]
 
 
 def _real_matchday_stats(real_competition_season_id: int, real_matchday: int) -> dict:
@@ -2092,6 +2249,15 @@ class LeagueMatchdayConcludeView(APIView):
             result = resolve_stage(target, seed=42)
             resolved_targets.append(result)
 
+        # A cup fed by "the table after round 7" hangs off a source stage that is
+        # NOT done — the championship keeps going. So after every conclusion, ask
+        # every competition of the league whether anything it was waiting for has
+        # now happened; the ones with nothing pending cost a single query.
+        for other in FantasyCompetition.objects.filter(league=league):
+            filled = resolve_pending_stages(other, seed=42)
+            if filled["stages_filled"]:
+                resolved_targets.append({"competition_id": other.id, **filled})
+
         md.status = FantasyMatchday.STATUS_CONCLUDED
         md.concluded_at = timezone.now()
         md.concluded_by = request.user
@@ -2335,7 +2501,7 @@ class CompetitionScheduleView(APIView):
                 except (TypeError, ValueError):
                     continue
                 parsed_mapping[rno] = md
-        result = _schedule_competition_rounds(
+        result = competition_calendar.schedule(
             comp, round_mapping=parsed_mapping or None, start_md=start_md, end_md=end_md
         )
         return Response(result)
@@ -2351,7 +2517,11 @@ class CompetitionSchedulePreviewView(APIView):
         s = CompetitionSchedulePreviewSerializer(data=request.data or {})
         s.is_valid(raise_exception=True)
         data = s.validated_data
-        return Response(_schedule_preview(comp, start_md=data.get("start_matchday"), end_md=data.get("end_matchday")))
+        return Response(
+            competition_calendar.preview(
+                comp, start_md=data.get("start_matchday"), end_md=data.get("end_matchday")
+            )
+        )
 
 
 class CompetitionAddQualificationRuleView(APIView):

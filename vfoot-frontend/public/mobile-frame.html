@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  Banco di prova mobile: la finestra del browser non si ridimensiona sotto
+  automazione, quindi il layout stretto si guarda dentro un iframe da 390px
+  (iPhone 14). Solo strumento di sviluppo: sta in public/ perche' deve essere
+  servito dalla stessa origine dell'app, altrimenti l'iframe non parte.
+
+  Uso: /mobile-frame.html?p=/league-admin%3Ftab%3Dleague
+-->
+<meta charset="utf-8" />
+<title>vfoot · anteprima mobile</title>
+<style>
+  body { margin: 0; background: #0f172a; font: 13px system-ui, sans-serif; color: #cbd5e1; }
+  header { display: flex; gap: 8px; align-items: center; padding: 8px 12px; }
+  input { flex: 1; padding: 6px 8px; border-radius: 8px; border: 1px solid #334155;
+          background: #1e293b; color: #e2e8f0; }
+  .stage { display: flex; justify-content: center; padding: 0 0 16px; }
+  iframe { width: 390px; height: 844px; border: 8px solid #1e293b; border-radius: 28px;
+           background: #fff; }
+</style>
+<header>
+  <span>390 × 844</span>
+  <input id="path" />
+  <button onclick="go()">vai</button>
+</header>
+<div class="stage"><iframe id="f"></iframe></div>
+<script>
+  const params = new URLSearchParams(location.search);
+  const start = params.get('p') || '/home';
+  document.getElementById('path').value = start;
+  document.getElementById('f').src = start;
+  function go() {
+    document.getElementById('f').src = document.getElementById('path').value;
+  }
+</script>

@@ -1,84 +1,80 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  addCompetitionRule,
-  buildDefaultCompetitionStages,
-  createCompetitionTemplate,
+  createCompetitionGuided,
   getCompetitions,
-  getCompetitionStages,
   getLeagueDetail,
   getRealSeasons,
-  scheduleCompetition,
+  previewCompetitionPlan,
   setLeagueReferenceSeason,
-  updateCompetition,
 } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import type {
   CompetitionItem,
-  CompetitionStageItem,
+  CompetitionRoundRow,
+  CompetitionWizardPlan,
   LeagueDetail,
   RealSeasonItem,
   ReferenceSeason,
+  WizardPrizeSpec,
 } from '../types/league';
 
-type TemplateKind = 'round_robin' | 'knockout';
-type ParticipantsSource = 'manual' | 'rule';
-type RuleMode = 'table_range' | 'winner' | 'loser';
+type Format = 'league' | 'cup' | 'groups_knockout';
+type ParticipantsSource = 'teams' | 'qualified';
 
-// ---- preview math (mirrors backend generators, purely for instant feedback) ----
+const PRIZE_ICONS = ['🏆', '🥇', '🥈', '🥉', '🛡️', '⭐', '👑', '🎖️', '🐐', '💩'];
 
-function floorPow2(n: number): number {
-  let p = 1;
-  while (p * 2 <= n) p *= 2;
-  return p;
-}
+const FORMATS: { id: Format; emoji: string; title: string; blurb: string }[] = [
+  {
+    id: 'league',
+    emoji: '🛡️',
+    title: 'Campionato',
+    blurb: 'Tutti contro tutti, classifica a punti. Scegli quante volte girare.',
+  },
+  {
+    id: 'cup',
+    emoji: '🏆',
+    title: 'Coppa',
+    blurb: 'Eliminazione diretta. Turno preliminare automatico se non siete potenza di 2.',
+  },
+  {
+    id: 'groups_knockout',
+    emoji: '🌍',
+    title: 'Gironi + playoff',
+    blurb: 'Prima un girone, poi le migliori si giocano il titolo agli scontri diretti.',
+  },
+];
 
-function roundRobinPreview(n: number, double: boolean) {
-  if (n < 2) return null;
-  const baseRounds = n % 2 === 0 ? n - 1 : n;
-  const baseMatches = (n * (n - 1)) / 2;
-  return { rounds: baseRounds * (double ? 2 : 1), matches: baseMatches * (double ? 2 : 1) };
-}
-
-function knockoutPreview(n: number) {
-  if (n < 2) return null;
-  const base = floorPow2(n);
-  const eliminate = n - base; // play-in matches needed to reach a power of two
-  const stages: string[] = [];
-  if (eliminate > 0) stages.push(`Turno preliminare · ${eliminate} ${eliminate === 1 ? 'spareggio' : 'spareggi'}`);
-  let size = base;
-  while (size >= 2) {
-    const label =
-      size === 2 ? 'Finale' : size === 4 ? 'Semifinali' : size === 8 ? 'Quarti' : size === 16 ? 'Ottavi' : `Round of ${size}`;
-    stages.push(`${label} · ${size / 2} ${size / 2 === 1 ? 'gara' : 'gare'}`);
-    size = Math.floor(size / 2);
-  }
-  return { base, eliminate, stages };
-}
+const LEG_LABELS: Record<number, string> = {
+  1: 'Sola andata',
+  2: 'Andata e ritorno',
+  3: 'Tre tornate',
+  4: 'Quattro tornate',
+  5: 'Cinque tornate',
+};
 
 // ---- small UI atoms ----
 
-function StepDots({ step }: { step: number }) {
-  const labels = ['Template', 'Configura', 'Rivedi'];
+function StepDots({ step, labels }: { step: number; labels: string[] }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5 overflow-x-auto">
       {labels.map((label, i) => {
         const n = i + 1;
         const active = n === step;
         const done = n < step;
         return (
-          <div key={label} className="flex items-center gap-2">
+          <div key={label} className="flex shrink-0 items-center gap-1.5">
             <div
               className={
-                'flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ' +
+                'flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ' +
                 (active ? 'bg-slate-900 text-white' : done ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-500')
               }
             >
               {done ? '✓' : n}
             </div>
-            <span className={'text-sm ' + (active ? 'font-semibold text-slate-900' : 'text-slate-400')}>{label}</span>
-            {n < labels.length ? <span className="mx-1 text-slate-300">→</span> : null}
+            <span className={'text-xs ' + (active ? 'font-semibold text-slate-900' : 'text-slate-400')}>{label}</span>
+            {n < labels.length ? <span className="text-slate-300">→</span> : null}
           </div>
         );
       })}
@@ -86,7 +82,7 @@ function StepDots({ step }: { step: number }) {
   );
 }
 
-function TemplateCard({
+function ChoiceCard({
   active,
   emoji,
   title,
@@ -104,59 +100,57 @@ function TemplateCard({
       type="button"
       onClick={onClick}
       className={
-        'flex w-full flex-col items-start gap-2 rounded-2xl border-2 p-5 text-left transition ' +
+        'flex w-full items-start gap-3 rounded-2xl border-2 p-4 text-left transition ' +
         (active ? 'border-slate-900 bg-slate-50 shadow-card' : 'border-slate-200 bg-white hover:border-slate-400')
       }
     >
-      <span className="text-3xl">{emoji}</span>
-      <span className="text-base font-bold text-slate-900">{title}</span>
-      <span className="text-sm text-slate-500">{blurb}</span>
+      <span className="text-2xl leading-none">{emoji}</span>
+      <span className="min-w-0">
+        <span className="block text-sm font-bold text-slate-900">{title}</span>
+        <span className="mt-0.5 block text-xs text-slate-500">{blurb}</span>
+      </span>
     </button>
   );
 }
 
-// ---- structure visualization (the "see what you created" graph) ----
-
-function StageFlow({ stages }: { stages: CompetitionStageItem[] }) {
-  const sorted = [...stages].sort((a, b) => a.order_index - b.order_index);
-  if (!sorted.length) {
-    return (
-      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
-        Nessuno stage ancora: i partecipanti verranno qualificati da un'altra competizione e la struttura sarà generata
-        quando quella competizione raggiungerà la giornata indicata.
-      </div>
-    );
-  }
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1">
-      {sorted.map((s, i) => (
-        <div key={s.stage_id}>
-          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">
-                {s.order_index}
-              </div>
-              <div>
-                <div className="text-sm font-semibold text-slate-900">{s.name}</div>
-                <div className="mt-0.5 flex items-center gap-1.5">
-                  {/* The words the wizard itself used two screens earlier. A
-                      confirmation that renames what you just chose reads as a
-                      different thing from the one you asked for. */}
-                  <Badge tone={s.stage_type === 'knockout' ? 'amber' : 'blue'}>
-                    {s.stage_type === 'knockout' ? 'Eliminazione diretta' : 'Tutti contro tutti'}
-                  </Badge>
-                  {s.double_round ? <Badge tone="slate">Andata/Ritorno</Badge> : null}
-                </div>
-              </div>
-            </div>
-            <div className="text-right text-xs text-slate-500">
-              <div>{s.participants.length} squadre</div>
-              <div>{s.fixtures.total} gare</div>
+    <label className="block">
+      <span className="text-xs font-semibold text-slate-500">{label}</span>
+      <div className="mt-1">{children}</div>
+      {hint ? <span className="mt-1 block text-[11px] text-slate-400">{hint}</span> : null}
+    </label>
+  );
+}
+
+const inputCls = 'w-full rounded-xl border border-slate-200 px-3 py-2 text-sm';
+
+/** The shape the wizard is about to build, said in rounds and matches. */
+function PlanSummary({ plan }: { plan: CompetitionWizardPlan }) {
+  return (
+    <div className="space-y-1.5">
+      {plan.stages.map((s, i) => (
+        <div key={`${s.name}-${i}`} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-slate-900">{s.name}</div>
+            <div className="mt-0.5">
+              <Badge tone={s.type === 'knockout' ? 'amber' : 'blue'}>
+                {s.type === 'knockout' ? 'Eliminazione diretta' : 'Tutti contro tutti'}
+              </Badge>
             </div>
           </div>
-          {i < sorted.length - 1 ? <div className="py-0.5 text-center text-slate-300">↓</div> : null}
+          <div className="shrink-0 text-right text-[11px] text-slate-500">
+            <div>{s.teams} squadre</div>
+            <div>
+              {s.rounds} {s.rounds === 1 ? 'giornata' : 'giornate'} · {s.matches} {s.matches === 1 ? 'gara' : 'gare'}
+            </div>
+          </div>
         </div>
       ))}
+      <div className="pt-1 text-xs text-slate-500">
+        In tutto <b className="text-slate-800">{plan.total_rounds}</b>{' '}
+        {plan.total_rounds === 1 ? 'giornata' : 'giornate'} da collocare sul calendario reale.
+      </div>
     </div>
   );
 }
@@ -169,45 +163,44 @@ export default function CompetitionCreatePage() {
   const [competitions, setCompetitions] = useState<CompetitionItem[]>([]);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  // real-season reference (league-level) + per-competition matchday span
   const [realSeasons, setRealSeasons] = useState<RealSeasonItem[]>([]);
   const [refSeason, setRefSeason] = useState<ReferenceSeason | null>(null);
   const [savingSeason, setSavingSeason] = useState(false);
-  const [startMd, setStartMd] = useState('1');
-  const [endMd, setEndMd] = useState('');
 
   const [step, setStep] = useState(1);
-  const [template, setTemplate] = useState<TemplateKind | null>(null);
+  const [format, setFormat] = useState<Format | null>(null);
   const [name, setName] = useState('');
 
   // participants
-  const [source, setSource] = useState<ParticipantsSource>('manual');
+  const [source, setSource] = useState<ParticipantsSource>('teams');
   const [selectedTeamIds, setSelectedTeamIds] = useState<number[]>([]);
 
-  // round-robin format
-  const [doubleRound, setDoubleRound] = useState(false);
+  // format options
+  const [legs, setLegs] = useState(1);
+  const [groups, setGroups] = useState(1);
+  const [advance, setAdvance] = useState(2);
   const [pointsWin, setPointsWin] = useState(3);
   const [pointsDraw, setPointsDraw] = useState(1);
   const [pointsLoss, setPointsLoss] = useState(0);
 
-  // qualification rule (rule-fed)
-  const [ruleSourceCompId, setRuleSourceCompId] = useState<number | null>(null);
-  const [ruleMode, setRuleMode] = useState<RuleMode>('table_range');
-  const [ruleRankFrom, setRuleRankFrom] = useState('1');
-  const [ruleRankTo, setRuleRankTo] = useState('4');
-  const [ruleUseRound, setRuleUseRound] = useState(false);
-  const [ruleSourceRound, setRuleSourceRound] = useState('19');
+  // qualification
+  const [qualStageId, setQualStageId] = useState<number | null>(null);
+  const [qualRound, setQualRound] = useState<number | null>(null);
+  const [qualRankFrom, setQualRankFrom] = useState(1);
+  const [qualRankTo, setQualRankTo] = useState(4);
 
+  // calendar + prizes
+  const [startMd, setStartMd] = useState<number | null>(null);
+  const [endMd, setEndMd] = useState<number | null>(null);
+  const [prizes, setPrizes] = useState<WizardPrizeSpec[]>([]);
+
+  const [plan, setPlan] = useState<CompetitionWizardPlan | null>(null);
+  const [planErr, setPlanErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<{
-    compId: number;
-    stages: CompetitionStageItem[];
-    ruleFed: boolean;
-    scheduledRounds?: number;
-  } | null>(null);
 
   const isAdmin = selectedLeague?.role === 'admin';
+  const teams = detail?.teams ?? [];
 
   useEffect(() => {
     setDetail(null);
@@ -227,7 +220,7 @@ export default function CompetitionCreatePage() {
         setCompetitions(comps);
         setRealSeasons(seasons);
         setRefSeason(d.reference_season);
-        setSelectedTeamIds(d.teams.map((t) => t.team_id)); // default: all teams
+        setSelectedTeamIds(d.teams.map((t) => t.team_id));
       } catch (e) {
         if (alive) setLoadErr(e instanceof Error ? e.message : 'Errore di caricamento.');
       }
@@ -237,14 +230,83 @@ export default function CompetitionCreatePage() {
     };
   }, [selectedLeagueId]);
 
-  const teams = detail?.teams ?? [];
-  const nTeams = source === 'manual' ? selectedTeamIds.length : 0;
+  /** Every round of every existing competition, as a qualification source. */
+  const qualifiableRounds = useMemo(() => {
+    const out: { compName: string; row: CompetitionRoundRow }[] = [];
+    for (const c of competitions) {
+      for (const row of c.rounds ?? []) {
+        if (row.stage_id == null) continue;
+        out.push({ compName: c.name, row });
+      }
+    }
+    return out;
+  }, [competitions]);
 
-  const preview = useMemo(() => {
-    if (template === 'round_robin') return roundRobinPreview(nTeams, doubleRound);
-    if (template === 'knockout') return knockoutPreview(nTeams);
-    return null;
-  }, [template, nTeams, doubleRound]);
+  const selectedQualRound = useMemo(
+    () => qualifiableRounds.find((r) => r.row.stage_id === qualStageId && r.row.round_no === qualRound) ?? null,
+    [qualifiableRounds, qualStageId, qualRound]
+  );
+
+  const qualification = useMemo(() => {
+    if (source !== 'qualified' || qualStageId == null) return null;
+    return {
+      source_stage_id: qualStageId,
+      mode: 'table_range' as const,
+      source_round: qualRound,
+      rank_from: qualRankFrom,
+      rank_to: qualRankTo,
+    };
+  }, [source, qualStageId, qualRound, qualRankFrom, qualRankTo]);
+
+  const qualifiedCount = Math.max(0, qualRankTo - qualRankFrom + 1);
+  const teamCount = source === 'teams' ? selectedTeamIds.length : qualifiedCount;
+
+  // Ask the backend what this spec produces: the same arithmetic that will build it.
+  const refreshPlan = useCallback(async () => {
+    if (!selectedLeagueId || !format) return;
+    if (source === 'teams' && selectedTeamIds.length < 2) {
+      setPlan(null);
+      return;
+    }
+    if (source === 'qualified' && qualStageId == null) {
+      setPlan(null);
+      return;
+    }
+    setPlanErr(null);
+    try {
+      const p = await previewCompetitionPlan(selectedLeagueId, {
+        format,
+        team_ids: source === 'teams' ? selectedTeamIds : undefined,
+        qualification,
+        legs,
+        groups,
+        advance_per_group: advance,
+      });
+      setPlan(p);
+      setStartMd((cur) => {
+        const floor = p.min_start_matchday ?? 1;
+        if (cur == null || cur < floor) return floor;
+        return cur;
+      });
+    } catch (e) {
+      setPlan(null);
+      setPlanErr(e instanceof Error ? e.message : 'Anteprima non disponibile.');
+    }
+  }, [selectedLeagueId, format, source, selectedTeamIds, qualification, legs, groups, advance, qualStageId]);
+
+  useEffect(() => {
+    void refreshPlan();
+  }, [refreshPlan]);
+
+  // Prizes are proposed the moment a format is chosen; the user edits or drops them.
+  useEffect(() => {
+    if (!format) return;
+    setPrizes(
+      format === 'league'
+        ? [{ name: 'Scudetto', icon: '🏆', condition: 'winner' }]
+        : [{ name: 'Coppa', icon: '🏆', condition: 'winner' }]
+    );
+  }, [format]);
 
   function toggleTeam(id: number) {
     setSelectedTeamIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -264,74 +326,39 @@ export default function CompetitionCreatePage() {
     }
   }
 
-  const canCreate =
-    !!template &&
-    name.trim().length > 0 &&
-    (source === 'manual' ? selectedTeamIds.length >= 2 : ruleSourceCompId != null);
+  const issues = useMemo(() => {
+    const out: string[] = [];
+    if (!name.trim()) out.push('dai un nome alla competizione');
+    if (source === 'teams' && selectedTeamIds.length < 2) out.push('scegli almeno 2 squadre');
+    if (source === 'qualified' && qualStageId == null) out.push("scegli da dove arrivano i partecipanti");
+    if (source === 'qualified' && qualifiedCount < 2) out.push('devono qualificarsi almeno 2 squadre');
+    if (planErr) out.push(planErr.toLowerCase());
+    return out;
+  }, [name, source, selectedTeamIds, qualStageId, qualifiedCount, planErr]);
 
   async function handleCreate() {
-    if (!selectedLeagueId || !template || !canCreate) return;
+    if (!selectedLeagueId || !format) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await createCompetitionTemplate(selectedLeagueId, {
+      const res = await createCompetitionGuided(selectedLeagueId, {
         name: name.trim(),
-        competition_type: template,
-        team_ids: source === 'manual' ? selectedTeamIds : undefined,
-        container_only: source === 'rule',
+        format,
+        team_ids: source === 'teams' ? selectedTeamIds : undefined,
+        qualification,
+        legs,
+        groups,
+        advance_per_group: advance,
+        points: { win: pointsWin, draw: pointsDraw, loss: pointsLoss },
+        start_matchday: startMd,
+        end_matchday: endMd,
+        prizes: prizes.filter((p) => p.name.trim()),
       });
-      const compId: number = res.competition_id;
-
-      if (template === 'round_robin' && (pointsWin !== 3 || pointsDraw !== 1 || pointsLoss !== 0)) {
-        await updateCompetition(compId, { points_win: pointsWin, points_draw: pointsDraw, points_loss: pointsLoss });
-      }
-
-      let ruleFed = false;
-      let scheduledRounds: number | undefined;
-      const span = {
-        start_matchday: Number(startMd) || 1,
-        end_matchday: endMd ? Number(endMd) : null,
-      };
-      if (source === 'manual') {
-        await buildDefaultCompetitionStages(compId, false, 42, template === 'round_robin' ? doubleRound : false);
-        // Auto-map the competition rounds onto the league's reference-season
-        // real matchdays within the chosen span.
-        if (refSeason) {
-          const r = await scheduleCompetition(compId, span);
-          scheduledRounds = r.rounds;
-        }
-      } else if (ruleSourceCompId != null) {
-        ruleFed = true;
-        await addCompetitionRule(compId, {
-          source_competition_id: ruleSourceCompId,
-          source_stage: 'final',
-          source_round: ruleUseRound ? Number(ruleSourceRound) || null : null,
-          mode: ruleMode,
-          rank_from: ruleMode === 'table_range' ? Number(ruleRankFrom) || 1 : undefined,
-          rank_to: ruleMode === 'table_range' ? Number(ruleRankTo) || Number(ruleRankFrom) || 1 : undefined,
-        });
-        // No fixtures yet — just remember the span for when participants resolve.
-        if (refSeason) await updateCompetition(compId, span);
-      }
-
-      const stages = await getCompetitionStages(compId);
-      setCreated({ compId, stages, ruleFed, scheduledRounds });
+      navigate(`/league-admin/competitions/${res.competition.competition_id}?created=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Creazione fallita.');
-    } finally {
       setBusy(false);
     }
-  }
-
-  function resetForm() {
-    setCreated(null);
-    setStep(1);
-    setTemplate(null);
-    setName('');
-    setSource('manual');
-    setSelectedTeamIds(teams.map((t) => t.team_id));
-    setDoubleRound(false);
-    setRuleSourceCompId(null);
   }
 
   // ---- guards ----
@@ -341,147 +368,97 @@ export default function CompetitionCreatePage() {
   if (!isAdmin) {
     return (
       <div className="mx-auto max-w-2xl p-6">
-        <Card className="p-6 text-sm text-slate-600">
-          Solo gli admin della lega possono creare competizioni.
-        </Card>
+        <Card className="p-6 text-sm text-slate-600">Solo gli admin della lega possono creare competizioni.</Card>
       </div>
     );
   }
-  if (loadErr) {
-    return <div className="p-6 text-sm text-red-600">{loadErr}</div>;
-  }
+  if (loadErr) return <div className="p-6 text-sm text-red-600">{loadErr}</div>;
 
-  // ---- success screen ----
-  if (created) {
-    return (
-      <div className="mx-auto max-w-3xl space-y-4 p-4 sm:p-6">
-        <Card className="p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500 text-lg text-white">✓</div>
-            <div>
-              <div className="text-lg font-bold text-slate-900">Competizione creata</div>
-              <div className="text-sm text-slate-500">{name}</div>
-            </div>
-          </div>
-          <div className="mt-5">
-            <SectionTitle>Struttura</SectionTitle>
-            <div className="mt-2">
-              <StageFlow stages={created.stages} />
-            </div>
-          </div>
-          {created.ruleFed ? (
-            <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-              I partecipanti saranno determinati dalla regola di qualificazione: la struttura completa comparirà appena la
-              competizione sorgente raggiunge il punto indicato.
-            </div>
-          ) : created.scheduledRounds ? (
-            <div className="mt-4 rounded-xl bg-green-50 p-3 text-sm text-green-800">
-              {created.scheduledRounds} giornate agganciate alle giornate reali di {refSeason?.competition} {refSeason?.season}.
-            </div>
-          ) : null}
-          <div className="mt-6 flex flex-wrap gap-2">
-            <Button onClick={() => navigate(`/competitions/${created.compId}`)}>Apri competizione</Button>
-            <Button variant="secondary" onClick={resetForm}>
-              Creane un'altra
-            </Button>
-            <Button variant="ghost" onClick={() => navigate('/league-admin')}>
-              Torna all'admin
-            </Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
+  const stepLabels = ['Formato', 'Chi gioca', 'Quando', 'Premi'];
 
-  // ---- wizard ----
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4 sm:p-6">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="mx-auto max-w-3xl space-y-4 p-4 pb-24 sm:p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-slate-900">Nuova competizione</h1>
-          <p className="text-sm text-slate-500">{selectedLeague?.name}</p>
+          <p className="truncate text-sm text-slate-500">{selectedLeague?.name}</p>
         </div>
-        <Link to="/league-admin" className="text-sm text-slate-500 hover:text-slate-900">
+        <Link to="/league-admin?tab=league" className="shrink-0 text-sm text-slate-500 hover:text-slate-900">
           ✕ Annulla
         </Link>
       </div>
 
-      <Card className="p-4">
-        <StepDots step={step} />
+      <Card className="p-3">
+        <StepDots step={step} labels={stepLabels} />
       </Card>
 
-      {/* STEP 1 — template */}
+      {/* STEP 1 — format */}
       {step === 1 ? (
-        <Card className="p-5">
-          <SectionTitle>Scegli un formato</SectionTitle>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <TemplateCard
-              active={template === 'round_robin'}
-              emoji="🏆"
-              title="Campionato"
-              blurb="Tutti contro tutti. Classifica a punti, con andata/ritorno opzionale."
-              onClick={() => setTemplate('round_robin')}
-            />
-            <TemplateCard
-              active={template === 'knockout'}
-              emoji="🥇"
-              title="Coppa"
-              blurb="Eliminazione diretta a tabellone. Turno preliminare automatico se le squadre non sono potenza di 2."
-              onClick={() => setTemplate('knockout')}
-            />
+        <Card className="p-4 sm:p-5">
+          <SectionTitle>Che competizione è</SectionTitle>
+          <div className="mt-3 space-y-2">
+            {FORMATS.map((f) => (
+              <ChoiceCard
+                key={f.id}
+                active={format === f.id}
+                emoji={f.emoji}
+                title={f.title}
+                blurb={f.blurb}
+                onClick={() => setFormat(f.id)}
+              />
+            ))}
           </div>
-          <div className="mt-5 flex justify-end">
-            <Button disabled={!template} onClick={() => setStep(2)}>
+          <div className="mt-4">
+            <Field label="Nome *">
+              <input
+                className={inputCls + (name.trim() ? '' : ' border-amber-300')}
+                placeholder={format === 'league' ? 'es. Campionato' : 'es. Coppa dei Campioni'}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button disabled={!format || !name.trim()} onClick={() => setStep(2)}>
               Continua
             </Button>
           </div>
         </Card>
       ) : null}
 
-      {/* STEP 2 — configure */}
-      {step === 2 && template ? (
+      {/* STEP 2 — participants + format options */}
+      {step === 2 && format ? (
         <div className="space-y-4">
-          <Card className="p-5">
-            <SectionTitle>Nome *</SectionTitle>
-            <input
-              className={
-                'mt-2 w-full rounded-xl border px-3 py-2 text-sm ' +
-                (name.trim() ? 'border-slate-200' : 'border-amber-300')
-              }
-              placeholder={template === 'round_robin' ? 'es. Campionato Lega' : 'es. Coppa Lega'}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </Card>
-
-          <Card className="p-5">
-            <SectionTitle>Partecipanti</SectionTitle>
-            <div className="mt-2 inline-flex rounded-xl bg-slate-100 p-1">
-              <button
-                type="button"
-                onClick={() => setSource('manual')}
-                className={'rounded-lg px-3 py-1.5 text-sm font-semibold ' + (source === 'manual' ? 'bg-white shadow-card' : 'text-slate-500')}
-              >
-                Squadre della lega
-              </button>
-              <button
-                type="button"
-                onClick={() => setSource('rule')}
-                disabled={competitions.length === 0}
-                className={
-                  'rounded-lg px-3 py-1.5 text-sm font-semibold disabled:opacity-40 ' +
-                  (source === 'rule' ? 'bg-white shadow-card' : 'text-slate-500')
+          <Card className="p-4 sm:p-5">
+            <SectionTitle>Chi partecipa</SectionTitle>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <ChoiceCard
+                active={source === 'teams'}
+                emoji="👥"
+                title="Le squadre della lega"
+                blurb="Scegli tu chi iscrivere."
+                onClick={() => setSource('teams')}
+              />
+              <ChoiceCard
+                active={source === 'qualified'}
+                emoji="🎟️"
+                title="Chi si qualifica"
+                blurb={
+                  qualifiableRounds.length
+                    ? 'In base alla classifica di un’altra competizione.'
+                    : 'Serve prima un’altra competizione.'
                 }
-              >
-                Qualificate da un'altra competizione
-              </button>
+                onClick={() => qualifiableRounds.length && setSource('qualified')}
+              />
             </div>
 
-            {source === 'manual' ? (
-              <div className="mt-3">
+            {source === 'teams' ? (
+              <div className="mt-4">
                 <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
-                  <span>{selectedTeamIds.length} di {teams.length} selezionate</span>
-                  <div className="flex gap-2">
+                  <span>
+                    {selectedTeamIds.length} di {teams.length} selezionate
+                  </span>
+                  <div className="flex gap-3">
                     <button className="hover:text-slate-900" onClick={() => setSelectedTeamIds(teams.map((t) => t.team_id))}>
                       Tutte
                     </button>
@@ -499,7 +476,7 @@ export default function CompetitionCreatePage() {
                         type="button"
                         onClick={() => toggleTeam(t.team_id)}
                         className={
-                          'truncate rounded-lg border px-2 py-1.5 text-left text-xs ' +
+                          'truncate rounded-lg border px-2 py-2 text-left text-xs ' +
                           (on ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600')
                         }
                         title={t.name}
@@ -511,156 +488,260 @@ export default function CompetitionCreatePage() {
                 </div>
               </div>
             ) : (
-              <div className="mt-3 space-y-3">
-                <p className="text-xs text-slate-500">
-                  I partecipanti verranno presi dai risultati di un'altra competizione — è così che costruisci, ad esempio,
-                  una coppa alimentata dal campionato.
-                </p>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500">Competizione sorgente</label>
+              <div className="mt-4 space-y-3">
+                <Field
+                  label="Si qualificano dalla classifica di…"
+                  hint="La coppa non potrà iniziare prima di questo momento: il calendario si sposta da solo."
+                >
                   <select
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                    value={ruleSourceCompId ?? ''}
-                    onChange={(e) => setRuleSourceCompId(e.target.value ? Number(e.target.value) : null)}
+                    className={inputCls}
+                    value={qualStageId != null && qualRound != null ? `${qualStageId}:${qualRound}` : ''}
+                    onChange={(e) => {
+                      if (!e.target.value) {
+                        setQualStageId(null);
+                        setQualRound(null);
+                        return;
+                      }
+                      const [sid, rno] = e.target.value.split(':').map(Number);
+                      setQualStageId(sid);
+                      setQualRound(rno);
+                    }}
                   >
                     <option value="">Seleziona…</option>
-                    {competitions.map((c) => (
-                      <option key={c.competition_id} value={c.competition_id}>
-                        {c.name}
+                    {qualifiableRounds.map(({ compName, row }) => (
+                      <option key={`${row.stage_id}:${row.round_no}`} value={`${row.stage_id}:${row.round_no}`}>
+                        {compName} — {row.label}
+                        {row.real_matchday ? ` (giornata reale ${row.real_matchday})` : ''}
                       </option>
                     ))}
                   </select>
-                </div>
+                </Field>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500">Criterio</label>
-                    <select
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                      value={ruleMode}
-                      onChange={(e) => setRuleMode(e.target.value as RuleMode)}
-                    >
-                      <option value="table_range">Posizione in classifica</option>
-                      <option value="winner">Vincitore</option>
-                      <option value="loser">Ultimo</option>
-                    </select>
-                  </div>
-                  {ruleMode === 'table_range' ? (
-                    <div className="flex items-end gap-2">
-                      <div>
-                        <label className="text-xs font-semibold text-slate-500">Da</label>
-                        <input
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                          value={ruleRankFrom}
-                          onChange={(e) => setRuleRankFrom(e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-slate-500">A</label>
-                        <input
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                          value={ruleRankTo}
-                          onChange={(e) => setRuleRankTo(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-                <label className="flex items-center gap-2 text-sm text-slate-600">
-                  <input type="checkbox" checked={ruleUseRound} onChange={(e) => setRuleUseRound(e.target.checked)} />
-                  Fotografa la classifica dopo un round specifico
-                </label>
-                {ruleUseRound ? (
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500">Dopo il round n.</label>
+                  <Field label="Dalla posizione">
                     <input
-                      className="mt-1 w-32 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                      value={ruleSourceRound}
-                      onChange={(e) => setRuleSourceRound(e.target.value)}
+                      type="number"
+                      min={1}
+                      className={inputCls}
+                      value={qualRankFrom}
+                      onChange={(e) => setQualRankFrom(Math.max(1, Number(e.target.value) || 1))}
                     />
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-400">Se non specificato, si usa la classifica finale della sorgente.</p>
-                )}
+                  </Field>
+                  <Field label="Alla posizione">
+                    <input
+                      type="number"
+                      min={1}
+                      className={inputCls}
+                      value={qualRankTo}
+                      onChange={(e) => setQualRankTo(Math.max(1, Number(e.target.value) || 1))}
+                    />
+                  </Field>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+                  {qualifiedCount >= 2 ? (
+                    <>
+                      <b>{qualifiedCount} squadre</b> qualificate
+                      {selectedQualRound ? (
+                        <>
+                          {' '}
+                          dalla classifica di «{selectedQualRound.compName}» ({selectedQualRound.row.label})
+                        </>
+                      ) : null}
+                      . I nomi si sapranno quando quella giornata sarà giocata.
+                    </>
+                  ) : (
+                    'Devono qualificarsi almeno 2 squadre.'
+                  )}
+                </div>
               </div>
             )}
           </Card>
 
           {/* format options */}
-          {template === 'round_robin' ? (
-            <Card className="p-5">
-              <SectionTitle>Formato campionato</SectionTitle>
-              <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" checked={doubleRound} onChange={(e) => setDoubleRound(e.target.checked)} />
-                Andata e ritorno (ogni accoppiamento giocato due volte)
-              </label>
-              <div className="mt-4 grid grid-cols-3 gap-3">
-                {([['Vittoria', pointsWin, setPointsWin], ['Pareggio', pointsDraw, setPointsDraw], ['Sconfitta', pointsLoss, setPointsLoss]] as const).map(
-                  ([label, val, setter]) => (
-                    <div key={label}>
-                      <label className="text-xs font-semibold text-slate-500">{label}</label>
+          {format !== 'cup' ? (
+            <Card className="p-4 sm:p-5">
+              <SectionTitle>{format === 'league' ? 'Formula del campionato' : 'Formula dei gironi'}</SectionTitle>
+              <div className="mt-3 space-y-3">
+                <Field
+                  label="Quante volte si affrontano tutti"
+                  hint={
+                    plan
+                      ? `${teamCount} squadre × ${legs} ${legs === 1 ? 'tornata' : 'tornate'} = ${
+                          plan.stages.find((s) => s.type === 'round_robin')?.rounds ?? 0
+                        } giornate. Nelle tornate pari il campo si inverte.`
+                      : 'Ogni tornata è un giro completo di tutti contro tutti.'
+                  }
+                >
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setLegs(n)}
+                        className={
+                          'rounded-xl border px-2 py-2 text-sm font-semibold ' +
+                          (legs === n ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600')
+                        }
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-1.5 text-[11px] font-semibold text-slate-600">{LEG_LABELS[legs]}</div>
+                </Field>
+
+                {format === 'groups_knockout' ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field
+                      label="Gironi"
+                      hint={source === 'qualified' ? 'Con i qualificati si gioca un girone unico.' : undefined}
+                    >
                       <input
                         type="number"
-                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                        min={1}
+                        max={4}
+                        disabled={source === 'qualified'}
+                        className={inputCls + ' disabled:bg-slate-100'}
+                        value={source === 'qualified' ? 1 : groups}
+                        onChange={(e) => setGroups(Math.max(1, Math.min(4, Number(e.target.value) || 1)))}
+                      />
+                    </Field>
+                    <Field label="Passano (per girone)">
+                      <input
+                        type="number"
+                        min={1}
+                        max={4}
+                        className={inputCls}
+                        value={advance}
+                        onChange={(e) => setAdvance(Math.max(1, Math.min(4, Number(e.target.value) || 1)))}
+                      />
+                    </Field>
+                  </div>
+                ) : null}
+
+                <div>
+                  <div className="text-xs font-semibold text-slate-500">Punti per vittoria / pareggio / sconfitta</div>
+                  <div className="mt-1 grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        [pointsWin, setPointsWin],
+                        [pointsDraw, setPointsDraw],
+                        [pointsLoss, setPointsLoss],
+                      ] as const
+                    ).map(([val, setter], i) => (
+                      <input
+                        key={i}
+                        type="number"
+                        className={inputCls}
                         value={val}
                         onChange={(e) => setter(Number(e.target.value))}
                       />
-                    </div>
-                  )
-                )}
+                    ))}
+                  </div>
+                </div>
               </div>
             </Card>
           ) : null}
 
-          {/* real-season calendar */}
-          <Card className="p-5">
-            <SectionTitle>Calendario reale</SectionTitle>
+          {plan ? (
+            <Card className="border border-slate-200 bg-slate-50 p-4 sm:p-5">
+              <SectionTitle>Com'è fatta</SectionTitle>
+              <div className="mt-2">
+                <PlanSummary plan={plan} />
+              </div>
+            </Card>
+          ) : planErr ? (
+            <Card className="border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{planErr}</Card>
+          ) : null}
+
+          <div className="flex items-center justify-between">
+            <Button variant="ghost" onClick={() => setStep(1)}>
+              ← Indietro
+            </Button>
+            <Button disabled={issues.length > 0} onClick={() => setStep(3)}>
+              Continua
+            </Button>
+          </div>
+          {issues.length ? <div className="text-right text-xs text-amber-600">Per continuare: {issues.join(', ')}.</div> : null}
+        </div>
+      ) : null}
+
+      {/* STEP 3 — calendar */}
+      {step === 3 && format ? (
+        <div className="space-y-4">
+          <Card className="p-4 sm:p-5">
+            <SectionTitle>Quando si gioca</SectionTitle>
             {refSeason ? (
-              <div className="mt-2 space-y-3">
-                <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Badge tone="green">{refSeason.competition}</Badge>
-                    <span className="font-semibold text-slate-900">{refSeason.season}</span>
-                    <span className="text-slate-400">· stagione di riferimento della lega</span>
-                  </div>
-                  <button
-                    className="text-xs text-slate-500 hover:text-slate-900"
-                    disabled={savingSeason}
-                    onClick={() => applyReferenceSeason(null)}
-                  >
-                    Cambia
-                  </button>
+              <div className="mt-3 space-y-3">
+                <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-3 text-sm">
+                  <Badge tone="green">{refSeason.competition}</Badge>
+                  <span className="font-semibold text-slate-900">{refSeason.season}</span>
+                  <span className="text-slate-400">· campionato di riferimento</span>
                 </div>
-                <p className="text-xs text-slate-500">
-                  Le giornate della competizione si agganciano automaticamente a quelle reali, distribuite nell'intervallo
-                  scelto. Potrai correggerle a mano dopo, se serve.
-                </p>
-                <div className="flex items-end gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500">Dalla giornata reale</label>
-                    <input
-                      className="mt-1 w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                      value={startMd}
-                      onChange={(e) => setStartMd(e.target.value)}
-                    />
+                {plan?.constraint ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    {plan.constraint}: non può cominciare prima della{' '}
+                    <b>{plan.min_start_matchday}ª giornata reale</b>.
                   </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500">Alla giornata reale</label>
+                ) : null}
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Dalla giornata reale">
                     <input
-                      className="mt-1 w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                      placeholder="ultima"
-                      value={endMd}
-                      onChange={(e) => setEndMd(e.target.value)}
+                      type="number"
+                      min={plan?.min_start_matchday ?? 1}
+                      className={inputCls}
+                      value={startMd ?? ''}
+                      onChange={(e) => setStartMd(e.target.value ? Number(e.target.value) : null)}
                     />
-                  </div>
+                  </Field>
+                  <Field label="Alla giornata reale" hint="Vuoto = una dopo l'altra, senza soste.">
+                    <input
+                      type="number"
+                      className={inputCls}
+                      placeholder="di fila"
+                      value={endMd ?? ''}
+                      onChange={(e) => setEndMd(e.target.value ? Number(e.target.value) : null)}
+                    />
+                  </Field>
                 </div>
+                {plan ? (
+                  <div className="text-xs text-slate-500">
+                    {endMd == null ? (
+                      <>
+                        Le {plan.total_rounds} giornate si giocheranno di fila, dalla {startMd ?? 1}ª alla{' '}
+                        {(startMd ?? 1) + plan.total_rounds - 1}ª giornata reale. Indica una giornata di fine per
+                        distanziarle e coprire tutto l'intervallo.
+                      </>
+                    ) : (
+                      <>
+                        Le {plan.total_rounds} giornate verranno distribuite su questo intervallo, una per giornata
+                        reale.
+                      </>
+                    )}{' '}
+                    Potrai correggerle a mano dalla pagina della competizione.
+                  </div>
+                ) : null}
+                {plan && startMd != null
+                  ? (() => {
+                      const room = plan.season_real_matchdays.filter(
+                        (md) => md >= startMd && (endMd == null || md <= endMd)
+                      ).length;
+                      if (room >= plan.total_rounds) return null;
+                      return (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                          Servono {plan.total_rounds} giornate reali, in questo intervallo ce ne sono {room}. Allarga
+                          l'intervallo o riduci le tornate.
+                        </div>
+                      );
+                    })()
+                  : null}
               </div>
             ) : (
-              <div className="mt-2 space-y-2">
+              <div className="mt-3 space-y-2">
                 <p className="text-sm text-slate-600">
-                  Questa lega non ha ancora una stagione reale di riferimento. Sceglila una volta: vale per tutta la lega.
+                  Questa lega non ha ancora un campionato reale di riferimento. Sceglilo una volta: vale per tutta la lega.
                 </p>
                 <select
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  className={inputCls}
                   disabled={savingSeason}
                   value=""
                   onChange={(e) => e.target.value && applyReferenceSeason(Number(e.target.value))}
@@ -672,115 +753,178 @@ export default function CompetitionCreatePage() {
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-slate-400">
-                  Senza stagione di riferimento puoi comunque creare la competizione, ma le giornate non verranno mappate.
-                </p>
               </div>
             )}
           </Card>
 
-          {/* live preview */}
-          {source === 'manual' && preview ? (
-            <Card className="border border-slate-200 bg-slate-50 p-5">
-              <SectionTitle>Anteprima</SectionTitle>
-              {template === 'round_robin' && 'matches' in preview ? (
-                <p className="mt-2 text-sm text-slate-700">
-                  {nTeams} squadre → <b>{preview.rounds} giornate</b>, <b>{preview.matches} partite</b>
-                  {doubleRound ? ' (andata/ritorno)' : ''}.
-                </p>
-              ) : null}
-              {template === 'knockout' && 'stages' in preview ? (
-                <div className="mt-2 space-y-1 text-sm text-slate-700">
-                  <p>{nTeams} squadre → tabellone:</p>
-                  <ul className="ml-4 list-disc text-slate-600">
-                    {preview.stages.map((s) => (
-                      <li key={s}>{s}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </Card>
-          ) : null}
-
-          {(() => {
-            const issues: string[] = [];
-            if (!name.trim()) issues.push('inserisci un nome');
-            if (source === 'manual' && selectedTeamIds.length < 2) issues.push('seleziona almeno 2 squadre');
-            if (source === 'rule' && ruleSourceCompId == null) issues.push('scegli la competizione sorgente');
-            return (
-              <div className="flex items-center justify-between">
-                <Button variant="ghost" onClick={() => setStep(1)}>
-                  ← Indietro
-                </Button>
-                <div className="flex items-center gap-3">
-                  {issues.length ? (
-                    <span className="text-xs text-amber-600">Per continuare: {issues.join(', ')}.</span>
-                  ) : null}
-                  <Button disabled={issues.length > 0} onClick={() => setStep(3)}>
-                    Continua
-                  </Button>
-                </div>
-              </div>
-            );
-          })()}
+          <div className="flex items-center justify-between">
+            <Button variant="ghost" onClick={() => setStep(2)}>
+              ← Indietro
+            </Button>
+            <Button onClick={() => setStep(4)}>Continua</Button>
+          </div>
         </div>
       ) : null}
 
-      {/* STEP 3 — review */}
-      {step === 3 && template ? (
-        <Card className="p-5">
-          <SectionTitle>Riepilogo</SectionTitle>
-          <dl className="mt-3 divide-y divide-slate-100 text-sm">
-            <div className="flex justify-between py-2">
-              <dt className="text-slate-500">Nome</dt>
-              <dd className="font-semibold text-slate-900">{name}</dd>
+      {/* STEP 4 — prizes + confirm */}
+      {step === 4 && format ? (
+        <div className="space-y-4">
+          <Card className="p-4 sm:p-5">
+            <SectionTitle>Cosa si vince</SectionTitle>
+            <div className="mt-1 text-xs text-slate-500">
+              Un premio è un nome, un'icona e la condizione che lo assegna. Verrà consegnato da solo quando la condizione
+              si realizza.
             </div>
-            <div className="flex justify-between py-2">
-              <dt className="text-slate-500">Formato</dt>
-              <dd className="font-semibold text-slate-900">{template === 'round_robin' ? 'Campionato' : 'Coppa'}</dd>
+            <div className="mt-3 space-y-3">
+              {prizes.map((prize, idx) => (
+                <div key={idx} className="rounded-xl border border-slate-200 p-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      className={inputCls}
+                      placeholder="Nome del premio"
+                      value={prize.name}
+                      onChange={(e) =>
+                        setPrizes((prev) => prev.map((p, i) => (i === idx ? { ...p, name: e.target.value } : p)))
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-lg px-2 py-2 text-slate-400 hover:text-red-600"
+                      onClick={() => setPrizes((prev) => prev.filter((_, i) => i !== idx))}
+                      aria-label="Togli premio"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {PRIZE_ICONS.map((icon) => (
+                      <button
+                        key={icon}
+                        type="button"
+                        onClick={() => setPrizes((prev) => prev.map((p, i) => (i === idx ? { ...p, icon } : p)))}
+                        className={
+                          'h-9 w-9 rounded-lg border text-lg ' +
+                          (prize.icon === icon ? 'border-slate-900 bg-slate-100' : 'border-slate-200')
+                        }
+                      >
+                        {icon}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2">
+                    <select
+                      className={inputCls}
+                      value={prize.condition}
+                      onChange={(e) =>
+                        setPrizes((prev) =>
+                          prev.map((p, i) =>
+                            i === idx ? { ...p, condition: e.target.value as WizardPrizeSpec['condition'] } : p
+                          )
+                        )
+                      }
+                    >
+                      <option value="winner">{format === 'league' ? 'Chi arriva primo' : 'Chi vince la finale'}</option>
+                      <option value="runner_up">
+                        {format === 'league' ? 'Chi arriva secondo' : 'Chi perde la finale'}
+                      </option>
+                      <option value="rank">Una posizione in classifica</option>
+                    </select>
+                  </div>
+                  {prize.condition === 'rank' ? (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <Field label="Dalla posizione">
+                        <input
+                          type="number"
+                          min={1}
+                          className={inputCls}
+                          value={prize.rank_from ?? 1}
+                          onChange={(e) =>
+                            setPrizes((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, rank_from: Number(e.target.value) || 1 } : p))
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field label="Alla posizione">
+                        <input
+                          type="number"
+                          min={1}
+                          className={inputCls}
+                          value={prize.rank_to ?? prize.rank_from ?? 1}
+                          onChange={(e) =>
+                            setPrizes((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, rank_to: Number(e.target.value) || 1 } : p))
+                            )
+                          }
+                        />
+                      </Field>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setPrizes((prev) => [...prev, { name: '', icon: '🥈', condition: 'runner_up' }])}
+              >
+                + Aggiungi premio
+              </Button>
             </div>
-            <div className="flex justify-between py-2">
-              <dt className="text-slate-500">Partecipanti</dt>
-              <dd className="text-right font-semibold text-slate-900">
-                {source === 'manual'
-                  ? `${selectedTeamIds.length} squadre selezionate`
-                  : `Qualificate da ${competitions.find((c) => c.competition_id === ruleSourceCompId)?.name ?? '—'}`}
-              </dd>
-            </div>
-            {source === 'rule' ? (
-              <div className="flex justify-between py-2">
-                <dt className="text-slate-500">Regola</dt>
+          </Card>
+
+          <Card className="p-4 sm:p-5">
+            <SectionTitle>Riepilogo</SectionTitle>
+            <dl className="mt-2 divide-y divide-slate-100 text-sm">
+              <div className="flex justify-between gap-3 py-2">
+                <dt className="text-slate-500">Nome</dt>
+                <dd className="truncate font-semibold text-slate-900">{name}</dd>
+              </div>
+              <div className="flex justify-between gap-3 py-2">
+                <dt className="text-slate-500">Formato</dt>
+                <dd className="font-semibold text-slate-900">{FORMATS.find((f) => f.id === format)?.title}</dd>
+              </div>
+              <div className="flex justify-between gap-3 py-2">
+                <dt className="text-slate-500">Partecipanti</dt>
                 <dd className="text-right font-semibold text-slate-900">
-                  {ruleMode === 'table_range'
-                    ? `Posizioni ${ruleRankFrom}–${ruleRankTo}`
-                    : ruleMode === 'winner'
-                    ? 'Vincitore'
-                    : 'Ultimo'}
-                  {ruleUseRound ? ` · dopo round ${ruleSourceRound}` : ' · classifica finale'}
+                  {source === 'teams'
+                    ? `${selectedTeamIds.length} squadre`
+                    : `${qualifiedCount} qualificate${selectedQualRound ? ` · ${selectedQualRound.compName}` : ''}`}
                 </dd>
               </div>
-            ) : null}
-            {template === 'round_robin' ? (
-              <div className="flex justify-between py-2">
-                <dt className="text-slate-500">Formato gare</dt>
-                <dd className="font-semibold text-slate-900">
-                  {doubleRound ? 'Andata/Ritorno' : 'Sola andata'} · {pointsWin}/{pointsDraw}/{pointsLoss}
+              {plan ? (
+                <div className="flex justify-between gap-3 py-2">
+                  <dt className="text-slate-500">Giornate</dt>
+                  <dd className="text-right font-semibold text-slate-900">
+                    {plan.total_rounds}
+                    {startMd ? ` · dalla ${startMd}ª reale` : ''}
+                  </dd>
+                </div>
+              ) : null}
+              <div className="flex justify-between gap-3 py-2">
+                <dt className="text-slate-500">Premi</dt>
+                <dd className="text-right font-semibold text-slate-900">
+                  {prizes.filter((p) => p.name.trim()).length
+                    ? prizes
+                        .filter((p) => p.name.trim())
+                        .map((p) => `${p.icon ?? ''} ${p.name}`)
+                        .join(', ')
+                    : 'nessuno'}
                 </dd>
               </div>
-            ) : null}
-          </dl>
+            </dl>
 
-          {error ? <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
+            {error ? <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
 
-          <div className="mt-5 flex justify-between">
-            <Button variant="ghost" onClick={() => setStep(2)} disabled={busy}>
-              ← Indietro
-            </Button>
-            <Button onClick={handleCreate} disabled={!canCreate || busy}>
-              {busy ? 'Creazione…' : 'Crea competizione'}
-            </Button>
-          </div>
-        </Card>
+            <div className="mt-4 flex items-center justify-between">
+              <Button variant="ghost" onClick={() => setStep(3)} disabled={busy}>
+                ← Indietro
+              </Button>
+              <Button onClick={handleCreate} disabled={busy || issues.length > 0}>
+                {busy ? 'Creazione…' : 'Crea competizione'}
+              </Button>
+            </div>
+          </Card>
+        </div>
       ) : null}
     </div>
   );

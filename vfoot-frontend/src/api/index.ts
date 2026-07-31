@@ -21,6 +21,9 @@ import type {
   CompetitionStageItem,
   CompetitionUpdateRequest,
   CompetitionTemplateRequest,
+  CompetitionWizardPlan,
+  CompetitionWizardRequest,
+  CompetitionWizardResult,
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueFixtureItem,
@@ -75,6 +78,11 @@ type ApiImpl = {
   importRosterCsv: typeof backendApi.importRosterCsv;
   importRosterXlsx: typeof backendApi.importRosterXlsx;
   createCompetitionTemplate: (leagueId: number, req: CompetitionTemplateRequest) => ReturnType<typeof backendApi.createCompetitionTemplate>;
+  createCompetitionGuided: (leagueId: number, req: CompetitionWizardRequest) => Promise<CompetitionWizardResult>;
+  previewCompetitionPlan: (
+    leagueId: number,
+    req: Omit<CompetitionWizardRequest, 'name' | 'prizes' | 'points' | 'start_matchday' | 'end_matchday'>
+  ) => Promise<CompetitionWizardPlan>;
   getCompetitions: (leagueId: number) => Promise<CompetitionItem[]>;
   updateCompetition: (competitionId: number, req: CompetitionUpdateRequest) => Promise<CompetitionItem>;
   deleteCompetition: (competitionId: number) => Promise<void>;
@@ -96,7 +104,7 @@ type ApiImpl = {
     competitionId: number,
     allowRepechage?: boolean,
     randomSeed?: number,
-    doubleRound?: boolean
+    legs?: number
   ) => Promise<unknown>;
   resolveCompetitionStage: (stageId: number, randomSeed?: number) => Promise<unknown>;
   createAuction: typeof backendApi.createAuction;
@@ -166,6 +174,8 @@ export const bulkAssignRoster = typedImpl.bulkAssignRoster;
 export const importRosterCsv = typedImpl.importRosterCsv;
 export const importRosterXlsx = typedImpl.importRosterXlsx;
 export const createCompetitionTemplate = typedImpl.createCompetitionTemplate;
+export const createCompetitionGuided = typedImpl.createCompetitionGuided;
+export const previewCompetitionPlan = typedImpl.previewCompetitionPlan;
 export const getCompetitions = typedImpl.getCompetitions;
 export const updateCompetition = typedImpl.updateCompetition;
 export const deleteCompetition = typedImpl.deleteCompetition;

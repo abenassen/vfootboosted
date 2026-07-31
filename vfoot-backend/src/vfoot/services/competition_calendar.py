@@ -1,0 +1,415 @@
+"""Where a competition's rounds land on the real championship calendar.
+
+A fantasy round is played "on" a real matchday: that is what decides which real
+performances score it. Mapping the two is mostly arithmetic — spread N rounds over
+the available matchdays — but two constraints make it more than that, and both were
+missing:
+
+* A competition whose field is decided by another one cannot START before the
+  moment that decides it. "The top 4 after round 7 enter the cup" and "the cup
+  begins on matchday 3" cannot both be true.
+* Two rounds of the same competition cannot share a real matchday: a team would
+  play twice, and its lineup for that matchday is a single object.
+
+Both are enforced here, in one place, for the preview and for the write — so what
+the admin is shown is exactly what will be saved.
+"""
+
+from __future__ import annotations
+
+from django.db import transaction
+
+from realdata.models import Match
+from vfoot.models import (
+    CompetitionQualificationRule,
+    CompetitionStage,
+    CompetitionStageRule,
+    FantasyCompetition,
+    FantasyFixture,
+)
+from vfoot.services.competition_stages import (
+    apply_round_calendar,
+    competition_round_rows,
+    recompute_round_layout,
+)
+
+
+# ---------------------------------------------------------------------------
+# Available real matchdays
+# ---------------------------------------------------------------------------
+
+
+def _pick_real_competition_and_matchdays(starts_at, ends_at):
+    """Legacy fallback: infer the real season from the competition's date window."""
+    from django.db.models import Count
+
+    if not starts_at or not ends_at:
+        return None, []
+
+    base = Match.objects.filter(
+        kickoff__date__gte=starts_at,
+        kickoff__date__lte=ends_at,
+        matchday__isnull=False,
+    )
+    if not base.exists():
+        return None, []
+
+    top = (
+        base.values("competition_season_id")
+        .annotate(c=Count("id"))
+        .order_by("-c", "competition_season_id")
+        .first()
+    )
+    if not top:
+        return None, []
+    csid = int(top["competition_season_id"])
+    matchdays = list(
+        base.filter(competition_season_id=csid)
+        .order_by("matchday")
+        .values_list("matchday", flat=True)
+        .distinct()
+    )
+    return csid, [int(x) for x in matchdays if x is not None]
+
+
+def season_matchdays(competition: FantasyCompetition) -> tuple[int | None, list[int]]:
+    """Every real matchday of the league's reference season, span ignored."""
+    season = competition.league.reference_season
+    if season is None:
+        return _pick_real_competition_and_matchdays(competition.starts_at, competition.ends_at)
+    matchdays = list(
+        Match.objects.filter(competition_season_id=season.id, matchday__isnull=False)
+        .order_by("matchday")
+        .values_list("matchday", flat=True)
+        .distinct()
+    )
+    return season.id, [int(x) for x in matchdays if x is not None]
+
+
+def reference_matchdays(competition: FantasyCompetition, start_md=None, end_md=None):
+    """Real matchdays usable by this competition, inside the [start, end] span."""
+    csid, matchdays = season_matchdays(competition)
+    if csid is None:
+        return None, []
+    lo = start_md if start_md is not None else competition.start_matchday
+    hi = end_md if end_md is not None else competition.end_matchday
+    out = [md for md in matchdays if (lo is None or md >= lo) and (hi is None or md <= hi)]
+    return csid, out
+
+
+# ---------------------------------------------------------------------------
+# Dependencies: what has to happen before this competition can start
+# ---------------------------------------------------------------------------
+
+
+def _round_matchday(competition: FantasyCompetition, round_no: int | None) -> int | None:
+    """Real matchday a given round of ``competition`` is played on."""
+    if round_no is None:
+        return None
+    planned = (competition.round_calendar or {}).get(str(round_no))
+    if planned:
+        return int(planned)
+    row = (
+        FantasyFixture.objects.filter(competition=competition, round_no=round_no, fantasy_matchday__isnull=False)
+        .select_related("fantasy_matchday")
+        .values_list("fantasy_matchday__real_matchday", flat=True)
+        .first()
+    )
+    return int(row) if row is not None else None
+
+
+def _last_round(competition: FantasyCompetition) -> int | None:
+    rows = competition_round_rows(competition)
+    return rows[-1]["round_no"] if rows else None
+
+
+def dependencies(competition: FantasyCompetition) -> list[dict]:
+    """Every "this competition waits on that one" link, with the matchday it lands on.
+
+    Both mechanisms are read: the stage rules (what the wizard writes now) and the
+    older competition-level qualification rules, so a league built before the
+    rewrite is constrained just the same.
+    """
+    out: list[dict] = []
+
+    rules = (
+        CompetitionStageRule.objects.filter(target_stage__competition=competition)
+        .exclude(source_stage__competition=competition)
+        .select_related("source_stage", "source_stage__competition", "target_stage")
+    )
+    for rule in rules:
+        source_comp = rule.source_stage.competition
+        cut = rule.source_round or _last_round(source_comp)
+        out.append(
+            {
+                "kind": "stage_rule",
+                "source_competition_id": source_comp.id,
+                "source_competition_name": source_comp.name,
+                "source_stage_name": rule.source_stage.name,
+                "source_round": cut,
+                "real_matchday": _round_matchday(source_comp, cut),
+                "target_stage_id": rule.target_stage_id,
+            }
+        )
+
+    for rule in (
+        CompetitionQualificationRule.objects.filter(competition=competition)
+        .exclude(source_competition=competition)
+        .select_related("source_competition")
+    ):
+        source_comp = rule.source_competition
+        cut = rule.source_round or _last_round(source_comp)
+        out.append(
+            {
+                "kind": "qualification_rule",
+                "source_competition_id": source_comp.id,
+                "source_competition_name": source_comp.name,
+                "source_stage_name": None,
+                "source_round": cut,
+                "real_matchday": _round_matchday(source_comp, cut),
+                "target_stage_id": None,
+            }
+        )
+    return out
+
+
+def earliest_start_matchday(competition: FantasyCompetition) -> tuple[int | None, list[str]]:
+    """First real matchday this competition may be played on, and why."""
+    floor: int | None = None
+    reasons: list[str] = []
+    for dep in dependencies(competition):
+        md = dep["real_matchday"]
+        if md is None:
+            continue
+        candidate = int(md) + 1
+        who = dep["source_competition_name"]
+        where = f"giornata {dep['source_round']}" if dep["source_round"] else "fine"
+        reasons.append(
+            f"i partecipanti si decidono a {where} di «{who}» (giornata reale {md}): "
+            f"non può iniziare prima della {candidate}ª"
+        )
+        floor = candidate if floor is None else max(floor, candidate)
+    return floor, reasons
+
+
+# ---------------------------------------------------------------------------
+# Mapping
+# ---------------------------------------------------------------------------
+
+
+def uniform_mapping(round_nos: list[int], real_matchdays: list[int], spread: bool = True) -> dict[int, int]:
+    """Place each round on a real matchday, one round per matchday.
+
+    ``spread`` decides between the two things "automatic" can mean, and the
+    difference is not cosmetic: two cup rounds over the 26 matchdays left in a
+    season come out as matchday 13 and matchday 38 when spread, which is nobody's
+    idea of a cup. So spreading happens only when the admin has SAID where the
+    competition ends; with an open end, rounds run back to back from the start.
+    """
+    mapping: dict[int, int] = {}
+    if not round_nos or not real_matchdays:
+        return mapping
+    if not spread or len(round_nos) >= len(real_matchdays):
+        for rno, md in zip(round_nos, real_matchdays):
+            mapping[rno] = md
+        return mapping
+    span = len(real_matchdays) - 1
+    steps = len(round_nos) - 1
+    used: set[int] = set()
+    for idx, rno in enumerate(round_nos):
+        pos = 0 if steps == 0 else int(round(idx * span / steps))
+        while pos < len(real_matchdays) and real_matchdays[pos] in used:
+            pos += 1
+        pos = min(pos, len(real_matchdays) - 1)
+        mapping[rno] = real_matchdays[pos]
+        used.add(real_matchdays[pos])
+    return mapping
+
+
+def normalise_mapping(
+    round_nos: list[int],
+    proposed: dict[int, int],
+    available: list[int],
+) -> tuple[dict[int, int], list[str]]:
+    """Force a mapping to be legal: inside the span, and strictly increasing."""
+    warnings: list[str] = []
+    allowed = [md for md in available]
+    out: dict[int, int] = {}
+    last: int | None = None
+    for rno in round_nos:
+        want = proposed.get(rno)
+        candidates = [md for md in allowed if last is None or md > last]
+        if not candidates:
+            warnings.append(f"giornata {rno}: non restano giornate reali disponibili")
+            continue
+        if want is None or want not in allowed:
+            chosen = candidates[0]
+        elif last is not None and want <= last:
+            chosen = candidates[0]
+            warnings.append(
+                f"giornata {rno}: spostata alla {chosen}ª — non può essere giocata prima della precedente"
+            )
+        else:
+            chosen = want
+        out[rno] = chosen
+        last = chosen
+    return out, warnings
+
+
+def _mapping_from_fixtures(competition: FantasyCompetition) -> dict[int, int]:
+    """Where the rounds actually are, for a competition built before the plan existed."""
+    mapping: dict[int, int] = {}
+    for rno, real_md in (
+        FantasyFixture.objects.filter(competition=competition, fantasy_matchday__isnull=False)
+        .values_list("round_no", "fantasy_matchday__real_matchday")
+        .distinct()
+    ):
+        if rno is None or real_md is None:
+            continue
+        mapping[int(rno)] = int(real_md)
+    return mapping
+
+
+def preview(competition: FantasyCompetition, start_md=None, end_md=None) -> dict:
+    # Read-only on purpose: recomputing the layout here would renumber the rounds
+    # of a competition somebody merely opened to look at.
+    rows = competition_round_rows(competition)
+    round_nos = [r["round_no"] for r in rows]
+    csid, all_matchdays = season_matchdays(competition)
+    floor, floor_reasons = earliest_start_matchday(competition)
+
+    effective_start = start_md if start_md is not None else competition.start_matchday
+    if floor is not None:
+        effective_start = floor if effective_start is None else max(int(effective_start), floor)
+    effective_end = end_md if end_md is not None else competition.end_matchday
+
+    available = [
+        md
+        for md in all_matchdays
+        if (effective_start is None or md >= effective_start) and (effective_end is None or md <= effective_end)
+    ]
+
+    stored = {int(k): int(v) for k, v in (competition.round_calendar or {}).items() if str(k).isdigit()}
+    if not stored:
+        stored = _mapping_from_fixtures(competition)
+    base = uniform_mapping(round_nos, available, spread=effective_end is not None)
+    proposed, _ = normalise_mapping(round_nos, base, available)
+    current, current_warnings = normalise_mapping(round_nos, stored, available) if stored else ({}, [])
+
+    warnings = list(current_warnings)
+    if round_nos and len(available) < len(round_nos):
+        warnings.append(
+            f"servono {len(round_nos)} giornate reali, nell'intervallo scelto ce ne sono {len(available)}"
+        )
+
+    return {
+        "competition_id": competition.id,
+        "competition_name": competition.name,
+        "starts_at": competition.starts_at.isoformat() if competition.starts_at else None,
+        "ends_at": competition.ends_at.isoformat() if competition.ends_at else None,
+        "start_matchday": effective_start,
+        "end_matchday": effective_end,
+        "min_start_matchday": floor,
+        "constraints": floor_reasons,
+        "dependencies": dependencies(competition),
+        "rounds": round_nos,
+        "round_rows": rows,
+        "available_real_matchdays": available,
+        "season_real_matchdays": all_matchdays,
+        "real_competition_season_id": csid,
+        "proposed_mapping": proposed,
+        "current_mapping": current or stored,
+        "warnings": warnings,
+    }
+
+
+@transaction.atomic
+def schedule(
+    competition: FantasyCompetition,
+    round_mapping: dict[int, int] | None = None,
+    start_md=None,
+    end_md=None,
+) -> dict:
+    """Write the calendar: store the plan, then hang the fixtures on it."""
+    recompute_round_layout(competition)
+    rows = competition_round_rows(competition)
+    round_nos = [r["round_no"] for r in rows]
+    if not round_nos:
+        return {"competition_id": competition.id, "scheduled_fixtures": 0, "rounds": 0, "real_matchdays": []}
+
+    floor, floor_reasons = earliest_start_matchday(competition)
+    effective_start = start_md if start_md is not None else competition.start_matchday
+    if floor is not None:
+        effective_start = floor if effective_start is None else max(int(effective_start), floor)
+    effective_end = end_md if end_md is not None else competition.end_matchday
+
+    span_fields = []
+    if effective_start != competition.start_matchday:
+        competition.start_matchday = effective_start
+        span_fields.append("start_matchday")
+    if effective_end != competition.end_matchday:
+        competition.end_matchday = effective_end
+        span_fields.append("end_matchday")
+
+    csid, all_matchdays = season_matchdays(competition)
+    available = [
+        md
+        for md in all_matchdays
+        if (effective_start is None or md >= effective_start) and (effective_end is None or md <= effective_end)
+    ]
+    if not csid or not available:
+        if span_fields:
+            competition.save(update_fields=span_fields)
+        return {
+            "competition_id": competition.id,
+            "scheduled_fixtures": 0,
+            "rounds": len(round_nos),
+            "real_matchdays": [],
+            "warnings": ["nessuna giornata reale disponibile nell'intervallo scelto"] + floor_reasons,
+        }
+
+    wanted = dict(uniform_mapping(round_nos, available, spread=effective_end is not None))
+    stored = {int(k): int(v) for k, v in (competition.round_calendar or {}).items() if str(k).isdigit()}
+    if not stored:
+        # First write for a competition built before the plan existed: adopt the
+        # calendar it is already being played on rather than inventing a new one.
+        stored = _mapping_from_fixtures(competition)
+    wanted.update({k: v for k, v in stored.items() if k in round_nos})
+    if round_mapping:
+        wanted.update({int(k): int(v) for k, v in round_mapping.items() if int(k) in round_nos})
+
+    mapping, warnings = normalise_mapping(round_nos, wanted, available)
+
+    competition.round_calendar = {str(k): int(v) for k, v in mapping.items()}
+    competition.save(update_fields=[*span_fields, "round_calendar"])
+
+    scheduled = apply_round_calendar(competition, csid)
+
+    return {
+        "competition_id": competition.id,
+        "scheduled_fixtures": scheduled,
+        "rounds": len(round_nos),
+        "real_matchdays": available,
+        "mapped_rounds": mapping,
+        "min_start_matchday": floor,
+        "warnings": warnings + ([] if len(available) >= len(round_nos) else [
+            f"servono {len(round_nos)} giornate reali, ce ne sono {len(available)}"
+        ]),
+    }
+
+
+def stage_round_bounds(competition: FantasyCompetition) -> dict[int, dict]:
+    """First/last real matchday of each stage, for "when does this stage play?"."""
+    calendar = {int(k): int(v) for k, v in (competition.round_calendar or {}).items() if str(k).isdigit()}
+    out: dict[int, dict] = {}
+    for stage in CompetitionStage.objects.filter(competition=competition).order_by("order_index", "id"):
+        first_round = (stage.round_offset or 0) + 1
+        last_round = (stage.round_offset or 0) + (stage.planned_rounds or 1)
+        mds = [calendar[r] for r in range(first_round, last_round + 1) if r in calendar]
+        out[stage.id] = {
+            "first_round": first_round,
+            "last_round": last_round,
+            "first_matchday": min(mds) if mds else None,
+            "last_matchday": max(mds) if mds else None,
+        }
+    return out

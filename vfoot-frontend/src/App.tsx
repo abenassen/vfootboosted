@@ -12,6 +12,8 @@ import MarketPage from './pages/MarketPage';
 import AuctionRoomPage from './pages/AuctionRoomPage';
 import LeagueAdminPage from './pages/LeagueAdminPage';
 import CompetitionCreatePage from './pages/CompetitionCreatePage';
+import CompetitionEditPage from './pages/CompetitionEditPage';
+import CompetitionAdvancedPage from './pages/CompetitionAdvancedPage';
 import NotFoundPage from './pages/NotFoundPage';
 import LandingPage from './pages/LandingPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
@@ -67,6 +69,9 @@ export default function App() {
         <Route path="decisioni" element={<DecisionsPage />} />
         <Route path="league-admin" element={<LeagueAdminPage />} />
         <Route path="league-admin/competitions/new" element={<CompetitionCreatePage />} />
+        {/* "advanced" before ":competitionId", or the word would be read as an id. */}
+        <Route path="league-admin/competitions/advanced" element={<CompetitionAdvancedPage />} />
+        <Route path="league-admin/competitions/:competitionId" element={<CompetitionEditPage />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

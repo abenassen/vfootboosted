@@ -145,6 +145,16 @@ class FantasyCompetition(models.Model):
     TYPE_ROUND_ROBIN = "round_robin"
     TYPE_KNOCKOUT = "knockout"
 
+    # How the competition was SHAPED, which ``competition_type`` cannot express:
+    # a group stage followed by a bracket is round-robin AND knockout at once, and
+    # a hand-built graph is neither. Purely descriptive — the generators read the
+    # stages, never this — but it is what lets the UI say "campionato" vs "coppa"
+    # and decide which edits still make sense after creation.
+    FORMAT_LEAGUE = "league"
+    FORMAT_CUP = "cup"
+    FORMAT_GROUPS_KNOCKOUT = "groups_knockout"
+    FORMAT_CUSTOM = "custom"
+
     STATUS_DRAFT = "draft"
     STATUS_ACTIVE = "active"
     STATUS_DONE = "done"
@@ -155,6 +165,16 @@ class FantasyCompetition(models.Model):
         max_length=24,
         choices=[(TYPE_ROUND_ROBIN, "Round Robin"), (TYPE_KNOCKOUT, "Knockout")],
         default=TYPE_ROUND_ROBIN,
+    )
+    format = models.CharField(
+        max_length=24,
+        choices=[
+            (FORMAT_LEAGUE, "Campionato"),
+            (FORMAT_CUP, "Coppa a eliminazione"),
+            (FORMAT_GROUPS_KNOCKOUT, "Gironi + eliminazione"),
+            (FORMAT_CUSTOM, "Personalizzata"),
+        ],
+        default=FORMAT_CUSTOM,
     )
     status = models.CharField(
         max_length=16,
@@ -173,6 +193,13 @@ class FantasyCompetition(models.Model):
     # rounds are spread uniformly across [start_matchday, end_matchday].
     start_matchday = models.IntegerField(null=True, blank=True)
     end_matchday = models.IntegerField(null=True, blank=True)
+    # The PLAN: {"<competition round>": <real matchday>}. Written when the calendar
+    # is computed (uniform spread, then admin fine-tuning) and read back whenever
+    # fixtures appear. Keeping it here rather than only on the fixtures is what lets
+    # a competition whose participants are still unknown — a cup fed by the table
+    # after round 7 — already have a calendar: the rounds exist as a plan long
+    # before there is a single fixture to hang a matchday on.
+    round_calendar = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -194,10 +221,24 @@ class CompetitionStage(models.Model):
         choices=[(TYPE_ROUND_ROBIN, "Round Robin"), (TYPE_KNOCKOUT, "Knockout")],
         default=TYPE_ROUND_ROBIN,
     )
+    # Stages with the SAME order_index are played in PARALLEL (two groups running
+    # side by side) and therefore share round numbers; a higher order_index means
+    # "after", and its rounds are numbered after the previous ones.
     order_index = models.IntegerField(default=1)
-    # Round-robin only: when true, every pairing is played twice (home/away
-    # swapped), doubling the rounds (andata/ritorno). Ignored for knockout.
-    double_round = models.BooleanField(default=False)
+    # Round-robin only: how many times the full set of pairings is played
+    # ("tornate"). 1 = sola andata, 2 = andata e ritorno, 3+ = a Serie-A-length
+    # season out of few teams. Home and away swap on every even leg. Ignored for
+    # knockout.
+    legs = models.IntegerField(default=1)
+    # Round numbering is COMPETITION-wide (the calendar, the "table after round N"
+    # rules and the fixture uniqueness all key on it), so each stage starts after
+    # the ones before it. Derived — recompute_round_layout() owns this field.
+    round_offset = models.IntegerField(default=0)
+    # How many competition rounds this stage occupies, and with how many teams —
+    # known from the plan even before a rule-fed stage has resolved a single
+    # participant, which is what lets its calendar be laid out in advance.
+    planned_rounds = models.IntegerField(default=1)
+    expected_participants = models.IntegerField(default=0)
     status = models.CharField(
         max_length=16,
         choices=[(STATUS_DRAFT, "Draft"), (STATUS_ACTIVE, "Active"), (STATUS_DONE, "Done")],
@@ -229,12 +270,19 @@ class CompetitionStageRule(models.Model):
     MODE_LOSERS = "losers"
 
     target_stage = models.ForeignKey(CompetitionStage, on_delete=models.CASCADE, related_name="rules_in")
+    # The source may live in ANOTHER competition of the same league: this single
+    # relation is how "the top 4 of the championship after round 7 enter the cup"
+    # and "the winners of the semifinals play the final" are both expressed.
     source_stage = models.ForeignKey(CompetitionStage, on_delete=models.CASCADE, related_name="rules_out")
     mode = models.CharField(
         max_length=16,
         choices=[(MODE_TABLE_RANGE, "Table Range"), (MODE_WINNERS, "Winners"), (MODE_LOSERS, "Losers")],
         default=MODE_WINNERS,
     )
+    # Table cut-off, as a round number of the SOURCE stage's competition. Null =
+    # the stage's final table. This is what makes "primi 4 alla giornata 7" a
+    # different thing from "primi 4 a fine campionato".
+    source_round = models.IntegerField(null=True, blank=True)
     rank_from = models.IntegerField(null=True, blank=True)
     rank_to = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
@@ -469,6 +517,9 @@ class CompetitionPrize(models.Model):
 
     competition = models.ForeignKey(FantasyCompetition, on_delete=models.CASCADE, related_name="prizes")
     name = models.CharField(max_length=120)
+    # A single emoji standing in for the trophy. Cheap identity now; a drawn crest
+    # (like the team ones) can replace it later without touching the condition.
+    icon = models.CharField(max_length=8, blank=True, default="🏆")
     condition_type = models.CharField(
         max_length=24,
         choices=[
@@ -479,9 +530,15 @@ class CompetitionPrize(models.Model):
         ],
         default=CONDITION_FINAL_TABLE_RANGE,
     )
+    # CASCADE, not PROTECT: a prize and the stage that decides it are cascaded
+    # together when their competition goes, and PROTECT made that deletion
+    # impossible at the database level — a cup with a "chi vince la finale" prize
+    # could not be deleted at all. Stages referenced by prizes in OTHER
+    # competitions are still guarded, in the delete views, where the check can say
+    # which prize is in the way instead of raising an integrity error.
     source_stage = models.ForeignKey(
         CompetitionStage,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name="awarded_prizes",

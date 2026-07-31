@@ -3,18 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import {
   addRosterPlayer,
-  buildDefaultCompetitionStages,
   concludeLeagueMatchday,
   recomputeLeagueMatchday,
-  createCompetitionStage,
-  createCompetitionPrize,
-  addCompetitionStageRule,
-  createCompetitionTemplate,
-  deleteCompetition,
-  deleteCompetitionPrize,
-  deleteCompetitionStage,
   createLeague,
-  getCompetitionStages,
   getCompetitions,
   getLeagueDetail,
   getLeagueMatchdays,
@@ -23,14 +14,10 @@ import {
   importRosterCsv,
   importRosterXlsx,
   joinLeague,
-  previewCompetitionSchedule,
   removeRosterPlayer,
-  scheduleCompetition,
   searchPlayers,
   setMarketStatus,
   updateLeagueSettings,
-  updateCompetitionStage,
-  updateCompetition,
   updateMemberRole,
 } from '../api';
 import { ApiError, type LeagueSettingsPatch } from '../api/backend';
@@ -41,10 +28,9 @@ import CopyButton from '../components/CopyButton';
 import MarketAdminPanel from '../components/MarketAdminPanel';
 import LeagueSetupChecklist from '../components/LeagueSetupChecklist';
 import Crest from '../components/Crest';
+import { competitionFormatLabel } from '../league/competitionFormat';
 import type {
   CompetitionItem,
-  CompetitionSchedulePreview,
-  CompetitionStageItem,
   LeagueDetail,
   LeagueMatchdayItem,
   PlayerSearchItem,
@@ -53,7 +39,7 @@ import type {
 } from '../types/league';
 
 type AdminTab = 'user' | 'league';
-type LeagueTab = 'overview' | 'roster' | 'competitions' | 'matchdays' | 'auction' | 'market';
+type LeagueTab = 'roster' | 'competitions' | 'matchdays' | 'auction' | 'market';
 
 export default function LeagueAdminPage() {
   const [searchParams] = useSearchParams();
@@ -62,7 +48,7 @@ export default function LeagueAdminPage() {
   const isAdmin = selectedLeague?.role === 'admin';
 
   const [activeTab, setActiveTab] = useState<AdminTab>('user');
-  const [leagueTab, setLeagueTab] = useState<LeagueTab>('overview');
+  const [leagueTab, setLeagueTab] = useState<LeagueTab>('competitions');
 
   const [league, setLeague] = useState<LeagueDetail | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
@@ -71,10 +57,6 @@ export default function LeagueAdminPage() {
   // save on every change: one stray tap on a checkbox rewrote a rule that decides
   // how votes are counted, with no way back and nothing asking for confirmation.
   const [optionsDraft, setOptionsDraft] = useState<LeagueSettingsPatch | null>(null);
-  // The manual competition builder is revealed only on request, and only while
-  // the league still has no competition — see the chooser in the Competizioni tab.
-  const [advancedCompOpen, setAdvancedCompOpen] = useState(false);
-
   const [createName, setCreateName] = useState('');
   const [createTeam, setCreateTeam] = useState('');
   // Reference season is mandatory at creation and immutable afterwards.
@@ -94,37 +76,9 @@ export default function LeagueAdminPage() {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [rosterXlsxFile, setRosterXlsxFile] = useState<File | null>(null);
 
-  const [compName, setCompName] = useState('');
-  const [compCreateMacro, setCompCreateMacro] = useState<'none' | 'round_robin' | 'knockout'>('none');
-  const [compWizardStartsAt, setCompWizardStartsAt] = useState('');
-  const [compWizardEndsAt, setCompWizardEndsAt] = useState('');
-  const [competitions, setCompetitions] = useState<CompetitionItem[]>([]);
-  const [selectedCompetitionId, setSelectedCompetitionId] = useState<number | null>(null);
-  const [compStartsAt, setCompStartsAt] = useState('');
-  const [compEndsAt, setCompEndsAt] = useState('');
 
+  const [competitions, setCompetitions] = useState<CompetitionItem[]>([]);
   const [matchdays, setMatchdays] = useState<LeagueMatchdayItem[]>([]);
-  const [competitionStages, setCompetitionStages] = useState<CompetitionStageItem[]>([]);
-  const [leagueStageOptions, setLeagueStageOptions] = useState<Array<{ stage_id: number; competition_id: number; label: string }>>([]);
-  const [newStageName, setNewStageName] = useState('Girone unico');
-  const [newStageType, setNewStageType] = useState<'round_robin' | 'knockout'>('round_robin');
-  const [newStageOrder, setNewStageOrder] = useState('1');
-  const [newStageTeamIds, setNewStageTeamIds] = useState<number[]>([]);
-  const [manualStageTeamToAdd, setManualStageTeamToAdd] = useState<number | null>(null);
-  const [selectedEditStageId, setSelectedEditStageId] = useState<number | null>(null);
-  const [autoselectStageOnLoad, setAutoselectStageOnLoad] = useState(false);
-  const [stageParticipantMode, setStageParticipantMode] = useState<'manual' | 'derived'>('manual');
-  const [stageRuleSourceId, setStageRuleSourceId] = useState<number | null>(null);
-  const [stageRuleMode, setStageRuleMode] = useState<'winners' | 'losers' | 'table_range'>('winners');
-  const [stageRuleRankFrom, setStageRuleRankFrom] = useState('1');
-  const [stageRuleRankTo, setStageRuleRankTo] = useState('1');
-  const [prizeName, setPrizeName] = useState('');
-  const [prizeConditionType, setPrizeConditionType] = useState<'final_table_range' | 'stage_table_range' | 'stage_winner' | 'stage_loser'>('final_table_range');
-  const [prizeStageId, setPrizeStageId] = useState<number | null>(null);
-  const [prizeRankFrom, setPrizeRankFrom] = useState('1');
-  const [prizeRankTo, setPrizeRankTo] = useState('1');
-  const [schedulePreview, setSchedulePreview] = useState<CompetitionSchedulePreview | null>(null);
-  const [roundMappingDraft, setRoundMappingDraft] = useState<Record<string, string>>({});
 
   const [msg, setMsg] = useState<string>('');
   const [msgTone, setMsgTone] = useState<'info' | 'success' | 'warning' | 'error'>('info');
@@ -143,57 +97,6 @@ export default function LeagueAdminPage() {
     () => league?.teams.find((t) => t.team_id === selectedTeamId)?.name ?? '',
     [league, selectedTeamId]
   );
-  const selectedCompetition = useMemo(
-    () => competitions.find((c) => c.competition_id === selectedCompetitionId) ?? null,
-    [competitions, selectedCompetitionId]
-  );
-  const stageOptionsByCompetition = useMemo(() => {
-    const grouped = new Map<number, { competitionName: string; items: Array<{ stage_id: number; label: string }> }>();
-    leagueStageOptions.forEach((opt) => {
-      const comp = competitions.find((c) => c.competition_id === opt.competition_id);
-      const competitionName = comp?.name ?? `Competition ${opt.competition_id}`;
-      if (!grouped.has(opt.competition_id)) {
-        grouped.set(opt.competition_id, { competitionName, items: [] });
-      }
-      grouped.get(opt.competition_id)!.items.push({
-        stage_id: opt.stage_id,
-        label: opt.label.replace(`${competitionName} > `, ''),
-      });
-    });
-    return [...grouped.entries()].map(([competitionId, data]) => ({
-      competitionId,
-      competitionName: data.competitionName,
-      items: data.items,
-    }));
-  }, [leagueStageOptions, competitions]);
-  const selectedEditStage = useMemo(
-    () => competitionStages.find((s) => s.stage_id === selectedEditStageId) ?? null,
-    [competitionStages, selectedEditStageId]
-  );
-  const stageParticipantEntries = useMemo(() => {
-    const manualNames = new Set<number>();
-    const manual = newStageTeamIds
-      .map((teamId) => {
-        const t = league?.teams.find((x) => x.team_id === teamId);
-        if (!t) return null;
-        manualNames.add(teamId);
-        return { kind: 'manual' as const, key: `m-${teamId}`, label: `${t.name} (${t.manager_username})`, teamId };
-      })
-      .filter((x): x is { kind: 'manual'; key: string; label: string; teamId: number } => !!x);
-
-    const derived = (selectedEditStage?.rules_in ?? []).map((r) => ({
-      kind: 'derived' as const,
-      key: `d-${r.rule_id}`,
-      label: `${formatRuleModeLabel(r.mode, r.rank_from, r.rank_to)} da ${r.source_competition_name ? `${r.source_competition_name} / ` : ''}${r.source_stage_name}`,
-    }));
-
-    return [...manual, ...derived];
-  }, [newStageTeamIds, league?.teams, selectedEditStage]);
-  const manualAddableTeams = useMemo(
-    () => (league?.teams ?? []).filter((t) => !newStageTeamIds.includes(t.team_id)),
-    [league?.teams, newStageTeamIds]
-  );
-
   /** The saved values, i.e. what "Annulla" goes back to and what "dirty" is
    *  measured against. */
   function optionsOf(d: LeagueDetail): LeagueSettingsPatch {
@@ -237,36 +140,12 @@ export default function LeagueAdminPage() {
   }
 
   async function loadCompetitions(leagueId: number) {
-    const c = await getCompetitions(leagueId);
-    setCompetitions(c);
-    if (!selectedCompetitionId && c.length) {
-      setSelectedCompetitionId(c[0].competition_id);
-    }
-    const allStages = await Promise.all(
-      c.map(async (comp) => {
-        try {
-          const stages = await getCompetitionStages(comp.competition_id);
-          return stages.map((s) => ({
-            stage_id: s.stage_id,
-            competition_id: comp.competition_id,
-            label: `${comp.name} > #${s.order_index} ${s.name}`,
-          }));
-        } catch {
-          return [];
-        }
-      })
-    );
-    setLeagueStageOptions(allStages.flat());
+    setCompetitions(await getCompetitions(leagueId));
   }
 
   async function loadMatchdays(leagueId: number) {
     const items = await getLeagueMatchdays(leagueId);
     setMatchdays(items);
-  }
-
-  async function loadCompetitionStages(competitionId: number) {
-    const items = await getCompetitionStages(competitionId);
-    setCompetitionStages(items);
   }
 
   useEffect(() => {
@@ -291,87 +170,12 @@ export default function LeagueAdminPage() {
       setRoster(null);
       setCompetitions([]);
       setMatchdays([]);
-      setLeagueStageOptions([]);
       return;
     }
     void loadLeagueDetail(selectedLeagueId).catch((e) => setMsg(`Errore dettaglio lega: ${e.message}`));
     void loadCompetitions(selectedLeagueId).catch((e) => setMsg(`Errore competizioni: ${e.message}`));
     void loadMatchdays(selectedLeagueId).catch((e) => setMsg(`Errore matchdays: ${e.message}`));
   }, [selectedLeagueId]);
-
-  useEffect(() => {
-    if (!selectedCompetitionId) {
-      setCompetitionStages([]);
-      return;
-    }
-    void loadCompetitionStages(selectedCompetitionId).catch(() => setCompetitionStages([]));
-  }, [selectedCompetitionId]);
-
-  useEffect(() => {
-    if (!selectedCompetition) {
-      setCompStartsAt('');
-      setCompEndsAt('');
-      setSchedulePreview(null);
-      setRoundMappingDraft({});
-      setPrizeStageId(null);
-      setSelectedEditStageId(null);
-      setAutoselectStageOnLoad(false);
-      if (!compName.trim()) {
-        setCompName(nextAvailableCompetitionName());
-      }
-      return;
-    }
-    setCompStartsAt(selectedCompetition.starts_at ?? '');
-    setCompEndsAt(selectedCompetition.ends_at ?? '');
-    setSchedulePreview(null);
-    setRoundMappingDraft({});
-    setPrizeStageId(null);
-    setSelectedEditStageId(null);
-    setAutoselectStageOnLoad(true);
-  }, [selectedCompetition]);
-
-  useEffect(() => {
-    if (!league?.teams.length) return;
-    setNewStageTeamIds(league.teams.map((t) => t.team_id));
-    setManualStageTeamToAdd(league.teams[0]?.team_id ?? null);
-  }, [league?.teams]);
-
-  useEffect(() => {
-    const nextOrder = (competitionStages.reduce((mx, s) => Math.max(mx, s.order_index), 0) || 0) + 1;
-    setNewStageOrder(String(nextOrder));
-  }, [competitionStages]);
-
-  useEffect(() => {
-    if (!selectedEditStageId) return;
-    const st = competitionStages.find((x) => x.stage_id === selectedEditStageId);
-    if (!st) return;
-    setNewStageName(st.name);
-    setNewStageType(st.stage_type);
-    setNewStageOrder(String(st.order_index));
-    setNewStageTeamIds(st.participants.filter((p) => p.source === 'manual').map((p) => p.team_id));
-  }, [selectedEditStageId, competitionStages]);
-
-  useEffect(() => {
-    if (!manualAddableTeams.length) {
-      setManualStageTeamToAdd(null);
-      return;
-    }
-    if (!manualStageTeamToAdd || !manualAddableTeams.some((t) => t.team_id === manualStageTeamToAdd)) {
-      setManualStageTeamToAdd(manualAddableTeams[0].team_id);
-    }
-  }, [manualAddableTeams, manualStageTeamToAdd]);
-
-  useEffect(() => {
-    if (!autoselectStageOnLoad) return;
-    if (!competitionStages.length) {
-      setSelectedEditStageId(null);
-      setAutoselectStageOnLoad(false);
-      return;
-    }
-    const sorted = [...competitionStages].sort((a, b) => (a.order_index - b.order_index) || (a.stage_id - b.stage_id));
-    setSelectedEditStageId(sorted[0].stage_id);
-    setAutoselectStageOnLoad(false);
-  }, [autoselectStageOnLoad, competitionStages]);
 
   useEffect(() => {
     if (!selectedLeagueId || !selectedTeamId) return;
@@ -510,110 +314,6 @@ export default function LeagueAdminPage() {
     setMsg(`Giornata ${md.real_matchday} ricalcolata (${use === 'snapshot' ? 'regole congelate' : 'regole attuali'})`);
   }
 
-  function formatRuleModeLabel(mode: 'winners' | 'losers' | 'table_range', rankFrom?: number | null, rankTo?: number | null): string {
-    if (mode === 'winners') return 'Vincitore';
-    if (mode === 'losers') return 'Sconfitto';
-    const rf = rankFrom ?? 1;
-    const rt = rankTo ?? rf;
-    return rf === rt ? `${rf}° classificato` : `Classificati ${rf}-${rt}`;
-  }
-
-  function nextAvailableCompetitionName(): string {
-    const used = new Set(competitions.map((c) => c.name.trim().toLowerCase()));
-    const base = 'Nuova competizione';
-    if (!used.has(base.toLowerCase())) return base;
-    let i = 2;
-    while (used.has(`${base} ${i}`.toLowerCase())) i += 1;
-    return `${base} ${i}`;
-  }
-
-  function formatDeletionDependencyError(err: unknown): Error {
-    if (!(err instanceof Error)) return new Error(String(err));
-    const msg = err.message ?? '';
-    const marker = 'API 400:';
-    const idx = msg.indexOf(marker);
-    if (idx < 0) return err;
-
-    const raw = msg.slice(idx + marker.length).trim();
-    try {
-      const payload = JSON.parse(raw) as {
-        detail?: string;
-        dependent_targets?: Array<{
-          target_competition_name?: string;
-          target_stage_name?: string;
-          mode?: string;
-          rank_from?: number | null;
-          rank_to?: number | null;
-        }>;
-        dependent_competitions?: Array<{
-          competition_name?: string;
-          mode?: string;
-          source_stage?: string;
-          rank_from?: number | null;
-          rank_to?: number | null;
-        }>;
-        dependent_prizes?: Array<{
-          competition_name?: string;
-          prize_name?: string;
-          source_stage_name?: string | null;
-        }>;
-      };
-
-      const chunks: string[] = [];
-
-      if (payload.dependent_targets?.length) {
-        const shown = payload.dependent_targets.slice(0, 3).map((d) => {
-          const mode = d.mode ?? 'rule';
-          const suffix =
-            mode === 'table_range' && d.rank_from
-              ? ` (${d.rank_from}${d.rank_to && d.rank_to !== d.rank_from ? `-${d.rank_to}` : ''})`
-              : '';
-          return `${d.target_competition_name ?? 'Comp'} / ${d.target_stage_name ?? 'Stage'} via ${mode}${suffix}`;
-        });
-        const more = payload.dependent_targets.length > 3 ? ` (+${payload.dependent_targets.length - 3} altre)` : '';
-        chunks.push(`Dipendenze stage: ${shown.join('; ')}${more}`);
-      }
-
-      if (payload.dependent_competitions?.length) {
-        const shown = payload.dependent_competitions.slice(0, 3).map((d) => {
-          const mode = d.mode ?? 'rule';
-          return `${d.competition_name ?? 'Comp'} via ${mode}/${d.source_stage ?? 'final'}`;
-        });
-        const more = payload.dependent_competitions.length > 3 ? ` (+${payload.dependent_competitions.length - 3} altre)` : '';
-        chunks.push(`Dipendenze competizione: ${shown.join('; ')}${more}`);
-      }
-
-      if (payload.dependent_prizes?.length) {
-        const shown = payload.dependent_prizes.slice(0, 3).map((d) => `${d.competition_name ?? 'Comp'}: ${d.prize_name ?? 'Premio'}`);
-        const more = payload.dependent_prizes.length > 3 ? ` (+${payload.dependent_prizes.length - 3} altri)` : '';
-        chunks.push(`Premi collegati: ${shown.join('; ')}${more}`);
-      }
-
-      if (chunks.length) {
-        return new Error(`${payload.detail ?? 'Eliminazione bloccata.'} ${chunks.join(' | ')}`);
-      }
-      if (payload.detail) return new Error(payload.detail);
-      return err;
-    } catch {
-      return err;
-    }
-  }
-
-  async function reloadSchedulePreview(competitionId: number) {
-    const preview = await previewCompetitionSchedule(competitionId, {
-      starts_at: compStartsAt || null,
-      ends_at: compEndsAt || null,
-    });
-    setSchedulePreview(preview);
-    const next: Record<string, string> = {};
-    for (const rno of preview.rounds) {
-      const key = String(rno);
-      const manual = preview.current_mapping[key] ?? preview.proposed_mapping[key];
-      next[key] = manual !== undefined ? String(manual) : '';
-    }
-    setRoundMappingDraft(next);
-  }
-
   return (
     <div className="space-y-4">
       <Card className="p-4">
@@ -633,7 +333,8 @@ export default function LeagueAdminPage() {
             league={league}
             competitions={competitions}
             onGoToInvite={() => {
-              setLeagueTab('overview');
+              // The invite code lives in the league card ABOVE the tab bar, so
+              // there is no tab to switch to — just scroll to it.
               revealAfterRender('vfoot-invite-code');
             }}
             onGoToCompetitions={() => {
@@ -1045,7 +746,13 @@ export default function LeagueAdminPage() {
                         const nextRole = demoting ? 'manager' : 'admin';
                         const team = teamOf.get(m.user_id) ?? null;
                         return (
-                          <div key={m.membership_id} className="flex items-center justify-between gap-2 rounded-xl border px-3 py-2">
+                          // On a phone the role button is as wide as the row, so a
+                          // non-wrapping row squeezed the team name down to its first
+                          // letter. Let the actions drop to their own line instead.
+                          <div
+                            key={m.membership_id}
+                            className="flex flex-col gap-2 rounded-xl border px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                          >
                             <div className="flex min-w-0 items-center gap-2">
                               {/* No crest for someone without a team: the seeded
                                   fallback would invent one for a team that does
@@ -1062,7 +769,7 @@ export default function LeagueAdminPage() {
                                 <div className="truncate text-xs text-slate-500">{m.username}</div>
                               </div>
                             </div>
-                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                               {/* "manager" is the value the database stores, not a
                                   word to show: it grants nothing on its own — every
                                   participant right comes from BEING a member — so a
@@ -1126,9 +833,11 @@ export default function LeagueAdminPage() {
           {league ? (
             <>
               <Card id="vfoot-league-tabs" className="p-4 scroll-mt-4">
-                <div className="inline-flex rounded-xl bg-slate-100 p-1">
+                {/* Five tabs do not fit 390px: the BAR scrolls, so the page does
+                    not get a horizontal scrollbar of its own. */}
+                <div className="-mx-1 overflow-x-auto px-1">
+                  <div className="inline-flex rounded-xl bg-slate-100 p-1">
                   {([
-                    ['overview', 'Overview'],
                     ['roster', 'Roster'],
                     ['competitions', 'Competizioni'],
                     ['matchdays', 'Matchdays'],
@@ -1139,24 +848,19 @@ export default function LeagueAdminPage() {
                       key={id}
                       type="button"
                       onClick={() => setLeagueTab(id)}
-                      className={leagueTab === id ? 'rounded-lg bg-white px-3 py-2 text-sm font-semibold' : 'px-3 py-2 text-sm font-semibold text-slate-600'}
+                      className={
+                        'whitespace-nowrap ' +
+                        (leagueTab === id
+                          ? 'rounded-lg bg-white px-3 py-2 text-sm font-semibold'
+                          : 'px-3 py-2 text-sm font-semibold text-slate-600')
+                      }
                     >
                       {label}
                     </button>
                   ))}
+                  </div>
                 </div>
               </Card>
-
-              {leagueTab === 'overview' ? (
-                <Card className="p-4">
-                  <SectionTitle>Panoramica lega</SectionTitle>
-                  <ul className="mt-3 space-y-2 text-sm text-slate-700">
-                    <li>• Roster: gestione giocatori per ciascun team della lega.</li>
-                    <li>• Competizioni: crea campionati o coppe dalle squadre partecipanti.</li>
-                    <li>• Asta: controlla chiamate, cronologia e budget disponibili.</li>
-                  </ul>
-                </Card>
-              ) : null}
 
               {leagueTab === 'roster' ? (
                 <div className="grid gap-4 lg:grid-cols-2">
@@ -1338,634 +1042,83 @@ export default function LeagueAdminPage() {
 
               {leagueTab === 'competitions' ? (
                 <div className="space-y-4">
-                  {/* The two routes used to sit one under the other, both open:
-                      the advanced form was visible immediately, so people started
-                      filling it in without ever registering that a guided flow
-                      existed. Now it is a choice, and the manual path costs one
-                      deliberate click. Only while the league has NO competition:
-                      once there is one, this same form is how it gets managed,
-                      and gating it would hide editing behind a create wizard. */}
-                  {!competitions.length && !advancedCompOpen ? (
-                    <Card className="p-4">
-                      <SectionTitle>Come vuoi creare la competizione?</SectionTitle>
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <Link
-                          to="/league-admin/competitions/new"
-                          className="flex flex-col rounded-2xl bg-slate-900 p-4 text-white transition hover:bg-slate-800"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-                              Consigliato
-                            </span>
-                          </div>
-                          <div className="mt-2 text-sm font-bold">✨ Flusso guidato</div>
-                          <div className="mt-1 text-xs text-slate-300">
-                            Scegli un template (Campionato, Coppa, o entrambi), andata-ritorno e
-                            qualificazioni. Stage e calendario li costruisce lui.
-                          </div>
-                          <span className="mt-3 text-sm font-semibold">Inizia →</span>
-                        </Link>
-
-                        <button
-                          type="button"
-                          onClick={() => setAdvancedCompOpen(true)}
-                          className="flex flex-col rounded-2xl border border-slate-200 p-4 text-left transition hover:bg-slate-50"
-                        >
-                          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                            Per chi sa già cosa vuole
-                          </div>
-                          <div className="mt-2 text-sm font-bold text-slate-800">🔧 Costruzione manuale</div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            Crei il contenitore, poi ogni stage, poi le qualificazioni fra stage, poi
-                            la mappatura dei round sulle giornate reali. Quattro passi separati, tutti a
-                            mano.
-                          </div>
-                          <span className="mt-3 text-sm font-semibold text-slate-700">Procedi →</span>
-                        </button>
-                      </div>
-                    </Card>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-2">
+                  {/* Creating and editing used to happen in the same form, on this
+                      page: a "select or create" dropdown, then four numbered cards
+                      that were half wizard and half editor. They are two different
+                      moments, so they are two different places now — this tab only
+                      LISTS what exists and points at them. */}
+                  <Card className="p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <SectionTitle>Competizioni</SectionTitle>
                       <Link
                         to="/league-admin/competitions/new"
-                        className="flex flex-1 items-center justify-between rounded-2xl bg-slate-900 p-4 text-white transition hover:bg-slate-800"
+                        className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                       >
-                        <div>
-                          <div className="text-sm font-bold">✨ Crea competizione (flusso guidato)</div>
-                          <div className="text-xs text-slate-300">
-                            Template Campionato/Coppa, andata-ritorno, e qualificazione da un'altra competizione.
-                          </div>
-                        </div>
-                        <span className="text-lg">→</span>
+                        + Crea competizione
                       </Link>
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {competitions.map((c) => {
+                        const dependsOn = c.dependencies.map((d) => d.source_competition_name);
+                        const mds = Object.values(c.round_calendar ?? {});
+                        return (
+                          <Link
+                            key={c.competition_id}
+                            to={`/league-admin/competitions/${c.competition_id}`}
+                            className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 p-3 transition hover:border-slate-400 hover:bg-slate-50"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-slate-900">{c.name}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                <Badge tone="slate">{competitionFormatLabel(c)}</Badge>
+                                <Badge tone={c.status === 'done' ? 'green' : c.status === 'active' ? 'amber' : 'slate'}>
+                                  {c.status === 'done' ? 'conclusa' : c.status === 'active' ? 'in corso' : 'bozza'}
+                                </Badge>
+                                {c.prizes.map((p) => (
+                                  <span key={p.prize_id} title={`${p.name} — ${p.condition_label}`} className="text-base leading-none">
+                                    {p.icon}
+                                  </span>
+                                ))}
+                              </div>
+                              {dependsOn.length ? (
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  partecipanti da: {dependsOn.join(', ')}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="shrink-0 text-right text-[11px] text-slate-500">
+                              <div>
+                                {c.fixtures.finished}/{c.fixtures.total} gare
+                              </div>
+                              <div>
+                                {c.rounds.length} {c.rounds.length === 1 ? 'giornata' : 'giornate'}
+                              </div>
+                              {mds.length ? (
+                                <div>
+                                  reali {Math.min(...mds)}–{Math.max(...mds)}
+                                </div>
+                              ) : null}
+                            </div>
+                          </Link>
+                        );
+                      })}
                       {!competitions.length ? (
-                        <Button size="sm" variant="ghost" onClick={() => setAdvancedCompOpen(false)}>
-                          ← Torna alla scelta
-                        </Button>
+                        <div className="rounded-xl border border-dashed border-slate-300 p-4 text-center text-sm text-slate-500">
+                          Nessuna competizione. Il percorso guidato costruisce un campionato, una coppa o un girone con
+                          playoff in quattro passi.
+                        </div>
                       ) : null}
                     </div>
-                  )}
 
-                  {competitions.length || advancedCompOpen ? (
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <Card className="p-4 lg:col-span-2">
-                      <SectionTitle>1. Seleziona O Crea Competizione (avanzato)</SectionTitle>
-                      {/* The four steps used to be announced in a "Competition
-                          Builder" card at the top of the tab, where they read as
-                          the description of the whole page — including the guided
-                          flow, which does none of this. They belong here, to the
-                          manual path they actually describe. */}
-                      <div className="mt-2 text-xs text-slate-500">
-                        Percorso manuale in quattro passi: 1) crea il contenitore competizione,
-                        2) aggiungi le sottocompetizioni (stage), 3) collega le qualificazioni fra
-                        stage, 4) pianifica i round sulle giornate reali.
-                      </div>
-                      <div className="mt-2 text-xs text-slate-500">Usa il menu per aprire una competizione esistente oppure scegli "Nuova competizione".</div>
-                      <select
-                        className="mt-3 w-full rounded-xl border px-3 py-2 text-sm"
-                        value={selectedCompetitionId ?? '__new__'}
-                        onChange={(e) => {
-                          if (e.target.value === '__new__') {
-                            setSelectedCompetitionId(null);
-                            setCompName(nextAvailableCompetitionName());
-                            return;
-                          }
-                          setSelectedCompetitionId(Number(e.target.value));
-                        }}
-                      >
-                        <option value="__new__">+ Nuova competizione</option>
-                        {competitions.map((c) => (
-                          <option key={c.competition_id} value={c.competition_id}>
-                            {c.name} ({c.competition_type})
-                          </option>
-                        ))}
-                      </select>
-
-                      {!selectedCompetition ? (
-                        <div className="mt-3 space-y-2">
-                          <input className="w-full rounded-xl border px-3 py-2 text-sm" value={compName} onChange={(e) => setCompName(e.target.value)} placeholder="Nome competizione (es. Champions League Lega)" />
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <input type="date" className="rounded-xl border px-3 py-2 text-sm" value={compWizardStartsAt} onChange={(e) => setCompWizardStartsAt(e.target.value)} />
-                            <input type="date" className="rounded-xl border px-3 py-2 text-sm" value={compWizardEndsAt} onChange={(e) => setCompWizardEndsAt(e.target.value)} />
-                          </div>
-                          <select className="w-full rounded-xl border px-3 py-2 text-sm" value={compCreateMacro} onChange={(e) => setCompCreateMacro(e.target.value as 'none' | 'round_robin' | 'knockout')}>
-                            <option value="none">Nessun macro: crea solo contenitore</option>
-                            <option value="round_robin">Macro: campionato tutti contro tutti (1 stage)</option>
-                            <option value="knockout">Macro: torneo a eliminazione diretta</option>
-                          </select>
-                          <div className="text-xs text-slate-500">Con i macro, il sistema include tutti i team della lega e genera automaticamente stage/fixture iniziali.</div>
-                          <Button
-                            size="sm"
-                            onClick={() =>
-                              void run(async () => {
-                                if (!selectedLeagueId) return;
-                                const macroMode = compCreateMacro !== 'none';
-                                const res = await createCompetitionTemplate(selectedLeagueId, {
-                                  name: compName,
-                                  competition_type: macroMode ? compCreateMacro : 'round_robin',
-                                  container_only: !macroMode,
-                                  team_ids: macroMode ? league.teams.map((t) => t.team_id) : undefined,
-                                  starts_at: compWizardStartsAt || null,
-                                  ends_at: compWizardEndsAt || null,
-                                });
-                                if (macroMode) {
-                                  await buildDefaultCompetitionStages(res.competition_id, false, 42);
-                                }
-                                await loadCompetitions(selectedLeagueId);
-                                setSelectedCompetitionId(res.competition_id);
-                                setMsg(macroMode ? `Competizione creata con macro ${compCreateMacro}` : `Competizione creata (contenitore): ${res.name}`);
-                              })
-                            }
-                          >
-                            Crea competizione
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="mt-3 rounded-xl border p-2 text-sm">
-                          <div><span className="font-semibold">Stato:</span> {selectedCompetition.status}</div>
-                          <div><span className="font-semibold">Fixture:</span> {selectedCompetition.fixtures.finished}/{selectedCompetition.fixtures.total}</div>
-                          <div><span className="font-semibold">Stage:</span> {competitionStages.length}</div>
-                          <div className="mt-2">
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() =>
-                                void run(async () => {
-                                  if (!selectedCompetition) return;
-                                  const ok = window.confirm(
-                                    `Eliminare la competizione "${selectedCompetition.name}"? Operazione irreversibile.`
-                                  );
-                                  if (!ok) return;
-                                  try {
-                                    await deleteCompetition(selectedCompetition.competition_id);
-                                  } catch (e) {
-                                    throw formatDeletionDependencyError(e);
-                                  }
-                                  setSelectedCompetitionId(null);
-                                  setSelectedEditStageId(null);
-                                  if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                                  setMsg('Competizione eliminata');
-                                })
-                              }
-                            >
-                              Elimina competizione
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </Card>
-                  </div>
-                  ) : null}
-
-                  {selectedCompetition ? (
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <Card className="p-4">
-                        <SectionTitle>3. Crea/Edita Sottocompetizione (Stage)</SectionTitle>
-                        <div className="mt-2 text-xs text-slate-500">Modalita partecipanti: manuale (team scelti) oppure derivata (regole da altri stage).</div>
-                        <div className="mt-3 space-y-2">
-                          <label htmlFor="stage-editor-select" className="block text-xs font-semibold text-slate-500">Stage da modificare</label>
-                          <select
-                            id="stage-editor-select"
-                            className="w-full rounded-xl border px-3 py-2 text-sm"
-                            value={selectedEditStageId ?? ''}
-                            onChange={(e) => setSelectedEditStageId(e.target.value ? Number(e.target.value) : null)}
-                          >
-                            <option value="">Nuovo stage</option>
-                            {competitionStages.map((s) => (
-                              <option key={s.stage_id} value={s.stage_id}>#{s.order_index} {s.name}</option>
-                            ))}
-                          </select>
-                          <label htmlFor="stage-editor-name" className="block text-xs font-semibold text-slate-500">Nome stage</label>
-                          <input id="stage-editor-name" className="w-full rounded-xl border px-3 py-2 text-sm" value={newStageName} onChange={(e) => setNewStageName(e.target.value)} placeholder="Nome stage (es. Girone A, Semifinale)" />
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <div>
-                              <label htmlFor="stage-editor-type" className="mb-1 block text-xs font-semibold text-slate-500">Formato stage</label>
-                              <select id="stage-editor-type" className="w-full rounded-xl border px-3 py-2 text-sm" value={newStageType} onChange={(e) => setNewStageType(e.target.value as 'round_robin' | 'knockout')}>
-                                <option value="round_robin">Tutti contro tutti</option>
-                                <option value="knockout">Eliminazione diretta</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label htmlFor="stage-editor-order" className="mb-1 block text-xs font-semibold text-slate-500">Ordine stage</label>
-                              <input id="stage-editor-order" className="w-full rounded-xl border px-3 py-2 text-sm" value={newStageOrder} onChange={(e) => setNewStageOrder(e.target.value)} placeholder="Ordine stage" />
-                            </div>
-                          </div>
-
-                          <div className="rounded-xl border p-2">
-                            <div className="text-xs font-semibold text-slate-500">Lista partecipanti stage</div>
-                            <div className="mt-2 max-h-36 space-y-1 overflow-auto text-xs">
-                              {stageParticipantEntries.length ? (
-                                stageParticipantEntries.map((entry) => (
-                                  <div key={entry.key} className="flex items-center justify-between rounded-lg border px-2 py-1">
-                                    <div className="flex items-center gap-2">
-                                      <Badge tone={entry.kind === 'manual' ? 'slate' : 'amber'}>{entry.kind === 'manual' ? 'team' : 'derived'}</Badge>
-                                      <span>{entry.label}</span>
-                                    </div>
-                                    {entry.kind === 'manual' ? (
-                                      <Button
-                                        size="sm"
-                                        variant="secondary"
-                                        onClick={() => setNewStageTeamIds((prev) => prev.filter((id) => id !== entry.teamId))}
-                                      >
-                                        Remove
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                ))
-                              ) : (
-                                <div className="text-slate-500">Nessun partecipante selezionato.</div>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="inline-flex rounded-xl bg-slate-100 p-1">
-                            <button type="button" onClick={() => setStageParticipantMode('manual')} className={stageParticipantMode === 'manual' ? 'rounded-lg bg-white px-3 py-1 text-xs font-semibold' : 'px-3 py-1 text-xs font-semibold text-slate-600'}>Manuale</button>
-                            <button type="button" onClick={() => setStageParticipantMode('derived')} className={stageParticipantMode === 'derived' ? 'rounded-lg bg-white px-3 py-1 text-xs font-semibold' : 'px-3 py-1 text-xs font-semibold text-slate-600'}>Derivata</button>
-                          </div>
-
-                          {stageParticipantMode === 'manual' ? (
-                            <>
-                              <div className="rounded-xl border p-2">
-                                <div className="text-xs font-semibold text-slate-500">Partecipanti manuali</div>
-                                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
-                                  <select
-                                    id="stage-manual-team-select"
-                                    className="rounded-xl border px-3 py-2 text-sm"
-                                    value={manualStageTeamToAdd ?? ''}
-                                    onChange={(e) => setManualStageTeamToAdd(e.target.value ? Number(e.target.value) : null)}
-                                  >
-                                    <option value="">Seleziona team da aggiungere</option>
-                                    {manualAddableTeams.map((t) => (
-                                      <option key={t.team_id} value={t.team_id}>
-                                        {t.name} ({t.manager_username})
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    disabled={!manualStageTeamToAdd || manualAddableTeams.length === 0}
-                                    onClick={() => {
-                                      if (!manualStageTeamToAdd) return;
-                                      setNewStageTeamIds((prev) => (prev.includes(manualStageTeamToAdd) ? prev : [...prev, manualStageTeamToAdd]));
-                                    }}
-                                  >
-                                    Add
-                                  </Button>
-                                </div>
-                                {manualAddableTeams.length === 0 ? (
-                                  <div className="mt-2 text-xs text-slate-500">Tutti i team della lega sono gia presenti nello stage.</div>
-                                ) : null}
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              {!selectedEditStageId ? (
-                                <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                                  Seleziona prima uno stage esistente dal menu in alto per aggiungere regole derivate.
-                                </div>
-                              ) : (
-                                <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                                  Stage target corrente: <span className="font-semibold">#{selectedEditStage?.order_index} {selectedEditStage?.name}</span>
-                                </div>
-                              )}
-                              <div className="text-xs text-slate-500">
-                                Risoluzione automatica: se i risultati sorgente sono disponibili, i partecipanti vengono determinati subito; altrimenti al termine delle matchday rilevanti.
-                              </div>
-                              <label htmlFor="stage-rule-source" className="block text-xs font-semibold text-slate-500">Sorgente qualificazione</label>
-                              <select id="stage-rule-source" className="w-full rounded-xl border px-3 py-2 text-sm" value={stageRuleSourceId ?? ''} onChange={(e) => setStageRuleSourceId(e.target.value ? Number(e.target.value) : null)}>
-                                <option value="">Sorgente qualificazione</option>
-                                {stageOptionsByCompetition.map((grp) => (
-                                  <optgroup key={grp.competitionId} label={grp.competitionName}>
-                                    {grp.items.map((item) => (
-                                      <option key={item.stage_id} value={item.stage_id}>{item.label}</option>
-                                    ))}
-                                  </optgroup>
-                                ))}
-                              </select>
-                              <label htmlFor="stage-rule-mode" className="block text-xs font-semibold text-slate-500">Criterio qualificazione</label>
-                              <select id="stage-rule-mode" className="w-full rounded-xl border px-3 py-2 text-sm" value={stageRuleMode} onChange={(e) => setStageRuleMode(e.target.value as 'winners' | 'losers' | 'table_range')}>
-                                <option value="winners">Vincitore dello stage sorgente</option>
-                                <option value="losers">Sconfitto dello stage sorgente</option>
-                                <option value="table_range">Posizione in classifica</option>
-                              </select>
-                              {stageRuleMode === 'table_range' ? (
-                                <>
-                                  <label htmlFor="stage-rule-rank" className="block text-xs font-semibold text-slate-500">Posizione in classifica</label>
-                                  <input id="stage-rule-rank" className="w-full rounded-xl border px-3 py-2 text-sm" placeholder="Posizione (es. 1, 2, 3...)" value={stageRuleRankFrom} onChange={(e) => setStageRuleRankFrom(e.target.value)} />
-                                </>
-                              ) : null}
-                              <Button
-                                size="sm"
-                                disabled={!selectedEditStageId}
-                                onClick={() =>
-                                  void run(async () => {
-                                    if (!selectedEditStageId) {
-                                      setMsg('Seleziona uno stage esistente da modificare.');
-                                      return;
-                                    }
-                                    if (!stageRuleSourceId) {
-                                      setMsg('Seleziona lo stage sorgente.');
-                                      return;
-                                    }
-                                    if (selectedEditStageId === stageRuleSourceId) {
-                                      setMsg('Sorgente e target non possono coincidere.');
-                                      return;
-                                    }
-                                    const singleRank = Number(stageRuleRankFrom || 1);
-                                    const created = await addCompetitionStageRule(selectedEditStageId, {
-                                      source_stage_id: stageRuleSourceId,
-                                      mode: stageRuleMode,
-                                      rank_from: stageRuleMode === 'table_range' ? singleRank : undefined,
-                                      rank_to: stageRuleMode === 'table_range' ? singleRank : undefined,
-                                    });
-                                    if (selectedCompetition) await loadCompetitionStages(selectedCompetition.competition_id);
-                                    if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                                    const unresolved = created.resolve?.unresolved_rules ?? 0;
-                                    if (unresolved > 0) {
-                                      setMsg('Regola stage aggiunta. Partecipanti derivati in attesa dei risultati dello stage sorgente.');
-                                    } else {
-                                      setMsg('Regola stage aggiunta e partecipanti aggiornati.');
-                                    }
-                                  })
-                                }
-                              >
-                                Aggiungi regola derivata
-                              </Button>
-                              <div className="rounded-xl border p-2 text-xs">
-                                <div className="font-semibold text-slate-500">Regole derivate correnti (stage selezionato)</div>
-                                <div className="mt-1 space-y-1">
-                                  {selectedEditStage?.rules_in.length ? (
-                                    selectedEditStage.rules_in.map((r) => (
-                                      <div key={r.rule_id}>
-                                        {formatRuleModeLabel(r.mode, r.rank_from, r.rank_to)} · {r.source_competition_name ? `${r.source_competition_name} / ` : ''}{r.source_stage_name}
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <div className="text-slate-500">Nessuna regola derivata.</div>
-                                  )}
-                                </div>
-                              </div>
-                            </>
-                          )}
-
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                void run(async () => {
-                                  if (!selectedCompetition) return;
-                                  if (selectedEditStageId) {
-                                    await updateCompetitionStage(selectedEditStageId, {
-                                      name: newStageName,
-                                      stage_type: newStageType,
-                                      order_index: Number(newStageOrder || 1),
-                                      team_ids: newStageTeamIds,
-                                    });
-                                    setMsg('Stage aggiornato');
-                                  } else {
-                                    await createCompetitionStage(selectedCompetition.competition_id, {
-                                      name: newStageName,
-                                      stage_type: newStageType,
-                                      order_index: Number(newStageOrder || 1),
-                                      team_ids: newStageTeamIds,
-                                    });
-                                    setMsg('Stage creato');
-                                  }
-                                  await loadCompetitionStages(selectedCompetition.competition_id);
-                                  if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                                })
-                              }
-                            >
-                              {selectedEditStageId ? 'Salva modifiche stage' : 'Crea nuovo stage'}
-                            </Button>
-                            {selectedEditStageId ? (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() =>
-                                  void run(async () => {
-                                    if (!selectedEditStageId || !selectedCompetition) return;
-                                    const stageToDelete = competitionStages.find((s) => s.stage_id === selectedEditStageId);
-                                    const ok = window.confirm(
-                                      `Eliminare lo stage "${stageToDelete?.name ?? `#${selectedEditStageId}`}"? Operazione irreversibile.`
-                                    );
-                                    if (!ok) return;
-                                    try {
-                                      await deleteCompetitionStage(selectedEditStageId);
-                                    } catch (e) {
-                                      throw formatDeletionDependencyError(e);
-                                    }
-                                    setSelectedEditStageId(null);
-                                    await loadCompetitionStages(selectedCompetition.competition_id);
-                                    if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                                    setMsg('Stage eliminato');
-                                  })
-                                }
-                              >
-                                Elimina stage
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                      </Card>
-
-                      <Card className="p-4 lg:col-span-2">
-                        <SectionTitle>Pianificazione Matchday e Stato</SectionTitle>
-                        <div className="mt-2 rounded-xl border p-2">
-                          <div className="text-xs font-semibold text-slate-500">Durata e Associazione ai Matchday Reali</div>
-                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                            <input type="date" className="rounded-xl border px-3 py-2 text-sm" value={compStartsAt} onChange={(e) => setCompStartsAt(e.target.value)} />
-                            <input type="date" className="rounded-xl border px-3 py-2 text-sm" value={compEndsAt} onChange={(e) => setCompEndsAt(e.target.value)} />
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => void run(async () => {
-                              if (!selectedCompetition) return;
-                              await updateCompetition(selectedCompetition.competition_id, { starts_at: compStartsAt || null, ends_at: compEndsAt || null });
-                              if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                              setMsg('Date competizione aggiornate');
-                            })}>Salva date</Button>
-                            <Button size="sm" variant="secondary" onClick={() => void run(async () => {
-                              if (!selectedCompetition) return;
-                              await reloadSchedulePreview(selectedCompetition.competition_id);
-                              setMsg('Preview calendario aggiornata');
-                            })}>Preview mapping</Button>
-                            <Button size="sm" onClick={() => void run(async () => {
-                              if (!selectedCompetition) return;
-                              const mapping: Record<string, number> = {};
-                              Object.entries(roundMappingDraft).forEach(([k, v]) => {
-                                const parsed = Number(v);
-                                if (Number.isFinite(parsed) && parsed > 0) mapping[k] = parsed;
-                              });
-                              await scheduleCompetition(selectedCompetition.competition_id, {
-                                starts_at: compStartsAt || null,
-                                ends_at: compEndsAt || null,
-                                round_mapping: mapping,
-                              });
-                              if (selectedLeagueId) {
-                                await loadCompetitions(selectedLeagueId);
-                                await loadMatchdays(selectedLeagueId);
-                              }
-                              await reloadSchedulePreview(selectedCompetition.competition_id);
-                              setMsg('Scheduling applicato');
-                            })}>Applica mapping</Button>
-                            <Button size="sm" variant="secondary" onClick={() => void run(async () => {
-                              if (!selectedCompetition) return;
-                              await updateCompetition(selectedCompetition.competition_id, { status: 'active' });
-                              if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                            })}>Set active</Button>
-                            <Button size="sm" variant="secondary" onClick={() => void run(async () => {
-                              if (!selectedCompetition) return;
-                              await updateCompetition(selectedCompetition.competition_id, { status: 'done' });
-                              if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                            })}>Set done</Button>
-                          </div>
-                        </div>
-                        {schedulePreview ? (
-                          <div className="mt-3 rounded-xl border bg-slate-50 p-2">
-                            <div className="text-xs text-slate-600">Matchday reali disponibili: {schedulePreview.available_real_matchdays.length ? schedulePreview.available_real_matchdays.join(', ') : 'nessuno nel range date'}</div>
-                            <div className="mt-2 space-y-2">
-                              {schedulePreview.rounds.map((rno) => {
-                                const key = String(rno);
-                                const current = schedulePreview.current_mapping[key];
-                                const proposed = schedulePreview.proposed_mapping[key];
-                                return (
-                                  <div key={key} className="grid items-center gap-2 rounded-lg border bg-white px-2 py-2 text-xs sm:grid-cols-[120px_1fr_auto]">
-                                    <div className="font-semibold">Round {rno}</div>
-                                    <select className="rounded-lg border px-2 py-1" value={roundMappingDraft[key] ?? ''} onChange={(e) => setRoundMappingDraft((prev) => ({ ...prev, [key]: e.target.value }))}>
-                                      <option value="">Non assegnato</option>
-                                      {schedulePreview.available_real_matchdays.map((md) => (
-                                        <option key={md} value={md}>Real MD {md}</option>
-                                      ))}
-                                    </select>
-                                    <div className="text-slate-500">curr {current ?? '-'} · auto {proposed ?? '-'}</div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ) : null}
-                      </Card>
-
-                      <Card className="p-4 lg:col-span-2">
-                        <SectionTitle>Stage Graph</SectionTitle>
-                        <div className="mt-2 max-h-80 space-y-2 overflow-auto text-xs">
-                          {competitionStages.length ? (
-                            competitionStages
-                              .sort((a, b) => (a.order_index - b.order_index) || (a.stage_id - b.stage_id))
-                              .map((st) => (
-                                <div key={st.stage_id} className="rounded-lg border px-2 py-2">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="font-semibold">#{st.order_index} {st.name}</span>
-                                    <Badge tone={st.stage_type === 'knockout' ? 'amber' : 'slate'}>
-                                      {st.stage_type === 'knockout' ? 'Eliminazione diretta' : 'Tutti contro tutti'}
-                                    </Badge>
-                                    <Badge tone={st.status === 'done' ? 'green' : st.status === 'active' ? 'amber' : 'slate'}>{st.status}</Badge>
-                                  </div>
-                                  <div className="mt-1">partecipanti {st.participants.length} · fixture {st.fixtures.finished}/{st.fixtures.total}</div>
-                                  {st.rules_in.length ? <div className="mt-1 text-slate-600">da: {st.rules_in.map((r) => `${formatRuleModeLabel(r.mode, r.rank_from, r.rank_to)} · ${r.source_competition_name ? `${r.source_competition_name} / ` : ''}${r.source_stage_name}`).join(', ')}</div> : <div className="mt-1 text-slate-500">nessuna regola in ingresso</div>}
-                                </div>
-                              ))
-                          ) : (
-                            <div className="text-slate-500">Nessuno stage definito.</div>
-                          )}
-                        </div>
-                      </Card>
-
-                      <Card className="p-4 lg:col-span-2">
-                        <SectionTitle>Premi e Condizioni</SectionTitle>
-                        <div className="mt-2 text-xs text-slate-500">
-                          Definisci premi con condizione di assegnazione: classifica finale, classifica stage o vincitore/perdente di uno stage.
-                        </div>
-                        <div className="mt-3 grid gap-2 lg:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
-                          <input className="rounded-xl border px-3 py-2 text-sm" placeholder="Nome premio (es. Scudetto, Coppa Fair Play)" value={prizeName} onChange={(e) => setPrizeName(e.target.value)} />
-                          <select className="rounded-xl border px-3 py-2 text-sm" value={prizeConditionType} onChange={(e) => setPrizeConditionType(e.target.value as 'final_table_range' | 'stage_table_range' | 'stage_winner' | 'stage_loser')}>
-                            <option value="final_table_range">Classifica finale (range)</option>
-                            <option value="stage_table_range">Classifica stage (range)</option>
-                            <option value="stage_winner">Vincitore stage</option>
-                            <option value="stage_loser">Perdente stage</option>
-                          </select>
-                          <select
-                            className="rounded-xl border px-3 py-2 text-sm"
-                            value={prizeStageId ?? ''}
-                            onChange={(e) => setPrizeStageId(e.target.value ? Number(e.target.value) : null)}
-                            disabled={prizeConditionType === 'final_table_range'}
-                          >
-                            <option value="">Stage (se richiesto)</option>
-                            {competitionStages.map((s) => (
-                              <option key={s.stage_id} value={s.stage_id}>#{s.order_index} {s.name}</option>
-                            ))}
-                          </select>
-                          <div className="grid grid-cols-2 gap-2">
-                            <input className="rounded-xl border px-3 py-2 text-sm" placeholder="from" value={prizeRankFrom} onChange={(e) => setPrizeRankFrom(e.target.value)} disabled={!(prizeConditionType === 'final_table_range' || prizeConditionType === 'stage_table_range')} />
-                            <input className="rounded-xl border px-3 py-2 text-sm" placeholder="to" value={prizeRankTo} onChange={(e) => setPrizeRankTo(e.target.value)} disabled={!(prizeConditionType === 'final_table_range' || prizeConditionType === 'stage_table_range')} />
-                          </div>
-                          <Button
-                            size="sm"
-                            onClick={() =>
-                              void run(async () => {
-                                if (!selectedCompetition || !prizeName.trim()) return;
-                                await createCompetitionPrize(selectedCompetition.competition_id, {
-                                  name: prizeName.trim(),
-                                  condition_type: prizeConditionType,
-                                  source_stage_id:
-                                    prizeConditionType === 'final_table_range' ? undefined : (prizeStageId ?? undefined),
-                                  rank_from:
-                                    prizeConditionType === 'final_table_range' || prizeConditionType === 'stage_table_range'
-                                      ? Number(prizeRankFrom || 1)
-                                      : undefined,
-                                  rank_to:
-                                    prizeConditionType === 'final_table_range' || prizeConditionType === 'stage_table_range'
-                                      ? Number(prizeRankTo || prizeRankFrom || 1)
-                                      : undefined,
-                                });
-                                if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                                setPrizeName('');
-                                setMsg('Premio aggiunto');
-                              })
-                            }
-                          >
-                            Aggiungi premio
-                          </Button>
-                        </div>
-
-                        <div className="mt-3 max-h-52 space-y-2 overflow-auto text-xs">
-                          {selectedCompetition.prizes.length ? (
-                            selectedCompetition.prizes.map((p) => (
-                              <div key={p.prize_id} className="flex items-center justify-between rounded-lg border px-2 py-2">
-                                <div>
-                                  <div className="font-semibold">{p.name}</div>
-                                  <div className="text-slate-600">
-                                    {p.condition_type}
-                                    {p.source_stage_name ? ` · ${p.source_stage_name}` : ''}
-                                    {p.rank_from !== null ? ` · ${p.rank_from}-${p.rank_to ?? p.rank_from}` : ''}
-                                  </div>
-                                </div>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() =>
-                                    void run(async () => {
-                                      await deleteCompetitionPrize(p.prize_id);
-                                      if (selectedLeagueId) await loadCompetitions(selectedLeagueId);
-                                    })
-                                  }
-                                >
-                                  Remove
-                                </Button>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="text-slate-500">Nessun premio configurato.</div>
-                          )}
-                        </div>
-                      </Card>
+                    <div className="mt-4 border-t pt-3 text-xs text-slate-500">
+                      Ti serve una formula diversa dalle tre guidate?{' '}
+                      <Link to="/league-admin/competitions/advanced" className="font-semibold underline">
+                        Costruzione avanzata
+                      </Link>
+                      : la componi turno per turno.
                     </div>
-                  ) : (
-                    <Card className="p-4">
-                      <div className="text-sm text-slate-500">Crea e seleziona una competizione per proseguire con stage, regole e calendario.</div>
-                    </Card>
-                  )}
+                  </Card>
                 </div>
               ) : null}
 

@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { compColor } from '../league/competitionColors';
-
-const TYPE_LABEL: Record<string, string> = { round_robin: 'Campionato', knockout: 'Coppa' };
+import { competitionFormatLabel } from '../league/competitionFormat';
 
 // Custom dropdown (a native <select> can't reliably colour individual options):
 // the button shows the CURRENT competition in its accent colour; the open list
@@ -45,7 +44,7 @@ export default function CompetitionSwitcher({ compact }: { compact?: boolean }) 
   const idx = Math.max(0, competitions.findIndex((c) => c.competition_id === selectedCompetitionId));
   const cur = competitions[idx];
   const curColor = compColor(idx);
-  const label = (c: typeof cur) => `${TYPE_LABEL[c.competition_type] ?? ''} · ${c.name}`;
+  const label = (c: typeof cur) => `${competitionFormatLabel(c)} · ${c.name}`;
 
   return (
     <div ref={ref} className={clsx('relative', compact && 'w-full')}>

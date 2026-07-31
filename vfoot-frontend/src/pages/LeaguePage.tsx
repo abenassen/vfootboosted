@@ -3,11 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { getActiveAuction, getCompetitions, getLeagueDetail } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
+import { competitionFormatLabel } from '../league/competitionFormat';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import CopyButton from '../components/CopyButton';
 import type { ActiveAuctionInfo, CompetitionItem, LeagueDetail } from '../types/league';
 
-const COMP_TYPE_LABEL: Record<string, string> = { round_robin: 'Campionato', knockout: 'Coppa' };
 
 // The LEAGUE page is the global hub: league info, participants, a SUMMARY of the
 // competitions (no tables — standings/brackets live under each competition, on the
@@ -135,7 +135,7 @@ export default function LeaguePage() {
               <div key={c.competition_id} className="flex items-center justify-between rounded-xl border px-3 py-2 text-sm">
                 <div className="flex items-center gap-2">
                   <Badge tone={c.competition_type === 'knockout' ? 'amber' : 'blue'}>
-                    {COMP_TYPE_LABEL[c.competition_type] ?? c.competition_type}
+                    {competitionFormatLabel(c)}
                   </Badge>
                   <div>
                     <div className="font-semibold">{c.name}</div>

@@ -114,32 +114,42 @@ class QualificationRuleCreateSerializer(serializers.Serializer):
     rank_to = serializers.IntegerField(required=False, allow_null=True)
 
 
+# Beyond this a round-robin is longer than the real championship it is played on.
+MAX_LEGS = 5
+
+
 class CompetitionStageBuildSerializer(serializers.Serializer):
     allow_repechage = serializers.BooleanField(required=False, default=False)
     random_seed = serializers.IntegerField(required=False, default=42)
-    double_round = serializers.BooleanField(required=False, default=False)
+    legs = serializers.IntegerField(required=False, default=1, min_value=1, max_value=MAX_LEGS)
 
 
 class CompetitionStageCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120)
     stage_type = serializers.ChoiceField(choices=["round_robin", "knockout"])
     order_index = serializers.IntegerField(required=False, default=1)
-    double_round = serializers.BooleanField(required=False, default=False)
+    legs = serializers.IntegerField(required=False, default=1, min_value=1, max_value=MAX_LEGS)
     team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+    # How many teams a still-unresolved stage will field, so its rounds (and the
+    # calendar built on them) exist before its participants do.
+    expected_participants = serializers.IntegerField(required=False, allow_null=True, min_value=0)
 
 
 class CompetitionStageUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120, required=False)
     stage_type = serializers.ChoiceField(choices=["round_robin", "knockout"], required=False)
     order_index = serializers.IntegerField(required=False)
-    double_round = serializers.BooleanField(required=False)
+    legs = serializers.IntegerField(required=False, min_value=1, max_value=MAX_LEGS)
     team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+    expected_participants = serializers.IntegerField(required=False, min_value=0)
     random_seed = serializers.IntegerField(required=False, default=42)
 
 
 class CompetitionStageRuleCreateSerializer(serializers.Serializer):
     source_stage_id = serializers.IntegerField()
     mode = serializers.ChoiceField(choices=["table_range", "winners", "losers"])
+    # Table cut-off inside the source stage's competition ("dopo la giornata 7").
+    source_round = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     rank_from = serializers.IntegerField(required=False, allow_null=True)
     rank_to = serializers.IntegerField(required=False, allow_null=True)
     random_seed = serializers.IntegerField(required=False, default=42)
@@ -147,12 +157,72 @@ class CompetitionStageRuleCreateSerializer(serializers.Serializer):
 
 class CompetitionPrizeCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120)
+    icon = serializers.CharField(max_length=8, required=False, allow_blank=True)
     condition_type = serializers.ChoiceField(
         choices=["final_table_range", "stage_table_range", "stage_winner", "stage_loser"]
     )
     source_stage_id = serializers.IntegerField(required=False, allow_null=True)
     rank_from = serializers.IntegerField(required=False, allow_null=True)
     rank_to = serializers.IntegerField(required=False, allow_null=True)
+
+
+class WizardQualificationSerializer(serializers.Serializer):
+    source_stage_id = serializers.IntegerField()
+    mode = serializers.ChoiceField(choices=["table_range", "winners", "losers"], default="table_range")
+    source_round = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    rank_from = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    rank_to = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+
+
+class WizardPrizeSerializer(serializers.Serializer):
+    """A prize said the way the wizard says it, before there are stages to point at.
+
+    "Chi vince" is a table position in a league and a final in a cup; the backend
+    translates, so the browser never has to guess a stage id it cannot know yet.
+    """
+
+    name = serializers.CharField(max_length=120)
+    icon = serializers.CharField(max_length=8, required=False, allow_blank=True)
+    condition = serializers.ChoiceField(choices=["winner", "runner_up", "rank"], default="winner")
+    rank_from = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    rank_to = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+
+
+class CompetitionPointsSerializer(serializers.Serializer):
+    win = serializers.IntegerField(default=3)
+    draw = serializers.IntegerField(default=1)
+    loss = serializers.IntegerField(default=0)
+
+
+class CompetitionWizardSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120)
+    format = serializers.ChoiceField(choices=["league", "cup", "groups_knockout"])
+    team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+    qualification = WizardQualificationSerializer(required=False, allow_null=True)
+    legs = serializers.IntegerField(required=False, default=1, min_value=1, max_value=MAX_LEGS)
+    groups = serializers.IntegerField(required=False, default=1, min_value=1, max_value=8)
+    advance_per_group = serializers.IntegerField(required=False, default=2, min_value=1, max_value=8)
+    points = CompetitionPointsSerializer(required=False)
+    start_matchday = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    end_matchday = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    prizes = WizardPrizeSerializer(many=True, required=False)
+    random_seed = serializers.IntegerField(required=False, default=42)
+
+    def validate(self, data):
+        if not data.get("qualification") and len(data.get("team_ids") or []) < 2:
+            raise serializers.ValidationError(
+                {"team_ids": "Scegli almeno 2 squadre, oppure una regola di qualificazione."}
+            )
+        return data
+
+
+class CompetitionWizardPreviewSerializer(serializers.Serializer):
+    format = serializers.ChoiceField(choices=["league", "cup", "groups_knockout"])
+    team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+    qualification = WizardQualificationSerializer(required=False, allow_null=True)
+    legs = serializers.IntegerField(required=False, default=1, min_value=1, max_value=MAX_LEGS)
+    groups = serializers.IntegerField(required=False, default=1, min_value=1, max_value=8)
+    advance_per_group = serializers.IntegerField(required=False, default=2, min_value=1, max_value=8)
 
 
 class MatchdayConcludeSerializer(serializers.Serializer):
