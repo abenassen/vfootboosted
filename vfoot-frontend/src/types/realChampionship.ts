@@ -38,7 +38,10 @@ export interface RealFixturesResponse {
 // Championship player pool ("listone") — GET /leagues/<id>/championship-players
 export interface ChampionshipPlayer {
   player_id: number;
+  /** Short form, the one shown in the list ("L. Martinez"). */
   name: string;
+  /** Unabbreviated, so a search for the first name can match. */
+  full_name?: string;
   role: string; // POR | DIF | CEN | ATT | ''
   team: string | null; // real club
   owned: boolean; // owned by a fantasy team in this league

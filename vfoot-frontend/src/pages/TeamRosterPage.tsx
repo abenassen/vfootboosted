@@ -35,9 +35,9 @@ export default function TeamRosterPage() {
               {data.roster.length} giocatori
             </div>
           </div>
-          <Link to="/league">
+          <Link to="/home">
             <Button variant="ghost" size="sm">
-              ← Lega
+              ← Home lega
             </Button>
           </Link>
         </div>

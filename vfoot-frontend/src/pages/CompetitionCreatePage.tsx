@@ -9,6 +9,7 @@ import {
   setLeagueReferenceSeason,
 } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
+import { useCompetitionContext } from '../league/CompetitionContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import type {
   CompetitionItem,
@@ -42,7 +43,10 @@ const FORMATS: { id: Format; emoji: string; title: string; blurb: string }[] = [
     id: 'groups_knockout',
     emoji: '🌍',
     title: 'Gironi + playoff',
-    blurb: 'Prima un girone, poi le migliori si giocano il titolo agli scontri diretti.',
+    // The draw is real: build_groups_knockout_graph shuffles the teams before
+    // splitting them. Worth saying, because a group stage whose composition is
+    // never explained reads as if someone chose it.
+    blurb: 'Le squadre vengono sorteggiate nei gironi, poi le migliori si giocano il titolo agli scontri diretti.',
   },
 ];
 
@@ -208,6 +212,7 @@ export default function CompetitionCreatePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { refreshCompetitions } = useCompetitionContext();
   const isAdmin = selectedLeague?.role === 'admin';
   const teams = detail?.teams ?? [];
 
@@ -380,6 +385,11 @@ export default function CompetitionCreatePage() {
         end_matchday: endMd,
         prizes: prizes.filter((p) => p.name.trim()),
       });
+      // The competition list feeds the switcher in the top bar and decides which
+      // menu entries exist (Partite and Classifica appear only once a competition
+      // does). Without this the app still believes the league has none until a
+      // reload, and the brand-new competition is unreachable from the menu.
+      await refreshCompetitions();
       navigate(`/league-admin/competitions/${res.competition.competition_id}?created=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Creazione fallita.');

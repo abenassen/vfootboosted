@@ -37,8 +37,27 @@ export default function MatchesPage() {
   const rounds = useMemo(() => [...new Set(fixtures.map((f) => f.round_no))].sort((a, b) => a - b), [fixtures]);
   const activeRound = round ?? rounds[0] ?? null;
   const shown = useMemo(() => fixtures.filter((f) => f.round_no === activeRound), [fixtures, activeRound]);
-  const roundLabel = (r: number) => fixtures.find((f) => f.round_no === r)?.round_label ?? `Giornata ${r}`;
+  /** A round's name. When parallel groups share it there is no single stage to
+   *  name it after — taking the first fixture's label made a whole round read as
+   *  "Girone B" while half of it was Girone A. */
+  const roundLabel = (r: number) => {
+    const inRound = fixtures.filter((f) => f.round_no === r);
+    const stages = new Set(inRound.map((f) => f.stage_name).filter(Boolean));
+    if (stages.size === 1) return inRound[0]?.round_label ?? `Giornata ${r}`;
+    return `Giornata ${r}`;
+  };
   const roundRealMatchday = shown.find((f) => typeof f.real_matchday === 'number')?.real_matchday ?? null;
+  // Grouped by stage, in the order the stages appear in the round.
+  const shownByStage = useMemo(() => {
+    const map = new Map<string | null, LeagueFixtureItem[]>();
+    for (const f of shown) {
+      const key = f.stage_name ?? null;
+      const list = map.get(key);
+      if (list) list.push(f);
+      else map.set(key, [f]);
+    }
+    return [...map.entries()];
+  }, [shown]);
   const myTeamName = selectedLeague?.team_name?.trim() || null;
 
   if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per vedere le partite.</div>;
@@ -85,9 +104,26 @@ export default function MatchesPage() {
             Si gioca sulla giornata {roundRealMatchday} di {selectedLeague?.reference_season?.competition ?? 'Serie A'}
           </div>
         ) : null}
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 space-y-4">
           {shown.length ? (
-            shown.map((f) => <FixtureRow key={f.fixture_id} f={f} myTeam={myTeamName} />)
+            // Parallel groups share the same rounds (order_index 1 side by side),
+            // so a round holds fixtures from Girone A AND Girone B. Flattened they
+            // read as one league, and the round label — taken from whichever
+            // fixture came first — named a single group for all of them.
+            shownByStage.map(([stageName, group]) => (
+              <div key={stageName ?? 'unico'}>
+                {shownByStage.length > 1 && stageName ? (
+                  <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
+                    {stageName}
+                  </div>
+                ) : null}
+                <div className="space-y-2">
+                  {group.map((f) => (
+                    <FixtureRow key={f.fixture_id} f={f} myTeam={myTeamName} />
+                  ))}
+                </div>
+              </div>
+            ))
           ) : (
             <div className="text-sm text-slate-500">Nessuna partita in questa giornata.</div>
           )}

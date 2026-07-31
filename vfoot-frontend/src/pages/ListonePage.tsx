@@ -10,6 +10,12 @@ import type { ChampionshipPlayer, ChampionshipPlayersResponse } from '../types/r
 type SortKey = 'name' | 'team' | 'value' | 'appearances' | 'market';
 
 const ROLES = ['POR', 'DIF', 'CEN', 'ATT'] as const;
+const ROLE_NAMES: Record<string, string> = {
+  POR: 'Portiere',
+  DIF: 'Difensore',
+  CEN: 'Centrocampista',
+  ATT: 'Attaccante',
+};
 const ROLE_CHIP: Record<string, string> = {
   POR: 'bg-amber-500',
   DIF: 'bg-blue-500',
@@ -78,7 +84,15 @@ export default function ListonePage() {
     if (freeOnly) ps = ps.filter((p) => !p.owned);
     if (ratedOnly) ps = ps.filter((p) => typeof p.value === 'number');
     const q = search.trim().toLowerCase();
-    if (q) ps = ps.filter((p) => p.name.toLowerCase().includes(q) || (p.team ?? '').toLowerCase().includes(q));
+    // Every field on the row, not just the abbreviated name: the list shows
+    // "L. Martinez", so searching "Lautaro" used to find nothing, and neither did
+    // the role or the owning team — both of which are visible in the row.
+    if (q) {
+      ps = ps.filter((p) =>
+        [p.name, p.full_name, p.team, p.role, p.owner, p.value_basis]
+          .some((field) => (field ?? '').toLowerCase().includes(q)),
+      );
+    }
 
     const num = (p: ChampionshipPlayer): number | null => {
       if (sort === 'value') return p.estimated_value ?? p.value ?? null;
@@ -329,6 +343,25 @@ function ValueDetail({
   return (
     <tr className="bg-slate-50">
       <td colSpan={6} className="px-4 py-2 text-xs text-slate-600">
+        {/* Who the player IS, before why he is worth what he is worth: the list
+            can only show an abbreviated name and a role chip, so opening a row
+            was the one place left to say the rest. */}
+        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-b pb-2">
+          <span className="text-sm font-bold text-slate-900">{p.full_name || p.name}</span>
+          {p.role ? <Badge tone="slate">{ROLE_NAMES[p.role] ?? p.role}</Badge> : null}
+          {p.team ? <span>Squadra reale: <b className="text-slate-700">{p.team}</b></span> : null}
+          <span>
+            {p.owned ? (
+              <>In rosa a <b className="text-slate-700">{p.owner ?? '—'}</b></>
+            ) : (
+              <b className="text-emerald-700">Svincolato</b>
+            )}
+          </span>
+          {p.market_value ? <span>Valore di mercato: <b className="text-slate-700">{fmtMarket(p.market_value)}</b></span> : null}
+          {p.role_undecided ? (
+            <Badge tone="amber">Ruolo da decidere</Badge>
+          ) : null}
+        </div>
         <div className="font-semibold text-slate-700">
           {p.estimated_value === null
             ? 'Nessun dato disponibile'

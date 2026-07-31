@@ -28,6 +28,8 @@ type NavItem = {
   /** Marks the entry that has work waiting on it — a dot, where a badge would
    *  have to invent a number the shell does not know. */
   flag?: boolean;
+  /** Not part of running the league: drawn below a separator. */
+  aside?: boolean;
 };
 
 const leagueNav = [
@@ -36,11 +38,13 @@ const leagueNav = [
   { to: '/squad', label: 'Squadra', icon: '👥', scope: 'league' as const },
   { to: '/matches', label: 'Partite', icon: '🎯', scope: 'competition' as const },
   { to: '/standings', label: 'Classifica', icon: '📊', scope: 'competition' as const },
-  { to: '/serie-a', label: 'Serie A', icon: '⚽', scope: 'league' as const },
   { to: '/listone', label: 'Listone', icon: '📋', scope: 'league' as const },
   { to: '/market', label: 'Mercato', icon: '💱', scope: 'league' as const },
   { to: '/decisioni', label: 'Decisioni', icon: '🗳️', scope: 'league' as const },
   { to: '/league-admin?tab=league', label: 'Gestione lega', icon: '⚙️', scope: 'league' as const },
+  // Last, and after a separator: the real championship is what the league is
+  // played ON, not a page you need to run it. Everything above is the league.
+  { to: '/serie-a', label: 'Serie A', icon: '⚽', scope: 'league' as const, aside: true },
 ];
 
 const USER_ADMIN_TO = '/league-admin?tab=user';
@@ -331,7 +335,12 @@ export default function AppShell() {
           <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
             {selectedLeague?.name ?? 'Nessuna lega'}
           </div>
-          <nav className="space-y-1">{visibleNav.map(renderNav)}</nav>
+          <nav className="space-y-1">{visibleNav.filter((it) => !it.aside).map(renderNav)}</nav>
+          {visibleNav.some((it) => it.aside) ? (
+            <nav className="mt-3 space-y-1 border-t pt-3">
+              {visibleNav.filter((it) => it.aside).map(renderNav)}
+            </nav>
+          ) : null}
 
           {/* No "active league" card here: name and role are already in the top
               bar, where they can also be CHANGED. Only the empty state needs a

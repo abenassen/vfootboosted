@@ -1955,7 +1955,7 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         "competition_name": fx.competition.name,
         "stage_id": fx.stage_id,
         "stage_name": fx.stage.name if fx.stage_id else None,
-        "round_label": fx.stage.name if fx.stage_id else f"Round {fx.round_no}",
+        "round_label": fx.stage.name if fx.stage_id else f"Giornata {fx.round_no}",
         "fantasy_matchday_id": fx.fantasy_matchday_id,
         "real_matchday": fx.fantasy_matchday.real_matchday if fx.fantasy_matchday_id else None,
         "round_no": fx.round_no,
@@ -3319,7 +3319,30 @@ def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, 
         base["rounds"] = rounds
     else:
         finished = [f for f in fixtures if f.status == FantasyFixture.STATUS_FINISHED]
-        base["standings"] = _compute_standings(finished, pw, pd, pl)
+        standings = _compute_standings(finished, pw, pd, pl)
+        # Before the first match there are no finished fixtures, so the table came
+        # back empty and a group showed its name over nothing — for a group stage
+        # that reads as "the draw failed", when in fact nobody has played yet.
+        # Every team that HAS a fixture in this section belongs in the table, at
+        # zero.
+        if not standings:
+            seen: dict[int, tuple[str, str]] = {}
+            for f in fixtures:
+                seen.setdefault(f.home_team_id, (f.home_team.name, f.home_team.crest))
+                seen.setdefault(f.away_team_id, (f.away_team.name, f.away_team.crest))
+            standings = [
+                {
+                    "rank": i + 1, "team_id": tid, "team": name, "crest": crest,
+                    "played": 0, "wins": 0, "draws": 0, "losses": 0,
+                    "goals_for": 0, "goals_against": 0, "goal_diff": 0, "points": 0,
+                    "avg_score_for": 0.0,
+                }
+                # Alphabetical: with everyone on zero any other order would suggest
+                # a ranking that does not exist yet.
+                for i, (tid, (name, crest)) in enumerate(
+                    sorted(seen.items(), key=lambda kv: kv[1][0].lower()))
+            ]
+        base["standings"] = standings
     return base
 
 
@@ -4017,6 +4040,10 @@ class LeagueChampionshipPlayersView(APIView):
                 "market_value": market.get(pid),
                 "player_id": pid,
                 "name": p["short_name"] or p["full_name"] or str(pid),
+                # The list shows the short name ("L. Martinez"); searching for
+                # "Lautaro" found nothing because that string is all the client
+                # had. Sent alongside so the search can match either.
+                "full_name": p["full_name"] or "",
                 "role": lpr.get(pid) or p["classic_role_seed"] or "",
                 "team": team_by_player.get(pid),
                 "owned": pid in owner_by_player,

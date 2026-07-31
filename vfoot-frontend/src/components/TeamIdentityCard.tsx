@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { updateMyTeam } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import Crest from './Crest';
@@ -86,6 +87,13 @@ export default function TeamIdentityCard({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {/* The other teams' roster page has a way back; one's own did not, and
+              it is reached the same way. */}
+          <Link to="/home">
+            <Button size="sm" variant="ghost">
+              ← Home lega
+            </Button>
+          </Link>
           {action}
           <Button size="sm" variant="secondary" onClick={() => (editing ? setEditing(false) : open())}>
             {editing ? 'Chiudi' : '✏️ Nome e stemma'}
