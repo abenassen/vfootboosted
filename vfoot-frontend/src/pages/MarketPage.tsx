@@ -110,6 +110,7 @@ export default function MarketPage() {
   const session = data?.session ?? null;
   const isClassic = (data?.mode ?? auction?.mode) === 'classic';
   const isAdmin = !!data?.is_admin;
+  const canOffer = session?.status === 'open' && data?.my_team_id != null;
 
   return (
     <div className="space-y-4">
@@ -128,10 +129,14 @@ export default function MarketPage() {
         <>
           <SessionHeader data={data!} isAdmin={isAdmin} />
 
-          {session.status === 'open' && data?.my_team_id != null && (
+          {canOffer ? (
             <OfferPanel data={data!} nowMs={nowMs} busy={busy}
-              targetId={targetId} onClearTarget={() => setTargetId(null)}
+              targetId={targetId} onPick={pickTarget} onClearTarget={() => setTargetId(null)}
               onOffer={(t, r, a) => act(async () => { await placeMarketOffer(selectedLeagueId, t, r, a); setTargetId(null); })} />
+          ) : (
+            // Senza squadra, o a sessione sospesa, la ricerca resta ma da sola:
+            // dentro "Fai un'offerta" non avrebbe nessuna offerta da fare.
+            <FreeAgentSearchCard data={data!} nowMs={nowMs} onPick={pickTarget} />
           )}
 
           <MyOffersCard offers={data?.my_offers ?? []} nowMs={nowMs} />
@@ -139,8 +144,6 @@ export default function MarketPage() {
           <LiveContestsCard data={data!} nowMs={nowMs} onPick={pickTarget} />
 
           <ClosedOffersCard offers={closedThisSession} />
-
-          <FreeAgentSearchCard data={data!} nowMs={nowMs} onPick={pickTarget} />
         </>
       )}
 
@@ -214,12 +217,13 @@ function SessionHeader({ data, isAdmin }: { data: MarketActive; isAdmin: boolean
 }
 
 function OfferPanel({
-  data, nowMs, busy, targetId, onClearTarget, onOffer,
+  data, nowMs, busy, targetId, onPick, onClearTarget, onOffer,
 }: {
   data: MarketActive;
   nowMs: number;
   busy: boolean;
   targetId: number | null;
+  onPick: (playerId: number) => void;
   onClearTarget: () => void;
   onOffer: (targetId: number, releaseId: number, amount: number) => void;
 }) {
@@ -256,10 +260,16 @@ function OfferPanel({
         <SectionTitle>Fai un’offerta</SectionTitle>
       </div>
       {!target ? (
-        <div className="mt-2 text-sm text-slate-500">Scegli uno svincolato dalla lista sotto e premi “Offri”.</div>
+        // Il giocatore si sceglie qui dentro: cercare e offrire sono lo stesso
+        // gesto, e mandare l'utente a caccia del nome in un elenco a parte per
+        // poi riportarlo su era un giro inutile.
+        <div className="mt-3">
+          <FreeAgentSearch data={data} nowMs={nowMs} onPick={onPick}
+            emptyHint="Scrivi il nome di uno svincolato (o scegli un ruolo) per offrire su di lui." />
+        </div>
       ) : (
         <div className="mt-3 space-y-3">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <Badge tone="blue">{target.role}</Badge>
             <b>{target.name}</b>
             {target.leading && (
@@ -268,6 +278,7 @@ function OfferPanel({
               </span>
             )}
             {target.locked && <Badge tone="amber">in definizione</Badge>}
+            <button className="text-xs text-slate-500 underline" onClick={onClearTarget}>cambia giocatore</button>
           </div>
           <label className="block text-sm">
             <span className="text-slate-600">Svincola (stesso ruolo)</span>
@@ -447,13 +458,15 @@ function ClosedOffersCard({ offers }: { offers: MarketOfferRow[] }) {
 
 /** Gli svincolati sono centinaia: elencarli tutti nasconde le offerte invece di
  *  mostrarle. Qui si arriva sapendo chi si vuole, quindi si parte dalla ricerca
- *  e la lista compare solo dopo. */
-function FreeAgentSearchCard({
-  data, nowMs, onPick,
+ *  e la lista compare solo dopo. Senza cornice: sta dentro "Fai un'offerta"
+ *  quando si puo' offrire, e in una card sua quando si puo' solo guardare. */
+function FreeAgentSearch({
+  data, nowMs, onPick, emptyHint,
 }: {
   data: MarketActive;
   nowMs: number;
   onPick: (playerId: number) => void;
+  emptyHint: string;
 }) {
   const [q, setQ] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('');
@@ -481,9 +494,8 @@ function FreeAgentSearchCard({
   }, [filtered]);
 
   return (
-    <Card className="p-4">
-      <SectionTitle>Cerca uno svincolato</SectionTitle>
-      <div className="mt-2 flex flex-wrap gap-2">
+    <>
+      <div className="flex flex-wrap gap-2">
         <input autoComplete="off" placeholder="Nome del giocatore…"
           className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm"
           value={q} onChange={(e) => setQ(e.target.value)} />
@@ -499,7 +511,7 @@ function FreeAgentSearchCard({
 
       {!searching ? (
         <div className="mt-3 text-sm text-slate-500">
-          {freeAgents.length} svincolati disponibili. Scrivi un nome (o scegli un ruolo) per trovarli.
+          {freeAgents.length} svincolati disponibili. {emptyHint}
         </div>
       ) : filtered.length === 0 ? (
         <div className="mt-3 text-sm text-slate-500">
@@ -523,6 +535,26 @@ function FreeAgentSearchCard({
           ))}
         </div>
       )}
+    </>
+  );
+}
+
+/** La stessa ricerca per chi non puo' offrire (nessuna squadra, o sessione
+ *  sospesa): guardare chi e' libero resta possibile. */
+function FreeAgentSearchCard({
+  data, nowMs, onPick,
+}: {
+  data: MarketActive;
+  nowMs: number;
+  onPick: (playerId: number) => void;
+}) {
+  return (
+    <Card className="p-4">
+      <SectionTitle>Cerca uno svincolato</SectionTitle>
+      <div className="mt-2">
+        <FreeAgentSearch data={data} nowMs={nowMs} onPick={onPick}
+          emptyHint="Scrivi un nome (o scegli un ruolo) per trovarli." />
+      </div>
     </Card>
   );
 }
