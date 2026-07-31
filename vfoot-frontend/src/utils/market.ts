@@ -36,6 +36,19 @@ export function countdown(deadlineIso: string | null, nowMs: number): string {
   return `${s}s`;
 }
 
+/** Quando si decide davvero il destino di un'offerta in testa: il suo timer di
+ *  24h, oppure la chiusura programmata del mercato se arriva prima. Un mercato
+ *  che chiude fra tre ore rende irrilevante un timer che ne ha ancora venti. */
+export function effectiveDeadline(
+  offerDeadline: string | null,
+  sessionClosesAt: string | null,
+): { iso: string | null; cappedBySession: boolean } {
+  if (!sessionClosesAt) return { iso: offerDeadline, cappedBySession: false };
+  if (!offerDeadline) return { iso: sessionClosesAt, cappedBySession: true };
+  const capped = new Date(sessionClosesAt).getTime() < new Date(offerDeadline).getTime();
+  return { iso: capped ? sessionClosesAt : offerDeadline, cappedBySession: capped };
+}
+
 export const OFFER_TONE: Record<string, 'green' | 'amber' | 'slate' | 'red' | 'blue'> = {
   leading: 'blue',
   accepted: 'amber',

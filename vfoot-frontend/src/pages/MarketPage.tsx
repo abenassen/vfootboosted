@@ -10,6 +10,7 @@ import { getActiveAuction } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { foldedMatch } from '../utils/text';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
+import { OfferDeadline } from '../components/OfferDeadline';
 import {
   OFFER_LABEL,
   OFFER_TONE,
@@ -127,7 +128,7 @@ export default function MarketPage() {
         <NoSessionCard isAdmin={isAdmin} auction={auction} />
       ) : (
         <>
-          <SessionHeader data={data!} isAdmin={isAdmin} />
+          <SessionHeader data={data!} isAdmin={isAdmin} nowMs={nowMs} />
 
           {canOffer ? (
             <OfferPanel data={data!} nowMs={nowMs} busy={busy}
@@ -139,7 +140,7 @@ export default function MarketPage() {
             <FreeAgentSearchCard data={data!} nowMs={nowMs} onPick={pickTarget} />
           )}
 
-          <MyOffersCard offers={data?.my_offers ?? []} nowMs={nowMs} />
+          <MyOffersCard offers={data?.my_offers ?? []} nowMs={nowMs} closesAt={session.closes_at} />
 
           <LiveContestsCard data={data!} nowMs={nowMs} onPick={pickTarget} />
 
@@ -182,8 +183,12 @@ function NoSessionCard({ isAdmin, auction }: { isAdmin: boolean; auction: Active
   );
 }
 
-function SessionHeader({ data, isAdmin }: { data: MarketActive; isAdmin: boolean }) {
+function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: boolean; nowMs: number }) {
   const s = data.session!;
+  // Sotto il giorno la data non dice piu' nulla di utile: da li' in giu' conta
+  // quanto manca, perche' e' meno del tempo che serve a un'offerta per maturare.
+  const closeMs = s.closes_at ? new Date(s.closes_at).getTime() - nowMs : null;
+  const closingSoon = closeMs !== null && closeMs < 24 * 3_600_000;
   return (
     <Card className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -195,7 +200,12 @@ function SessionHeader({ data, isAdmin }: { data: MarketActive; isAdmin: boolean
           <div className="mt-1 text-sm text-slate-600">
             Recupero: <b>{recoveryText(s.credit_recovery_mode, s.fixed_recovery_amount)}</b>
             {' · '}
-            {s.closes_at ? `chiude il ${new Date(s.closes_at).toLocaleString('it-IT')}` : 'chiusura indefinita'}
+            {!s.closes_at ? 'chiusura indefinita'
+              : closingSoon ? (
+                <b className="text-amber-600">
+                  chiude tra <span className="tabular-nums">{countdown(s.closes_at, nowMs)}</span>
+                </b>
+              ) : `chiude il ${new Date(s.closes_at).toLocaleString('it-IT')}`}
           </div>
           {data.my_budget && (
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-700">
@@ -274,7 +284,8 @@ function OfferPanel({
             <b>{target.name}</b>
             {target.leading && (
               <span className="text-slate-500">
-                · in testa {target.leading.team_name} a <b>{target.leading.amount}</b> · scade tra {countdown(target.leading.deadline_at, nowMs)}
+                · in testa {target.leading.team_name} a <b>{target.leading.amount}</b> ·{' '}
+                <OfferDeadline deadlineAt={target.leading.deadline_at} sessionClosesAt={data.session?.closes_at} nowMs={nowMs} />
               </span>
             )}
             {target.locked && <Badge tone="amber">in definizione</Badge>}
@@ -321,7 +332,9 @@ function OfferPanel({
   );
 }
 
-function MyOffersCard({ offers, nowMs }: { offers: MarketOfferRow[]; nowMs: number }) {
+function MyOffersCard({ offers, nowMs, closesAt }: {
+  offers: MarketOfferRow[]; nowMs: number; closesAt: string | null | undefined;
+}) {
   if (offers.length === 0) return null;
   return (
     <Card className="p-4">
@@ -335,7 +348,11 @@ function MyOffersCard({ offers, nowMs }: { offers: MarketOfferRow[]; nowMs: numb
             </div>
             <div className="flex items-center gap-3">
               <span>{o.amount} cr <span className="text-slate-400">(recupero {o.recovery})</span></span>
-              {o.status === 'leading' && <span className="text-slate-500">scade tra {countdown(o.deadline_at, nowMs)}</span>}
+              {o.status === 'leading' && (
+                <span className="text-slate-500">
+                  <OfferDeadline deadlineAt={o.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} />
+                </span>
+              )}
               <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>
             </div>
           </div>
@@ -347,10 +364,11 @@ function MyOffersCard({ offers, nowMs }: { offers: MarketOfferRow[]; nowMs: numb
 
 /** Una riga di svincolato: nome, ruolo, chi e' in testa, e il bottone per offrire. */
 function FreeAgentRow({
-  f, nowMs, canOffer, onPick,
+  f, nowMs, closesAt, canOffer, onPick,
 }: {
   f: MarketFreeAgent;
   nowMs: number;
+  closesAt: string | null | undefined;
   canOffer: boolean;
   onPick: (playerId: number) => void;
 }) {
@@ -361,7 +379,7 @@ function FreeAgentRow({
         {f.leading && (
           <span className="ml-2 text-slate-500">
             in testa {f.leading.mine ? <b className="text-emerald-700">tu</b> : f.leading.team_name} a <b>{f.leading.amount}</b>
-            {' · '}scade tra <span className="tabular-nums">{countdown(f.leading.deadline_at, nowMs)}</span>
+            {' · '}<OfferDeadline deadlineAt={f.leading.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} />
           </span>
         )}
         {f.locked && <span className="ml-2"><Badge tone="amber">in validazione</Badge></span>}
@@ -413,7 +431,8 @@ function LiveContestsCard({
       ) : (
         <div className="mt-2 divide-y divide-slate-100">
           {contests.map((f) => (
-            <FreeAgentRow key={f.player_id} f={f} nowMs={nowMs} canOffer={canOffer} onPick={onPick} />
+            <FreeAgentRow key={f.player_id} f={f} nowMs={nowMs} closesAt={data.session?.closes_at}
+                    canOffer={canOffer} onPick={onPick} />
           ))}
         </div>
       )}
@@ -525,7 +544,8 @@ function FreeAgentSearch({
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{ROLE_LABEL[r]}</div>
               <div className="mt-1 divide-y divide-slate-100">
                 {byRole.get(r)!.slice(0, 30).map((f) => (
-                  <FreeAgentRow key={f.player_id} f={f} nowMs={nowMs} canOffer={canOffer} onPick={onPick} />
+                  <FreeAgentRow key={f.player_id} f={f} nowMs={nowMs} closesAt={data.session?.closes_at}
+                    canOffer={canOffer} onPick={onPick} />
                 ))}
                 {byRole.get(r)!.length > 30 && (
                   <div className="py-2 text-xs text-slate-400">…e altri {byRole.get(r)!.length - 30}. Affina la ricerca.</div>

@@ -7,10 +7,10 @@ import {
   getMarketActive,
 } from '../api/backend';
 import { Badge, Button, Card, SectionTitle } from './ui';
+import { OfferDeadline } from './OfferDeadline';
 import {
   SESSION_LABEL,
   SESSION_TONE,
-  countdown,
   recoveryText,
 } from '../utils/market';
 import type { MarketActive, MarketFreeAgent, MarketOfferRow, MarketRecoveryMode } from '../types/market';
@@ -137,7 +137,7 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
             ) : (
               <div className="mt-2 divide-y divide-slate-100">
                 {leadingOffers.map((f) => (
-                  <LeadingRow key={f.player_id} f={f} nowMs={nowMs} busy={busy}
+                  <LeadingRow key={f.player_id} f={f} nowMs={nowMs} busy={busy} closesAt={data?.session?.closes_at}
                     onCancel={() => { if (window.confirm('Annullare l’offerta in testa?')) void act(() => adminMarketOffer(leagueId, f.leading!.offer_id, 'cancel')); }} />
                 ))}
               </div>
@@ -165,13 +165,16 @@ function QueueRow({ o, busy, onAccept, onReject }: { o: MarketOfferRow; busy: bo
   );
 }
 
-function LeadingRow({ f, nowMs, busy, onCancel }: { f: MarketFreeAgent; nowMs: number; busy: boolean; onCancel: () => void }) {
+function LeadingRow({ f, nowMs, closesAt, busy, onCancel }: {
+  f: MarketFreeAgent; nowMs: number; closesAt: string | null | undefined; busy: boolean; onCancel: () => void;
+}) {
   const l = f.leading!;
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
       <div>
         <Badge tone="blue">{f.role}</Badge>{' '}
-        <b>{f.name}</b> <span className="text-slate-500">· {l.team_name} a <b>{l.amount}</b> · scade tra {countdown(l.deadline_at, nowMs)}</span>
+        <b>{f.name}</b> <span className="text-slate-500">· {l.team_name} a <b>{l.amount}</b> ·{' '}
+          <OfferDeadline deadlineAt={l.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} /></span>
       </div>
       <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Annulla</Button>
     </div>

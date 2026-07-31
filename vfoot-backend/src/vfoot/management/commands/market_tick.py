@@ -38,28 +38,31 @@ class Command(BaseCommand):
         closed = 0
         promoted = 0
         for session in live:
-            # Scheduled auto-close: only an OPEN session with a due closes_at.
-            if (session.status == MarketSession.STATUS_OPEN
-                    and session.closes_at is not None and session.closes_at <= now):
+            if session.status != MarketSession.STATUS_OPEN:
+                continue
+
+            # Promuovere PRIMA di chiudere. Un'offerta che aveva gia' compiuto le
+            # sue 24h se le e' guadagnate: se la chiusura la precedesse, il suo
+            # esito dipenderebbe da quando e' passato il cron — accettata se un
+            # tick l'ha vista in tempo, annullata se il tick successivo trova
+            # anche la sessione scaduta. Stesso istante, esito diverso.
+            due = session.offers.filter(status="leading", deadline_at__lte=now).count()
+            if dry:
+                if due:
+                    self.stdout.write(f"[dry] session {session.id}: would promote {due} offer(s)")
+                promoted += due
+            else:
+                with transaction.atomic():
+                    promoted += len(promote_expired(session, now=now))
+
+            # Chiusura programmata: solo una sessione aperta con closes_at scaduto.
+            if session.closes_at is not None and session.closes_at <= now:
                 if dry:
                     self.stdout.write(f"[dry] would close session {session.id}")
                 else:
                     with transaction.atomic():
                         close_session(session, now=now)
                 closed += 1
-                continue
-
-            if session.status == MarketSession.STATUS_OPEN:
-                if dry:
-                    due = session.offers.filter(
-                        status="leading", deadline_at__lte=now).count()
-                    if due:
-                        self.stdout.write(
-                            f"[dry] session {session.id}: would promote {due} offer(s)")
-                    promoted += due
-                else:
-                    with transaction.atomic():
-                        promoted += len(promote_expired(session, now=now))
 
         self.stdout.write(self.style.SUCCESS(
             f"market_tick: sessions={len(live)} closed={closed} promoted={promoted}"))
