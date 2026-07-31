@@ -38,10 +38,10 @@ from vfoot.services.market_engine import (
     free_agent_ids,
     market_states,
     place_offer,
-    promote_expired,
     recovery_for,
     reject_offer,
     record_event,
+    sync_session,
 )
 
 
@@ -61,10 +61,14 @@ def _my_team(league: FantasyLeague, membership: LeagueMembership) -> FantasyTeam
 
 
 def _live_session(league: FantasyLeague) -> MarketSession | None:
-    return (MarketSession.objects
-            .filter(league=league, status__in=(MarketSession.STATUS_OPEN,
-                                               MarketSession.STATUS_SUSPENDED))
-            .order_by("-created_at").first())
+    """La sessione viva della lega, gia' portata al presente. Passa di qui ogni
+    vista del mercato: cosi' la scadenza programmata scatta alla prima richiesta
+    che la incontra, senza dipendere da un processo esterno che la sorvegli."""
+    session = (MarketSession.objects
+               .filter(league=league, status__in=(MarketSession.STATUS_OPEN,
+                                                  MarketSession.STATUS_SUSPENDED))
+               .order_by("-created_at").first())
+    return None if session is None else sync_session(session)
 
 
 def _offer_row(offer: MarketOffer, names: dict[int, str]) -> dict:
@@ -185,7 +189,6 @@ class MarketOfferCreateView(APIView):
         s = PlaceOfferSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         data = s.validated_data
-        promote_expired(session)
         try:
             offer = place_offer(
                 session, team,
@@ -208,6 +211,7 @@ class MarketOfferAdminView(APIView):
     def post(self, request, league_id: int, offer_id: int, action: str):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _ensure_admin(league, request.user.id)
+        _live_session(league)
         offer = get_object_or_404(MarketOffer, id=offer_id, session__league=league)
 
         if action == "accept":
@@ -258,7 +262,6 @@ class MarketActiveView(APIView):
                 "my_team_id": team.id if team else None,
             })
 
-        promote_expired(session)
         states = market_states(league, session)
         my_state = states.get(team.id) if team else None
 
@@ -363,6 +366,7 @@ class MarketSessionListView(APIView):
     def get(self, request, league_id: int):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _membership_or_404(league, request.user.id)
+        _live_session(league)  # la scadenza vale anche per chi guarda lo storico
 
         sessions = list(MarketSession.objects.filter(league=league).order_by("-created_at"))
         offers = list(MarketOffer.objects.filter(session__league=league)

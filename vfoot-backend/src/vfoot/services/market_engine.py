@@ -28,6 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import timedelta
 
+from django.db import transaction
 from django.utils import timezone
 
 from vfoot.models import (
@@ -352,6 +353,32 @@ def promote_expired(session: MarketSession, now=None) -> list[MarketOffer]:
                      offer_payload(offer), offer=offer)
         promoted.append(offer)
     return promoted
+
+
+def sync_session(session: MarketSession, now=None) -> MarketSession:
+    """Porta la sessione al presente prima di leggerla o di scriverci sopra.
+
+    Il tempo non ha bisogno di un processo che lo guardi: quello che conta e'
+    che *nessuna richiesta* veda uno stato scaduto. Ogni endpoint del mercato
+    passa di qui, quindi una sessione oltre la sua scadenza risulta chiusa alla
+    prima persona che la tocca — e chi prova a offrire dopo il termine trova la
+    porta chiusa, che e' l'unico effetto osservabile che serve davvero.
+
+    Idempotente, e sotto lock: due richieste simultanee non promuovono due volte.
+    Resta fuori la sessione sospesa, dove i timer sono congelati per scelta.
+    """
+    now = now or timezone.now()
+    with transaction.atomic():
+        session = (MarketSession.objects.select_for_update()
+                   .get(pk=session.pk))
+        if session.status != MarketSession.STATUS_OPEN:
+            return session
+        if session.closes_at is not None and session.closes_at <= now:
+            # La chiusura promuove tutto cio' che e' ancora in testa.
+            close_session(session, now=now)
+        else:
+            promote_expired(session, now=now)
+    return session
 
 
 class OfferApplyError(Exception):

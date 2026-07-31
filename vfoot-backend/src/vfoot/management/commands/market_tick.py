@@ -1,23 +1,24 @@
-"""Repair-market housekeeping tick (meant for the Linode cron).
+"""Manutenzione del mercato di riparazione: chiude le sessioni scadute e promuove
+le offerte che hanno compiuto le 24h.
 
-Two jobs, both idempotent:
-  * auto-close every OPEN session whose scheduled ``closes_at`` has passed;
-  * promote every leading offer past its 24h deadline to ``accepted`` (the same
-    thing that happens lazily when someone opens the Mercato page — this is the
-    safety net for sessions nobody is currently watching).
+NON serve alla correttezza. Ogni endpoint del mercato passa da
+``market_engine.sync_session``, quindi una scadenza produce i suoi effetti alla
+prima richiesta che la incontra: nessuno riesce a offrire dopo il termine, e
+nessuno vede aperta una sessione chiusa. Questo comando fa la stessa cosa senza
+aspettare quella richiesta — utile se un domani la chiusura dovra' mandare una
+notifica push, perche' quella non puo' partire da sola.
 
-Run it as often as the poll loop ticks (e.g. every 60-90s). Output is a one-line
-summary per run so it is greppable in the cron log.
+Idempotente: eseguirlo spesso, di rado, o mai, non cambia cio' che gli utenti
+vedono. Output di una riga per run, greppabile nel log del cron.
 """
 
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand
-from django.db import transaction
 from django.utils import timezone
 
 from vfoot.models import MarketSession
-from vfoot.services.market_engine import close_session, promote_expired
+from vfoot.services.market_engine import sync_session
 
 
 class Command(BaseCommand):
@@ -41,28 +42,24 @@ class Command(BaseCommand):
             if session.status != MarketSession.STATUS_OPEN:
                 continue
 
-            # Promuovere PRIMA di chiudere. Un'offerta che aveva gia' compiuto le
-            # sue 24h se le e' guadagnate: se la chiusura la precedesse, il suo
-            # esito dipenderebbe da quando e' passato il cron — accettata se un
-            # tick l'ha vista in tempo, annullata se il tick successivo trova
-            # anche la sessione scaduta. Stesso istante, esito diverso.
-            due = session.offers.filter(status="leading", deadline_at__lte=now).count()
+            due_close = session.closes_at is not None and session.closes_at <= now
+            # Alla chiusura passa in validazione TUTTO cio' che e' in testa, non
+            # solo chi ha compiuto le 24h: e' la regola di gioco, non un caso
+            # limite del comando.
+            due = session.offers.filter(
+                status="leading",
+                **({} if due_close else {"deadline_at__lte": now}),
+            ).count()
+
             if dry:
                 if due:
                     self.stdout.write(f"[dry] session {session.id}: would promote {due} offer(s)")
-                promoted += due
-            else:
-                with transaction.atomic():
-                    promoted += len(promote_expired(session, now=now))
-
-            # Chiusura programmata: solo una sessione aperta con closes_at scaduto.
-            if session.closes_at is not None and session.closes_at <= now:
-                if dry:
+                if due_close:
                     self.stdout.write(f"[dry] would close session {session.id}")
-                else:
-                    with transaction.atomic():
-                        close_session(session, now=now)
-                closed += 1
+            else:
+                sync_session(session, now=now)
+            promoted += due
+            closed += 1 if due_close else 0
 
         self.stdout.write(self.style.SUCCESS(
             f"market_tick: sessions={len(live)} closed={closed} promoted={promoted}"))

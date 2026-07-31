@@ -148,8 +148,10 @@ class ScheduledCloseTests(MarketBase):
         self.assertFalse(FantasyRosterSlot.objects.filter(
             team=self.t2, player_id=self.mine[0].id, released_at__isnull=True).exists())
 
-    # -- 3. senza il cron, la scadenza non fa nulla da sola -------------------
-    def test_senza_tick_la_sessione_resta_aperta_oltre_la_scadenza(self):
+    # -- 3. la scadenza vale anche senza cron --------------------------------
+    def test_aprire_la_pagina_dopo_la_scadenza_chiude_la_sessione(self):
+        """Il server se ne accorge da solo: chi apre il mercato dopo la scadenza
+        lo trova chiuso, senza che nessun cron sia passato."""
         self._setup(closes_in=timedelta(hours=-1))
         c = self._as(self.u2)
         r = c.get(f"/api/v1/leagues/{self.league.id}/market/active")
@@ -157,8 +159,27 @@ class ScheduledCloseTests(MarketBase):
         print(f"      sessione: {r.json()['session']['status']}")
         for k, v in self._statuses().items():
             print(f"      {k:36} {v}")
-        self.assertEqual(r.json()["session"]["status"], MarketSession.STATUS_OPEN)
-        self.assertEqual(self.giovane.status, MarketOffer.STATUS_LEADING)
+        self.assertEqual(r.json()["session"]["status"], MarketSession.STATUS_CLOSED)
+        self.assertEqual(self.giovane.status, MarketOffer.STATUS_ACCEPTED)
+
+    def test_dopo_la_scadenza_non_si_offre_piu(self):
+        """Il buco che conta: senza chiusura, un'offerta piazzata dopo la
+        scadenza veniva accettata come se il mercato fosse ancora aperto."""
+        self._setup(closes_in=timedelta(hours=-1))
+        tardivo = self._player("Tardivo", "ATT")
+        libero = self._player("Riserva t2", "ATT")  # mine[0] e' gia' impegnato
+        self._own(self.t2, libero, 100)
+        c = self._as(self.u2)
+        r = c.post(f"/api/v1/leagues/{self.league.id}/market/offers", {
+            "target_player_id": tardivo.id,
+            "release_player_id": libero.id,
+            "amount": 5,
+        }, format="json")
+        print(f"\n[8] offerta dopo la scadenza: HTTP {r.status_code} — {r.json().get('detail')}")
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(MarketOffer.objects.filter(target_player=tardivo).exists())
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.status, MarketSession.STATUS_CLOSED)
 
     # -- 4. offerta che scade nella stessa finestra della sessione ------------
     def test_timer_scaduto_prima_della_chiusura_viene_promosso(self):

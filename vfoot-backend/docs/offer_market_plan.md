@@ -40,9 +40,15 @@ dall'admin.
   offerte ancora in testa, che passano in **validazione** anche se non hanno compiuto le
   24h. È una regola di gioco voluta: rende conveniente **rilanciare sul filo**, perché chi
   arriva in testa all'ultimo non ha più 24 ore da difendere. Vale sia per la chiusura
-  programmata (`closes_at`, via `market_tick`) sia per quella manuale dell'admin — due
-  esiti diversi per lo stesso bottone sarebbero una trappola. L'admin mantiene comunque
-  l'ultima parola: dalla coda può rifiutare. Test in `tests_market_close.py`.
+  programmata (`closes_at`) sia per quella manuale dell'admin — due esiti diversi per lo
+  stesso bottone sarebbero una trappola. L'admin mantiene comunque l'ultima parola: dalla
+  coda può rifiutare. Test in `tests_market_close.py`.
+- **Chi applica la scadenza**: `market_engine.sync_session`, chiamato da `_live_session` e
+  quindi da **ogni endpoint** del mercato. La scadenza produce i suoi effetti alla prima
+  richiesta che la incontra: nessuno riesce a offrire dopo il termine e nessuno vede aperta
+  una sessione chiusa, **senza cron**. Il comando `market_tick` fa la stessa cosa in
+  anticipo ed è opzionale: servirà quando la chiusura dovrà mandare una notifica push, che
+  è l'unica cosa che non può partire da sola.
 - **Controlli admin**: **sospendere** la sessione (non si accettano offerte) o **chiuderla**
   (anche prima della scadenza). Non può creare una nuova sessione se ce n'è una aperta.
 - **Storico**: a sessione conclusa, lo **storico delle offerte** (accettate e non) resta
