@@ -767,6 +767,9 @@ export interface AuctionPoolPlayer {
   name: string;
   full_name: string;
   role: string | null;
+  /** False for someone outside the drawn order — added to the listone after the
+   *  auction started, or already gone round once. Still callable by name. */
+  in_draw_order: boolean;
 }
 
 /** Everyone still callable in this auction. Fetched once and re-fetched only when

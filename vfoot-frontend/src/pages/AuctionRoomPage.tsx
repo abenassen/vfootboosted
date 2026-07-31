@@ -444,10 +444,14 @@ function AdminControls({
   const [assignPrice, setAssignPrice] = useState('1');
   const [pool, setPool] = useState<AuctionPoolPlayer[]>([]);
 
-  // The callable pool, fetched once and re-fetched only when it shrinks — which
-  // pool_remaining already tells us. The search then costs nothing: no request
-  // per keystroke, and it can only offer players that CAN be nominated (the
-  // old endpoint searched every Player in the database, not this listone).
+  // The callable pool, fetched once and re-fetched whenever ANYTHING happens in
+  // the auction. The key is the id of the latest event, not pool_remaining: every
+  // mutation records an event and ids only go up, whereas the count can stay put
+  // across a change — a cancelled nomination puts its player back, so an assign
+  // and a cancel between two reads leave the same number with different names in
+  // it. The socket already fires on each event and the page re-fetches the state,
+  // so this rides along on a refresh that was happening anyway.
+  const lastEventId = state.events[0]?.id ?? null;
   useEffect(() => {
     let alive = true;
     void getAuctionPool(auctionId)
@@ -456,12 +460,24 @@ function AdminControls({
     return () => {
       alive = false;
     };
-  }, [auctionId, state.pool_remaining]);
+  }, [auctionId, lastEventId]);
+
+  // How many are still in the drawn order. When it empties, calling by name is
+  // the only way left to finish a short roster.
+  const drawLeft = pool.filter((p) => p.in_draw_order).length;
+  const [includeCalled, setIncludeCalled] = useState(false);
+  useEffect(() => {
+    // Ticks itself when the order runs out: leaving it off there would show an
+    // empty search on an auction that still has players to place.
+    if (pool.length && drawLeft === 0) setIncludeCalled(true);
+  }, [pool.length, drawLeft]);
 
   const results = useMemo(() => {
     if (query.trim().length < 2) return [];
-    return pool.filter((p) => foldedMatch(query, [p.name, p.full_name])).slice(0, 12);
-  }, [pool, query]);
+    return pool
+      .filter((p) => (includeCalled || p.in_draw_order) && foldedMatch(query, [p.name, p.full_name]))
+      .slice(0, 12);
+  }, [pool, query, includeCalled]);
 
   return (
     <Card className="p-4">
@@ -543,11 +559,40 @@ function AdminControls({
                   }, `Chiamato ${p.name}.`)
                 }
               >
-                {p.full_name}
+                <span className="flex items-center justify-between gap-2">
+                  <span className="truncate">{p.full_name}</span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {p.role ? <span className="text-[10px] text-slate-400">{p.role}</span> : null}
+                    {/* Callable but not in the drawn order: signed after the
+                        auction began, or already gone round once. Worth saying,
+                        because calling him is a deliberate act. */}
+                    {!p.in_draw_order ? (
+                      <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">
+                        fuori lista
+                      </span>
+                    ) : null}
+                  </span>
+                </span>
               </button>
             ))}
           </div>
         ) : null}
+        <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-600">
+          <input
+            type="checkbox"
+            checked={includeCalled}
+            disabled={drawLeft === 0}
+            onChange={(e) => setIncludeCalled(e.target.checked)}
+          />
+          <span>
+            Includi i già chiamati e non acquistati
+            {drawLeft === 0 ? (
+              <span className="ml-1 text-slate-400">· il giro è finito, non resta altro</span>
+            ) : (
+              <span className="ml-1 text-slate-400">· {drawLeft} ancora in lista</span>
+            )}
+          </span>
+        </label>
       </div>
 
       {/* Direct assign shortcut */}

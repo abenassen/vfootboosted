@@ -2708,6 +2708,31 @@ def _pool_remaining_ids(session) -> list[int]:
     return [pid for pid in (session.nomination_order or []) if pid not in called]
 
 
+def _nominatable_ids(session) -> list[int]:
+    """Everyone the admin may CALL BY NAME, which is more than the planned order.
+
+    ``nomination_order`` is fixed when the auction is created and drives the random
+    draws. Manual calls should not be bound by it: a player signed after the
+    auction started is in the league's listone but not in that list, and a roster
+    left short at the end has no way to be completed. What must stay refused is
+    someone already owned, or the one currently up for auction.
+    """
+    owned = set(FantasyRosterSlot.objects
+                .filter(team__league=session.league, released_at__isnull=True)
+                .values_list("player_id", flat=True))
+    open_ids = set(AuctionNomination.objects
+                   .filter(session=session, status=AuctionNomination.STATUS_OPEN)
+                   .values_list("player_id", flat=True))
+    listone = (LeaguePlayerRole.objects
+               .filter(league=session.league)
+               .values_list("player_id", flat=True))
+    planned = session.nomination_order or []
+    order = {pid: i for i, pid in enumerate(planned)}
+    # Those still to be drawn first, in the drawn order; then the extras.
+    return sorted((pid for pid in listone if pid not in owned and pid not in open_ids),
+                  key=lambda pid: (order.get(pid, len(planned)), pid))
+
+
 def _open_nomination(session):
     return (AuctionNomination.objects
             .filter(session=session, status=AuctionNomination.STATUS_OPEN)
@@ -2973,18 +2998,25 @@ class AuctionPoolView(APIView):
         session = get_object_or_404(AuctionSession, id=auction_id)
         _membership_or_404(session.league, request.user.id)
 
-        pool = _pool_remaining_ids(session)
-        roles = league_role_map(session.league, pool)
-        players = Player.objects.filter(id__in=pool).values_list("id", "short_name", "full_name")
+        # Everyone CALLABLE, not just those left in the drawn order: the manual
+        # call is the way to finish a short roster once the order has run out.
+        callable_ids = _nominatable_ids(session)
+        drawn = set(_pool_remaining_ids(session))
+        roles = league_role_map(session.league, callable_ids)
+        players = Player.objects.filter(id__in=callable_ids).values_list(
+            "id", "short_name", "full_name")
         by_id = {pid: (short, full) for pid, short, full in players}
         return Response([
             {
                 "player_id": pid,
-                "name": by_id.get(pid, ("", ""))[0] or by_id.get(pid, ("", ""))[1] or str(pid),
-                "full_name": by_id.get(pid, ("", ""))[1] or "",
+                "name": by_id[pid][0] or by_id[pid][1] or str(pid),
+                "full_name": by_id[pid][1] or "",
                 "role": roles.get(pid),
+                # False => outside the draw order (added to the listone later, or
+                # already gone round once). Callable, but the UI can say so.
+                "in_draw_order": pid in drawn,
             }
-            for pid in pool
+            for pid in callable_ids
             if pid in by_id
         ])
 
@@ -3014,7 +3046,11 @@ class AuctionNominateView(APIView):
         mode = data["mode"]
 
         pool = _pool_remaining_ids(session)
-        if not pool:
+        # An exhausted draw order ends the auction — but only for a DRAW. Calling
+        # by name is exactly what is left to do when the order has run out and a
+        # roster is still short, so it must not be met with "tutti i giocatori
+        # sono stati chiamati" and a closed session.
+        if not pool and mode != "manual":
             session.status = AuctionSession.STATUS_CLOSED
             session.save(update_fields=["status"])
             _record_auction_event(session, AuctionEvent.TYPE_SESSION_CLOSED, request.user,
@@ -3025,8 +3061,11 @@ class AuctionNominateView(APIView):
 
         if mode == "manual":
             player_id = data["player_id"]
-            if player_id not in pool:
-                return Response({"detail": "Giocatore non disponibile (gia' chiamato o fuori dal listone)."},
+            # Deliberately NOT `pool`: a call by name may reach outside the drawn
+            # order (see _nominatable_ids). Only owned players and the one on the
+            # block are refused.
+            if player_id not in _nominatable_ids(session):
+                return Response({"detail": "Giocatore non disponibile (gia' in una rosa o gia' in chiamata)."},
                                 status=status.HTTP_400_BAD_REQUEST)
             call_mode = AuctionNomination.CALL_MANUAL
         else:
