@@ -114,15 +114,28 @@ function TeamSwitcher({ currentTeamId }: { currentTeamId: number; ownTeamId: num
     <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
       {teams.map((t) => {
         const active = t.team_id === currentTeamId;
-        const dest = t.team_id === ownId ? '/squad' : `/teams/${t.team_id}`;
+        const own = t.team_id === ownId;
+        const dest = own ? '/squad' : `/teams/${t.team_id}`;
         return (
           <button
             key={t.team_id}
             onClick={() => navigate(dest)}
-            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
-              active ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            title={own ? 'La tua squadra' : undefined}
+            className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
+              active
+                ? 'bg-slate-900 text-white'
+                : own
+                  // Marked even when it is not the one on screen: in a strip of
+                  // eight unfamiliar names, yours should not have to be recalled.
+                  ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-300 hover:bg-emerald-100'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
+            {/* No crest here on purpose. The strip is a way to move between
+                rosters, not to look at them: badges made every chip taller for no
+                information the name does not already carry, and having the crest
+                in two places at once invited them to disagree. */}
+            {own ? <span aria-hidden>★</span> : null}
             {t.name}
           </button>
         );

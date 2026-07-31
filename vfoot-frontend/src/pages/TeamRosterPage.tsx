@@ -4,6 +4,7 @@ import { useAsync } from '../utils/useAsync';
 import { getTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import RosterView from '../components/RosterView';
+import Crest from '../components/Crest';
 
 /** Another participant's roster, in the same structured view as one's own — the
  *  read-only counterpart of the Squad page, reached from the League page. The
@@ -27,12 +28,20 @@ export default function TeamRosterPage() {
     <div className="space-y-4">
       <Card className="p-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <SectionTitle>Rosa</SectionTitle>
-            <div className="mt-1 text-xl font-black">{data.team.name}</div>
-            <div className="text-sm text-slate-500">
-              {data.team.manager ? `di ${data.team.manager} · ` : ''}
-              {data.roster.length} giocatori
+          {/* Crest and manager, not just the name: switching between teams from
+              the strip changes only this header, and a line of text alone made
+              it easy to lose track of whose roster is on screen. */}
+          <div className="flex items-center gap-3">
+            <Crest descriptor={data.team.crest} teamName={data.team.name} size={48} />
+            <div>
+              <SectionTitle>Rosa</SectionTitle>
+              <div className="mt-0.5 text-xl font-black">{data.team.name}</div>
+              <div className="text-sm text-slate-500">
+                {data.team.manager ? (
+                  <>Fantallenatore: <b className="text-slate-700">{data.team.manager}</b> · </>
+                ) : null}
+                {data.roster.length} giocatori
+              </div>
             </div>
           </div>
           <Link to="/home">

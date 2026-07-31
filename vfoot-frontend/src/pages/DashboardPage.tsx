@@ -85,10 +85,14 @@ export default function DashboardPage() {
           {/* No "Formazione" button here any more: with a championship and a cup
               running together it could only guess which one you meant. The
               shortcuts now sit on each next match, named after its competition. */}
+          {/* No "Mercato aperto" badge here. market_open does not mean the market
+              is running: it is the admin's switch for editing rosters BY HAND
+              (add/remove/bulk), it defaults to true, and it guards three
+              admin-only endpoints. On a league that has not even held its auction
+              it announced an open market that did not exist. The real state of
+              the auction and of the offer market is shown by LeagueHome, and only
+              when there is one. */}
           <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={selectedLeague?.market_open ? 'green' : 'slate'}>
-              Mercato {selectedLeague?.market_open ? 'aperto' : 'chiuso'}
-            </Badge>
             {myRow ? (
               <span className="text-xs text-slate-500">
                 {myRow.wins}V · {myRow.draws}N · {myRow.losses}P · media {myRow.avg_score_for.toFixed(1)}

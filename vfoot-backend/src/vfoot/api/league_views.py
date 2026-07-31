@@ -3364,10 +3364,47 @@ def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:
 _KO_ROUND_LABELS = {1: "Finale", 2: "Semifinali", 4: "Quarti di finale", 8: "Ottavi di finale"}
 
 
-def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, pl) -> dict:
+def _highlighted_ranks(stage) -> list[int]:
+    """Table positions that actually lead somewhere in THIS stage.
+
+    Two sources, both explicit in the data: a qualification rule that takes a
+    range of the table into a later stage, and a prize awarded to a range of it.
+    Previously the UI just painted the top 4 green (top 2 with groups) — a number
+    borrowed from real football that means nothing in a fantasy league, and that
+    told a ten-team championship with a single winner that four places matter.
+    """
+    if stage is None:
+        return []
+    ranks: set[int] = set()
+
+    for rule in stage.rules_out.filter(mode=CompetitionStageRule.MODE_TABLE_RANGE):
+        lo = rule.rank_from or 1
+        hi = rule.rank_to or lo
+        ranks.update(range(lo, hi + 1))
+
+    for prize in stage.competition.prizes.all():
+        if prize.condition_type == CompetitionPrize.CONDITION_STAGE_TABLE_RANGE:
+            if prize.source_stage_id != stage.id:
+                continue
+        elif prize.condition_type == CompetitionPrize.CONDITION_FINAL_TABLE_RANGE:
+            # The final table is the last stage's; a group table is not it.
+            if stage.competition.stages.order_by("-order_index", "-id").first() != stage:
+                continue
+        else:
+            continue
+        lo = prize.rank_from or 1
+        hi = prize.rank_to or lo
+        ranks.update(range(lo, hi + 1))
+
+    return sorted(ranks)
+
+
+def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, pl,
+             stage=None) -> dict:
     """One results section: a standings table (round-robin) or a bracket (knockout)."""
     fixtures = list(fixtures)
-    base = {"name": name, "type": stage_type, "order": order}
+    base = {"name": name, "type": stage_type, "order": order,
+            "highlight_ranks": _highlighted_ranks(stage)}
     if stage_type == CompetitionStage.TYPE_KNOCKOUT:
         by_round: dict[int, list] = {}
         for f in fixtures:
@@ -3432,7 +3469,8 @@ class CompetitionStructureView(APIView):
         if stages:
             sections = [
                 _section(s.name, s.stage_type, s.order_index,
-                         s.fixtures.select_related(*rel), my_team_id, current_md, pw, pd, pl)
+                         s.fixtures.select_related(*rel), my_team_id, current_md, pw, pd, pl,
+                         stage=s)
                 for s in stages
             ]
         else:
@@ -3789,6 +3827,7 @@ class LeagueTeamLineupView(APIView):
         return Response(
             {
                 "team": {"team_id": team.id, "name": team.name,
+                         "crest": team.crest,
                          "manager": team.manager.user.username},
                 "is_own": is_own,
                 "competitions": [{"competition_id": c["id"], "name": c["name"]} for c in competitions],
@@ -3811,7 +3850,7 @@ class LeagueTeamLineupView(APIView):
                 # Spending summary: a fixed 500 budget (as used elsewhere), what
                 # this squad cost, and per-role breakdown — so the manager reads
                 # where his money went without adding it up by hand.
-                "budget": _roster_budget(roster),
+                "budget": _roster_budget(roster, league.initial_budget),
                 # Which season the appearances/minutes/label describe. The client
                 # must say so: pre-season these are LAST year's, and a silent
                 # "poco impiegato" from stale data is exactly the confusion to avoid.
@@ -3824,8 +3863,14 @@ class LeagueTeamLineupView(APIView):
         )
 
 
-def _roster_budget(roster: list) -> dict:
-    initial = 500
+def _roster_budget(roster: list, initial: int) -> dict:
+    """Spending summary against the LEAGUE's budget.
+
+    Was hardcoded to 500 while FantasyLeague.initial_budget defaults to 1000 and
+    is configurable per league, so the Squadra page reported a residue of zero to
+    anyone who had spent more than 500 — which, on the default economy, is most
+    of a full roster.
+    """
     spent = sum(r["price"] for r in roster)
     by_role: dict[str, int] = {}
     for r in roster:

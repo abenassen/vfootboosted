@@ -57,7 +57,10 @@ export default function ClassificaPage() {
             <Card key={s.name} className="p-4">
               {tables.length > 1 || brackets.length ? <SectionTitle>{s.name}</SectionTitle> : null}
               <div className={tables.length > 1 || brackets.length ? 'mt-2' : ''}>
-                <StandingsTable rows={rows(s.standings ?? [], selectedLeague?.team_name)} promoCount={tables.length > 1 ? 2 : 4} />
+                <StandingsTable
+                  rows={rows(s.standings ?? [], selectedLeague?.team_name)}
+                  highlightRanks={s.highlight_ranks}
+                />
               </div>
             </Card>
           ))}

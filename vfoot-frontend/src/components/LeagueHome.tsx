@@ -2,18 +2,24 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   concludeLeagueMatchday,
+  getActiveAuction,
   getCompetitionStructure,
   getLeagueActivity,
   getLeagueDetail,
   getLeagueFixtures,
   getLeagueMatchdays,
 } from '../api';
-import type { LeagueActivityItem } from '../api/backend';
+// Not re-exported by the api facade, same as in MarketPage.
+import { getMarketActive, type LeagueActivityItem } from '../api/backend';
+import type { MarketSessionInfo } from '../types/market';
+import clsx from 'clsx';
 import { useLeagueContext } from '../league/LeagueContext';
 import { competitionFormatLabel } from '../league/competitionFormat';
+import { compColor, type CompColor } from '../league/competitionColors';
 import { Badge, Button, Card, SectionTitle } from './ui';
 import Crest from './Crest';
 import type {
+  ActiveAuctionInfo,
   CompetitionItem,
   CompetitionStructure,
   LeagueDetail,
@@ -39,6 +45,8 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   const [structures, setStructures] = useState<Record<number, CompetitionStructure>>({});
   const [matchdays, setMatchdays] = useState<LeagueMatchdayItem[]>([]);
   const [activity, setActivity] = useState<LeagueActivityItem[]>([]);
+  const [auction, setAuction] = useState<ActiveAuctionInfo | null>(null);
+  const [marketSession, setMarketSession] = useState<MarketSessionInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -49,6 +57,10 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     void getLeagueFixtures(selectedLeagueId).then((f) => alive && setFixtures(f)).catch(() => {});
     void getLeagueMatchdays(selectedLeagueId).then((m) => alive && setMatchdays(m)).catch(() => {});
     void getLeagueActivity(selectedLeagueId, 8).then((a) => alive && setActivity(a)).catch(() => {});
+    void getActiveAuction(selectedLeagueId).then((a) => alive && setAuction(a)).catch(() => {});
+    void getMarketActive(selectedLeagueId)
+      .then((m) => alive && setMarketSession(m.session))
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -76,6 +88,12 @@ export default function LeagueHome({ competitions }: { competitions: Competition
 
   const compName = useMemo(
     () => new Map(competitions.map((c) => [c.competition_id, c.name])),
+    [competitions],
+  );
+  // Same accent everywhere the competition is named, so a shortcut and the block
+  // it belongs to are recognisably the same thing.
+  const compColorById = useMemo(
+    () => new Map(competitions.map((c, i) => [c.competition_id, compColor(i)])),
     [competitions],
   );
 
@@ -151,6 +169,43 @@ export default function LeagueHome({ competitions }: { competitions: Competition
         </Card>
       ) : null}
 
+      {/* The market, when there IS one. The old Lega page carried this banner and
+          it was worth keeping: an auction is a live event you have to be told
+          about, unlike a permission flag that is on from the day the league is
+          created. */}
+      {auction?.auction_id ? (
+        <Card className="border-2 border-green-300 bg-green-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Badge tone="green">Live</Badge>
+                <span className="font-bold">Asta in corso</span>
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                {auction.is_admin
+                  ? 'Sei il banditore: entra per chiamare i giocatori e aggiudicare.'
+                  : 'Entra per seguire l’asta e rilanciare in tempo reale.'}
+              </div>
+            </div>
+            <Link to="/auction">
+              <Button>Entra nella sala asta →</Button>
+            </Link>
+          </div>
+        </Card>
+      ) : marketSession ? (
+        <Card className="border-l-4 border-sky-500 bg-sky-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-bold text-sky-900">Mercato aperto</div>
+              <div className="text-xs text-sky-800">Puoi fare offerte sugli svincolati.</div>
+            </div>
+            <Link to="/market">
+              <Button size="sm">Vai al mercato →</Button>
+            </Link>
+          </div>
+        </Card>
+      ) : null}
+
       {/* 1 — my next matches, and how to field a team for each */}
       {nextByCompetition.length ? (
         <Card className="p-4">
@@ -161,7 +216,12 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                 {/* Which competition, on the shortcut itself: with a championship
                     and a cup running together, "Imposta formazione" alone does
                     not say which team sheet you are about to fill. */}
-                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <div
+                  className={clsx(
+                    'text-[11px] font-bold uppercase tracking-wide',
+                    compColorById.get(f.competition_id)?.text700 ?? 'text-slate-500',
+                  )}
+                >
                   {compName.get(f.competition_id) ?? 'Competizione'}
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
@@ -178,7 +238,10 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                 {f.can_set_lineup ? (
                   <Link
                     to={`/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`}
-                    className="mt-2 inline-flex rounded-lg bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
+                    className={clsx(
+                      'mt-2 inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90',
+                      compColorById.get(f.competition_id)?.bg700 ?? 'bg-slate-900',
+                    )}
                   >
                     Formazione · {compName.get(f.competition_id) ?? ''}
                   </Link>
@@ -200,7 +263,12 @@ export default function LeagueHome({ competitions }: { competitions: Competition
             <SectionTitle>Ultimi risultati</SectionTitle>
             <div className="mt-2 space-y-1">
               {lastResults.map((f) => (
-                <MiniFixture key={f.fixture_id} f={f} competition={compName.get(f.competition_id)} />
+                <MiniFixture
+                  key={f.fixture_id}
+                  f={f}
+                  competition={compName.get(f.competition_id)}
+                  competitionClass={compColorById.get(f.competition_id)?.text700}
+                />
               ))}
             </div>
           </Card>
@@ -233,10 +301,15 @@ export default function LeagueHome({ competitions }: { competitions: Competition
 
       {/* 4 — everything else */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {competitions.map((c) => (
+        {competitions.map((c, i) => (
           <CompetitionBlock
             key={c.competition_id}
             competition={c}
+            // Same accent the switcher and the competition-scoped pages give it:
+            // the colour identifies WHICH competition, by its position in the
+            // league. Colouring by format instead made "champ" amber here and
+            // green everywhere else.
+            color={compColor(i)}
             fixtures={fixtures.filter((f) => f.competition_id === c.competition_id)}
             structure={structures[c.competition_id] ?? null}
             myTeamName={myTeamName}
@@ -252,11 +325,13 @@ export default function LeagueHome({ competitions }: { competitions: Competition
 /** One competition: how it stands, and the round being played. */
 function CompetitionBlock({
   competition,
+  color,
   fixtures,
   structure,
   myTeamName,
 }: {
   competition: CompetitionItem;
+  color: CompColor;
   fixtures: LeagueFixtureItem[];
   structure: CompetitionStructure | null;
   myTeamName: string | null;
@@ -274,13 +349,19 @@ function CompetitionBlock({
   const tables = (structure?.sections ?? []).filter((s) => s.type === 'round_robin');
 
   return (
-    <Card className="p-4">
+    <Card className={clsx('border-l-4 p-4', color.border600)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <SectionTitle className="!mb-0">{competition.name}</SectionTitle>
-          <Badge tone={competition.competition_type === 'knockout' ? 'amber' : 'blue'}>
+          <SectionTitle className={clsx('!mb-0', color.text700)}>{competition.name}</SectionTitle>
+          <span
+            className={clsx(
+              'inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold',
+              color.bg50,
+              color.text800,
+            )}
+          >
             {competitionFormatLabel(competition)}
-          </Badge>
+          </span>
         </div>
         <Link to="/matches" className="text-xs font-semibold text-slate-500 hover:text-slate-800">
           Calendario →
@@ -344,14 +425,24 @@ function CompetitionBlock({
   );
 }
 
-function MiniFixture({ f, competition }: { f: LeagueFixtureItem; competition?: string }) {
+function MiniFixture({
+  f,
+  competition,
+  competitionClass,
+}: {
+  f: LeagueFixtureItem;
+  competition?: string;
+  competitionClass?: string;
+}) {
   const finished = f.status === 'finished' && f.score;
   const row = (
     <div
       className={`rounded-lg px-2 py-1 ${f.is_user_involved ? 'bg-slate-100 font-semibold' : ''}`}
     >
       {competition ? (
-        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{competition}</div>
+        <div className={clsx('text-[10px] font-bold uppercase tracking-wide', competitionClass ?? 'text-slate-400')}>
+          {competition}
+        </div>
       ) : null}
       <div className="flex items-center gap-2 text-sm">
         <span className="flex flex-1 items-center justify-end gap-1.5 truncate">

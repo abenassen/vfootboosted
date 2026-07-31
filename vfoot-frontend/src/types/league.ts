@@ -142,6 +142,9 @@ export interface CompetitionSection {
   name: string;
   type: 'round_robin' | 'knockout';
   order: number;
+  /** Table positions that lead to a prize or to a later stage, from the
+   *  competition's own rules. Empty when nothing hangs on the placings. */
+  highlight_ranks?: number[];
   standings?: LeagueStandingRow[];
   rounds?: { round_no: number; label: string; fixtures: LeagueFixtureItem[] }[];
 }
