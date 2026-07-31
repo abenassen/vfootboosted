@@ -66,6 +66,7 @@ from vfoot.models import (
     FantasyFixtureDetail,
     FantasyLeague,
     FantasyMatchday,
+    LeagueDecision,
     FantasyRosterSlot,
     FantasyTeam,
     LeagueMembership,
@@ -314,6 +315,69 @@ class LeagueDetailView(APIView):
                 ],
             }
         )
+
+
+class LeagueActivityView(APIView):
+    """What has happened in the league lately, newest first.
+
+    Merged from the records that already exist rather than from a new event table:
+    a roster slot knows when it was acquired, a decision when it was settled, a
+    matchday when it was concluded. That keeps the feed honest — it cannot drift
+    from what actually happened — at the cost of three small queries.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+        limit = min(int(request.query_params.get("limit") or 12), 50)
+
+        items: list[dict] = []
+
+        for slot in (FantasyRosterSlot.objects
+                     .filter(team__league=league, released_at__isnull=True)
+                     .select_related("player", "team")
+                     .order_by("-acquired_at")[:limit]):
+            items.append({
+                "kind": "acquisto",
+                "at": slot.acquired_at.isoformat() if slot.acquired_at else None,
+                "text": f"{slot.player.short_name or slot.player.full_name} → {slot.team.name}",
+                "detail": f"{slot.purchase_price} crediti" if slot.purchase_price else None,
+                "team_id": slot.team_id,
+                "crest": slot.team.crest,
+            })
+
+        for d in (LeagueDecision.objects
+                  .filter(league=league, status=LeagueDecision.STATUS_RESOLVED)
+                  .select_related("player")
+                  .order_by("-resolved_at")[:limit]):
+            items.append({
+                "kind": "decisione",
+                "at": d.resolved_at.isoformat() if d.resolved_at else None,
+                "text": d.title,
+                "detail": d.outcome or None,
+                "team_id": None,
+                "crest": None,
+            })
+
+        for md in (FantasyMatchday.objects
+                   .filter(league=league, status=FantasyMatchday.STATUS_CONCLUDED)
+                   .order_by("-concluded_at")[:limit]):
+            items.append({
+                "kind": "giornata",
+                "at": md.concluded_at.isoformat() if md.concluded_at else None,
+                "text": f"Conclusa la giornata {md.real_matchday}",
+                "detail": None,
+                "team_id": None,
+                "crest": None,
+            })
+
+        # Undated rows (older data, or a field never filled) sink rather than
+        # jumping to the top of a feed sorted by a missing value.
+        items.sort(key=lambda i: i["at"] or "", reverse=True)
+        return Response(items[:limit])
 
 
 class LeagueMyTeamView(APIView):

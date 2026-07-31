@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom';
 import {
   concludeLeagueMatchday,
   getCompetitionStructure,
+  getLeagueActivity,
   getLeagueDetail,
   getLeagueFixtures,
   getLeagueMatchdays,
 } from '../api';
+import type { LeagueActivityItem } from '../api/backend';
 import { useLeagueContext } from '../league/LeagueContext';
 import { competitionFormatLabel } from '../league/competitionFormat';
 import { Badge, Button, Card, SectionTitle } from './ui';
@@ -19,21 +21,24 @@ import type {
   LeagueMatchdayItem,
 } from '../types/league';
 
-/** What is going on in the league right now, all of it on one page.
+/** The league at a glance, in the order a participant actually wants it:
+ *  my next matches first (with the way to field a team for each), then the last
+ *  results, then what has been happening, and only then the league-wide tables
+ *  and the roll call.
  *
- *  Replaces the old "Lega" page, which was a hub of links to pages that already
- *  existed. The questions people actually open the app for are "who plays whom
- *  this week" and "how is it going" — asked once per competition, because a
- *  league can run a championship and a cup side by side.
+ *  Two columns from `lg` up: stacked, the useful part was pushed below the fold
+ *  by material nobody opens the app for.
  */
 export default function LeagueHome({ competitions }: { competitions: CompetitionItem[] }) {
   const { selectedLeagueId, selectedLeague } = useLeagueContext();
   const isAdmin = selectedLeague?.role === 'admin';
+  const myTeamName = selectedLeague?.team_name?.trim() || null;
 
   const [detail, setDetail] = useState<LeagueDetail | null>(null);
   const [fixtures, setFixtures] = useState<LeagueFixtureItem[]>([]);
   const [structures, setStructures] = useState<Record<number, CompetitionStructure>>({});
   const [matchdays, setMatchdays] = useState<LeagueMatchdayItem[]>([]);
+  const [activity, setActivity] = useState<LeagueActivityItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -43,12 +48,12 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     void getLeagueDetail(selectedLeagueId).then((d) => alive && setDetail(d)).catch(() => {});
     void getLeagueFixtures(selectedLeagueId).then((f) => alive && setFixtures(f)).catch(() => {});
     void getLeagueMatchdays(selectedLeagueId).then((m) => alive && setMatchdays(m)).catch(() => {});
+    void getLeagueActivity(selectedLeagueId, 8).then((a) => alive && setActivity(a)).catch(() => {});
     return () => {
       alive = false;
     };
   }, [selectedLeagueId]);
 
-  // One structure per competition: it is what carries the standings, per stage.
   useEffect(() => {
     if (!selectedLeagueId) return;
     let alive = true;
@@ -60,15 +65,36 @@ export default function LeagueHome({ competitions }: { competitions: Competition
       ),
     ).then((entries) => {
       if (!alive) return;
-      setStructures(Object.fromEntries(entries.filter(Boolean) as Array<readonly [number, CompetitionStructure]>));
+      setStructures(
+        Object.fromEntries(entries.filter(Boolean) as Array<readonly [number, CompetitionStructure]>),
+      );
     });
     return () => {
       alive = false;
     };
   }, [selectedLeagueId, competitions]);
 
-  // The matchday the league is standing on, and whether the real round behind it
-  // is over — the only case in which concluding is a sensible offer.
+  const compName = useMemo(
+    () => new Map(competitions.map((c) => [c.competition_id, c.name])),
+    [competitions],
+  );
+
+  const mine = fixtures.filter((f) => f.is_user_involved);
+  // One "next" per competition: a league can run a championship and a cup, and
+  // they are fielded separately.
+  const nextByCompetition = useMemo(() => {
+    const out = new Map<number, LeagueFixtureItem>();
+    for (const f of [...mine].sort((a, b) => a.round_no - b.round_no)) {
+      if (f.status !== 'finished' && !out.has(f.competition_id)) out.set(f.competition_id, f);
+    }
+    return [...out.values()];
+  }, [mine]);
+
+  const lastResults = useMemo(
+    () => [...mine].filter((f) => f.status === 'finished').sort((a, b) => b.round_no - a.round_no).slice(0, 4),
+    [mine],
+  );
+
   const currentMd = matchdays.find((m) => m.phase === 'current') ?? null;
   const canConclude =
     isAdmin && currentMd && currentMd.status === 'planned' && currentMd.real_completion.is_completed;
@@ -103,12 +129,13 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                     return Promise.all([
                       getLeagueMatchdays(selectedLeagueId).then(setMatchdays),
                       getLeagueFixtures(selectedLeagueId).then(setFixtures),
+                      getLeagueActivity(selectedLeagueId, 8).then(setActivity),
                     ]);
                   })
                   .catch((e: unknown) =>
-                    // Concluding can need per-team decisions (forfait vs formazione
-                    // precedente); that flow lives in Gestione lega, so a failure
-                    // here points there instead of pretending to handle it.
+                    // Concluding can need per-team decisions (forfait vs previous
+                    // lineup); that flow lives in Gestione lega, so a failure here
+                    // points there instead of pretending to handle it.
                     setMsg(
                       `Non è stato possibile concludere qui: ${
                         e instanceof Error ? e.message : String(e)
@@ -124,22 +151,105 @@ export default function LeagueHome({ competitions }: { competitions: Competition
         </Card>
       ) : null}
 
-      {competitions.map((c) => (
-        <CompetitionBlock
-          key={c.competition_id}
-          competition={c}
-          fixtures={fixtures.filter((f) => f.competition_id === c.competition_id)}
-          structure={structures[c.competition_id] ?? null}
-          myTeamName={selectedLeague?.team_name?.trim() || null}
-        />
-      ))}
+      {/* 1 — my next matches, and how to field a team for each */}
+      {nextByCompetition.length ? (
+        <Card className="p-4">
+          <SectionTitle>{nextByCompetition.length > 1 ? 'Le tue prossime partite' : 'La tua prossima partita'}</SectionTitle>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {nextByCompetition.map((f) => (
+              <div key={f.fixture_id} className="rounded-xl border border-slate-200 p-3">
+                {/* Which competition, on the shortcut itself: with a championship
+                    and a cup running together, "Imposta formazione" alone does
+                    not say which team sheet you are about to fill. */}
+                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                  {compName.get(f.competition_id) ?? 'Competizione'}
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                  <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
+                  <span className="truncate">{f.home_team.name}</span>
+                  <span className="text-slate-400">vs</span>
+                  <span className="truncate">{f.away_team.name}</span>
+                  <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {f.round_label ?? `Giornata ${f.round_no}`}
+                  {typeof f.real_matchday === 'number' ? ` · giornata reale ${f.real_matchday}` : ''}
+                </div>
+                {f.can_set_lineup ? (
+                  <Link
+                    to={`/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`}
+                    className="mt-2 inline-flex rounded-lg bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
+                  >
+                    Formazione · {compName.get(f.competition_id) ?? ''}
+                  </Link>
+                ) : (
+                  <div className="mt-2 text-[11px] text-slate-400">
+                    La formazione si imposta quando hai una rosa.
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
 
-      {detail ? <Participants detail={detail} myTeamName={selectedLeague?.team_name?.trim() || null} /> : null}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* 2 — how the last ones went */}
+        {lastResults.length ? (
+          <Card className="p-4">
+            <SectionTitle>Ultimi risultati</SectionTitle>
+            <div className="mt-2 space-y-1">
+              {lastResults.map((f) => (
+                <MiniFixture key={f.fixture_id} f={f} competition={compName.get(f.competition_id)} />
+              ))}
+            </div>
+          </Card>
+        ) : null}
+
+        {/* 3 — what has been happening */}
+        <Card className="p-4">
+          <SectionTitle>Novità</SectionTitle>
+          {activity.length ? (
+            <ul className="mt-2 space-y-1.5">
+              {activity.map((a, i) => (
+                <li key={`${a.kind}-${i}`} className="flex items-start gap-2 text-sm">
+                  <span className="mt-0.5 shrink-0" aria-hidden>
+                    {a.kind === 'acquisto' ? '🔁' : a.kind === 'decisione' ? '🗳️' : '🏁'}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-slate-700">{a.text}</span>
+                    {a.detail ? <span className="block text-xs text-slate-400">{a.detail}</span> : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="mt-2 text-sm text-slate-500">
+              Ancora niente da raccontare: acquisti, decisioni e giornate concluse compaiono qui.
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* 4 — everything else */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {competitions.map((c) => (
+          <CompetitionBlock
+            key={c.competition_id}
+            competition={c}
+            fixtures={fixtures.filter((f) => f.competition_id === c.competition_id)}
+            structure={structures[c.competition_id] ?? null}
+            myTeamName={myTeamName}
+          />
+        ))}
+      </div>
+
+      {detail ? <Participants detail={detail} myTeamName={myTeamName} /> : null}
     </div>
   );
 }
 
-/** One competition: the round being played, and how it stands. */
+/** One competition: how it stands, and the round being played. */
 function CompetitionBlock({
   competition,
   fixtures,
@@ -151,14 +261,12 @@ function CompetitionBlock({
   structure: CompetitionStructure | null;
   myTeamName: string | null;
 }) {
-  // The round to show: the one in play, else the first not yet played, else the
-  // last one played — a concluded competition should still show its final round.
   const round = useMemo(() => {
-    const byRound = [...new Set(fixtures.map((f) => f.round_no))].sort((a, b) => a - b);
-    const current = byRound.find((r) => fixtures.some((f) => f.round_no === r && f.phase === 'current'));
+    const rounds = [...new Set(fixtures.map((f) => f.round_no))].sort((a, b) => a - b);
+    const current = rounds.find((r) => fixtures.some((f) => f.round_no === r && f.phase === 'current'));
     if (current != null) return current;
-    const next = byRound.find((r) => fixtures.some((f) => f.round_no === r && f.status !== 'finished'));
-    return next ?? byRound[byRound.length - 1] ?? null;
+    const next = rounds.find((r) => fixtures.some((f) => f.round_no === r && f.status !== 'finished'));
+    return next ?? rounds[rounds.length - 1] ?? null;
   }, [fixtures]);
 
   const shown = fixtures.filter((f) => f.round_no === round);
@@ -179,26 +287,10 @@ function CompetitionBlock({
         </Link>
       </div>
 
-      {shown.length ? (
-        <div className="mt-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            {shown[0]?.round_label && new Set(shown.map((f) => f.stage_name)).size === 1
-              ? shown[0].round_label
-              : `Giornata ${round}`}
-            {typeof shown[0]?.real_matchday === 'number' ? ` · giornata reale ${shown[0].real_matchday}` : ''}
-          </div>
-          <div className="mt-1.5 space-y-1">
-            {shown.map((f) => (
-              <MiniFixture key={f.fixture_id} f={f} />
-            ))}
-          </div>
-        </div>
-      ) : null}
-
       {/* A competition that has not started has nothing to report: a table of
-          zeros is not a standing, and it would push the ones that matter down. */}
+          zeros is not a standing. */}
       {started && tables.length ? (
-        <div className="mt-4 space-y-3">
+        <div className="mt-3 space-y-3">
           {tables.map((s) => (
             <div key={s.name}>
               {tables.length > 1 ? (
@@ -222,37 +314,58 @@ function CompetitionBlock({
                 ))}
               </ol>
               {(s.standings?.length ?? 0) > 5 ? (
-                <Link to="/standings" className="mt-1 inline-block text-xs font-semibold text-slate-500 hover:text-slate-800">
+                <Link
+                  to="/standings"
+                  className="mt-1 inline-block text-xs font-semibold text-slate-500 hover:text-slate-800"
+                >
                   Classifica completa →
                 </Link>
               ) : null}
             </div>
           ))}
         </div>
-      ) : null}
+      ) : shown.length ? (
+        <div className="mt-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            {new Set(shown.map((f) => f.stage_name)).size === 1
+              ? shown[0]?.round_label ?? `Giornata ${round}`
+              : `Giornata ${round}`}
+          </div>
+          <div className="mt-1.5 space-y-1">
+            {shown.slice(0, 4).map((f) => (
+              <MiniFixture key={f.fixture_id} f={f} />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2 text-sm text-slate-500">Non è ancora cominciata.</div>
+      )}
     </Card>
   );
 }
 
-function MiniFixture({ f }: { f: LeagueFixtureItem }) {
+function MiniFixture({ f, competition }: { f: LeagueFixtureItem; competition?: string }) {
   const finished = f.status === 'finished' && f.score;
   const row = (
     <div
-      className={`flex items-center gap-2 rounded-lg px-2 py-1 text-sm ${
-        f.is_user_involved ? 'bg-slate-100 font-semibold' : ''
-      }`}
+      className={`rounded-lg px-2 py-1 ${f.is_user_involved ? 'bg-slate-100 font-semibold' : ''}`}
     >
-      <span className="flex flex-1 items-center justify-end gap-1.5 truncate">
-        <span className="truncate">{f.home_team.name}</span>
-        <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={18} />
-      </span>
-      <span className="shrink-0 tabular-nums text-slate-500">
-        {finished ? `${Math.round(f.score!.home_total)}–${Math.round(f.score!.away_total)}` : 'vs'}
-      </span>
-      <span className="flex flex-1 items-center gap-1.5 truncate">
-        <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={18} />
-        <span className="truncate">{f.away_team.name}</span>
-      </span>
+      {competition ? (
+        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{competition}</div>
+      ) : null}
+      <div className="flex items-center gap-2 text-sm">
+        <span className="flex flex-1 items-center justify-end gap-1.5 truncate">
+          <span className="truncate">{f.home_team.name}</span>
+          <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={18} />
+        </span>
+        <span className="shrink-0 tabular-nums text-slate-500">
+          {finished ? `${Math.round(f.score!.home_total)}–${Math.round(f.score!.away_total)}` : 'vs'}
+        </span>
+        <span className="flex flex-1 items-center gap-1.5 truncate">
+          <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={18} />
+          <span className="truncate">{f.away_team.name}</span>
+        </span>
+      </div>
     </div>
   );
   return f.has_detail ? (
@@ -264,13 +377,12 @@ function MiniFixture({ f }: { f: LeagueFixtureItem }) {
   );
 }
 
-/** Who is in the league. The strip inside a roster page browses between teams;
- *  this is the roll call, with the crests, and it belongs on the home page. */
+/** Who is in the league, with the crests that make them recognisable. */
 function Participants({ detail, myTeamName }: { detail: LeagueDetail; myTeamName: string | null }) {
   return (
     <Card className="p-4">
       <SectionTitle>Partecipanti</SectionTitle>
-      <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
         {detail.teams.map((t) => {
           const mine = t.name === myTeamName;
           return (
@@ -285,7 +397,9 @@ function Participants({ detail, myTeamName }: { detail: LeagueDetail; myTeamName
               <span className="min-w-0">
                 <span className="block truncate text-sm font-semibold text-slate-800">
                   {t.name}
-                  {mine ? <span className="ml-1.5 text-[10px] font-bold uppercase text-emerald-600">la tua</span> : null}
+                  {mine ? (
+                    <span className="ml-1.5 text-[10px] font-bold uppercase text-emerald-600">la tua</span>
+                  ) : null}
                 </span>
                 <span className="block truncate text-xs text-slate-500">{t.manager_username}</span>
               </span>

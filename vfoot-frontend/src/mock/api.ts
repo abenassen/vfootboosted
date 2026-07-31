@@ -288,6 +288,18 @@ export async function updateMyTeam(leagueId: number, patch: { name?: string; cre
   return { team_id: team.team_id, name: team.name, crest: team.crest ?? '' };
 }
 
+export async function getLeagueActivity(_leagueId: number, _limit = 12) {
+  await sleep(80);
+  return [] as Array<{
+    kind: 'acquisto' | 'decisione' | 'giornata';
+    at: string | null;
+    text: string;
+    detail: string | null;
+    team_id: number | null;
+    crest: string | null;
+  }>;
+}
+
 export async function getLeagueDetail(leagueId: number): Promise<LeagueDetail> {
   await sleep(100);
   const l = mockLeagues.find((x) => x.league_id === leagueId);

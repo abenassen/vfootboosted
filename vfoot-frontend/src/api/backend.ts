@@ -383,6 +383,23 @@ export async function updateMyTeam(
   return parseJsonOrThrow(res);
 }
 
+export interface LeagueActivityItem {
+  kind: 'acquisto' | 'decisione' | 'giornata';
+  at: string | null;
+  text: string;
+  detail: string | null;
+  team_id: number | null;
+  crest: string | null;
+}
+
+/** Recent goings-on in the league, newest first. */
+export async function getLeagueActivity(leagueId: number, limit = 12): Promise<LeagueActivityItem[]> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/activity?limit=${limit}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function getLeagueDetail(leagueId: number): Promise<LeagueDetail> {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
