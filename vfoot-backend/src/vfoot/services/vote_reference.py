@@ -67,6 +67,47 @@ def weights_fingerprint() -> str:
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
+# BUMP THIS when the scoring CODE changes in a way that moves votes without any
+# constant changing — a fixed formula, an argument that was not being passed, a
+# different feature source. The rest of the fingerprint is built from constants
+# and from the calibration file, so a pure code fix leaves it identical and every
+# cached vote in the wild stays wrong until someone clears the cache by hand.
+#   1 -> 2: the listone was building the index without the defensive exposure.
+SCORING_CODE_VERSION = 2
+
+
+def scoring_fingerprint() -> str:
+    """A hash of EVERYTHING that turns features into a vote, for cache keys.
+
+    ``weights_fingerprint`` answers "does the stored reference still match the
+    weights"; this answers the different question "would the same appearance get
+    the same vote today", which needs three things it deliberately leaves out:
+
+      * the CALIBRATION ITSELF — recalibrating produces new per-role means and
+        spreads with the weights untouched, so the weights hash alone does not
+        move and anything keyed on it would keep serving pre-calibration votes;
+      * the rated/senza-voto GATES, which decide WHO gets a vote at all;
+      * the goalkeeper evidence damping, which scales the deviation from 6.
+
+    Anything caching derived votes must key on this. Without it a cached season
+    stays valid until a new match is played: the 25-26 season is over, so the
+    listone served ratings computed before the whole v3 retuning and no key ever
+    changed. Cheap to compute — one file already in memory plus a few constants.
+    """
+    from vfoot.services import classic_rating as cr
+    payload = {
+        "code": SCORING_CODE_VERSION,
+        "weights": weights_fingerprint(),
+        # The calibrated scale, not just the weights that produced it.
+        "reference": _load() or {},
+        "gates": [cr.MIN_MINUTES_RATED, cr.MIN_TOUCHES_RATED,
+                  cr.ALWAYS_RATED_MINUTES],
+        "gk_evidence": cr.GK_EVIDENCE_FULL,
+    }
+    blob = json.dumps(payload, sort_keys=True, default=str).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
 def save(reference: dict, role_averages: dict, *, season_id: int,
          feature_scales: dict | None = None) -> None:
     REFERENCE_PATH.parent.mkdir(parents=True, exist_ok=True)

@@ -157,3 +157,78 @@ class SmallSampleShrinkageTests(SimpleTestCase):
         values = self._values({1: {"avg": 9.5, "n": 1},     # one dazzling night
                                2: {"avg": 7.0, "n": 34}})   # a whole good season
         self.assertGreater(values[2]["value"], values[1]["value"])
+
+
+class SnapshotFallbackTests(SimpleTestCase):
+    """The versioned snapshot that lets a slim database show a real listone.
+
+    ``export_dev_db`` strips the zone features the votes are computed from, so the
+    numbers have to travel with the SOURCE instead of with the database — a table
+    inside the copy would have to be filled before the export and would do nothing
+    for the copies already downloaded. The rule that keeps it safe is that it is a
+    fallback and never an override.
+    """
+
+    SNAP = {
+        "scoring_fingerprint": "abc123",
+        "seasons": {"2": {"label": "Serie A 2025-2026", "data_version": "380:-",
+                          "ratings": {"7": [6.8, 30], "9": [5.5, 12]}}},
+    }
+
+    def setUp(self):
+        pr.clear_snapshot_cache()
+        self.addCleanup(pr.clear_snapshot_cache)
+
+    def _ratings(self, computed, *, snapshot=None, fingerprint="abc123",
+                 version="380:-"):
+        with patch.object(pr, "_compute_season_player_ratings", return_value=computed), \
+                patch.object(pr, "_snapshot",
+                             return_value=self.SNAP if snapshot is None else snapshot), \
+                patch.object(pr, "scoring_fingerprint", return_value=fingerprint), \
+                patch.object(pr, "data_version", return_value=version):
+            return pr.snapshot_ratings(2) if not computed else computed
+
+    def test_snapshot_fills_in_when_nothing_can_be_computed(self):
+        got = self._ratings({})
+        self.assertEqual(got[7], {"avg": 6.8, "n": 30})
+        self.assertEqual(got[9], {"avg": 5.5, "n": 12})
+
+    def test_player_ids_come_back_as_integers(self):
+        # JSON object keys are strings; the rest of the pipeline joins on Player.id.
+        self.assertTrue(all(isinstance(k, int) for k in self._ratings({})))
+
+    def test_a_season_absent_from_the_snapshot_stays_empty(self):
+        with patch.object(pr, "_snapshot", return_value=self.SNAP), \
+                patch.object(pr, "scoring_fingerprint", return_value="abc123"):
+            self.assertEqual(pr.snapshot_ratings(999), {})
+
+    def test_a_missing_snapshot_file_is_not_an_error(self):
+        # A full database never needs the file; its absence must not raise.
+        with patch.object(pr, "SNAPSHOT_PATH", pr.SNAPSHOT_PATH.parent / "nope.json"):
+            pr.clear_snapshot_cache()
+            self.assertEqual(pr._snapshot(), {})
+
+    def test_a_stale_fingerprint_still_serves_but_warns(self):
+        # Better a listone from the previous model than an empty page — as long as
+        # nobody has to discover it by noticing the numbers look odd.
+        with self.assertLogs("vfoot.services.player_ratings", "WARNING") as logs:
+            got = self._ratings({}, fingerprint="different")
+        self.assertEqual(got[7]["avg"], 6.8)
+        self.assertIn("different scoring model", "".join(logs.output))
+
+    def test_a_different_set_of_played_matches_warns(self):
+        with self.assertLogs("vfoot.services.player_ratings", "WARNING") as logs:
+            self._ratings({}, version="200:-")
+        self.assertIn("different set", "".join(logs.output))
+
+    def test_a_real_database_always_wins(self):
+        """The one rule that makes this safe: never mask fresh data with the file."""
+        computed = {7: {"avg": 5.0, "n": 38}}
+        with patch.object(pr, "_compute_season_player_ratings", return_value=computed), \
+                patch.object(pr, "_snapshot", return_value=self.SNAP), \
+                patch.object(pr, "scoring_fingerprint", return_value="abc123"), \
+                patch.object(pr, "data_version", return_value="380:-"), \
+                patch("vfoot.services.player_ratings.cache") as fake_cache:
+            fake_cache.get.return_value = None
+            got = pr.season_player_ratings(2)
+        self.assertEqual(got, computed)          # not the 6.8 sitting in the file

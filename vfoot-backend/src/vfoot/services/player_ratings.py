@@ -13,26 +13,44 @@ current form. A player with NO history in either season has no value (None) —
 typically a newcomer who hasn't played yet.
 
 Expensive aggregates are cached under a DATA VERSION key (match count + last data
-check of the season), so a cached value is reused across restarts and workers and
-invalidates itself as soon as new matches are finalized.
+check of the season) AND the scoring fingerprint, so a cached value is reused
+across restarts and workers, invalidates itself as soon as new matches are
+finalized, and stops being served the moment the model that produced it changes.
+
+That cache is a per-machine directory (``.django_cache``, gitignored, and in
+production deliberately outside the checkout): it is a speed-up, never a source.
+The SNAPSHOT below is the source of last resort — see ``snapshot_ratings``.
 """
 from __future__ import annotations
 
+import json
+import logging
 import math
 from collections import defaultdict
+from pathlib import Path
 
+from django.conf import settings
 from django.core.cache import cache
 
 from realdata.models import CompetitionSeason, Match, Player
 from vfoot.services.classic_pagella import data_version, get_reference
+from vfoot.services.vote_reference import scoring_fingerprint
 from vfoot.services.classic_rating import (
     _minutes_map,
     _per_match_player_totals,
     _vote_from_index,
+    defensive_exposure,
     index_for_role,
     is_rated,
     current_role_map,
 )
+
+log = logging.getLogger(__name__)
+
+# Versioned in the repo next to the code, exactly like vote_reference.json, and for
+# the same reason: it is a computed artefact that has to travel with the SOURCE
+# rather than with the database.
+SNAPSHOT_PATH = Path(settings.BASE_DIR) / "vfoot" / "data" / "player_ratings_snapshot.json"
 
 # Rated appearances at which current form and last season's value weigh the same.
 SHRINKAGE_APPEARANCES = 5
@@ -72,7 +90,23 @@ def _compute_season_player_ratings(cs_id: int) -> dict:
         return {}
     ref = get_reference(cs_id)
     totals = _per_match_player_totals(match_ids)
+    if not totals:
+        # No zone coverage at all (see the guard in _per_match_player_totals).
+        # Everything below reads the same tables, so there is nothing to gain by
+        # going on — and defensive_exposure alone is several queries.
+        return {}
     minutes = _minutes_map(match_ids)
+    # The defensive exposure is an ARGUMENT to the index, not something read from
+    # the totals, so leaving it out does not omit a detail — it silently scores
+    # every outfield player as if the opponent had created nothing in his zones.
+    # It used to be missing here while ``build_reference`` and
+    # ``voto_puro_for_match`` both pass it, so the listone z-scored an index built
+    # one way against a scale calibrated on another. Cost: +0.157 of a vote on
+    # defenders (who carry the most exposure), +0.063 on midfielders, +0.015 on
+    # attackers and exactly 0 on keepers, whose channel has no exposure term —
+    # which is why POR was the one role landing on a mean of 6.00 while the
+    # listone average sat at 6.09 against the 5.98 of the real pagelle.
+    exposure = defensive_exposure(match_ids, minutes)
     # Canonical scoring role source (k-means disambiguated), NOT the raw TM seed.
     roles = current_role_map(only_declared=True)
 
@@ -86,7 +120,9 @@ def _compute_season_player_ratings(cs_id: int) -> dict:
             continue
         # index_for_role dispatches to the goalkeeper channel for POR, so keepers
         # now get a season value too (they used to be skipped entirely).
-        vote = _vote_from_index(index_for_role(role, feats, mins), role, mins, ref)
+        vote = _vote_from_index(
+            index_for_role(role, feats, mins, exposure.get((mid, pid), 0.0)),
+            role, mins, ref)
         a = agg[pid]
         a[0] += vote
         a[1] += 1
@@ -94,13 +130,83 @@ def _compute_season_player_ratings(cs_id: int) -> dict:
             for pid, (s, n) in agg.items() if n}
 
 
+_snapshot_memo: dict | None = None
+
+
+def clear_snapshot_cache() -> None:
+    """Drop the in-process copy of the snapshot (after regenerating it, or in tests)."""
+    global _snapshot_memo
+    _snapshot_memo = None
+
+
+def _snapshot() -> dict:
+    global _snapshot_memo
+    if _snapshot_memo is None:
+        try:
+            _snapshot_memo = json.loads(SNAPSHOT_PATH.read_text())
+        except (OSError, ValueError):
+            # A missing or unreadable snapshot is not an error: a full database
+            # never needs it.
+            _snapshot_memo = {}
+    return _snapshot_memo
+
+
+def snapshot_ratings(cs_id: int) -> dict:
+    """Season ratings read from the versioned snapshot, or {} if it cannot serve.
+
+    The reason this file exists rather than a database table: the slim copy from
+    ``export_dev_db`` has no zone features, so a table shipped inside it would have
+    to be populated BEFORE the export — which does nothing for the copies people
+    already downloaded. Shipping the numbers with the SOURCE fixes those too, with
+    a plain ``git pull`` and without replacing anyone's database (and the local
+    leagues, rosters and test data in it). 9 KB of JSON against 54 MB of SQLite.
+
+    Used ONLY when computing from zone features yields nothing, so a real database
+    always wins: this can never mask fresh data with a stale figure. Both the
+    scoring fingerprint and the played-data version are checked and any mismatch is
+    logged — a snapshot from a different model, or from a different set of matches,
+    is still better than an empty listone, but nobody should discover that silently.
+    """
+    season = (_snapshot().get("seasons") or {}).get(str(cs_id))
+    if not season:
+        return {}
+    stored_fp = _snapshot().get("scoring_fingerprint")
+    if stored_fp != scoring_fingerprint():
+        log.warning("player_ratings snapshot was built by a different scoring model "
+                    "(%s != %s); rebuild it with `manage.py "
+                    "build_player_ratings_snapshot`.", stored_fp, scoring_fingerprint())
+    if season.get("data_version") != data_version(cs_id):
+        log.warning("player_ratings snapshot for season %s describes a different set "
+                    "of played matches (%s != %s).", cs_id,
+                    season.get("data_version"), data_version(cs_id))
+    return {int(pid): {"avg": avg, "n": n}
+            for pid, (avg, n) in (season.get("ratings") or {}).items()}
+
+
 def season_player_ratings(cs_id: int) -> dict:
-    """{player_id: {"avg", "n"}} for a season, version-cached across restarts."""
-    key = f"vfoot:player_ratings:{cs_id}:{data_version(cs_id)}"
+    """{player_id: {"avg", "n"}} for a season, version-cached across restarts.
+
+    Keyed on the SCORING fingerprint as well as the played-data version. Keying
+    on the data alone was wrong in the one case that matters most: a CONCLUDED
+    season never plays another match, so its key was frozen and the entry, stored
+    with no expiry, outlived every change to the model. The 25-26 listone served
+    ratings computed on 2026-07-21 straight through the v3 retuning — believable
+    numbers, silently pre-tuning, and no way to tell from the outside.
+    """
+    key = (f"vfoot:player_ratings:{cs_id}:{data_version(cs_id)}"
+           f":{scoring_fingerprint()}")
     hit = cache.get(key)
     if hit is not None:
         return hit
     data = _compute_season_player_ratings(cs_id)
+    if not data:
+        # Nothing computable: either a season this model cannot score at all, or a
+        # database whose zone features were stripped. The snapshot answers the
+        # second case and stays empty for the first.
+        data = snapshot_ratings(cs_id)
+        if data:
+            log.info("season %s scored from the versioned snapshot (%d players): "
+                     "no zone features in this database.", cs_id, len(data))
     cache.set(key, data, None)
     return data
 
