@@ -1205,10 +1205,39 @@ def _per_match_player_totals(match_ids):
             .values("match_id", "player_id", "feature_key")
             .annotate(v=Sum("value")))
     out = defaultdict(dict)
+    covered = set()
     for r in rows:
         out[(r["match_id"], r["player_id"])][r["feature_key"]] = r["v"]
-    _merge_shot_detail(out, match_ids)
-    _merge_defensive_value(out, match_ids)
+        covered.add(r["match_id"])
+
+    # A match with no zone row at all is NOT a match where nobody did anything:
+    # it is a database that cannot answer the question. The distinction matters
+    # because the two merges below read from tables a slim copy keeps
+    # (``MatchShot``, ``MatchAppearance.raw_stats``) while ``export_dev_db``
+    # empties the zone tables — so they would rebuild a row per appearance
+    # carrying two features out of forty, and the scorer cannot tell that apart
+    # from a real player who barely touched the ball. The index then lands near
+    # zero, which is BELOW the frozen per-role mean (DIF 0.17, CEN 0.28, ATT
+    # 0.32, POR 1.41), so every vote comes out at or under 6: a full, ordered,
+    # entirely plausible listone that is uniformly wrong, with nothing to signal
+    # it. Refusing to score is the promise export_dev_db already makes.
+    #
+    # Restricted to the matches that ARE covered rather than all-or-nothing, so
+    # one failed import degrades one matchday instead of the season. On the full
+    # 25-26 database the merges invent exactly 0 keys, so this changes nothing
+    # where the data is there.
+    uncovered = [m for m in match_ids if m not in covered]
+    if uncovered:
+        log.error("no %s zone features for %d of %d matches — those matches "
+                  "cannot be scored and are skipped rather than scored on "
+                  "zeroes (a database with emptied zone tables would otherwise "
+                  "produce a complete listone capped at 6). First ids: %s",
+                  PROVIDER_SOFASCORE, len(uncovered), len(match_ids),
+                  uncovered[:5])
+    if not covered:
+        return {}
+    _merge_shot_detail(out, sorted(covered))
+    _merge_defensive_value(out, sorted(covered))
     return out
 
 

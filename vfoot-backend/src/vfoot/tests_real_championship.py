@@ -312,6 +312,13 @@ class RealChampionshipTests(TestCase):
         MatchAppearance.objects.create(match=self.match, player=scorer,
                                        team_season=self.home_ts, side="home",
                                        minutes_played=90, is_starter=True)
+        # A match needs at least one zone row to be scoreable at all (see
+        # test_a_match_without_zone_features_is_not_scored): without it the whole
+        # match is skipped, which would make this test pass for the wrong reason.
+        # Realistic too — a player who gets a shot off has touches.
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=scorer, provider="sofascore",
+            feature_key="touches", zone_key="z_4_2", value=30.0, team_side="home")
         # df is home (setUp): an own goal is tagged with the away side.
         MatchShot.objects.create(match=self.match, player=self.df, team_side="away",
                                  minute=50, shot_type="goal", is_goal=True,
@@ -322,6 +329,35 @@ class RealChampionshipTests(TestCase):
         tot = _per_match_player_totals([self.match.id])
         self.assertEqual(tot[(self.match.id, scorer.id)]["shots_goal"], 1.0)
         self.assertEqual(tot.get((self.match.id, self.df.id), {}).get("shots_goal", 0), 0)
+
+    def test_a_match_without_zone_features_is_not_scored(self):
+        """A database whose zone tables were emptied must produce NO votes.
+
+        This is the slim copy from ``export_dev_db``, which keeps ``MatchShot`` and
+        ``MatchAppearance.raw_stats`` while dropping the zone features the index is
+        built from. The two merges read exactly those surviving tables, so before
+        the coverage check they rebuilt a row per appearance carrying a couple of
+        features out of forty — and a near-zero index sits BELOW every frozen
+        per-role mean, so the season came out as a complete, ordered, entirely
+        believable listone in which nobody could exceed 6. Refusing to score is
+        what the export already promises; scoring on the leftovers is worse than
+        an empty page because nothing says it happened.
+        """
+        from realdata.models import MatchShot
+        from vfoot.services.classic_rating import _per_match_player_totals
+        MatchShot.objects.create(match=self.match, player=self.df, team_side="home",
+                                 minute=60, shot_type="goal", is_goal=True, xg=0.3,
+                                 xgot=0.7, provider="sofascore", zone_key="z_4_2")
+        self.assertFalse(PlayerZoneFeature.objects.filter(match=self.match).exists())
+        self.assertEqual(_per_match_player_totals([self.match.id]), {})
+
+        # One zone row is enough to make the match scoreable again: the check is
+        # per MATCH, so a failed import degrades that matchday and not the season.
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=self.df, provider="sofascore",
+            feature_key="touches", zone_key="z_4_2", value=30.0, team_side="home")
+        tot = _per_match_player_totals([self.match.id])
+        self.assertEqual(tot[(self.match.id, self.df.id)]["shots_goal"], 1.0)
 
     def test_gk_without_data_is_senza_voto(self):
         # No features at all -> the keeper is s.v. like any other player (he no
