@@ -315,6 +315,76 @@ Agents must NEVER:
 
 ### Dev Notes
 
+-   **Rebuilding a known application state: `manage.py simulate_scenario`.**
+    The entry point for "put everything back the way it was so I can test X".
+    `--list` describes the named scenarios (`g22-live` is a half-played matchday
+    22 with one match in progress); `--at <instant>` moves the same scenario to
+    another moment. Two guarantees it is built around, both covered by
+    `realdata/tests_season_simulator.py`:
+    -   same scenario + same instant → the identical season, down to the scorers;
+    -   same scenario + a LATER instant → the SAME season further on. A match is
+        always played in full and then cut back to the minute being watched, and
+        each fixture draws from a stream keyed on its own provider id, so a goal
+        scored at the 20th minute is still there at the 90th. Without both of
+        those, advancing the clock re-rolls the season and nothing about a live
+        pipeline can be tested.
+    -   Winding the clock BACK is supported and is the case that rots silently:
+        matches that have un-happened have their rows erased, and league
+        matchdays no longer behind the front are reopened.
+    -   Runs are incremental — a finished match's payload never changes, so it is
+        ingested once. Moving the instant a few hours touches only the matches
+        that changed. After editing the generator or changing the seed, pass
+        `--fresh`: every payload is then different and the whole season must be
+        re-ingested (minutes, not seconds).
+-   **Playing a season that has not been played.** A synced calendar with no
+    results leaves the whole scoring chain (voto puro, listone, pagelle,
+    standings) with nothing to work on. Two commands fill it in — both driven by
+    `simulate_scenario`, and neither inventing a database row directly:
+    -   `manage.py simulate_sofascore_season --season 3 --through 22 --now
+        2027-01-31T18:35:00+01:00` writes SofaScore-shaped JSON into the request
+        cache and then runs the REAL importer over it (offline — a cached path
+        never touches the network). Each appearance is donor-sampled from a
+        completed season's stat blobs, so it is internally coherent; the events
+        (scoreline, scorers, cards, subs) are decided first and always win. See
+        `realdata/services/season_simulator.py` for what is and is not modelled.
+    -   `manage.py advance_fantasy_league --league 62 --through 22` fields a
+        lineup per manager per matchday and concludes the rounds behind the
+        front, through `score_and_persist_matchday` — the same function the
+        admin's Concludi button calls.
+    -   The two are calibrated against the real season and stay within a few
+        percent of it (shots, goals, cards, xG/xGOT by outcome, assists per
+        goal). The known cost: scored against the frozen `vote_reference.json`,
+        the synthetic ATT and POR averages sit about 0.1 of a vote above 6 —
+        a fifth of the pagella's own grid step, and worth remembering before
+        reading anything into a simulated listone.
+-   **Driving the REAL live pipeline off a simulated season:
+    `VFOOT_EGRESS_SIMULATED`.** `egress_client` is the one place the system
+    crosses to the outside world — it warms the request cache, and everything
+    else reads that cache offline. With the flag on, `run_egress` is served by a
+    generator (`realdata/services/egress_sim.py`) that writes the payload
+    SofaScore would be serving for that match *at this minute*, taken from
+    `timezone.now()`. So `manage.py tick` on its ordinary cadence exercises the
+    genuine scheduler, live poll, full-time observation and +15min/+1h
+    finalization — only the bytes are invented:
+        18:40 live-poll 1-0 · 19:50 status flips to finished · 20:05 stamp-ft
+        · 20:25 final-check · 21:10 final-confirm -> data_ready
+    Rebuilding the season at a later instant is NOT a substitute: it produces the
+    same rows without ever running the state machine that is supposed to produce
+    them.
+    Two things this got wrong at first, both worth knowing: the importer resolves
+    a match from the SCHEDULE and skips anything the schedule does not call
+    finished, so the round's event file has to be updated alongside the live
+    endpoint or finalization imports nothing while reporting success; and the
+    "what minute is this match at" rule must live in ONE place
+    (`season_simulator.status_at`, which also sits out the interval) or a fixture
+    is at the 60th minute when rebuilt and the 75th when polled.
+-   **`VFOOT_FAKE_NOW`** shifts the instant the app looks at the data from,
+    without touching the data, so a simulated season can be observed from
+    inside it. It patches `django.utils.timezone.now` from settings.py — early
+    enough to catch `default=timezone.now` fields — and the clock WALKS rather
+    than freezing. A middleware then ships the server's now as `X-Vfoot-Now` so
+    the client's market countdowns do not measure across two clocks. Inert when
+    the variable is unset. See `vfoot/simclock.py`.
 -   Preferred way to start/stop both servers: **`./vfoot-dev`** at the
     repo root. It keeps the four places the host appears in sync
     (`DJANGO_ALLOWED_HOSTS`, `DJANGO_CORS_ORIGINS`,
