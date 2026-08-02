@@ -1,0 +1,7 @@
+[Unit]
+Description=Vfoot backup notturno (database + media)
+[Service]
+Type=oneshot
+# root: pg_dump gira come utente postgres, e la destinazione e' /root/backups.
+User=root
+ExecStart=/usr/local/sbin/vfoot-backup

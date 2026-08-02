@@ -228,30 +228,42 @@ wired into `tick` and `sync_calendar --egress`, tested in `tests_live_pipeline`)
 tick decides which matches are due (DB calendar), warms them through the egress via a
 narrow sudo bridge, then reads the warm cache with the existing offline import.
 
-### Install the units + the sudo bridge (disabled)
+### The scheduled jobs
+
+**The inventory of everything that runs on a timer lives in
+`deploy/systemd/README.md`** — what each job is, its cadence, and what breaks when
+it stops running. It is one list in one place on purpose: this section used to
+carry a second copy of it, and a second copy is the one that goes stale.
+
+Installing and enabling is `deploy/systemd/install.sh`, run as root on the server:
+
 ```sh
-scp deploy/systemd/*.{service,timer} root@139.162.144.123:/etc/systemd/system/
+ssh root@139.162.144.123 'cd /srv/vfoot-app/vfoot-backend/deploy/systemd
+  ./install.sh                # copy units + the backup script, daemon-reload, enable NOTHING
+  ./install.sh --status'      # what is on, and when it next fires
+```
+
+### The sudo bridge (needed only by `tick` and `calendar`)
+```sh
 scp deploy/egress/vfoot-egress root@139.162.144.123:/usr/local/sbin/vfoot-egress
 scp deploy/egress/vfoot-egress.sudoers root@139.162.144.123:/tmp/vfoot-egress.sudoers
 ssh root@139.162.144.123 '
   chmod 0755 /usr/local/sbin/vfoot-egress
   install -m 0440 /tmp/vfoot-egress.sudoers /etc/sudoers.d/vfoot-egress
-  visudo -cf /etc/sudoers.d/vfoot-egress            # validate
-  systemctl daemon-reload'                          # do NOT enable yet
+  visudo -cf /etc/sudoers.d/vfoot-egress'           # validate
 ```
-The `vfoot-calendar.service` runs `sync_calendar --egress --year <YY/YY> --season-id <id>`;
+`vfoot-calendar.service` runs `sync_calendar --egress --year <YY/YY> --season-id <id>`;
 `vfoot-tick.service` runs `tick` (it finds the due matches from the DB itself).
+Without the bridge both fail on every fire — `install.sh` skips enabling them
+until it is in place.
 
 ### Enable at launch
 ```sh
-ssh root@139.162.144.123 '
-  systemctl enable --now vfoot-tm-poll.timer          # listone stays current (TM)
-  systemctl enable --now vfoot-egress-refill.timer    # keeps the IP pool full
-  systemctl enable --now vfoot-calendar.timer         # Loop A: calendar via egress
-  systemctl enable --now vfoot-tick.timer'            # Loop B: live/finalization
+ssh root@139.162.144.123 'cd /srv/vfoot-app/vfoot-backend/deploy/systemd
+  ./install.sh --enable-all'
 ```
-`vfoot-tm-poll` and `vfoot-egress-refill` are independent and can be enabled anytime;
-`vfoot-calendar`/`vfoot-tick` need the sudo bridge above.
+`vfoot-backup` deserves to go on **before** launch, not at it: it is the only copy
+of the data between one deploy and the next, and it depends on nothing.
 
 ## Notifiche push / PWA (primo deploy che le porta)
 

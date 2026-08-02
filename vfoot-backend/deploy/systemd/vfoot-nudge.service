@@ -1,0 +1,7 @@
+[Unit]
+Description=Vfoot sollecito: giornate finite e non ancora conteggiate dall'admin
+[Service]
+Type=oneshot
+User=vfoot
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py nudge_conclusions

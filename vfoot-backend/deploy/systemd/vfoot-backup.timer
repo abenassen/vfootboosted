@@ -1,0 +1,11 @@
+[Unit]
+Description=Backup una volta al giorno, di notte
+[Timer]
+# 03:15: dopo il refill dell'egress delle 03:00 e ben lontano da qualsiasi partita.
+# Persistent recupera il backup di un giorno in cui il server era spento — che e'
+# esattamente il giorno in cui poi lo vorresti.
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=10m
+Persistent=true
+[Install]
+WantedBy=timers.target

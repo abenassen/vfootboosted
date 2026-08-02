@@ -311,7 +311,9 @@ nulla — nessun cron, nessun timer systemd, nessuna riga nel deploy.
 
 **Il lavoro**, in ordine:
 
-1. mettere `market_tick` nel cron del Linode (ogni 60–90 s), che è una riga;
+1. ~~mettere `market_tick` nel cron del Linode (ogni 60–90 s)~~ — **FATTO
+   (02/08/2026)**: unità `vfoot-market` ogni 90 s, staged e spenta come le altre.
+   L'inventario di tutto lo schedulato è in `deploy/systemd/README.md`;
 2. fargli emettere le notifiche sugli eventi che genera, sul canale
    `league_notifications` che già serve email e push (§5) — una sola decisione su
    *cosa* dire, due modi di dirlo;

@@ -1,0 +1,16 @@
+[Unit]
+Description=Manutenzione del mercato ogni 90 secondi
+[Timer]
+# NON serve alla correttezza: ogni endpoint del mercato passa da sync_session, per
+# cui una scadenza produce i suoi effetti alla prima richiesta che la incontra.
+# Serve alle NOTIFICHE, che sono esattamente le cose che nessuna richiesta puo'
+# far partire — quando la sessione chiude alle 3 di notte non c'e' nessuno a
+# generare il traffico che le innescherebbe.
+#
+# Niente Persistent: recuperare un tick saltato non ha senso (l'esecuzione
+# successiva vede comunque lo stesso stato, il comando e' idempotente).
+OnBootSec=3min
+OnUnitActiveSec=90s
+AccuracySec=15s
+[Install]
+WantedBy=timers.target

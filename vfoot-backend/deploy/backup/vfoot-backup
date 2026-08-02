@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+#
+# Backup notturno di Vfoot: database + media caricati.
+#
+# Perche' esiste: il runbook prevede un pg_dump PRIMA di ogni deploy, che protegge
+# dai deploy — non dal resto. Fra un deploy e l'altro possono passare settimane, e
+# in mezzo ci stanno un'asta intera, un mercato e mezzo campionato: senza un backup
+# periodico la finestra di perdita e' "tutto quello che e' successo dall'ultima
+# volta che ho toccato il codice".
+#
+# Cosa salva:
+#   - il database (pg_dump compresso) — l'unica copia dei dati di lega;
+#   - MEDIA_ROOT (avatar dei giocatori caricati dall'admin) — file veri, non in git.
+# Cosa NON salva, di proposito: il checkout (sta su GitHub), la SPA compilata (si
+# ricostruisce), la cache SofaScore (si riscalda), il pool egress (si rigenera).
+#
+# Idempotente e silenzioso quando va bene: una riga di riepilogo, e il codice di
+# uscita che systemd usa per accorgersi dei guai.
+#
+#   vfoot-backup              # esegue
+#   vfoot-backup --dry-run    # dice cosa farebbe
+#
+set -euo pipefail
+
+DEST="${VFOOT_BACKUP_DIR:-/root/backups}"
+KEEP_DAYS="${VFOOT_BACKUP_KEEP_DAYS:-21}"
+DB_NAME="${VFOOT_DB_NAME:-vfoot}"
+MEDIA_DIR="${VFOOT_MEDIA_DIR:-/srv/vfoot-app/vfoot-backend/src/media}"
+DRY=""
+[ "${1:-}" = "--dry-run" ] && DRY=1
+
+TS="$(date +%Y%m%d-%H%M%S)"
+DB_FILE="$DEST/vfoot-db-$TS.sql.gz"
+MEDIA_FILE="$DEST/vfoot-media-$TS.tar.gz"
+
+if [ -n "$DRY" ]; then
+  echo "[dry-run] pg_dump $DB_NAME -> $DB_FILE"
+  [ -d "$MEDIA_DIR" ] && echo "[dry-run] tar $MEDIA_DIR -> $MEDIA_FILE" \
+                      || echo "[dry-run] $MEDIA_DIR non esiste: niente media da salvare"
+  echo "[dry-run] cancellerei da $DEST i backup piu' vecchi di $KEEP_DAYS giorni:"
+  find "$DEST" -maxdepth 1 -name 'vfoot-*-*.gz' -mtime "+$KEEP_DAYS" -print 2>/dev/null || true
+  exit 0
+fi
+
+mkdir -p "$DEST"
+
+# I .part di un tentativo fallito vanno via da soli: non li ripulirebbe nessuno
+# (la rotazione guarda i .gz) e un pg_dump che fallisce ogni notte riempirebbe il
+# disco di mezzi backup. Testato: simulando un pg_dump che esce con errore, la
+# directory resta come prima e i backup vecchi NON vengono toccati.
+cleanup() { rm -f "$DB_FILE.part" "$MEDIA_FILE.part"; }
+trap cleanup EXIT
+
+# Il dump va su file temporaneo e viene rinominato solo a compressione riuscita:
+# un pg_dump interrotto non deve lasciare in giro un archivio troncato che
+# sembra un backup valido finche' non provi a ripristinarlo.
+sudo -u postgres pg_dump "$DB_NAME" | gzip > "$DB_FILE.part"
+mv "$DB_FILE.part" "$DB_FILE"
+
+if [ -d "$MEDIA_DIR" ] && [ -n "$(ls -A "$MEDIA_DIR" 2>/dev/null)" ]; then
+  tar czf "$MEDIA_FILE.part" -C "$(dirname "$MEDIA_DIR")" "$(basename "$MEDIA_DIR")"
+  mv "$MEDIA_FILE.part" "$MEDIA_FILE"
+  MEDIA_MSG="media $(du -h "$MEDIA_FILE" | cut -f1)"
+else
+  MEDIA_MSG="media assenti"
+fi
+
+# La rotazione viene DOPO il backup nuovo: se il dump di stanotte fallisce, il
+# comando esce prima (set -e) e i vecchi restano dove sono. Cancellare per primi
+# significherebbe fare spazio buttando l'unica copia buona.
+DELETED=$(find "$DEST" -maxdepth 1 -name 'vfoot-*-*.gz' -mtime "+$KEEP_DAYS" -delete -print 2>/dev/null | wc -l)
+
+echo "backup ok: db $(du -h "$DB_FILE" | cut -f1), $MEDIA_MSG, ruotati $DELETED file (>$KEEP_DAYS giorni)"

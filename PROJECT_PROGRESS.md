@@ -3443,3 +3443,123 @@ Verificato sul campo: registrazione reale -> email ricevuta in posta in arrivo d
 pulsante Google non viene mostrato e l'endpoint rifiuta). Schermata di consenso
 gia' impostata su "Esterno"; ricordarsi di **pubblicare l'app in produzione**,
 altrimenti funziona solo per gli utenti di prova (max 100).
+
+## Due orologi: giornata giocata vs giornata conteggiata (2026-08-02)
+
+Il puntatore "giornata corrente" rispondeva a due domande diverse con lo stesso
+numero: *cosa si sta giocando* e *cosa la lega ha conteggiato*. La prima è un
+fatto del calendario reale, la seconda è un atto amministrativo — e finché sono
+la stessa cosa, un admin che dimentica di chiudere una giornata **blocca chi
+gioca**. Sintomo concreto trovato nel codice: la scorciatoia "Formazione" della
+home puntava alla prima fixture non `finished`, e una fixture resta `scheduled`
+finché non si conclude la giornata; quindi la 16 dimenticata continuava a
+proporre di schierare la 16 — già bloccata, con l'API che rispondeva 409 — e non
+offriva mai la 17. `can_set_lineup` per giunta non guardava affatto la deadline.
+
+Ora sono due orologi separati (`services/matchday_state.py`):
+
+- **calendario reale** → `next_fieldable_matchday` (prima giornata non ancora
+  bloccata), `playing_matchday` (finestra di 3h dal kickoff, definizione che non
+  dipende dal poller e quindi non può incastrarsi), `locked_matchdays`. Non
+  aspetta nessuno;
+- **registro della lega** → `ledger_matchday` (prima giornata né conclusa né in
+  attesa), `conclusion_queue` (gli arretrati), `can_conclude`.
+
+`FantasyMatchday` acquista il terzo stato **`awaiting`**: il gesto esplicito con
+cui l'admin dice "una partita è stata rinviata, la lega va avanti, questa la
+chiudo al recupero". Deliberatamente manuale — aspettare o imporre il voto
+d'ufficio è una decisione di lega, non un fatto del calendario. Una giornata
+parcheggiata è l'unica che si può concludere **fuori ordine**.
+
+Il caso reale su cui è tarato tutto: Serie A 25-26, giornata 16 con quattro
+partite rinviate il 21 dicembre e recuperate il 14-15 gennaio, mentre si
+giocavano la 17, 18, 19 e 20. E la 24, con Milan-Como recuperata il 18 febbraio
+dopo la 25.
+
+**Rinvio ≠ senza voto.** `match_resolver` esisteva, era testato e non era
+collegato allo scoring: un giocatore la cui partita non si era giocata diventava
+`s.v.` e **bruciava una sostituzione**. Ora `pending_player_ids` entra nella
+composizione delle formazioni: il titolare pending resta in campo senza
+contribuire e la panchina non lo copre; un panchinaro pending non entra mai.
+Verificato sui dati veri: rimettendo i 4 recuperi a "non giocati", 209 giocatori
+risultano correttamente pending e la conclusione si blocca elencando le quattro
+partite per nome.
+
+**Voto d'ufficio = scalare, non dati finti.** `OfficeOverride` perde
+`template`/`outfield_scale`/`gk_goals_prevented` e guadagna un solo campo `voto`
+(default 6.0). Il disegno precedente iniettava un vettore-zona medio: qualcosa
+che ha la *forma* di una misura senza esserlo, e che sarebbe finito in medie,
+esposizioni e modelli. Un voto d'ufficio è una decisione, non un dato: entra a
+livello di voto, senza bonus/malus, e il portiere passa dalla stessa porta (il
+canale goals-prevented non viene interrogato). Conta nel modificatore difesa come
+qualsiasi voto puro (deciso), ma **non** dà l'imbattibilità al portiere: non c'è
+clean sheet in una partita che nessuno ha giocato. È per lega: `(league, match)`,
+quindi una lega impone il 6 e quella accanto aspetta il recupero.
+
+**La formazione fa fede.** Il calcolo filtrava la formazione sulla rosa
+*attuale*: un giocatore ceduto a gennaio diventava `s.v.` in una giornata di
+dicembre, cioè lo stesso turno dava punteggi diversi a seconda di *quando*
+l'admin lo concludeva. Il filtro sparisce dal calcolo e la proprietà si sposta a
+monte, dove è verificabile: R1 una formazione bloccata è immutabile; R2 la
+validazione di un'offerta sostituisce il ceduto con l'acquistato **in ogni
+formazione ancora aperta**, nella stessa identica posizione (il pari-ruolo del
+mercato garantisce che l'XI resti di undici e il modulo legale), e il manager
+riceve la notifica; R3 niente validazioni a giornata in corso, agganciato ai
+kickoff e non alle chiusure — altrimenti un admin distratto congelerebbe il
+mercato per sempre. Resta una spia rumorosa: se al calcolo compare un giocatore
+che era già fuori rosa **al blocco** della giornata, è un bug di riparazione e
+finisce a log come errore, non in silenzio.
+
+Contro l'admin smemorato, nessuna chiusura automatica (valutata e scartata: una
+lega che non chiude mai è una lega abbandonata, e la conclusione tardiva dà
+comunque lo stesso identico risultato di quella puntuale, quindi non c'è
+urgenza). Invece: la coda arretrati chiudibile in blocco, il sollecito
+email+push all'admin (`manage.py nudge_conclusions`, con cooldown su `nudged_at`)
+e l'avviso visibile a **tutta** la lega — in una lega di amici gli altri
+partecipanti sono un promemoria migliore di qualsiasi cron.
+
+499 test verdi (22 nuovi). Flusso completo verificato end-to-end sul DB reale in
+transazione annullata: conclusione bloccata con le 4 partite elencate → voti
+d'ufficio imposti → conclusione riuscita, 5 fixture calcolate, 6 titolari col
+voto d'ufficio nel tabellino.
+
+## Lo schedulato del server, in un posto solo (2026-08-02)
+
+Esisteva già un impianto systemd (`tick`, `calendar`, `tm-poll`, `egress-refill`),
+ma l'elenco viveva in due file — la tabella in `deploy/systemd/README.md` e la
+lista di `enable` in `DEPLOY.md` — e mancavano tre job che erano già stati
+identificati e mai messi giù. Ora l'inventario è **uno**: la tabella nel README,
+con una colonna che vale più delle altre, *cosa si rompe se non gira*. Se non si
+riesce a compilarla, il job probabilmente non serve.
+
+Aggiunti:
+
+- **`vfoot-market`** (ogni 90 s) — `market_tick`. La ROADMAP §10 lo chiedeva da
+  fine luglio: non serve alla correttezza (ogni endpoint passa da `sync_session`)
+  ma serve alle notifiche, che sono esattamente le cose che nessuna richiesta può
+  innescare — quando una sessione chiude alle 3 di notte non c'è traffico da cui
+  farle partire.
+- **`vfoot-nudge`** (10:00) — il sollecito agli admin in ritardo con le
+  conclusioni. Le 10:00 perché un campionato che finisce di lunedì sera va letto
+  la mattina dopo, non a mezzanotte.
+- **`vfoot-backup`** (03:15) — il buco vero della lista. Il runbook prevedeva un
+  `pg_dump` *prima di ogni deploy*, che protegge dai deploy e non dal resto: fra
+  un deploy e l'altro passano settimane, e in mezzo ci stanno un'asta intera e
+  mezzo campionato. Salva database + `MEDIA_ROOT` (gli avatar caricati non sono in
+  git), ruota a 21 giorni, e **ruota dopo** aver scritto il backup nuovo: fare
+  spazio prima significherebbe buttare l'unica copia buona se il dump di stanotte
+  fallisce. Verificato con un `pg_dump` finto in entrambi i rami — successo
+  (archivi rileggibili, rotazione del file vecchio) e fallimento (uscita 1, backup
+  precedenti intatti). Il primo giro lasciava un `.part` orfano che nessuna
+  rotazione avrebbe mai ripulito: ora c'è una trap.
+
+E `deploy/systemd/install.sh`, perché aggiungere un job stava diventando una
+sequenza di `scp` da ricordare a memoria: copia unità e script, `daemon-reload`,
+`--status` per vedere cosa è acceso, `--enable`/`--enable-all` per accendere.
+Installare **non** accende — è la postura con cui il server sta oggi — e i due job
+che escono via egress vengono saltati se manca il ponte sudo, invece di fallire a
+ogni scatto.
+
+**Limite noto, non dimenticanza**: il backup sta sullo stesso disco di ciò che
+salva. Copre l'errore umano, non la perdita del Linode. Manca una copia fuori dal
+server, ed è una decisione da prendere (dove).

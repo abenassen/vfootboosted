@@ -1,0 +1,7 @@
+[Unit]
+Description=Vfoot mercato a offerte: chiude le sessioni scadute e promuove le offerte mature
+[Service]
+Type=oneshot
+User=vfoot
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py market_tick

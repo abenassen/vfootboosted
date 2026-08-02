@@ -1,0 +1,16 @@
+[Unit]
+Description=Sollecita gli admin una volta al giorno
+[Timer]
+# Una volta al giorno basta e avanza: il ritardo di una conclusione non rompe
+# niente (chi gioca continua a schierare, la giornata conclusa in ritardo da' lo
+# stesso identico risultato), quindi il sollecito e' un promemoria, non un
+# allarme. Il comando ha un cooldown suo su `nudged_at`, quindi anche se il timer
+# scattasse piu' spesso nessuno verrebbe sommerso.
+#
+# Le 10:00 sono l'ora giusta per un campionato che finisce di lunedi' sera:
+# l'admin lo legge la mattina dopo, non a mezzanotte.
+OnCalendar=*-*-* 10:00:00
+RandomizedDelaySec=30m
+Persistent=true
+[Install]
+WantedBy=timers.target
