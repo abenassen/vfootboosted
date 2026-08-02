@@ -10,6 +10,18 @@
 #     ./vfoot-sim stop         ferma tutto quello che ha avviato
 #     ./vfoot-sim build        ricostruisce lo stato dello scenario, poi avvia
 #
+#   QUANDO SERVE `build` E NON UN SEMPLICE AVVIO. Un riavvio riporta l'OROLOGIO
+#   all'istante dello scenario, ma non i DATI: il cron intanto ha fatto camminare
+#   la serata, e quello che ha scritto resta. Dopo mezz'ora di simulazione i due
+#   divergono, e la forma che prende non e' ovvia -- una partita gia' promossa a
+#   `data_ready` esce da `candidate_matches()`, quindi il tick non la tocca piu' e
+#   resta "in corso" secondo la banca dati e non ancora cominciata secondo
+#   l'orologio, con il tick che riferisce "nothing due" su tutto. Peggio se non e'
+#   stata promossa: `_apply_status` riscrive il punteggio da quello che il provider
+#   dice ADESSO, e un 1-0 torna 0-0.
+#
+#   Regola pratica: se il cron ha girato piu' di qualche minuto, `build`.
+#
 #   IL .env NON VIENE MODIFICATO. Le variabili vengono ESPORTATE nell'ambiente dei
 #   processi che questo script avvia, e vincono su quelle del file: load_dotenv
 #   non sovrascrive l'ambiente. E' la stessa proprieta' che rende insidioso un
