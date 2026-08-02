@@ -1228,12 +1228,18 @@ def _per_match_player_totals(match_ids):
     # where the data is there.
     uncovered = [m for m in match_ids if m not in covered]
     if uncovered:
-        log.error("no %s zone features for %d of %d matches — those matches "
-                  "cannot be scored and are skipped rather than scored on "
-                  "zeroes (a database with emptied zone tables would otherwise "
-                  "produce a complete listone capped at 6). First ids: %s",
-                  PROVIDER_SOFASCORE, len(uncovered), len(match_ids),
-                  uncovered[:5])
+        # A match with no APPEARANCES either has simply not been played yet, and
+        # saying anything about it would make the alarm meaningless through sheer
+        # noise. What has to be loud is the other case: eleven players took the
+        # field and the features that describe them are gone.
+        played = set(MatchAppearance.objects.filter(match_id__in=uncovered)
+                     .values_list("match_id", flat=True).distinct())
+        if played:
+            log.error("no %s zone features for %d matches that WERE played — they "
+                      "cannot be scored and are skipped rather than scored on "
+                      "zeroes (a database with emptied zone tables would otherwise "
+                      "produce a complete listone capped at 6). First ids: %s",
+                      PROVIDER_SOFASCORE, len(played), sorted(played)[:5])
     if not covered:
         return {}
     _merge_shot_detail(out, sorted(covered))
