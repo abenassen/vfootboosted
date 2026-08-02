@@ -198,6 +198,7 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
             <Badge tone={SESSION_TONE[s.status]}>{SESSION_LABEL[s.status]}</Badge>
           </div>
           <div className="mt-1 text-sm text-slate-600">
+            {s.opens_at && <>Aperta il {stamp(s.opens_at)}{' · '}</>}
             Recupero: <b>{recoveryText(s.credit_recovery_mode, s.fixed_recovery_amount)}</b>
             {' · '}
             {!s.closes_at ? 'chiusura indefinita'
@@ -586,38 +587,85 @@ function FreeAgentSearchCard({
   );
 }
 
+/** Giorno e ora in forma breve: nello storico la data serve a collocare la
+ *  sessione nella stagione, non al minuto. */
+function stamp(iso: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString('it-IT', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+/** Da quando a quando e' durata. La fine e' quella VERA (`closed_at`): una
+ *  sessione chiusa a mano finisce prima della scadenza annunciata, e mostrare
+ *  quest'ultima racconterebbe una durata mai esistita. Se manca, ripiega sulla
+ *  scadenza prevista e lo dice. */
+function sessionSpan(s: MarketSessionHistory): string {
+  const from = stamp(s.opens_at);
+  const to = stamp(s.closed_at);
+  const planned = stamp(s.closes_at);
+  const start = from ? `dal ${from}` : 'inizio non registrato';
+  if (to) return `${start} · al ${to}`;
+  if (planned) return `${start} · chiusura prevista ${planned}`;
+  return `${start} · ancora aperta`;
+}
+
+/** Ogni sessione passata e' una riga sola finche' non la si apre.
+ *
+ *  Prima erano tutte srotolate una dietro l'altra: una sessione con cento
+ *  offerte spingeva le precedenti fuori dallo schermo, e chi cercava un mercato
+ *  di sei mesi fa doveva scorrere tutto quello venuto dopo. Chiuse, ci stanno
+ *  tutte insieme e si sceglie quale guardare. */
 function HistoryList({ sessions }: { sessions: MarketSessionHistory[] }) {
   return (
-    <div className="mt-3 space-y-4">
-      {sessions.map((s) => {
-        const settled = s.offers.filter((o) => o.status === 'settled');
-        return (
-          <div key={s.id} className="border-t border-slate-100 pt-3 first:border-0 first:pt-0">
-            <div className="flex items-center gap-2 text-sm">
-              <b>{s.name}</b>
-              <Badge tone={SESSION_TONE[s.status]}>{SESSION_LABEL[s.status]}</Badge>
-              <span className="text-xs text-slate-500">{recoveryText(s.credit_recovery_mode, s.fixed_recovery_amount)}</span>
-            </div>
-            <div className="mt-1 text-xs text-slate-500">
-              {s.offers.length} offerte · {settled.length} concluse
-            </div>
-            {s.offers.length > 0 && (
-              <div className="mt-1 divide-y divide-slate-100">
-                {s.offers.map((o) => (
-                  <div key={o.offer_id} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-xs">
-                    <span>
-                      <b>{o.target_name}</b> <span className="text-slate-400">← {o.team_name} / {o.release_name}</span>
-                    </span>
-                    <span className="flex items-center gap-2">
-                      {o.amount} cr <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+    <div className="mt-3 space-y-2">
+      {sessions.map((s) => <HistorySession key={s.id} s={s} />)}
+    </div>
+  );
+}
+
+function HistorySession({ s }: { s: MarketSessionHistory }) {
+  const [open, setOpen] = useState(false);
+  const settled = s.offers.filter((o) => o.status === 'settled');
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}
+        className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-left hover:bg-slate-50">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <b>{s.name}</b>
+            <Badge tone={SESSION_TONE[s.status]}>{SESSION_LABEL[s.status]}</Badge>
           </div>
-        );
-      })}
+          <div className="mt-0.5 text-xs text-slate-500">{sessionSpan(s)}</div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 text-xs text-slate-500">
+          <span>{s.offers.length} offerte · <b className="text-slate-700">{settled.length}</b> acquisti</span>
+          <span aria-hidden className="text-slate-400">{open ? '▾' : '▸'}</span>
+        </div>
+      </button>
+      {open && (
+        <div className="border-t border-slate-100 px-3 py-2">
+          <div className="text-xs text-slate-500">
+            Recupero: {recoveryText(s.credit_recovery_mode, s.fixed_recovery_amount)}
+          </div>
+          {s.offers.length === 0 ? (
+            <div className="mt-1 text-xs text-slate-400">Nessuna offerta in questa sessione.</div>
+          ) : (
+            <div className="mt-1 divide-y divide-slate-100">
+              {s.offers.map((o) => (
+                <div key={o.offer_id} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-xs">
+                  <span>
+                    <b>{o.target_name}</b> <span className="text-slate-400">← {o.team_name} / {o.release_name}</span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    {o.amount} cr <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
