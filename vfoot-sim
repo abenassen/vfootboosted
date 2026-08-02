@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+#
+#   Accende il sito DENTRO la stagione simulata, senza toccare la configurazione
+#   di tutti i giorni.
+#
+#     ./vfoot-sim              avvia (scenario predefinito, g22-live)
+#     ./vfoot-sim g22-pre      avvia su un altro scenario
+#     ./vfoot-sim --at 2027-01-31T21:15:00+01:00
+#     ./vfoot-sim status       che cosa gira, con che orologio
+#     ./vfoot-sim stop         ferma tutto quello che ha avviato
+#     ./vfoot-sim build        ricostruisce lo stato dello scenario, poi avvia
+#
+#   IL .env NON VIENE MODIFICATO. Le variabili vengono ESPORTATE nell'ambiente dei
+#   processi che questo script avvia, e vincono su quelle del file: load_dotenv
+#   non sovrascrive l'ambiente. E' la stessa proprieta' che rende insidioso un
+#   `export` dimenticato in una shell -- qui la si usa apposta.
+#
+#   Perche' uno script separato invece di due righe a mano: le variabili devono
+#   valere per DUE processi (il server e il cron dei tick) avviati a pochi secondi
+#   di distanza, perche' ognuno calcola il proprio scarto dall'ora vera quando
+#   parte. Avviarli a mano in due momenti diversi li lascia con due orologi
+#   diversi, e il sintomo -- una partita che al server risulta finita e al cron no
+#   -- non assomiglia per niente alla causa.
+#
+#   Funziona in Git Bash su Windows e su Linux: niente ss, setsid o /proc, che
+#   sono il motivo per cui ./vfoot-dev ha dovuto avere un gemello PowerShell.
+#
+set -uo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOGDIR="${TMPDIR:-/tmp}/vfoot-sim"
+PIDFILE="$LOGDIR/pids"
+BACK_PORT=8000
+FRONT_PORT=5173
+
+# Lo scenario e l'istante predefiniti: gli stessi che `manage.py simulate_scenario
+# --list` descrive. Cambiarli qui NON basta -- li' c'e' la definizione vera.
+SCENARIO="g22-live"
+AT=""
+
+BOLD=$'\033[1m'; DIM=$'\033[2m'; OK=$'\033[32m'; WARN=$'\033[33m'; ERR=$'\033[31m'; X=$'\033[0m'
+die()  { printf '%serrore:%s %s\n' "$ERR" "$X" "$*" >&2; exit 1; }
+say()  { printf '  %s\n' "$*"; }
+
+# --- python del venv, con i due layout possibili --------------------------
+PY="$REPO/vfoot-backend/.venv/Scripts/python.exe"
+[ -x "$PY" ] || PY="$REPO/vfoot-backend/.venv/bin/python"
+[ -x "$PY" ] || die "python del venv non trovato sotto vfoot-backend/.venv"
+MANAGE="$REPO/vfoot-backend/src/manage.py"
+
+# --- porte, senza ss ------------------------------------------------------
+port_busy() {
+  "$PY" - "$1" <<'EOF' 2>/dev/null
+import socket, sys
+s = socket.socket()
+s.settimeout(0.4)
+sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0 else 1)
+EOF
+}
+
+wait_port() { # porta secondi
+  local i=0
+  while [ "$i" -lt "$2" ]; do
+    port_busy "$1" && return 0
+    sleep 1; i=$((i + 1))
+  done
+  return 1
+}
+
+kill_port() { # porta etichetta -- chiude anche cio' che NON abbiamo avviato noi
+  port_busy "$1" || return 0
+  if command -v taskkill.exe >/dev/null 2>&1; then
+    # Windows: la coppia netstat/taskkill e' l'unica strada che non richiede
+    # strumenti che Git Bash non ha.
+    local pids
+    pids=$(netstat -ano 2>/dev/null | grep -E "LISTENING" | grep ":$1 " \
+           | awk '{print $NF}' | sort -u)
+    for p in $pids; do taskkill.exe //PID "$p" //F >/dev/null 2>&1 || true; done
+  else
+    local pids
+    pids=$(lsof -ti ":$1" 2>/dev/null || true)
+    [ -n "$pids" ] && kill -9 $pids 2>/dev/null || true
+  fi
+  sleep 1
+  port_busy "$1" && { printf '%s%s occupata e non si libera%s\n' "$WARN" "$1" "$X" >&2; return 1; }
+  say "porta $1 liberata"
+}
+
+# --- avvio ----------------------------------------------------------------
+export_sim_env() {
+  # L'istante: quello passato con --at, altrimenti quello dello scenario, letto
+  # dalla sua definizione invece che duplicato qui.
+  if [ -z "$AT" ]; then
+    AT=$("$PY" "$MANAGE" shell -c \
+      "from vfoot.management.commands.simulate_scenario import SCENARIOS; \
+       print(SCENARIOS['$SCENARIO'].at)" 2>/dev/null | tail -1)
+  fi
+  [ -n "$AT" ] || die "scenario '$SCENARIO' sconosciuto (prova: $PY $MANAGE simulate_scenario --list)"
+  export VFOOT_FAKE_NOW="$AT"
+  export VFOOT_EGRESS_SIMULATED=true
+}
+
+start_backend() {
+  mkdir -p "$LOGDIR"
+  ( cd "$REPO/vfoot-backend/src" \
+    && nohup "$PY" manage.py runserver "localhost:$BACK_PORT" --noreload \
+       > "$LOGDIR/backend.log" 2>&1 < /dev/null & echo $! >> "$PIDFILE" )
+  wait_port "$BACK_PORT" 45 \
+    || { tail -20 "$LOGDIR/backend.log" >&2; die "backend non partito"; }
+  say "backend   http://localhost:$BACK_PORT"
+}
+
+start_ticks() {
+  mkdir -p "$LOGDIR"
+  # -u: senza, python bufferizza lo stdout quando non e' un terminale, e un log
+  # che si riempie a blocchi di qualche kilobyte resta vuoto per mezz'ora. Questo
+  # e' l'unico log che si guarda mentre scorre, quindi e' l'unico dove conta.
+  ( cd "$REPO/vfoot-backend/src" \
+    && nohup "$PY" -u manage.py tick_loop \
+       > "$LOGDIR/tick.log" 2>&1 < /dev/null & echo $! >> "$PIDFILE" )
+  say "cron      un tick al minuto  ($LOGDIR/tick.log)"
+}
+
+start_frontend() {
+  if port_busy "$FRONT_PORT"; then
+    say "frontend  gia' in ascolto sulla $FRONT_PORT, lasciato com'e'"
+    return 0
+  fi
+  local npm_bin=npm
+  command -v npm >/dev/null 2>&1 || {
+    # Node qui e' installato come zip nella cartella utente (l'MSI vuole
+    # l'amministratore): stessa ricerca che fa vfoot-dev.ps1.
+    npm_bin=$(ls -d "$LOCALAPPDATA/Programs/node-v"*/npm.cmd 2>/dev/null | head -1)
+    [ -n "$npm_bin" ] || { printf '%snpm non trovato: avvia il frontend a mano%s\n' "$WARN" "$X"; return 0; }
+  }
+  mkdir -p "$LOGDIR"
+  ( cd "$REPO/vfoot-frontend" \
+    && nohup "$npm_bin" run dev -- --host localhost --port "$FRONT_PORT" \
+       > "$LOGDIR/frontend.log" 2>&1 < /dev/null & echo $! >> "$PIDFILE" )
+  wait_port "$FRONT_PORT" 45 \
+    || { tail -20 "$LOGDIR/frontend.log" >&2; printf '%sfrontend non partito%s\n' "$WARN" "$X"; return 0; }
+  say "frontend  http://localhost:$FRONT_PORT"
+}
+
+# --- comandi --------------------------------------------------------------
+cmd_start() {
+  export_sim_env
+  printf '%sscenario %s%s  orologio simulato: %s%s%s\n' \
+    "$BOLD" "$SCENARIO" "$X" "$OK" "$VFOOT_FAKE_NOW" "$X"
+  mkdir -p "$LOGDIR"; : > "$PIDFILE"
+  kill_port "$BACK_PORT" || true
+  start_backend
+  start_ticks
+  start_frontend
+  printf '\n%sl orologio CAMMINA: da qui in poi il tempo passa come quello vero.%s\n' "$DIM" "$X"
+  printf '%sper fermare tutto: ./vfoot-sim stop%s\n' "$DIM" "$X"
+}
+
+cmd_build() {
+  export_sim_env
+  printf '%sricostruisco lo scenario %s a %s%s\n' "$BOLD" "$SCENARIO" "$VFOOT_FAKE_NOW" "$X"
+  "$PY" "$MANAGE" simulate_scenario --scenario "$SCENARIO" --at "$VFOOT_FAKE_NOW" \
+    || die "ricostruzione fallita"
+  cmd_start
+}
+
+cmd_status() {
+  printf '%sporte%s\n' "$BOLD" "$X"
+  port_busy "$BACK_PORT" && say "backend   in ascolto sulla $BACK_PORT" || say "backend   fermo"
+  port_busy "$FRONT_PORT" && say "frontend  in ascolto sulla $FRONT_PORT" || say "frontend  fermo"
+  printf '%sorologio del server%s\n' "$BOLD" "$X"
+  if port_busy "$BACK_PORT"; then
+    # L'intestazione c'e' SOLO quando l'orologio e' spostato: la sua assenza e'
+    # essa stessa la risposta, ed e' il controllo che dice se il processo acceso
+    # e' quello simulato o quello di tutti i giorni.
+    local now
+    now=$("$PY" - "$BACK_PORT" <<'EOF' 2>/dev/null
+import sys, urllib.request
+try:
+    r = urllib.request.urlopen(f"http://localhost:{sys.argv[1]}/api/v1/leagues", timeout=4)
+    print(r.headers.get("X-Vfoot-Now") or "")
+except Exception as exc:
+    print(getattr(exc, "headers", {}).get("X-Vfoot-Now", "") if hasattr(exc, "headers") else "")
+EOF
+)
+    if [ -n "$now" ]; then say "SIMULATO  $now"; else say "reale     (nessuna intestazione X-Vfoot-Now)"; fi
+  else
+    say "n/d       backend fermo"
+  fi
+  [ -s "$PIDFILE" ] && printf '%s  avviati da questo script: %s pid  (log: %s)%s\n' \
+    "$DIM" "$(wc -l < "$PIDFILE" | tr -d ' ')" "$LOGDIR" "$X"
+}
+
+cmd_stop() {
+  local n=0
+  if [ -s "$PIDFILE" ]; then
+    while read -r p; do
+      [ -n "$p" ] || continue
+      kill "$p" 2>/dev/null && n=$((n + 1))
+    done < "$PIDFILE"
+    : > "$PIDFILE"
+  fi
+  # I pid dei figli avviati con nohup non bastano su Windows, dove il processo
+  # vero e' un nipote: si chiude anche per porta.
+  kill_port "$BACK_PORT" || true
+  kill_port "$FRONT_PORT" || true
+  # Il cron non ascolta su nessuna porta, quindi va cercato per riga di comando.
+  if command -v taskkill.exe >/dev/null 2>&1; then
+    "$PY" - <<'EOF' 2>/dev/null || true
+import subprocess
+out = subprocess.run(["wmic", "process", "where", "name='python.exe'",
+                      "get", "ProcessId,CommandLine", "/format:csv"],
+                     capture_output=True, text=True).stdout
+for line in out.splitlines():
+    if "tick_loop" in line:
+        pid = line.strip().rsplit(",", 1)[-1]
+        if pid.isdigit():
+            subprocess.run(["taskkill.exe", "/PID", pid, "/F"], capture_output=True)
+EOF
+  else
+    pkill -f "manage.py tick_loop" 2>/dev/null || true
+  fi
+  printf '%sfermato%s (%s processi chiusi per pid)\n' "$OK" "$X" "$n"
+}
+
+usage() {
+  sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^#//;s/^ //'
+}
+
+# --- argomenti ------------------------------------------------------------
+CMD=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --at)   AT="${2:-}"; shift 2 ;;
+    -h|--help|help) usage; exit 0 ;;
+    start|stop|status|build) CMD="$1"; shift ;;
+    *)      SCENARIO="$1"; shift ;;
+  esac
+done
+
+case "${CMD:-start}" in
+  start)  cmd_start ;;
+  build)  cmd_build ;;
+  status) cmd_status ;;
+  stop)   cmd_stop ;;
+  *)      usage; exit 1 ;;
+esac

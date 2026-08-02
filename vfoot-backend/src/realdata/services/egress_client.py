@@ -26,7 +26,18 @@ def _wrapper() -> str:
 
 
 def run_egress(args: list[str], *, timeout: float = 900.0) -> bool:
-    """Run ``sudo -n <wrapper> <args>``. True iff it exits 0 (cache warmed)."""
+    """Run ``sudo -n <wrapper> <args>``. True iff it exits 0 (cache warmed).
+
+    With ``VFOOT_EGRESS_SIMULATED`` on, the request is served by a generator
+    instead of by the network (see ``egress_sim``). That switch lives HERE, at the
+    one point that crosses to the outside world, so a simulated championship
+    exercises the real scheduler, the real live poll and the real import — only the
+    bytes are invented. Off by default, and the module is not even imported then.
+    """
+    if getattr(settings, "VFOOT_EGRESS_SIMULATED", False):
+        from realdata.services import egress_sim
+
+        return egress_sim.run(args)
     cmd = ["sudo", "-n", _wrapper(), *args]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
