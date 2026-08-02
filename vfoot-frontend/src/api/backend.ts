@@ -159,7 +159,32 @@ function humanMessage(status: number, parsed: any, statusText: string, url = '')
   return detail ?? statusText ?? 'Operazione non riuscita.';
 }
 
+/** Di quanto l'orologio del server e' avanti rispetto a quello di questo browser.
+ *
+ *  Zero quasi sempre, e diverso da zero solo quando il backend gira con l'orologio
+ *  simulato (VFOOT_FAKE_NOW): li' il server vive mesi avanti, e un conto alla
+ *  rovescia calcolato con `Date.now()` misurerebbe fra una scadenza simulata e un
+ *  adesso reale — mesi, invece dei minuti che l'utente si aspetta.
+ *
+ *  Si aggiorna da se' a ogni risposta, quindi non puo' invecchiare, e in assenza
+ *  dell'intestazione resta zero: senza orologio simulato nulla cambia. */
+let serverSkewMs = 0;
+
+/** L'adesso del SERVER in millisecondi. Da usare ovunque si confronti il tempo con
+ *  una data che arriva dal server; `Date.now()` resta giusto per tutto il resto. */
+export function serverNow(): number {
+  return Date.now() + serverSkewMs;
+}
+
+function noteServerClock(res: Response): void {
+  const stamp = res.headers.get('X-Vfoot-Now');
+  if (!stamp) return;
+  const t = new Date(stamp).getTime();
+  if (!Number.isNaN(t)) serverSkewMs = t - Date.now();
+}
+
 async function parseJsonOrThrow(res: Response): Promise<any> {
+  noteServerClock(res);
   const raw = await res.text();
   let parsed: unknown = null;
   if (raw) {

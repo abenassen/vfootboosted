@@ -5,6 +5,7 @@ import {
   getMarketActive,
   getMarketSessions,
   placeMarketOffer,
+  serverNow,
 } from '../api/backend';
 import { getActiveAuction } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
@@ -36,7 +37,7 @@ export default function MarketPage() {
   const [auction, setAuction] = useState<ActiveAuctionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(() => serverNow());
   const [showHistory, setShowHistory] = useState(false);
   const [targetId, setTargetId] = useState<number | null>(null);
 
@@ -71,7 +72,7 @@ export default function MarketPage() {
   }, [selectedLeagueId, refresh]);
 
   useEffect(() => {
-    const t = window.setInterval(() => setNowMs(Date.now()), 1000);
+    const t = window.setInterval(() => setNowMs(serverNow()), 1000);
     return () => window.clearInterval(t);
   }, []);
 

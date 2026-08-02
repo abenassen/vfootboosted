@@ -5,6 +5,7 @@ import {
   controlMarketSession,
   createMarketSession,
   getMarketActive,
+  serverNow,
 } from '../api/backend';
 import { Badge, Button, Card, SectionTitle } from './ui';
 import { OfferDeadline } from './OfferDeadline';
@@ -22,7 +23,7 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
   const [data, setData] = useState<MarketActive | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(() => serverNow());
 
   const load = useCallback(async () => {
     try {
@@ -40,7 +41,7 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
   }, [load]);
 
   useEffect(() => {
-    const t = window.setInterval(() => setNowMs(Date.now()), 1000);
+    const t = window.setInterval(() => setNowMs(serverNow()), 1000);
     return () => window.clearInterval(t);
   }, []);
 

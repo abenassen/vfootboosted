@@ -85,6 +85,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Announces the server's clock when it has been shifted, so the client's
+    # countdowns do not measure across two different clocks. Inert otherwise.
+    'vfoot.middleware.SimClockHeaderMiddleware',
 ]
 
 
@@ -93,6 +96,12 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = _env_list(
     "DJANGO_CORS_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000")
+
+# Which response headers the browser lets the PAGE read: a cross-origin response
+# exposes seven by default and a custom one is not among them — it would arrive and
+# stay invisible to JavaScript. In development the SPA sits on another port, so
+# without this line the server's clock would be sent and never read.
+CORS_EXPOSE_HEADERS = ["X-Vfoot-Now"]
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -197,6 +206,15 @@ if _SECURE:
 # cannot sustain a per-minute poll across ten simultaneous matches). Override with
 # the VFOOT_LIVE_POLL_MINUTES env var; no code change needed to retune it.
 VFOOT_LIVE_POLL_MINUTES = float(os.environ.get("VFOOT_LIVE_POLL_MINUTES", "2"))
+
+# Serve the egress from a generator instead of the network, so a simulated season
+# can be driven through the REAL live pipeline: the same scheduler, the same poll
+# cadence, the same finalization windows, the same import — only the provider is
+# invented. Development only; see realdata/services/egress_sim.py. VFOOT_SIM_SEED
+# must match the seed the scenario was built with, or a polled match would be a
+# different match from the one already in the database.
+VFOOT_EGRESS_SIMULATED = _env_bool("VFOOT_EGRESS_SIMULATED", False)
+VFOOT_SIM_SEED = int(os.environ.get("VFOOT_SIM_SEED", "2627"))
 
 # Where the scraped/reference datasets live (historical-data/, data_fantacalcio/).
 # Auxiliary commands derive their defaults from here instead of hardcoding a path,
@@ -348,3 +366,14 @@ LOGGING = {
         "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
     },
 }
+
+
+# --- Simulated clock (development) ---------------------------------------
+# Shifts the instant the app looks at the data FROM, without touching the data:
+# it is how a simulated season, which lives at its own dates, can be observed from
+# inside. Inert unless VFOOT_FAKE_NOW is set. It sits HERE and not in
+# AppConfig.ready() because fields declared `default=timezone.now` capture the
+# function while the models load — after settings, before ready(). See
+# vfoot/simclock.py.
+from vfoot import simclock as _simclock  # noqa: E402
+VFOOT_FAKE_NOW = _simclock.install()

@@ -49,6 +49,11 @@ function fromEnv(): ApiProvider {
 
 export const apiProvider: ApiProvider = fromQueryParam() ?? fromEnv();
 
+/** L'adesso del server, per i conti alla rovescia. Non passa dallo switch mock /
+ *  backend: e' una proprieta' della connessione, non dei dati, e sotto il provider
+ *  mock non c'e' nessun server da cui divergere — vale `Date.now()`. */
+export const serverNow = backendApi.serverNow;
+
 const impl = apiProvider === 'backend' ? backendApi : mockApi;
 
 type ApiImpl = {
