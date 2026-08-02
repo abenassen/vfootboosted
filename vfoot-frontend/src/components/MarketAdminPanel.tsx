@@ -78,9 +78,7 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
     <div className="space-y-4">
       {error && <Card className="border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</Card>}
 
-      {!session ? (
-        <CreateSessionCard busy={busy} onCreate={(opts) => act(() => createMarketSession(leagueId, opts))} />
-      ) : (
+      {session && (
         <>
           <Card className="p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -114,22 +112,16 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
               il giocatore svincolato lascia la rosa e quello acquistato entra al prezzo offerto.
             </div>
           </Card>
+        </>
+      )}
 
-          <Card className="p-4">
-            <SectionTitle>Offerte da validare ({queue.length})</SectionTitle>
-            {queue.length === 0 ? (
-              <div className="mt-2 text-sm text-slate-500">Nessuna offerta in attesa.</div>
-            ) : (
-              <div className="mt-2 divide-y divide-slate-100">
-                {queue.map((o) => (
-                  <QueueRow key={o.offer_id} o={o} busy={busy}
-                    onAccept={() => act(() => adminMarketOffer(leagueId, o.offer_id, 'accept'))}
-                    onReject={() => act(() => adminMarketOffer(leagueId, o.offer_id, 'reject'))} />
-                ))}
-              </div>
-            )}
-          </Card>
+      {/* Fuori dal ramo "c'e' una sessione": la coda le sopravvive. */}
+      <QueueCard queue={queue} sessionLive={!!session} busy={busy}
+        onAccept={(id) => act(() => adminMarketOffer(leagueId, id, 'accept'))}
+        onReject={(id) => act(() => adminMarketOffer(leagueId, id, 'reject'))} />
 
+      {session && (
+        <>
           <Card className="p-4">
             <SectionTitle>Offerte in testa ({leadingOffers.length})</SectionTitle>
             {leadingOffers.length === 0 ? (
@@ -145,7 +137,54 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
           </Card>
         </>
       )}
+
+      {!session && (
+        <CreateSessionCard busy={busy} onCreate={(opts) => act(() => createMarketSession(leagueId, opts))} />
+      )}
     </div>
+  );
+}
+
+/** Le offerte che aspettano una decisione.
+ *
+ *  Sta fuori dal blocco della sessione di proposito: alla chiusura le offerte in
+ *  testa finiscono qui dentro, ma la sessione smette di essere "viva" e prima
+ *  spariva anche la coda — le offerte restavano accettate e non concluse, senza
+ *  nessuna schermata da cui deciderle. Le rose non cambiano finche' non si
+ *  accetta, quindi non e' un dettaglio estetico: era lavoro bloccato. */
+function QueueCard({ queue, sessionLive, busy, onAccept, onReject }: {
+  queue: MarketOfferRow[];
+  sessionLive: boolean;
+  busy: boolean;
+  onAccept: (offerId: number) => void;
+  onReject: (offerId: number) => void;
+}) {
+  // Senza sessione e senza coda non c'e' niente da dire: la card sparisce e
+  // resta solo l'invito ad aprire una sessione.
+  if (!sessionLive && queue.length === 0) return null;
+  const fromClosed = queue.filter((o) => o.session_closed).length;
+  return (
+    <Card className="p-4">
+      <SectionTitle>Offerte da validare ({queue.length})</SectionTitle>
+      {queue.length === 0 ? (
+        <div className="mt-2 text-sm text-slate-500">Nessuna offerta in attesa.</div>
+      ) : (
+        <>
+          {fromClosed > 0 && (
+            <div className="mt-1 text-xs text-amber-600">
+              {fromClosed === queue.length ? (fromClosed === 1 ? 'Arriva' : 'Arrivano') : `${fromClosed} arrivano`}
+              {' '}da una sessione già chiusa: restano da decidere, e finché non decidi le rose non cambiano.
+            </div>
+          )}
+          <div className="mt-2 divide-y divide-slate-100">
+            {queue.map((o) => (
+              <QueueRow key={o.offer_id} o={o} busy={busy}
+                onAccept={() => onAccept(o.offer_id)} onReject={() => onReject(o.offer_id)} />
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 

@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from vfoot.models import (
@@ -171,10 +172,19 @@ def leading_offer_for(session: MarketSession, target_player_id: int) -> MarketOf
 
 def _target_locked(session: MarketSession, target_player_id: int) -> bool:
     """A target being resolved (accepted awaiting apply, or already settled) no
-    longer accepts rebids."""
+    longer accepts rebids.
+
+    Le `accepted` si cercano in tutta la LEGA, non solo in questa sessione:
+    un'offerta rimasta in coda alla chiusura tiene il giocatore impegnato anche
+    nella sessione successiva, finche' l'admin non decide. Le `settled` restano
+    per sessione — un acquisto di mesi fa puo' essere stato svincolato dopo, e
+    bloccherebbe per sempre un giocatore tornato libero."""
     return MarketOffer.objects.filter(
-        session=session, target_player_id=target_player_id,
-        status__in=(MarketOffer.STATUS_ACCEPTED, MarketOffer.STATUS_SETTLED),
+        Q(session=session,
+          status__in=(MarketOffer.STATUS_ACCEPTED, MarketOffer.STATUS_SETTLED))
+        | Q(session__league_id=session.league_id,
+            status=MarketOffer.STATUS_ACCEPTED),
+        target_player_id=target_player_id,
     ).exists()
 
 

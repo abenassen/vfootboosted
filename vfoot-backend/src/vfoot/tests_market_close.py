@@ -148,6 +148,65 @@ class ScheduledCloseTests(MarketBase):
         self.assertFalse(FantasyRosterSlot.objects.filter(
             team=self.t2, player_id=self.mine[0].id, released_at__isnull=True).exists())
 
+    # -- 2b. la coda sopravvive alla sessione ---------------------------------
+    def test_la_coda_resta_visibile_quando_la_sessione_non_e_piu_viva(self):
+        """Il buco: la sessione chiusa esce dalle "vive", e con essa spariva la
+        coda. Le offerte restavano accettate e non concluse, senza nessuna
+        schermata da cui deciderle."""
+        self._setup(closes_in=timedelta(hours=-1))
+        self._tick()
+        c = self._as(self.admin)
+        # La prima lettura dopo la chiusura mostra ancora la sessione; e' dalla
+        # seconda in poi che sparisce, ed e' li' che si perdeva la coda.
+        c.get(f"/api/v1/leagues/{self.league.id}/market/active")
+        body = c.get(f"/api/v1/leagues/{self.league.id}/market/active").json()
+        queue = body.get("admin_queue") or []
+        print(f"\n[9] sessione non piu' viva: session={body['session']} "
+              f"coda={len(queue)}")
+        self.assertIsNone(body["session"])
+        self.assertEqual(len(queue), 3)
+        # Con nome squadra e provenienza: senza, l'admin non sa di chi decide.
+        self.assertTrue(all(o["team_name"] for o in queue))
+        self.assertTrue(all(o["session_closed"] for o in queue))
+
+    def test_la_coda_resta_privata_dell_admin(self):
+        """Chiudere la sessione non e' un modo per far vedere a tutti cosa c'e'
+        in validazione."""
+        self._setup(closes_in=timedelta(hours=-1))
+        self._tick()
+        c = self._as(self.u2)
+        c.get(f"/api/v1/leagues/{self.league.id}/market/active")
+        body = c.get(f"/api/v1/leagues/{self.league.id}/market/active").json()
+        self.assertIsNone(body["session"])
+        self.assertEqual(body.get("admin_queue") or [], [])
+
+    def test_una_nuova_sessione_non_rimette_in_palio_chi_e_in_coda(self):
+        """Finche' l'admin non decide, il giocatore e' impegnato: se la sessione
+        successiva lo rimettesse all'asta, due squadre potrebbero vincerlo e una
+        delle due validazioni fallirebbe a caso."""
+        self._setup(closes_in=timedelta(hours=-1))
+        self._tick()
+        conteso = self.free[0]  # ha addosso l'offerta di t2, accettata e in coda
+
+        nuova = self._session()
+        libero = self._player("Riserva t3 bis", "ATT")
+        self._own(self.t3, libero, 100)
+        c = self._as(self.u3)
+        r = c.post(f"/api/v1/leagues/{self.league.id}/market/offers", {
+            "target_player_id": conteso.id,
+            "release_player_id": libero.id,
+            "amount": 30,
+        }, format="json")
+        print(f"\n[10] offerta su chi e' in coda, sessione nuova: "
+              f"HTTP {r.status_code} — {r.json().get('detail')}")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(MarketOffer.objects.filter(session=nuova).count(), 0)
+
+        # E la pagina lo dice: compare come "in validazione", non come offerta.
+        body = c.get(f"/api/v1/leagues/{self.league.id}/market/active").json()
+        row = next(f for f in body["free_agents"] if f["player_id"] == conteso.id)
+        self.assertTrue(row["locked"])
+
     # -- 3. la scadenza vale anche senza cron --------------------------------
     def test_aprire_la_pagina_dopo_la_scadenza_chiude_la_sessione(self):
         """Il server se ne accorge da solo: chi apre il mercato dopo la scadenza

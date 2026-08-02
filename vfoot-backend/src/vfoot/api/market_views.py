@@ -88,6 +88,40 @@ def _offer_row(offer: MarketOffer, names: dict[int, str]) -> dict:
     }
 
 
+def _pending_queue(league: FantasyLeague) -> list[MarketOffer]:
+    """Le offerte che aspettano l'admin, cercate per LEGA e non per sessione.
+
+    Alla chiusura ogni offerta in testa passa in `accepted`, ma la sessione esce
+    dalle "vive" e con essa spariva la coda: le offerte restavano da decidere e
+    nessuna pagina sapeva piu' mostrarle. La coda non appartiene alla sessione,
+    appartiene alla lega — e non si svuota da sola."""
+    return list(MarketOffer.objects.filter(
+        session__league=league, status=MarketOffer.STATUS_ACCEPTED,
+    ).select_related("session").order_by("resolved_at"))
+
+
+def _queue_rows(league: FantasyLeague, offers: list[MarketOffer]) -> list[dict]:
+    """Righe della coda, col nome della squadra: senza, l'admin legge "undefined
+    svincola X" e non sa di chi sta decidendo la rosa."""
+    if not offers:
+        return []
+    need: set[int] = set()
+    for o in offers:
+        need.add(o.target_player_id)
+        need.add(o.release_player_id)
+    names = {p.id: _label(p) for p in Player.objects.filter(id__in=need)}
+    team_names = dict(FantasyTeam.objects.filter(league=league)
+                      .values_list("id", "name"))
+    rows = []
+    for o in offers:
+        row = _offer_row(o, names)
+        row["team_name"] = team_names.get(o.team_id)
+        row["session_name"] = o.session.name
+        row["session_closed"] = o.session.status == MarketSession.STATUS_CLOSED
+        rows.append(row)
+    return rows
+
+
 class MarketSessionCreateView(APIView):
     """Open a new market session (admin, classic-only). At most one live session."""
 
@@ -255,11 +289,16 @@ class MarketActiveView(APIView):
         is_admin = membership.role == LeagueMembership.ROLE_ADMIN
         team = _my_team(league, membership)
         session = _live_session(league)
+        pending = _pending_queue(league)
 
         if session is None:
+            # Niente sessione viva non vuol dire niente da fare: la coda di
+            # validazione sopravvive alla chiusura, ed e' l'unico posto da cui
+            # si puo' svuotare.
             return Response({
                 "session": None, "is_admin": is_admin, "mode": league.mode,
                 "my_team_id": team.id if team else None,
+                "admin_queue": _queue_rows(league, pending) if is_admin else [],
             })
 
         states = market_states(league, session)
@@ -278,6 +317,10 @@ class MarketActiveView(APIView):
             session=session,
             status__in=(MarketOffer.STATUS_ACCEPTED, MarketOffer.STATUS_SETTLED),
         ).values_list("target_player_id", flat=True))
+        # Anche chi e' in coda da una sessione PRECEDENTE: finche' l'admin non
+        # decide resta svincolato, e senza questo la sessione nuova lo rimetterebbe
+        # all'asta come se fosse libero.
+        locked |= {o.target_player_id for o in pending}
 
         # Collect every player id we need a name for in one query.
         need_ids = set(pool) | set(leading.keys()) | locked
@@ -289,14 +332,6 @@ class MarketActiveView(APIView):
         if my_state:
             for pid in my_state.roster:
                 need_ids.add(pid)
-        admin_queue = []
-        if is_admin:
-            admin_queue = list(MarketOffer.objects.filter(
-                session=session, status=MarketOffer.STATUS_ACCEPTED).order_by("resolved_at"))
-            for o in admin_queue:
-                need_ids.add(o.target_player_id)
-                need_ids.add(o.release_player_id)
-
         _players = list(Player.objects.filter(id__in=need_ids))
         names = {p.id: _label(p) for p in _players}
         full_names = {p.id: _full_label(p) for p in _players}
@@ -352,7 +387,7 @@ class MarketActiveView(APIView):
             "free_agents": free_agents,
             "my_roster": my_roster,
             "my_offers": [_offer_row(o, names) for o in my_offers],
-            "admin_queue": [_offer_row(o, names) for o in admin_queue],
+            "admin_queue": _queue_rows(league, pending),
         }
         return Response(payload)
 

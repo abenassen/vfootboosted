@@ -69,6 +69,10 @@ export interface MarketOfferRow {
   status: MarketOfferStatus;
   deadline_at: string | null;
   created_at: string;
+  /** Solo nella coda admin: da quale sessione arriva l'offerta, e se quella
+   *  sessione e' gia' chiusa (la coda le sopravvive). */
+  session_name?: string;
+  session_closed?: boolean;
 }
 
 export interface MarketActive {
