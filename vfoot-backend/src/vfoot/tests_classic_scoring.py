@@ -184,3 +184,51 @@ class ComposeLinesTest(SimpleTestCase):
         self.assertEqual(payload["away_total"], 66.0)  # full XI at 6.0
         self.assertIn("home", payload)
         self.assertIsInstance(payload["home"]["modifiers"], list)
+
+
+class VoteCenteringReportTests(SimpleTestCase):
+    """The arithmetic behind `manage.py check_vote_centering`.
+
+    The check itself needs a real season and lives as a command, not a test — a
+    test that skips itself on an empty database protects nothing. What IS testable
+    here is the decomposition it prints, because that is what tells whoever reads a
+    failure WHERE to look: a drift in the centre term means the index being scored
+    has stopped matching the one the reference was calibrated on (an argument not
+    passed, a feature not arriving), while the covariance term is structural.
+    """
+
+    def test_a_centred_role_reports_no_drift(self):
+        from vfoot.management.commands.check_vote_centering import centering_report
+        # z averaging zero, w constant -> the vote sits on 6 and both terms vanish.
+        rows = [(-1.0, 0.8, 5.5), (0.0, 0.8, 6.0), (1.0, 0.8, 6.5)]
+        r = centering_report({"DIF": rows}, 0.8)["DIF"]
+        self.assertEqual(r["n"], 3)
+        self.assertAlmostEqual(r["mean"], 6.0)
+        self.assertAlmostEqual(r["drift"], 0.0)
+        self.assertAlmostEqual(r["centre_term"], 0.0)
+        self.assertAlmostEqual(r["cov_term"], 0.0)
+
+    def test_an_off_centre_index_shows_up_in_the_centre_term(self):
+        """Every z shifted up by the same amount — the signature of scoring an
+        index the reference was not calibrated on. This is the exposure bug."""
+        from vfoot.management.commands.check_vote_centering import centering_report
+        rows = [(0.5, 0.8, 6.5), (0.5, 0.8, 6.5)]
+        r = centering_report({"DIF": rows}, 0.8)["DIF"]
+        self.assertAlmostEqual(r["centre_term"], 0.8 * 0.8 * 0.5)
+        self.assertAlmostEqual(r["cov_term"], 0.0)   # no spread in w, nothing to correlate
+
+    def test_minutes_correlated_with_z_show_up_in_the_covariance_term(self):
+        """Long games earning a higher z is structural, not a defect — so it has to
+        land in its own term rather than be mistaken for a miscalibration."""
+        from vfoot.management.commands.check_vote_centering import centering_report
+        rows = [(-1.0, 0.4, 5.5), (1.0, 0.9, 6.5)]   # E[z] = 0, but w tracks z
+        r = centering_report({"DIF": rows}, 0.8)["DIF"]
+        self.assertAlmostEqual(r["centre_term"], 0.0)
+        self.assertGreater(r["cov_term"], 0.0)
+
+    def test_roles_are_reported_independently(self):
+        from vfoot.management.commands.check_vote_centering import centering_report
+        out = centering_report({"DIF": [(0.0, 0.8, 6.0)],
+                                "POR": [(0.0, 0.8, 5.0)]}, 0.8)
+        self.assertAlmostEqual(out["DIF"]["drift"], 0.0)
+        self.assertAlmostEqual(out["POR"]["drift"], -1.0)
