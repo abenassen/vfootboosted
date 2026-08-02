@@ -135,6 +135,7 @@ type ApiImpl = {
   getLeagueMatchdays: (leagueId: number) => Promise<LeagueMatchdayItem[]>;
   concludeLeagueMatchday: (leagueId: number, fantasyMatchdayId: number, force?: boolean, lineupResolutions?: Record<string, 'forfait' | 'previous'>) => Promise<unknown>;
   recomputeLeagueMatchday: (leagueId: number, fantasyMatchdayId: number, use?: 'current' | 'snapshot', force?: boolean, lineupResolutions?: Record<string, 'forfait' | 'previous'>) => Promise<unknown>;
+  setLeagueMatchdayAwaiting: (leagueId: number, fantasyMatchdayId: number, awaiting?: boolean, reason?: string) => Promise<unknown>;
   getLeagueDecisions: typeof backendApi.getLeagueDecisions;
   voteLeagueDecision: typeof backendApi.voteLeagueDecision;
   resolveLeagueDecision: typeof backendApi.resolveLeagueDecision;
@@ -224,6 +225,7 @@ export const syncLeagueMatchdays = typedImpl.syncLeagueMatchdays;
 export const getLeagueMatchdays = typedImpl.getLeagueMatchdays;
 export const concludeLeagueMatchday = typedImpl.concludeLeagueMatchday;
 export const recomputeLeagueMatchday = typedImpl.recomputeLeagueMatchday;
+export const setLeagueMatchdayAwaiting = typedImpl.setLeagueMatchdayAwaiting;
 export const getLeagueDecisions = typedImpl.getLeagueDecisions;
 export const voteLeagueDecision = typedImpl.voteLeagueDecision;
 export const resolveLeagueDecision = typedImpl.resolveLeagueDecision;

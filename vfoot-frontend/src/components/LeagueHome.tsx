@@ -101,10 +101,18 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   const mine = fixtures.filter((f) => f.is_user_involved);
   // One "next" per competition: a league can run a championship and a cup, and
   // they are fielded separately.
+  //
+  // "Next" means the next one you can still FIELD, not the next one the admin has
+  // yet to score: a fixture stays `scheduled` until its matchday is concluded, so
+  // keying on that alone kept offering a round played weeks ago — and hid the one
+  // still open — every time an admin was late. A locked round that has not been
+  // scored yet belongs to the ledger banner below, not here.
   const nextByCompetition = useMemo(() => {
     const out = new Map<number, LeagueFixtureItem>();
     for (const f of [...mine].sort((a, b) => a.round_no - b.round_no)) {
-      if (f.status !== 'finished' && !out.has(f.competition_id)) out.set(f.competition_id, f);
+      if (f.status !== 'finished' && !f.lineup_locked && !out.has(f.competition_id)) {
+        out.set(f.competition_id, f);
+      }
     }
     return [...out.values()];
   }, [mine]);
@@ -157,9 +165,45 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     return items;
   }, [nextByCompetition, compName, compColorById, alerts]);
 
-  const currentMd = matchdays.find((m) => m.phase === 'current') ?? null;
-  const canConclude =
-    isAdmin && currentMd && currentMd.status === 'planned' && currentMd.real_completion.is_completed;
+  // The two clocks, kept apart here exactly as they are on the server. What is
+  // being played comes from the real calendar and moves on its own; what has been
+  // counted is the admin's ledger and is allowed to lag. Showing both is what makes
+  // a forgotten conclusion legible instead of looking like a broken league.
+  const playingMd = matchdays.find((m) => m.is_playing) ?? null;
+  const fieldableMd = matchdays.find((m) => m.is_fieldable) ?? null;
+  const awaitingMds = matchdays.filter((m) => m.status === 'awaiting');
+  // Every arrear, not only the one that is unblocked right now: closing them in
+  // order is what the button does, and the count is the honest size of the backlog.
+  const queue = matchdays.filter((m) => m.awaits_conclusion);
+
+  // Close the whole arrears queue in order, stopping at the first one that needs a
+  // decision (a team without a lineup) — that conversation lives in Gestione lega.
+  const concludeQueue = () => {
+    if (!selectedLeagueId || !queue.length) return;
+    setBusy(true);
+    setMsg(null);
+    void queue
+      .reduce(
+        (chain, md) => chain.then(() => concludeLeagueMatchday(selectedLeagueId, md.fantasy_matchday_id).then(() => {})),
+        Promise.resolve(),
+      )
+      .then(() => setMsg(queue.length > 1 ? 'Giornate concluse.' : 'Giornata conclusa.'))
+      .catch((e: unknown) =>
+        setMsg(
+          `Non è stato possibile concludere qui: ${
+            e instanceof Error ? e.message : String(e)
+          }. Aprila da Gestione lega → Giornate.`,
+        ),
+      )
+      .finally(() => {
+        setBusy(false);
+        void Promise.all([
+          getLeagueMatchdays(selectedLeagueId).then(setMatchdays),
+          getLeagueFixtures(selectedLeagueId).then(setFixtures),
+          getLeagueActivity(selectedLeagueId, 5).then(setActivity),
+        ]).catch(() => {});
+      });
+  };
 
   if (!competitions.length) return null;
 
@@ -167,50 +211,72 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     <div className="space-y-4">
       {msg ? <Card className="p-3 text-sm text-slate-700">{msg}</Card> : null}
 
-      {canConclude && currentMd ? (
-        <Card className="border-l-4 border-emerald-500 bg-emerald-50 p-4">
+      {queue.length || awaitingMds.length ? (
+        <Card
+          className={clsx(
+            'border-l-4 p-4',
+            queue.length ? 'border-emerald-500 bg-emerald-50' : 'border-amber-500 bg-amber-50',
+          )}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-sm font-bold text-emerald-900">
-                La giornata {currentMd.real_matchday} è finita
-              </div>
-              <div className="text-xs text-emerald-800">
-                Tutte le partite reali sono concluse: puoi calcolare i punteggi e far avanzare la lega.
-              </div>
+            <div className="min-w-0">
+              {queue.length ? (
+                <>
+                  <div className="text-sm font-bold text-emerald-900">
+                    {queue.length === 1
+                      ? `La giornata ${queue[0].real_matchday} è finita`
+                      : `Ci sono ${queue.length} giornate da chiudere`}
+                  </div>
+                  <div className="text-xs text-emerald-800">
+                    {isAdmin
+                      ? 'Tutte le partite reali sono concluse: puoi calcolare i punteggi.'
+                      : `In attesa che l'amministratore chiuda ${
+                          queue.length === 1 ? 'la giornata' : 'le giornate'
+                        } ${queue.map((m) => m.real_matchday).join(', ')}.`}
+                    {/* The other clock, said out loud: the league has NOT stopped,
+                        only the counting has. */}
+                    {playingMd ? ` Intanto si gioca la giornata ${playingMd.real_matchday}.` : ''}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-sm font-bold text-amber-900">
+                    {awaitingMds.length === 1
+                      ? `Giornata ${awaitingMds[0].real_matchday} in attesa di recupero`
+                      : `Giornate ${awaitingMds.map((m) => m.real_matchday).join(', ')} in attesa di recupero`}
+                  </div>
+                  <div className="text-xs text-amber-800">
+                    La lega è andata avanti: {awaitingMds.length === 1 ? 'verrà conteggiata' : 'verranno conteggiate'}{' '}
+                    quando le partite rinviate saranno giocate.
+                    {awaitingMds[0]?.awaiting_reason ? ` (${awaitingMds[0].awaiting_reason})` : ''}
+                  </div>
+                </>
+              )}
             </div>
-            <Button
-              size="sm"
-              disabled={busy}
-              onClick={() => {
-                if (!selectedLeagueId) return;
-                setBusy(true);
-                setMsg(null);
-                void concludeLeagueMatchday(selectedLeagueId, currentMd.fantasy_matchday_id)
-                  .then(() => {
-                    setMsg('Giornata conclusa.');
-                    return Promise.all([
-                      getLeagueMatchdays(selectedLeagueId).then(setMatchdays),
-                      getLeagueFixtures(selectedLeagueId).then(setFixtures),
-                      getLeagueActivity(selectedLeagueId, 5).then(setActivity),
-                    ]);
-                  })
-                  .catch((e: unknown) =>
-                    // Concluding can need per-team decisions (forfait vs previous
-                    // lineup); that flow lives in Gestione lega, so a failure here
-                    // points there instead of pretending to handle it.
-                    setMsg(
-                      `Non è stato possibile concludere qui: ${
-                        e instanceof Error ? e.message : String(e)
-                      }. Aprila da Gestione lega → Giornate.`,
-                    ),
-                  )
-                  .finally(() => setBusy(false));
-              }}
-            >
-              {busy ? 'Concludo…' : 'Concludi la giornata'}
-            </Button>
+            {isAdmin && queue.length ? (
+              <Button size="sm" disabled={busy} onClick={concludeQueue}>
+                {busy
+                  ? 'Concludo…'
+                  : queue.length === 1
+                  ? 'Concludi la giornata'
+                  : `Chiudi le ${queue.length} giornate`}
+              </Button>
+            ) : null}
           </div>
+          {/* Arrears AND a parked matchday can coexist: the second line keeps the
+              parked one visible instead of letting the queue hide it. */}
+          {queue.length && awaitingMds.length ? (
+            <div className="mt-2 text-xs text-emerald-800">
+              In attesa di recupero: giornata {awaitingMds.map((m) => m.real_matchday).join(', ')}.
+            </div>
+          ) : null}
         </Card>
+      ) : fieldableMd ? (
+        <div className="px-1 text-xs text-slate-500">
+          {playingMd
+            ? `Si gioca la giornata ${playingMd.real_matchday} · prossima da schierare: la ${fieldableMd.real_matchday}`
+            : `Prossima giornata da schierare: la ${fieldableMd.real_matchday}`}
+        </div>
       ) : null}
 
       {/* The market, when there IS one. The old Lega page carried this banner and

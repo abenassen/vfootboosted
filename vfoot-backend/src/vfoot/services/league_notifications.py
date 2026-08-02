@@ -131,7 +131,78 @@ def notify_decision_resolved(decision, actor=None) -> None:
            for u in users])
 
 
-def _push(users: list, *, title: str, body: str, tag: str = "") -> None:
+def notify_conclusions_pending(league, matchdays, admins) -> None:
+    """The league is waiting on the admin: these matchdays are complete and unscored.
+
+    Sent to the admins only — the rest of the league sees the same thing as a banner
+    on the home, which is the part that actually works: in a league of friends the
+    other participants are a better reminder than any scheduler.
+    """
+    if not _enabled() or not matchdays or not admins:
+        return
+    users = [a for a in admins if a.email and a.is_active]
+    if not users:
+        return
+    rounds = ", ".join(str(m.real_matchday) for m in matchdays)
+    n = len(matchdays)
+    subject = (f"Giornata da chiudere · {league.name}" if n == 1
+               else f"{n} giornate da chiudere · {league.name}")
+    _push(users, title=subject,
+          body=f"Giornat{'a' if n == 1 else 'e'} {rounds}: i risultati aspettano te.",
+          tag=f"conclusions-{league.id}", url="/league-admin?tab=matchdays")
+    base = str(getattr(settings, "VFOOT_FRONTEND_BASE_URL", "")).rstrip("/")
+    body = (
+        "{greeting}\n\n"
+        f"Nella lega \"{league.name}\" "
+        + (f"la giornata {rounds} è finita" if n == 1
+           else f"le giornate {rounds} sono finite")
+        + " ma non risulta"
+        + ("" if n == 1 else "no")
+        + " ancora conclusa"
+        + ("" if n == 1 else "e")
+        + ".\n\n"
+        "Finché non la chiudi, punteggi e classifica restano fermi — il resto della "
+        "lega intanto continua a giocare e a schierare normalmente.\n\n"
+        f"Puoi chiuderla qui: {base}/league-admin?tab=matchdays\n"
+    )
+    _send([_message(u, subject, body) for u in users])
+
+
+def notify_lineup_repaired(league, manager, out_player_id, in_player_id, matchdays) -> None:
+    """His acquisition landed in a lineup he had already sent.
+
+    Not a courtesy: the swap changed a team sheet he had decided, and finding out at
+    the tabellino would be the worst possible moment. He still has time — validations
+    only happen before the lock — so the message is early enough to be acted on.
+    """
+    if not _enabled() or manager is None:
+        return
+    from realdata.models import Player
+    names = dict(Player.objects.filter(id__in=[out_player_id, in_player_id])
+                 .values_list("id", "full_name"))
+    out_name = names.get(out_player_id, str(out_player_id))
+    in_name = names.get(in_player_id, str(in_player_id))
+    rounds = ", ".join(str(m) for m in matchdays)
+    subject = f"La tua formazione è cambiata · {league.name}"
+    _push([manager], title=subject,
+          body=f"{in_name} prende il posto di {out_name} (giornata {rounds}).",
+          tag=f"lineup-repair-{league.id}", url="/squad/formation")
+    base = str(getattr(settings, "VFOOT_FRONTEND_BASE_URL", "")).rstrip("/")
+    body = (
+        "{greeting}\n\n"
+        f"Nella lega \"{league.name}\" la tua offerta è stata validata: {out_name} "
+        f"lascia la rosa e al suo posto arriva {in_name}.\n\n"
+        f"{out_name} era schierato nella formazione della giornata {rounds}, quindi "
+        f"{in_name} ne ha preso esattamente il posto — stesso ruolo, stessa "
+        "posizione. La formazione resta valida e completa.\n\n"
+        f"Se preferisci schierarla diversamente sei ancora in tempo: {base}/squad/formation\n"
+    )
+    if not manager.email or not manager.is_active:
+        return
+    _send([_message(manager, subject, body)])
+
+
+def _push(users: list, *, title: str, body: str, tag: str = "", url: str = "/decisioni") -> None:
     """The second channel. Silent when push is not configured, and never able to
     stop the email: whoever installed the app hears sooner, nobody hears less."""
     from vfoot.services import push_channel
@@ -140,7 +211,7 @@ def _push(users: list, *, title: str, body: str, tag: str = "") -> None:
     for user in users:
         try:
             push_channel.send_to_user(user, title=title, body=body,
-                                      url="/decisioni", tag=tag)
+                                      url=url, tag=tag)
         except Exception:                                 # noqa: BLE001
             log.exception("Notifica push fallita per l'utente %s", user.id)
 

@@ -41,6 +41,8 @@ from vfoot.api.league_views import (
     LeagueJoinView,
     LeagueListCreateView,
     LeagueMatchdayConcludeView,
+    LeagueMatchdayAwaitView,
+    LeagueMatchdayOfficeVotesView,
     LeagueMatchdayRecomputeView,
     LeagueMatchdayListView,
     LeagueMatchdaySyncView,
@@ -146,6 +148,16 @@ urlpatterns = [
         "leagues/<int:league_id>/matchdays/<int:fantasy_matchday_id>/recompute",
         LeagueMatchdayRecomputeView.as_view(),
         name="league-matchday-recompute",
+    ),
+    path(
+        "leagues/<int:league_id>/matchdays/<int:fantasy_matchday_id>/await",
+        LeagueMatchdayAwaitView.as_view(),
+        name="league-matchday-await",
+    ),
+    path(
+        "leagues/<int:league_id>/matchdays/<int:fantasy_matchday_id>/office-votes",
+        LeagueMatchdayOfficeVotesView.as_view(),
+        name="league-matchday-office-votes",
     ),
     path(
         "leagues/<int:league_id>/members/<int:membership_id>/role",

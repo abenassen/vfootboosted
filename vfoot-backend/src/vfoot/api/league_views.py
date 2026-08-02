@@ -71,6 +71,7 @@ from vfoot.models import (
     FantasyTeam,
     LeagueMembership,
     LeaguePlayerRole,
+    OfficeOverride,
     SavedLineupSnapshot,
 )
 from vfoot.services.auction_engine import (
@@ -115,6 +116,7 @@ from vfoot.services.player_ratings import (
     latest_market_values, player_values, previous_season_with_data,
 )
 from vfoot.services.match_resolver import matchday_fixtures_by_team
+from vfoot.services import lineup_repair, matchday_state
 
 # Frozen listone role (POR/DIF/CEN/ATT) -> frontend lineup taxonomy (GK/DEF/MID/ATT).
 _CLASSIC_ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
@@ -788,7 +790,12 @@ class TeamRosterRemoveView(APIView):
 
         slot.released_at = timezone.now()
         slot.save(update_fields=["released_at"])
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        # Same invariant as a market settlement: a lineup that is still open must not
+        # be left holding a player the team no longer has. There is no incoming
+        # player here, so the slot is vacated — the manager can refill it, since a
+        # locked lineup is never touched.
+        vacated = lineup_repair.swap_player(league, team.id, player_id, None)
+        return Response({"lineups_vacated": vacated}, status=status.HTTP_200_OK)
 
 
 class LeagueRosterBulkAssignView(APIView):
@@ -1997,22 +2004,21 @@ class CompetitionListView(APIView):
 
 
 def _current_matchday(league: FantasyLeague):
-    """The league's 'current' matchday = the earliest one not yet concluded."""
-    return (
-        FantasyMatchday.objects.filter(league=league)
-        .exclude(status=FantasyMatchday.STATUS_CONCLUDED)
-        .order_by("real_matchday", "id")
-        .first()
-    )
+    """The matchday the LEDGER is due to score next — never a statement about what is
+    being played. See services/matchday_state for why the two are separate."""
+    return matchday_state.ledger_matchday(league)
 
 
-def _fixture_phase(fx: FantasyFixture, current_real_md: int | None) -> str:
-    """concluded | current | future | unscheduled — drives the UI badge."""
+def _fixture_phase(fx: FantasyFixture, current_real_md: int | None,
+                   awaiting_mds: set[int] | None = None) -> str:
+    """concluded | current | awaiting | future | unscheduled — drives the UI badge."""
     if fx.status == FantasyFixture.STATUS_FINISHED:
         return "concluded"
     if fx.fantasy_matchday_id is None:
         return "unscheduled"
     real_md = fx.fantasy_matchday.real_matchday
+    if awaiting_mds and real_md in awaiting_mds:
+        return "awaiting"
     if current_real_md is None:
         return "future"
     if real_md == current_real_md:
@@ -2023,7 +2029,8 @@ def _fixture_phase(fx: FantasyFixture, current_real_md: int | None) -> str:
 
 
 def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_real_md: int | None = None,
-                           my_roster_ready: bool = False) -> dict:
+                           my_roster_ready: bool = False, awaiting_mds: set[int] | None = None,
+                           locked_mds: set[int] | None = None) -> dict:
     mine = bool(my_team_id and (fx.home_team_id == my_team_id or fx.away_team_id == my_team_id))
     played = fx.status == FantasyFixture.STATUS_FINISHED
     return {
@@ -2039,7 +2046,12 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         "leg_no": fx.leg_no,
         "kickoff": fx.kickoff.isoformat() if fx.kickoff else None,
         "status": fx.status,
-        "phase": _fixture_phase(fx, current_real_md),
+        "phase": _fixture_phase(fx, current_real_md, awaiting_mds),
+        # Whether this matchday's lineups have locked (its first confirmed kickoff
+        # has passed). Read from the REAL calendar, so it stays true no matter how
+        # far behind the admin is with his conclusions.
+        "lineup_locked": bool(locked_mds is not None and fx.fantasy_matchday_id is not None
+                              and fx.fantasy_matchday.real_matchday in locked_mds),
         "home_team": {"team_id": fx.home_team_id, "name": fx.home_team.name,
                       "crest": fx.home_team.crest},
         "away_team": {"team_id": fx.away_team_id, "name": fx.away_team.name,
@@ -2050,8 +2062,13 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         # the UI: it also depends on the roster, which the calendar does not load.
         # An empty roster has nothing to field, and offering the button anyway sent
         # people to a formation page with no players in it.
+        # It also depends on the DEADLINE, which is the part that used to be missing:
+        # a fixture is 'not played' until the admin concludes its matchday, so a
+        # forgotten conclusion kept offering "Formazione" on a round played weeks
+        # earlier — a button the save endpoint could only answer with a 409.
         "can_set_lineup": bool(
             mine and my_roster_ready and not played and fx.fantasy_matchday_id is not None
+            and not (locked_mds is not None and fx.fantasy_matchday.real_matchday in locked_mds)
         ),
         # A fixture that has not been played has no rich detail: /fixtures/<id>
         # answers 404 "No rich detail for this fixture". Saying so here lets the
@@ -2080,10 +2097,14 @@ class LeagueFixturesView(APIView):
 
         current = _current_matchday(league)
         current_real_md = current.real_matchday if current else None
+        awaiting_mds = {md.real_matchday for md in matchday_state.awaiting_matchdays(league)}
+        locked_mds = (matchday_state.locked_matchdays(league.reference_season_id)
+                      if league.reference_season_id else set())
         # One query for the whole calendar, not one per fixture.
         my_roster_ready = bool(my_team_id) and FantasyRosterSlot.objects.filter(
             team_id=my_team_id, released_at__isnull=True).exists()
-        items = [_serialize_fixture_row(fx, my_team_id, current_real_md, my_roster_ready)
+        items = [_serialize_fixture_row(fx, my_team_id, current_real_md, my_roster_ready,
+                                        awaiting_mds, locked_mds)
                  for fx in qs[:200]]
         return Response(items)
 
@@ -2092,7 +2113,8 @@ def _competition_round_nos(comp: FantasyCompetition) -> list[int]:
     return [row["round_no"] for row in competition_round_rows(comp)]
 
 
-def _real_matchday_stats(real_competition_season_id: int, real_matchday: int) -> dict:
+def _real_matchday_stats(real_competition_season_id: int, real_matchday: int,
+                         league: FantasyLeague | None = None) -> dict:
     # A postponed-and-replayed match appears TWICE in a real matchday: a stale
     # 'postponed' placeholder with no score, plus the rescheduled row that was
     # actually played (a different external_id, played weeks later — see Serie A
@@ -2101,12 +2123,25 @@ def _real_matchday_stats(real_competition_season_id: int, real_matchday: int) ->
     # the team pairing so each real fixture counts once and is 'completed' when ANY
     # of its rows has a final score. Within one matchday a (home, away) pairing is
     # unique, and a replay keeps the same home/away, so the pairing is a safe key.
+    #
+    # ``league`` makes the answer league-specific: a match this league has ruled on
+    # with an office vote is settled AS FAR AS THIS LEAGUE IS CONCERNED, even though
+    # it was never played. That is the whole point of the ruling — it is what unblocks
+    # the conclusion — and it is per league by construction, so the league next door
+    # still sees the round as incomplete and goes on waiting for the recovery.
+    office_match_ids = set()
+    if league is not None:
+        office_match_ids = set(
+            OfficeOverride.objects.filter(league=league, is_active=True)
+            .values_list("match_id", flat=True)
+        )
     done_by_pair: dict[tuple[int, int], bool] = {}
-    for home_id, away_id, hg, ag in Match.objects.filter(
+    for mid, home_id, away_id, hg, ag in Match.objects.filter(
         competition_season_id=real_competition_season_id, matchday=real_matchday
-    ).values_list("home_team_id", "away_team_id", "home_goals", "away_goals"):
+    ).values_list("id", "home_team_id", "away_team_id", "home_goals", "away_goals"):
         key = (home_id, away_id)
-        done_by_pair[key] = done_by_pair.get(key, False) or (hg is not None and ag is not None)
+        settled = (hg is not None and ag is not None) or mid in office_match_ids
+        done_by_pair[key] = done_by_pair.get(key, False) or settled
     total = len(done_by_pair)
     completed = sum(1 for v in done_by_pair.values() if v)
     return {
@@ -2189,23 +2224,52 @@ class LeagueMatchdayListView(APIView):
         )
         current = _current_matchday(league)
         current_id = current.id if current else None
+        # The other clock, read from the real calendar: what can still be fielded and
+        # what is on the pitch right now. Deliberately independent of the conclusions
+        # above, so an admin who is three matchdays behind does not move it.
+        fieldable = matchday_state.next_fieldable_matchday(league)
+        playing = matchday_state.playing_matchday(league)
+        locks = (matchday_state.matchday_locks(league.reference_season_id)
+                 if league.reference_season_id else {})
         payload = []
         for md in rows:
-            real_stats = _real_matchday_stats(md.real_competition_season_id, md.real_matchday)
+            real_stats = _real_matchday_stats(md.real_competition_season_id, md.real_matchday, league)
             fx_total = md.fixtures.count()
             fx_finished = md.fixtures.filter(status=FantasyFixture.STATUS_FINISHED).count()
             if md.status == FantasyMatchday.STATUS_CONCLUDED:
                 phase = "concluded"
+            elif md.status == FantasyMatchday.STATUS_AWAITING:
+                phase = "awaiting"
             elif md.id == current_id:
                 phase = "current"
             else:
                 phase = "future"
+            allowed, blocked_reason = matchday_state.can_conclude(league, md)
+            if allowed and not real_stats["is_completed"]:
+                allowed, blocked_reason = False, "La giornata reale non è ancora completata."
+            elif allowed and fx_total == 0:
+                allowed, blocked_reason = False, "Nessuna fixture fantasy associata."
+            lock_at = locks.get(md.real_matchday)
             payload.append(
                 {
                     "fantasy_matchday_id": md.id,
                     "league_id": league.id,
                     "status": md.status,
                     "phase": phase,
+                    "is_fieldable": md.real_matchday == fieldable,
+                    "is_playing": md.real_matchday == playing,
+                    "lineup_lock_at": lock_at.isoformat() if lock_at else None,
+                    # Two different questions. `can_conclude` is "may this one be
+                    # closed RIGHT NOW" (it enforces the order, so behind an unclosed
+                    # matchday it is False). `awaits_conclusion` is "does the league
+                    # owe this one" — true for every arrear, which is what the count
+                    # of a forgotten admin's backlog is made of.
+                    "can_conclude": allowed,
+                    "conclude_blocked_reason": "" if allowed else blocked_reason,
+                    "awaits_conclusion": (md.status != FantasyMatchday.STATUS_CONCLUDED
+                                          and real_stats["is_completed"] and fx_total > 0),
+                    "awaiting_since": md.awaiting_since.isoformat() if md.awaiting_since else None,
+                    "awaiting_reason": md.awaiting_reason,
                     "real_competition_season": {
                         "id": md.real_competition_season_id,
                         "name": str(md.real_competition_season),
@@ -2237,18 +2301,19 @@ class LeagueMatchdayConcludeView(APIView):
         s.is_valid(raise_exception=True)
         force = s.validated_data.get("force", False)
 
-        # Conclude in order: only the current (earliest non-concluded) matchday.
+        # Conclude in order — with one deliberate exception: a matchday parked as
+        # AWAITING may be closed whenever its postponed match is finally played,
+        # without first having to close everything played since.
         current = _current_matchday(league)
-        if md.status != FantasyMatchday.STATUS_CONCLUDED and current and md.id != current.id and not force:
+        allowed, reason = matchday_state.can_conclude(league, md)
+        if not allowed and not force:
             return Response(
-                {
-                    "detail": f"Conclude matchdays in order — the current one is real matchday {current.real_matchday}.",
-                    "current_matchday_id": current.id,
-                },
+                {"detail": reason,
+                 "current_matchday_id": current.id if current else None},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        real_stats = _real_matchday_stats(md.real_competition_season_id, md.real_matchday)
+        real_stats = _real_matchday_stats(md.real_competition_season_id, md.real_matchday, league)
         if not real_stats["is_completed"] and not force:
             return Response(
                 {
@@ -2285,6 +2350,19 @@ class LeagueMatchdayConcludeView(APIView):
                     {
                         "detail": "Alcune squadre non hanno la formazione: scegli 'forfait' o 'previous' per ognuna.",
                         "teams_without_lineup": result["missing_teams"],
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if result["pending_matches"]:
+                # Somebody in a fielded XI plays a match that has not been played.
+                # Scoring now would silently treat a postponement as a senza voto:
+                # the honest options are to park the matchday (awaiting) or, once it
+                # exists, to impose an office vote on the missing match.
+                return Response(
+                    {
+                        "detail": "Ci sono partite della giornata non ancora giocate: "
+                                  "metti la giornata in attesa oppure concludila forzando.",
+                        "pending_matches": result["pending_matches"],
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -2356,7 +2434,12 @@ class LeagueMatchdayConcludeView(APIView):
         md.status = FantasyMatchday.STATUS_CONCLUDED
         md.concluded_at = timezone.now()
         md.concluded_by = request.user
-        md.save(update_fields=["status", "concluded_at", "concluded_by"])
+        # Concluding a parked matchday is how the wait ends; the parking marks go.
+        md.awaiting_since = None
+        md.awaiting_reason = ""
+        md.nudged_at = None
+        md.save(update_fields=["status", "concluded_at", "concluded_by",
+                               "awaiting_since", "awaiting_reason", "nudged_at"])
 
         return Response(
             {
@@ -2371,6 +2454,159 @@ class LeagueMatchdayConcludeView(APIView):
                 "resolved_target_stages": resolved_targets,
             }
         )
+
+
+class LeagueMatchdayAwaitView(APIView):
+    """Admin: park the current matchday as AWAITING, or bring it back.
+
+    The gesture behind "una partita è stata rinviata: la lega va avanti, questa
+    giornata la chiudo quando si recupera". Deliberately manual: whether to wait for
+    the recovery or to impose an office vote is a decision of the league, not a fact
+    of the calendar, and it is the one moment where the two are told apart.
+
+    Body: {"awaiting": true|false (default true), "reason": "..."}.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, league_id: int, fantasy_matchday_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        md = get_object_or_404(FantasyMatchday, id=fantasy_matchday_id, league=league)
+
+        awaiting = request.data.get("awaiting", True)
+        if not isinstance(awaiting, bool):
+            awaiting = str(awaiting).lower() not in ("false", "0", "")
+
+        if md.status == FantasyMatchday.STATUS_CONCLUDED:
+            return Response({"detail": "La giornata è già conclusa."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if awaiting:
+            # Only the matchday the ledger is actually on can be parked: parking a
+            # future one would leave a hole in the middle of the ledger rather than
+            # letting the league step over the one it is stuck on.
+            pointer = matchday_state.ledger_matchday(league)
+            if pointer is None or pointer.id != md.id:
+                return Response(
+                    {"detail": "Si può mettere in attesa solo la giornata che la lega "
+                               "deve ancora conteggiare."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            md.status = FantasyMatchday.STATUS_AWAITING
+            md.awaiting_since = timezone.now()
+            md.awaiting_reason = str(request.data.get("reason", ""))[:200]
+        else:
+            md.status = FantasyMatchday.STATUS_PLANNED
+            md.awaiting_since = None
+            md.awaiting_reason = ""
+        md.save(update_fields=["status", "awaiting_since", "awaiting_reason"])
+
+        new_pointer = matchday_state.ledger_matchday(league)
+        return Response({
+            "fantasy_matchday_id": md.id,
+            "status": md.status,
+            "awaiting_since": md.awaiting_since.isoformat() if md.awaiting_since else None,
+            "awaiting_reason": md.awaiting_reason,
+            "ledger_matchday": new_pointer.real_matchday if new_pointer else None,
+        })
+
+
+class LeagueMatchdayOfficeVotesView(APIView):
+    """Admin: the league's ruling on the matches of this matchday it will not wait for.
+
+    GET  -> the matches of the round that have no final data, each with the office
+            vote this league has already imposed on it (if any).
+    POST -> {"match_ids": [...], "voto": 6.0, "reason": "..."} imposes (or updates)
+            the ruling; {"remove": true} withdraws it.
+
+    Per league by construction: the rows are keyed on (league, match), so one league
+    imposing the 6 on Como-Milan leaves every other league free to wait for the
+    recovery. Classic only — an imposed VOTE has no meaning in aura, where a fixture
+    takes the real scoreline.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def _rows(self, league, md):
+        overrides = {o.match_id: o for o in OfficeOverride.objects.filter(
+            league=league, fantasy_matchday=md)}
+        out = []
+        for m in (Match.objects
+                  .filter(competition_season_id=md.real_competition_season_id,
+                          matchday=md.real_matchday)
+                  .select_related("home_team__team", "away_team__team")
+                  .order_by("kickoff", "id")):
+            o = overrides.get(m.id)
+            # A postponed shell whose replay has already been played is not missing
+            # data — it is a duplicate, and ruling on it would be ruling on nothing.
+            superseded = m.status == Match.STATUS_POSTPONED and Match.objects.filter(
+                competition_season_id=md.real_competition_season_id,
+                matchday=md.real_matchday, home_team_id=m.home_team_id,
+                away_team_id=m.away_team_id, data_ready=True).exists()
+            if m.data_ready or superseded:
+                continue
+            out.append({
+                "match_id": m.id,
+                "home": m.home_team.team.name,
+                "away": m.away_team.team.name,
+                "status": m.status,
+                "kickoff": m.kickoff.isoformat() if m.kickoff else None,
+                "office_vote": o.voto if (o and o.is_active) else None,
+                "reason": o.reason if o else "",
+            })
+        return out
+
+    def get(self, request, league_id: int, fantasy_matchday_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+        md = get_object_or_404(FantasyMatchday, id=fantasy_matchday_id, league=league)
+        return Response({"fantasy_matchday_id": md.id, "matches": self._rows(league, md)})
+
+    @transaction.atomic
+    def post(self, request, league_id: int, fantasy_matchday_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        md = get_object_or_404(FantasyMatchday, id=fantasy_matchday_id, league=league)
+        if league.mode != FantasyLeague.MODE_CLASSIC:
+            return Response({"detail": "Il voto d'ufficio è disponibile solo per le leghe classic."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        match_ids = [int(x) for x in (request.data.get("match_ids") or [])]
+        if not match_ids:
+            return Response({"detail": "Nessuna partita indicata."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        matches = list(Match.objects.filter(
+            id__in=match_ids, competition_season_id=md.real_competition_season_id,
+            matchday=md.real_matchday))
+        if len(matches) != len(set(match_ids)):
+            return Response({"detail": "Alcune partite non appartengono a questa giornata."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if request.data.get("remove"):
+            OfficeOverride.objects.filter(league=league, match_id__in=match_ids).delete()
+            return Response({"removed": len(match_ids), "matches": self._rows(league, md)})
+
+        try:
+            voto = float(request.data.get("voto", 6.0))
+        except (TypeError, ValueError):
+            return Response({"detail": "Voto non valido."}, status=status.HTTP_400_BAD_REQUEST)
+        if not 0.0 <= voto <= 10.0:
+            return Response({"detail": "Il voto deve stare fra 0 e 10."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        reason = str(request.data.get("reason", ""))[:200]
+
+        for m in matches:
+            OfficeOverride.objects.update_or_create(
+                league=league, match=m,
+                defaults={"fantasy_matchday": md, "voto": voto, "reason": reason,
+                          "is_active": True, "created_by": request.user},
+            )
+        return Response({"applied": len(matches), "voto": voto,
+                         "matches": self._rows(league, md)})
 
 
 class LeagueMatchdayRecomputeView(APIView):
@@ -3493,7 +3729,7 @@ def _highlighted_ranks(stage) -> tuple[list[int], list[int]]:
 
 
 def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, pl,
-             stage=None) -> dict:
+             stage=None, awaiting_mds=None, locked_mds=None) -> dict:
     """One results section: a standings table (round-robin) or a bracket (knockout)."""
     fixtures = list(fixtures)
     prize_ranks, qualify_ranks = _highlighted_ranks(stage)
@@ -3509,7 +3745,8 @@ def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, 
             rounds.append({
                 "round_no": rno,
                 "label": _KO_ROUND_LABELS.get(len(fs), f"Turno {rno}"),
-                "fixtures": [_serialize_fixture_row(f, my_team_id, current_md) for f in fs],
+                "fixtures": [_serialize_fixture_row(f, my_team_id, current_md, False,
+                                                    awaiting_mds, locked_mds) for f in fs],
             })
         base["rounds"] = rounds
     else:
@@ -3559,18 +3796,22 @@ class CompetitionStructureView(APIView):
         pw, pd, pl = comp.points_win, comp.points_draw, comp.points_loss
         rel = ("competition", "stage", "fantasy_matchday", "home_team", "away_team", "detail")
 
+        awaiting_mds = {md.real_matchday for md in matchday_state.awaiting_matchdays(league)}
+        locked_mds = (matchday_state.locked_matchdays(league.reference_season_id)
+                      if league.reference_season_id else set())
         stages = list(comp.stages.order_by("order_index", "id"))
         if stages:
             sections = [
                 _section(s.name, s.stage_type, s.order_index,
                          s.fixtures.select_related(*rel), my_team_id, current_md, pw, pd, pl,
-                         stage=s)
+                         stage=s, awaiting_mds=awaiting_mds, locked_mds=locked_mds)
                 for s in stages
             ]
         else:
             sections = [
                 _section(comp.name, comp.competition_type, 1,
-                         comp.fixtures.select_related(*rel), my_team_id, current_md, pw, pd, pl)
+                         comp.fixtures.select_related(*rel), my_team_id, current_md, pw, pd, pl,
+                         awaiting_mds=awaiting_mds, locked_mds=locked_mds)
             ]
         return Response({
             "competition_id": comp.id, "name": comp.name,

@@ -149,19 +149,27 @@ class ComposeLinesTest(SimpleTestCase):
                         "voto_puro": 7.0, "fantavoto": 7.0, "sv": False, "conceded": 0}
         return index, role_map
 
-    def test_sold_and_absent(self):
+    def test_absent_player_is_sv_and_the_lineup_is_taken_as_sent(self):
+        """The submitted lineup is authoritative: only "did he play" decides a line.
+
+        It used to be filtered against the CURRENT roster, so a player sold after the
+        matchday was silently turned into an s.v. slot — which made the same round
+        score differently depending on WHEN the admin got round to concluding it.
+        Ownership is now enforced where it belongs: at the transfer, which repairs
+        every lineup still open and never touches one already locked
+        (services/lineup_repair).
+        """
         from vfoot.services.classic_matchday_scoring import compose_team_lines
         index, role_map = self._index_and_roles()
-        del index[4]  # player 4 owned but did NOT play (absent from the index)
-        owned = (set(range(1, 12)) - {5}) | {20}  # player 5 sold; bench 21 sold; 20 owned
+        del index[4]  # player 4 did NOT play (absent from the index)
         starters, bench = compose_team_lines(
-            1, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [20, 21], index, role_map, owned)
+            1, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [20, 21], index, role_map)
         self.assertEqual(len(starters), 11)
         by = {l["player_id"]: l for l in starters}
-        self.assertTrue(by[5]["sv"])   # sold -> s.v. slot
-        self.assertTrue(by[4]["sv"])   # absent -> s.v.
-        self.assertFalse(by[2]["sv"])  # owned + played
-        self.assertEqual([l["player_id"] for l in bench], [20])  # 21 (sold) dropped
+        self.assertTrue(by[4]["sv"])    # absent -> s.v.
+        self.assertFalse(by[5]["sv"])   # played -> scores, whoever owns him today
+        self.assertFalse(by[2]["sv"])
+        self.assertEqual([l["player_id"] for l in bench], [20, 21])
 
     def test_compose_then_score(self):
         from vfoot.services.classic_matchday_scoring import (
@@ -169,11 +177,11 @@ class ComposeLinesTest(SimpleTestCase):
             score_composed_fixture,
         )
         index, role_map = self._index_and_roles()
-        owned = set(range(1, 12)) | {20, 21}
-        # Home: DEF player 5 sold -> s.v.; bench 20 (DEF) subs in (7.0).
+        # Home: DEF player 5 did not play -> s.v.; bench 20 (DEF) subs in (7.0).
         # 10 played at 6.0 (=60) + 7.0 = 67. Away: full XI at 6.0 = 66.
-        home = compose_team_lines(1, list(range(2, 12)), [20, 21], index, role_map, owned - {5})
-        away = compose_team_lines(1, list(range(2, 12)), [20, 21], index, role_map, owned)
+        home_index = {k: v for k, v in index.items() if k != 5}
+        home = compose_team_lines(1, list(range(2, 12)), [20, 21], home_index, role_map)
+        away = compose_team_lines(1, list(range(2, 12)), [20, 21], index, role_map)
         rs = Ruleset(defense_enabled=False, max_substitutions=5)
         payload = score_composed_fixture(home, away, rs, {
             "fixture_id": 7, "fantasy_round": 1, "real_matchday": 3,

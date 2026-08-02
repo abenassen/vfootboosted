@@ -800,6 +800,39 @@ export async function getLeagueMatchdays(_leagueId: number): Promise<LeagueMatch
       real_matchday: 24,
       real_completion: { total: 10, completed: 10, is_completed: true },
       fixtures: { total: 4, finished: 2 },
+      is_fieldable: false,
+      is_playing: false,
+      lineup_lock_at: '2026-02-06T18:45:00Z',
+      can_conclude: true,
+      conclude_blocked_reason: '',
+      awaits_conclusion: true,
+      awaiting_since: null,
+      awaiting_reason: '',
+      concluded_at: null,
+      concluded_by: null,
+    },
+    {
+      fantasy_matchday_id: 2,
+      league_id: 1,
+      status: 'planned',
+      phase: 'future',
+      real_competition_season: {
+        id: 1,
+        name: 'Serie A 2025-2026',
+        competition: 'Serie A',
+        season: '2025-2026',
+      },
+      real_matchday: 25,
+      real_completion: { total: 10, completed: 0, is_completed: false },
+      fixtures: { total: 4, finished: 0 },
+      is_fieldable: true,
+      is_playing: false,
+      lineup_lock_at: '2026-02-13T18:45:00Z',
+      can_conclude: false,
+      conclude_blocked_reason: 'La giornata reale non è ancora completata.',
+      awaits_conclusion: false,
+      awaiting_since: null,
+      awaiting_reason: '',
       concluded_at: null,
       concluded_by: null,
     },
@@ -833,6 +866,20 @@ export async function recomputeLeagueMatchday(
 ): Promise<{ fantasy_matchday_id: number; recomputed_with: string; fixtures_scored: number }> {
   await sleep(100);
   return { fantasy_matchday_id: fantasyMatchdayId, recomputed_with: use, fixtures_scored: 4 };
+}
+
+export async function setLeagueMatchdayAwaiting(
+  _leagueId: number,
+  fantasyMatchdayId: number,
+  awaiting = true,
+  reason = '',
+): Promise<{ fantasy_matchday_id: number; status: string; awaiting_reason: string }> {
+  await sleep(100);
+  return {
+    fantasy_matchday_id: fantasyMatchdayId,
+    status: awaiting ? 'awaiting' : 'planned',
+    awaiting_reason: reason,
+  };
 }
 
 export async function getCompetitionStructure(_leagueId: number, competitionId: number) {

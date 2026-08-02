@@ -228,7 +228,17 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
       </div>
 
       <div className="flex shrink-0 items-center gap-2 text-right">
-        {p.sv ? (
+        {p.pending ? (
+          // A postponement is not a senza voto and must not read like one: nothing
+          // happened yet, the bench does not cover it, and the slot will be settled
+          // when the match is recovered (or by an office vote).
+          <span
+            title="Partita rinviata: non ancora giocata"
+            className="rounded border border-dashed border-sky-400 px-1.5 py-0.5 text-[10px] font-bold text-sky-600"
+          >
+            rinviata
+          </span>
+        ) : p.sv ? (
           // 'dati mancanti' is not a verdict on the player — say so, rather than
           // letting a gap in our data read as "he did nothing".
           p.sv_reason === 'dati_mancanti' ? (
@@ -263,6 +273,14 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
             ) : (
               <span className="text-[11px] text-slate-500">{fmt(p.voto_puro ?? 0)}</span>
             )}
+            {p.office ? (
+              <span
+                title="Voto d'ufficio: la lega ha imposto questo voto per una partita non giocata"
+                className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700"
+              >
+                ufficio
+              </span>
+            ) : null}
             {p.bonus > 0 ? <span className="text-[11px] font-semibold text-emerald-600">+{fmt(p.bonus)}</span> : null}
             {p.malus > 0 ? <span className="text-[11px] font-semibold text-rose-600">−{fmt(p.malus)}</span> : null}
             <span

@@ -28,6 +28,12 @@ export interface ClassicPlayerLine {
   sv: boolean; // senza voto: didn't play / not rated
   // Why he is s.v. — 'dati_mancanti' is OUR gap, not a judgement on the player.
   sv_reason?: 'dati_mancanti' | 'impiego_insufficiente' | null;
+  /** His club's match has not been played (a postponement). Reads as s.v. in the
+   *  sum but is NOT one: the bench does not cover it, and the league settles it
+   *  later — by the recovery, or by an office vote. */
+  pending?: boolean;
+  /** The vote was IMPOSED by the league for a match that was not played. */
+  office?: boolean;
   voto_puro: number | null;
   bonus: number; // goal +3, assist +1, pen save +3
   malus: number; // own goal -2, pen miss -3, card, GK -1/goal conceded

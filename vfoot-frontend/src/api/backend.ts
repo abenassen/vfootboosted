@@ -1050,6 +1050,64 @@ export async function recomputeLeagueMatchday(
   return parseJsonOrThrow(res);
 }
 
+// Park a matchday as "awaiting" (a postponed match: the league moves on and this
+// round is scored when the recovery is played), or bring it back to the ledger.
+export async function setLeagueMatchdayAwaiting(
+  leagueId: number,
+  fantasyMatchdayId: number,
+  awaiting = true,
+  reason = '',
+) {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/matchdays/${fantasyMatchdayId}/await`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ awaiting, reason }),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export interface OfficeVoteMatch {
+  match_id: number;
+  home: string;
+  away: string;
+  status: string;
+  kickoff: string | null;
+  /** The vote this league has imposed on the match, or null if it is waiting. */
+  office_vote: number | null;
+  reason: string;
+}
+
+// The matches of a matchday with no final data, and this league's ruling on each.
+export async function getMatchdayOfficeVotes(
+  leagueId: number,
+  fantasyMatchdayId: number,
+): Promise<{ fantasy_matchday_id: number; matches: OfficeVoteMatch[] }> {
+  const res = await fetch(
+    `${baseUrl()}/leagues/${leagueId}/matchdays/${fantasyMatchdayId}/office-votes`,
+    { headers: { Accept: 'application/json', ...authHeaders() } },
+  );
+  return parseJsonOrThrow(res);
+}
+
+export async function setMatchdayOfficeVotes(
+  leagueId: number,
+  fantasyMatchdayId: number,
+  matchIds: number[],
+  voto = 6,
+  reason = '',
+  remove = false,
+): Promise<{ matches: OfficeVoteMatch[] }> {
+  const res = await fetch(
+    `${baseUrl()}/leagues/${leagueId}/matchdays/${fantasyMatchdayId}/office-votes`,
+    {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ match_ids: matchIds, voto, reason, remove }),
+    },
+  );
+  return parseJsonOrThrow(res);
+}
+
 export async function searchPlayers(q: string, leagueId?: number, limit = 20): Promise<PlayerSearchItem[]> {
   const params = new URLSearchParams();
   params.set('q', q);

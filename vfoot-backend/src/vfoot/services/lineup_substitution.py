@@ -34,19 +34,30 @@ def apply_classic_substitutions(
     roles: dict[int, str],
     voted: set[int],
     max_subs: int | None = None,
+    frozen: set[int] | None = None,
 ) -> SubResult:
     """Classic: first benched player (in stored order) with a vote that keeps the
     formation legal replaces each s.v. starter. ``bench`` is the priority order.
     ``max_subs`` caps how many substitutions are made (None = unlimited); once the
-    cap is hit, remaining s.v. starters stay unresolved."""
+    cap is hit, remaining s.v. starters stay unresolved.
+
+    ``frozen`` are starters that must NOT be substituted even though they have no
+    vote: their real match has not been played yet (a postponement). A bench player
+    is the answer to "he didn't play", not to "his match hasn't happened" — using
+    one there would burn a substitution over a game that is still to come. They stay
+    in the XI contributing nothing, and are not reported as unresolved s.v. either:
+    they are a different thing and the league decides them separately (wait for the
+    recovery, or impose an office vote).
+    """
     effective = list(starters)
     cur_roles = [roles.get(p, "MID") for p in starters]
     used: set[int] = set()
     subs: list[tuple[int, int]] = []
     unresolved: list[int] = []
+    frozen = frozen or set()
 
     for i, starter in enumerate(starters):
-        if starter in voted:
+        if starter in voted or starter in frozen:
             continue
         if max_subs is not None and len(subs) >= max_subs:
             unresolved.append(starter)

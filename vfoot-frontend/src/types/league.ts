@@ -500,7 +500,10 @@ export interface LeagueFixtureItem {
   leg_no: number;
   kickoff: string | null;
   status: 'scheduled' | 'live' | 'finished';
-  phase: 'concluded' | 'current' | 'future' | 'unscheduled';
+  phase: 'concluded' | 'current' | 'awaiting' | 'future' | 'unscheduled';
+  /** Its real matchday has kicked off: the lineup is frozen for good. Read from the
+   *  real calendar, so it is true regardless of how far behind the admin is. */
+  lineup_locked?: boolean;
   home_team: { team_id: number; name: string; crest?: string | null };
   away_team: { team_id: number; name: string; crest?: string | null };
   score: { home_total: number; away_total: number } | null;
@@ -516,8 +519,24 @@ export interface LeagueFixtureItem {
 export interface LeagueMatchdayItem {
   fantasy_matchday_id: number;
   league_id: number;
-  status: 'planned' | 'concluded';
-  phase: 'concluded' | 'current' | 'future';
+  status: 'planned' | 'awaiting' | 'concluded';
+  /** The LEDGER's view: what has been counted. Never a statement about what is
+   *  being played — that is `is_playing` / `is_fieldable`, which come from the real
+   *  calendar and do not wait for the admin. */
+  phase: 'concluded' | 'current' | 'awaiting' | 'future';
+  /** The earliest matchday whose lineups can still be set. */
+  is_fieldable: boolean;
+  /** A match of this round is on the pitch right now. */
+  is_playing: boolean;
+  lineup_lock_at: string | null;
+  /** May be closed right now (enforces the order). */
+  can_conclude: boolean;
+  conclude_blocked_reason: string;
+  /** The league owes this one: complete and unscored. Every arrear, not just the
+   *  first — the count of what a forgotten conclusion has piled up. */
+  awaits_conclusion: boolean;
+  awaiting_since: string | null;
+  awaiting_reason: string;
   real_competition_season: {
     id: number;
     name: string;

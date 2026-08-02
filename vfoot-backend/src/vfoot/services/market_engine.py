@@ -41,6 +41,7 @@ from vfoot.models import (
     MarketSession,
 )
 from vfoot.services.auction_engine import ROLES, league_role_map, team_budgets
+from vfoot.services import league_notifications, lineup_repair, matchday_state
 
 # How long a leading offer stands before it is promoted to "accepted" absent a
 # higher rebid. A rebid mints a fresh leading offer, restarting the clock.
@@ -409,6 +410,13 @@ def apply_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
                         MarketOffer.STATUS_CANCELLED):
         raise OfferApplyError("Offerta gia' risolta.")
 
+    # R3: nothing changes hands while the championship is on the pitch. Keyed on the
+    # real calendar and NOT on the league's conclusions — a freeze that waited for an
+    # admin to close a matchday would let a forgetful one freeze the market for good.
+    if matchday_state.is_matchday_in_progress(league, now):
+        raise OfferApplyError(
+            "Giornata in corso: le validazioni riprendono a fine giornata.")
+
     # Release slot must still be on the roster.
     release_slot = FantasyRosterSlot.objects.filter(
         team_id=offer.team_id, player_id=offer.release_player_id, released_at__isnull=True
@@ -447,6 +455,18 @@ def apply_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
                               "acquire_slot", "recovery_amount"])
     record_event(session, MarketEvent.TYPE_OFFER_SETTLED, actor,
                  offer_payload(offer), offer=offer)
+
+    # R2: the acquisition takes the released player's exact place in every lineup
+    # not yet locked. Same role by construction (check_offer refuses anything else),
+    # so the XI stays eleven and the module stays legal.
+    touched = lineup_repair.swap_player(
+        league, offer.team_id, offer.release_player_id, offer.target_player_id, now)
+    if touched:
+        manager = getattr(getattr(offer.team, "manager", None), "user", None)
+        if manager is not None:
+            league_notifications.on_commit(
+                league_notifications.notify_lineup_repaired,
+                league, manager, offer.release_player_id, offer.target_player_id, touched)
     return offer
 
 

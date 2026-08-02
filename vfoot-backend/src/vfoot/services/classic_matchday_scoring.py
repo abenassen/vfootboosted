@@ -17,7 +17,9 @@ index/lineup/roster lookups touch the database.
 
 from __future__ import annotations
 
-from realdata.models import Match, Player
+import logging
+
+from realdata.models import Match, Player, PlayerTeamStint
 from vfoot.models import (
     FantasyFixture,
     FantasyFixtureDetail,
@@ -31,8 +33,15 @@ from vfoot.services.classic_pagella import (
     pagella_for_match,
 )
 from vfoot.services.classic_scoring import Ruleset, resolve_fixture, score_team
+from vfoot.services.match_resolver import (
+    matchday_fixtures_by_team,
+    pending_matches,
+    pending_player_ids,
+)
 
 CLASSIC_ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
+
+log = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
@@ -118,12 +127,34 @@ def read_previous_lineup(league_id: int, real_matchday: int, team_id: int, compe
 # --------------------------------------------------------------------------- #
 # Pure composition (unit-tested without a DB).                                 #
 # --------------------------------------------------------------------------- #
-def _sv_line(pid: int, lineup_role: str, name: str | None = None) -> dict:
+def _sv_line(pid: int, lineup_role: str, name: str | None = None,
+             pending: bool = False) -> dict:
     """A senza-voto placeholder for a player with no line in the index (didn't play)
-    or no longer owned (sold): no vote, so it triggers a substitution / is excluded."""
+    or no longer owned (sold): no vote, so it triggers a substitution / is excluded.
+
+    ``pending`` marks the other reason for having no vote: his club's match has not
+    been played yet. It reads as s.v. everywhere the sum is concerned, but the bench
+    must NOT cover it — a postponement is not a performance.
+    """
     return {
         "player_id": pid, "name": name or str(pid), "lineup_role": lineup_role,
         "role": None, "voto_puro": None, "fantavoto": None, "sv": True,
+        "pending": pending,
+        "conceded": 0, "entered": False, "entered_for": None, "replaced_by": None,
+    }
+
+
+def _office_line(pid: int, lineup_role: str, voto: float) -> dict:
+    """An imposed vote: it IS the voto puro and the fantavoto, with nothing added.
+
+    No goal, assist or card can be credited for a match that was not played, so the
+    line carries the ruling and nothing else. ``office`` marks it as such — for the
+    tabellino, and so the clean-sheet modifier does not mistake it for a game.
+    """
+    return {
+        "player_id": pid, "name": str(pid), "lineup_role": lineup_role,
+        "role": None, "voto_puro": voto, "fantavoto": voto, "sv": False,
+        "pending": False, "office": True,
         "conceded": 0, "entered": False, "entered_for": None, "replaced_by": None,
     }
 
@@ -134,33 +165,62 @@ def compose_team_lines(
     bench_ids: list[int],
     index: dict,
     role_map: dict,
-    owned: set,
+    pending: set | None = None,
+    office: dict | None = None,
+    vacant: set | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Build the ordered (starters, bench) line lists for scoring.
 
-    - starters = [gk] + outfield (the XI): each becomes its index line when the player
-      is owned AND played; an owned player who didn't play, and a SOLD player, both
-      become an s.v. placeholder (an empty slot that triggers substitution).
-    - bench keeps its priority order but DROPS sold players (they can't come on); an
-      owned bench player who didn't play stays as s.v. (useless as a sub, correctly).
+    **The submitted lineup is authoritative.** It was frozen at its matchday's lock
+    and it is scored as sent: who owns the player TODAY does not enter into it. That
+    is what makes a postponed round score identically whether it is concluded on time
+    or six weeks later, and it is safe because a settlement repairs every lineup that
+    is still open and never touches one that has locked (services/lineup_repair).
+
+    - starters = [gk] + outfield (the XI): each becomes its index line, or an s.v.
+      placeholder when he has no line (didn't play / wasn't rated), which triggers a
+      substitution;
+    - bench keeps its priority order; a benched player with no vote simply cannot
+      come on.
     Every line's lineup_role is forced from role_map so the manager's slot role is
     authoritative and consistent between played and non-played players.
+
+    ``pending`` are players whose real match has not been played at all: they get a
+    placeholder that the substitution engine leaves alone (see classic_scoring).
+    ``office`` are the votes the league has imposed, which win over everything.
+    ``vacant`` are slots to empty regardless — used ONLY when falling back to an
+    older lineup the manager never submitted for this matchday: that one is the
+    admin's substitute, not the manager's word, so it is right to strip from it the
+    players the team no longer has.
     """
     starter_ids = ([gk_id] if gk_id else []) + list(outfield_ids)
+    pending = pending or set()
+    office = office or {}
+    vacant = vacant or set()
 
     def line_for(pid: int) -> dict:
         role = role_map.get(pid, "MID")
-        if pid not in owned:
-            return _sv_line(pid, role)  # sold -> empty slot
+        if pid in vacant:
+            return _sv_line(pid, role)
+        if pid in office:
+            # The league has ruled on this match: the ruling wins over both the
+            # missing data and any partial data the provider may have shipped.
+            return _office_line(pid, role, office[pid])
+        if pid in pending:
+            # Pending BEFORE the index on purpose: a match that is finished but whose
+            # data has not stabilised can already have appearances imported, so a line
+            # may well exist — but the vote is not official yet, and counting it would
+            # freeze a number that the next import can still move.
+            return _sv_line(pid, role, pending=True)
         base = index.get(pid)
         if base is None:
-            return _sv_line(pid, role)  # owned but didn't play
+            return _sv_line(pid, role)  # played, not rated: a plain s.v.
         line = dict(base)
         line["lineup_role"] = role
         return line
 
     starters = [line_for(pid) for pid in starter_ids]
-    bench = [line_for(pid) for pid in bench_ids if pid in owned]
+    bench = [line_for(pid) for pid in bench_ids]
     return starters, bench
 
 
@@ -205,7 +265,37 @@ def _snap_all_ids(snap) -> list[int]:
     return ids
 
 
-def team_lines_for_conclusion(league, team, competition_id, real_matchday, index, resolution):
+def office_votes_for(league, md, player_ids) -> dict:
+    """player_id -> imposed vote, for the league's ACTIVE office overrides of this
+    matchday. A player is covered when his club plays the overridden match."""
+    from vfoot.models import OfficeOverride
+
+    overrides = {
+        o.match_id: o.voto
+        for o in OfficeOverride.objects.filter(
+            league=league, fantasy_matchday=md, is_active=True)
+    }
+    if not overrides:
+        return {}
+    cs_id = md.real_competition_season_id
+    fixtures = matchday_fixtures_by_team(cs_id, md.real_matchday)
+    stints = dict(
+        PlayerTeamStint.objects.filter(
+            player_id__in=list(player_ids),
+            team_season__competition_season_id=cs_id,
+            end_date__isnull=True,
+        ).values_list("player_id", "team_season_id")
+    )
+    out = {}
+    for pid in player_ids:
+        match = fixtures.get(stints.get(pid))
+        if match is not None and match.id in overrides:
+            out[pid] = overrides[match.id]
+    return out
+
+
+def team_lines_for_conclusion(league, team, competition_id, real_matchday, index, resolution,
+                              pending=None, office=None):
     """Resolve a team's (starters, bench) line lists at conclusion.
 
     Returns (starters, bench, meta). meta["source"] is one of:
@@ -242,9 +332,11 @@ def team_lines_for_conclusion(league, team, competition_id, real_matchday, index
     bench = [int(x) for x in (snap.bench_player_ids or [])]
     all_ids = ([gk] if gk else []) + outfield + bench
     role_map = role_map_for(league, all_ids)
-    starters, bench_lines = compose_team_lines(gk, outfield, bench, index, role_map, owned)
-    stale = sum(1 for p in all_ids if p not in owned) if source == "previous" else 0
-    return starters, bench_lines, {"source": source, "stale": stale}
+    # Only the fallback lineup is filtered against today's roster — see compose_team_lines.
+    vacant = {p for p in all_ids if p not in owned} if source == "previous" else set()
+    starters, bench_lines = compose_team_lines(gk, outfield, bench, index, role_map,
+                                               pending, office, vacant)
+    return starters, bench_lines, {"source": source, "stale": len(vacant)}
 
 
 def score_composed_fixture(
@@ -260,6 +352,35 @@ def score_composed_fixture(
     return build_fixture_payload(fixture_meta, home, away, ruleset)
 
 
+def _warn_about_unrepaired_lineups(league, md, team_lines) -> list[dict]:
+    """Fielded players whose slot was released BEFORE the matchday locked."""
+    from vfoot.services import matchday_state
+
+    lock = matchday_state.lineup_lock_at(md.real_competition_season_id, md.real_matchday)
+    if lock is None:
+        return []
+    fielded = {line["player_id"] for lines in team_lines.values() for line in lines[0] + lines[1]}
+    if not fielded:
+        return []
+    bad = [
+        {"player_id": s.player_id, "team_id": s.team_id,
+         "released_at": s.released_at.isoformat()}
+        for s in FantasyRosterSlot.objects.filter(
+            team__league=league, player_id__in=fielded,
+            released_at__isnull=False, released_at__lt=lock)
+        # A player released before the lock and re-acquired since is not an anomaly.
+        if not FantasyRosterSlot.objects.filter(
+            team_id=s.team_id, player_id=s.player_id, released_at__isnull=True).exists()
+    ]
+    if bad:
+        log.error(
+            "Formazione non riparata: lega=%s giornata=%s — %d giocatori schierati "
+            "erano gia' fuori rosa al blocco della giornata (%s). Il punteggio li "
+            "conta comunque: la formazione fa fede. Controllare lineup_repair.",
+            league.id, md.real_matchday, len(bad), bad[:5])
+    return bad
+
+
 def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force, update_snapshot=True):
     """Score every fixture of a classic matchday and FREEZE the results, atomically:
     fx.home_total/away_total (classic goals) + FantasyFixtureDetail.payload (the full
@@ -273,6 +394,19 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
     index = build_matchday_index(md.real_competition_season_id, md.real_matchday, league)
     resolutions = resolutions or {}
 
+    # Which of these players' clubs have not played yet: computed over every roster
+    # involved (a superset of the fielded players — two queries either way) so that a
+    # postponement is told apart from a senza voto BEFORE the lines are composed.
+    teams = {t.id: t for fx in fixtures for t in (fx.home_team, fx.away_team)}
+    roster_ids = set()
+    for team in teams.values():
+        roster_ids |= owned_player_ids(team)
+    pending = pending_player_ids(md.real_competition_season_id, md.real_matchday, roster_ids)
+    # The league's ruling on the matches it decided not to wait for. It covers part
+    # (or all) of the pending set: what stays pending is what nobody has ruled on.
+    office = office_votes_for(league, md, roster_ids)
+    pending -= set(office)
+
     # Pass 1: resolve lineups, collect teams still without one.
     team_lines: dict[tuple[int, str], tuple] = {}
     missing_teams: dict[int, dict] = {}
@@ -280,14 +414,38 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
         for side, team in (("home", fx.home_team), ("away", fx.away_team)):
             res = resolutions.get(str(team.id))
             starters, bench, meta = team_lines_for_conclusion(
-                league, team, fx.competition_id, md.real_matchday, index, res)
+                league, team, fx.competition_id, md.real_matchday, index, res, pending, office)
             if meta["source"] == "missing":
                 missing_teams[team.id] = {"team_id": team.id, "name": team.name, **meta}
             else:
                 team_lines[(fx.id, side)] = (starters, bench)
 
     if missing_teams and not force:
-        return {"updated": 0, "stage_ids": set(), "missing_teams": list(missing_teams.values())}
+        return {"updated": 0, "stage_ids": set(), "missing_teams": list(missing_teams.values()),
+                "pending_matches": []}
+
+    # The lineup is authoritative, which is only sound if every settlement repaired
+    # the lineups that were still open. A player fielded here who had ALREADY left the
+    # team when the round locked means one did not — a bug, not a game situation, and
+    # one that would otherwise pay points to a team that no longer had him. It cannot
+    # be corrected at this point (the lineup is frozen), so it is made loud instead.
+    _warn_about_unrepaired_lineups(league, md, team_lines)
+
+    # Players actually FIELDED whose match has not been played. The matchday cannot
+    # be honestly scored while these exist: the league either waits for the recovery
+    # (the awaiting state) or imposes an office vote. The caller decides; here we
+    # only report it.
+    fielded_pending = {
+        line["player_id"]
+        for lines in team_lines.values()
+        for line in lines[0]
+        if line.get("pending")
+    }
+    pending_info = pending_matches(
+        md.real_competition_season_id, md.real_matchday, fielded_pending)
+    if pending_info and not force:
+        return {"updated": 0, "stage_ids": set(), "missing_teams": [],
+                "pending_matches": pending_info}
 
     # Pass 2: score + persist (a still-missing team under force = forfait / empty).
     updated = 0
@@ -316,4 +474,5 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
     if update_snapshot:
         md.ruleset_snapshot = ruleset.to_snapshot()
         md.save(update_fields=["ruleset_snapshot"])
-    return {"updated": updated, "stage_ids": stage_ids, "missing_teams": []}
+    return {"updated": updated, "stage_ids": stage_ids, "missing_teams": [],
+            "pending_matches": pending_info}

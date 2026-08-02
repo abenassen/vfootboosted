@@ -5,6 +5,7 @@ import {
   addRosterPlayer,
   concludeLeagueMatchday,
   recomputeLeagueMatchday,
+  setLeagueMatchdayAwaiting,
   createLeague,
   getCompetitions,
   getLeagueDetail,
@@ -20,7 +21,13 @@ import {
   updateLeagueSettings,
   updateMemberRole,
 } from '../api';
-import { ApiError, type LeagueSettingsPatch } from '../api/backend';
+import {
+  ApiError,
+  getMatchdayOfficeVotes,
+  setMatchdayOfficeVotes,
+  type LeagueSettingsPatch,
+  type OfficeVoteMatch,
+} from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
@@ -96,6 +103,14 @@ export default function LeagueAdminPage() {
     teams: Array<{ team_id: number; name: string; has_previous_lineup: boolean; previous_lineup_stale: number }>;
     resolutions: Record<number, 'forfait' | 'previous'>;
   } | null>(null);
+  // The office-vote panel for one matchday: the matches with no final data, and the
+  // ruling the admin is about to impose on the ones he ticks.
+  const [officePanel, setOfficePanel] = useState<{
+    md: LeagueMatchdayItem;
+    matches: OfficeVoteMatch[];
+    picked: Record<number, boolean>;
+    voto: string;
+  } | null>(null);
 
   const selectedTeamName = useMemo(
     () => league?.teams.find((t) => t.team_id === selectedTeamId)?.name ?? '',
@@ -156,6 +171,13 @@ export default function LeagueAdminPage() {
     const tab = searchParams.get('tab');
     if (tab === 'league') setActiveTab('league');
     if (tab === 'user') setActiveTab('user');
+    // Deep link straight to a section of the league tab: the conclusion reminder
+    // mails a link and it should land on the queue, not on the tab bar.
+    if (tab && (['roster', 'competitions', 'matchdays', 'auction', 'market'] as const)
+        .includes(tab as LeagueTab)) {
+      setActiveTab('league');
+      setLeagueTab(tab as LeagueTab);
+    }
   }, [searchParams]);
 
   // Seasons available as a league's reference championship (for the create form).
@@ -245,12 +267,60 @@ export default function LeagueAdminPage() {
     }
   }
 
+  // Decided server-side now: the same rule that the conclude endpoint enforces,
+  // including the exception that lets a PARKED matchday be closed out of order as
+  // soon as its postponed match is recovered.
   function concludeDisabledReason(md: LeagueMatchdayItem): string | null {
-    if (md.phase === 'concluded') return 'Già conclusa';
-    if (md.phase === 'future') return 'Concludi prima la giornata attuale';
-    if (!md.real_completion.is_completed) return 'Giornata reale non ancora completata';
-    if (md.fixtures.total === 0) return 'Nessuna fixture fantasy associata';
-    return null;
+    return md.can_conclude ? null : md.conclude_blocked_reason || 'Non concludibile';
+  }
+
+  // The two honest answers to an incomplete matchday, side by side: rule on the
+  // missing matches, or wait for them. This opens the first one.
+  async function openOfficePanel(md: LeagueMatchdayItem) {
+    if (!selectedLeagueId) return;
+    const r = await getMatchdayOfficeVotes(selectedLeagueId, md.fantasy_matchday_id);
+    setOfficePanel({
+      md,
+      matches: r.matches,
+      picked: Object.fromEntries(r.matches.map((m) => [m.match_id, m.office_vote != null])),
+      voto: String(r.matches.find((m) => m.office_vote != null)?.office_vote ?? 6),
+    });
+  }
+
+  async function applyOfficeVotes(remove = false) {
+    if (!selectedLeagueId || !officePanel) return;
+    const ids = officePanel.matches.filter((m) => officePanel.picked[m.match_id]).map((m) => m.match_id);
+    if (!ids.length) {
+      setMsg('Nessuna partita selezionata');
+      return;
+    }
+    const voto = Number(officePanel.voto);
+    if (!remove && (!Number.isFinite(voto) || voto < 0 || voto > 10)) {
+      setMsg('Il voto deve stare fra 0 e 10');
+      return;
+    }
+    const r = await setMatchdayOfficeVotes(
+      selectedLeagueId, officePanel.md.fantasy_matchday_id, ids, voto, 'Partita rinviata', remove);
+    setOfficePanel((p) => (p ? { ...p, matches: r.matches } : p));
+    await loadMatchdays(selectedLeagueId);
+    setMsg(
+      remove
+        ? `Voto d'ufficio revocato su ${ids.length} partit${ids.length === 1 ? 'a' : 'e'}`
+        : `Voto d'ufficio ${voto} su ${ids.length} partit${ids.length === 1 ? 'a' : 'e'}: ora puoi concludere`,
+    );
+  }
+
+  // Park the current matchday (a postponement: the league moves on and this round is
+  // scored when the recovery is played), or bring it back into the queue.
+  async function awaitAction(md: LeagueMatchdayItem, awaiting: boolean, reason = '') {
+    if (!selectedLeagueId) return;
+    await setLeagueMatchdayAwaiting(selectedLeagueId, md.fantasy_matchday_id, awaiting, reason);
+    await loadMatchdays(selectedLeagueId);
+    setMsg(
+      awaiting
+        ? `Giornata ${md.real_matchday} in attesa: la lega avanza, la chiuderai al recupero`
+        : `Giornata ${md.real_matchday} di nuovo in coda`,
+    );
   }
 
   // If a matchday op reports classic teams without a lineup, open the resolution
@@ -1163,8 +1233,9 @@ export default function LeagueAdminPage() {
                 <Card className="p-4">
                   <SectionTitle>Giornate — progressione della lega</SectionTitle>
                   <div className="mt-1 text-xs text-slate-500">
-                    La lega avanza una giornata alla volta. Concludi la giornata <b>attuale</b> per calcolare i punteggi:
-                    diventerà <span className="text-green-700">conclusa</span> e la successiva passerà ad attuale.
+                    Questo è il <b>registro</b> della lega: cosa è stato conteggiato. Il campionato va avanti da sé —
+                    formazioni e blocchi seguono il calendario reale e non aspettano queste chiusure. Se una partita è
+                    stata rinviata puoi mettere la giornata <b>in attesa</b>: la lega prosegue e la chiudi al recupero.
                   </div>
                   <div className="mt-3 space-y-2 text-sm">
                     {matchdays.length ? (
@@ -1174,11 +1245,13 @@ export default function LeagueAdminPage() {
                         const phaseChip =
                           md.phase === 'concluded'
                             ? { tone: 'green' as const, label: 'Conclusa' }
+                            : md.phase === 'awaiting'
+                            ? { tone: 'amber' as const, label: 'In attesa di recupero' }
                             : md.phase === 'current'
-                            ? { tone: 'amber' as const, label: 'Attuale' }
+                            ? { tone: 'amber' as const, label: 'Da conteggiare' }
                             : { tone: 'slate' as const, label: 'Futura' };
                         const frame =
-                          md.phase === 'current'
+                          md.phase === 'current' || md.phase === 'awaiting'
                             ? 'border-amber-300 bg-amber-50'
                             : md.phase === 'concluded'
                             ? 'border-slate-100 bg-white'
@@ -1193,23 +1266,66 @@ export default function LeagueAdminPage() {
                               <Badge tone={md.real_completion.is_completed ? 'green' : 'amber'}>
                                 reale {md.real_completion.completed}/{md.real_completion.total}
                               </Badge>
+                              {md.is_playing ? <Badge tone="blue">In campo ora</Badge> : null}
+                              {md.is_fieldable ? <Badge tone="blue">Schierabile</Badge> : null}
                             </div>
                             <div className="mt-1 text-xs text-slate-600">
                               Fixture fantasy: {md.fixtures.finished}/{md.fixtures.total}
                               {md.concluded_by ? ` · conclusa da ${md.concluded_by}` : ''}
+                              {md.awaiting_reason ? ` · ${md.awaiting_reason}` : ''}
                             </div>
-                            {md.phase === 'current' ? (
-                              <div className="mt-2">
+                            {md.phase === 'current' || md.phase === 'awaiting' ? (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <Button
                                   size="sm"
                                   aria-label={`Concludi giornata ${md.real_matchday}`}
                                   disabled={!canConclude || busy}
                                   onClick={() => void run(() => concludeAction(md))}
                                 >
-                                  Concludi giornata attuale
+                                  {md.phase === 'awaiting' ? 'Concludi il recupero' : 'Concludi giornata'}
                                 </Button>
+                                {/* The explicit gesture: whether to wait for a
+                                    postponed match or not is a decision of the
+                                    league, never something the calendar does by
+                                    itself. */}
+                                {md.phase === 'current' && !md.real_completion.is_completed ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => void run(() => openOfficePanel(md))}
+                                    className="text-xs font-semibold text-sky-700 hover:text-sky-900 disabled:opacity-50"
+                                  >
+                                    Voto d'ufficio…
+                                  </button>
+                                ) : null}
+                                {md.phase === 'current' && !md.real_completion.is_completed ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => {
+                                      const reason = window.prompt(
+                                        `Giornata ${md.real_matchday}: la lega va avanti e questa resta in attesa del recupero.\n\nMotivo (facoltativo):`,
+                                        'Partita rinviata',
+                                      );
+                                      if (reason !== null) void run(() => awaitAction(md, true, reason));
+                                    }}
+                                    className="text-xs font-semibold text-amber-700 hover:text-amber-900 disabled:opacity-50"
+                                  >
+                                    Avanza, questa resta in attesa
+                                  </button>
+                                ) : null}
+                                {md.phase === 'awaiting' ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => void run(() => awaitAction(md, false))}
+                                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                                  >
+                                    Rimetti in coda
+                                  </button>
+                                ) : null}
                                 {disabledReason ? (
-                                  <span className="ml-2 text-xs text-amber-700">{disabledReason}</span>
+                                  <span className="text-xs text-amber-700">{disabledReason}</span>
                                 ) : null}
                               </div>
                             ) : null}
@@ -1238,6 +1354,90 @@ export default function LeagueAdminPage() {
                                 >
                                   …con regole congelate
                                 </button>
+                              </div>
+                            ) : null}
+
+                            {officePanel && officePanel.md.fantasy_matchday_id === md.fantasy_matchday_id ? (
+                              <div className="mt-3 rounded-xl border border-sky-300 bg-sky-50 p-3">
+                                <div className="text-sm font-semibold text-sky-900">
+                                  Voto d'ufficio — solo per questa lega
+                                </div>
+                                <div className="mt-1 text-xs text-sky-800">
+                                  Un voto <b>imposto</b>, non un dato: vale come voto puro e come fantavoto, senza
+                                  bonus né malus, perché la partita non si è giocata. Le altre leghe non ne sono
+                                  toccate: possono aspettare il recupero.
+                                </div>
+                                {officePanel.matches.length ? (
+                                  <>
+                                    <div className="mt-2 space-y-1">
+                                      {officePanel.matches.map((m) => (
+                                        <label
+                                          key={m.match_id}
+                                          className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-sm"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={!!officePanel.picked[m.match_id]}
+                                            onChange={(e) =>
+                                              setOfficePanel((p) =>
+                                                p
+                                                  ? { ...p, picked: { ...p.picked, [m.match_id]: e.target.checked } }
+                                                  : p,
+                                              )
+                                            }
+                                          />
+                                          <span className="min-w-0 flex-1 truncate">
+                                            {m.home} — {m.away}
+                                          </span>
+                                          <Badge tone={m.status === 'postponed' ? 'amber' : 'slate'}>
+                                            {m.status === 'postponed' ? 'rinviata' : m.status}
+                                          </Badge>
+                                          {m.office_vote != null ? (
+                                            <Badge tone="green">d'ufficio {m.office_vote}</Badge>
+                                          ) : null}
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                                      <label className="text-xs text-sky-900">
+                                        Voto{' '}
+                                        <input
+                                          type="number"
+                                          step="0.5"
+                                          min="0"
+                                          max="10"
+                                          value={officePanel.voto}
+                                          onChange={(e) =>
+                                            setOfficePanel((p) => (p ? { ...p, voto: e.target.value } : p))
+                                          }
+                                          className="w-16 rounded-lg border border-slate-300 px-2 py-1"
+                                        />
+                                      </label>
+                                      <Button size="sm" disabled={busy} onClick={() => void run(() => applyOfficeVotes(false))}>
+                                        Imponi
+                                      </Button>
+                                      <button
+                                        type="button"
+                                        disabled={busy}
+                                        onClick={() => void run(() => applyOfficeVotes(true))}
+                                        className="text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                                      >
+                                        Revoca
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setOfficePanel(null)}
+                                        className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                                      >
+                                        Chiudi
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="mt-2 text-xs text-sky-800">
+                                    Nessuna partita senza dati definitivi in questa giornata.
+                                  </div>
+                                )}
                               </div>
                             ) : null}
 

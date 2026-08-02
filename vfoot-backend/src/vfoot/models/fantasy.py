@@ -289,7 +289,23 @@ class CompetitionStageRule(models.Model):
 
 
 class FantasyMatchday(models.Model):
+    """One real matchday as the LEAGUE's ledger sees it.
+
+    Three states, and the middle one is the whole point. ``planned`` is waiting its
+    turn; ``concluded`` has been scored and counts. ``awaiting`` is the admin saying
+    "a real match of this round has not been played yet (a postponement) — the league
+    moves on, this one stays open and will be scored when the recovery is played".
+    Without it the ledger pointer is a single file: one incomplete round and every
+    round behind it is stuck, which in Serie A 2025-26 would have frozen a league for
+    four weeks (matchday 16, four matches recovered on 14-15 January).
+
+    Note this is the LEDGER only. What is being played, what can still be fielded and
+    when the market is frozen are read from the real calendar (see
+    ``services/matchday_state.py``) and never wait for an admin to click anything.
+    """
+
     STATUS_PLANNED = "planned"
+    STATUS_AWAITING = "awaiting"
     STATUS_CONCLUDED = "concluded"
 
     league = models.ForeignKey(FantasyLeague, on_delete=models.CASCADE, related_name="fantasy_matchdays")
@@ -301,9 +317,17 @@ class FantasyMatchday(models.Model):
     real_matchday = models.IntegerField()
     status = models.CharField(
         max_length=16,
-        choices=[(STATUS_PLANNED, "Planned"), (STATUS_CONCLUDED, "Concluded")],
+        choices=[(STATUS_PLANNED, "Planned"), (STATUS_AWAITING, "Awaiting"),
+                 (STATUS_CONCLUDED, "Concluded")],
         default=STATUS_PLANNED,
     )
+    # Set when the admin parks the matchday to let the league advance past it.
+    awaiting_since = models.DateTimeField(null=True, blank=True)
+    awaiting_reason = models.CharField(max_length=200, blank=True, default="")
+    # Last time we nudged the admin about this matchday waiting to be concluded.
+    # A stamp, not a counter: it exists so the reminder repeats at a decent interval
+    # instead of once per tick.
+    nudged_at = models.DateTimeField(null=True, blank=True)
     concluded_at = models.DateTimeField(null=True, blank=True)
     concluded_by = models.ForeignKey(
         User,
@@ -326,24 +350,23 @@ class FantasyMatchday(models.Model):
 
 
 class OfficeOverride(models.Model):
-    """League-scoped 'voto d'ufficio': substitute a real match's data with an
-    office result when that data is missing/late (typically a postponement).
+    """League-scoped 'voto d'ufficio': an IMPOSED VOTE for a real match the league
+    has decided not to wait for (typically a postponement).
 
-    Takes PRIORITY over real SofaScore data when the league computes its fantasy
-    scores. Each league decides INDEPENDENTLY — and occasionally — whether to wait
-    for the real data or impose an office result for a given real match; one league
-    overriding a match does not affect another.
+    Each league decides independently: one may impose the 6 on Como-Milan of 21
+    December while another waits for the 15 January recovery, and neither sees the
+    other's choice — which is why this is keyed on (league, match) and touches no
+    real-data table.
 
-    The substitute follows the "abolish roles" design: outfield players receive a
-    global-mean, 90'-normalised zone vector (an average contributor — the spatial
-    equivalent of a flat "6"); goalkeepers, scored on their separate goals-prevented
-    channel, receive a neutral goals-prevented scalar instead. Both are tunable
-    around the mean. The mean is computed at scoring time, so this row only stores
-    the decision + tuning, never frozen numbers.
+    Deliberately a SCALAR, not fabricated data. An earlier design gave outfield
+    players a global-mean zone vector and goalkeepers a neutral goals-prevented
+    figure; that would have injected into the database something shaped exactly like
+    a measurement and, from there, into every average, exposure and model that reads
+    zones. An office vote is not a datum, it is a ruling: it enters the scoring at
+    the level of the vote, gets no bonus/malus (no events happened), and applies to
+    goalkeepers through the same door as everyone else — their goals-prevented
+    channel is simply not consulted.
     """
-
-    TEMPLATE_NEUTRAL_MEAN = "neutral_mean"
-    TEMPLATE_CHOICES = [(TEMPLATE_NEUTRAL_MEAN, "Neutral mean (6 d'ufficio)")]
 
     league = models.ForeignKey(FantasyLeague, on_delete=models.CASCADE, related_name="office_overrides")
     # Context: which fantasy matchday this override belongs to (for listing/UI).
@@ -354,13 +377,10 @@ class OfficeOverride(models.Model):
     # roster / lineup) get the office substitute instead of their real performance.
     match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="office_overrides")
 
-    template = models.CharField(max_length=24, choices=TEMPLATE_CHOICES, default=TEMPLATE_NEUTRAL_MEAN)
-    # Outfield tuning: multiplier on the global-mean zone vector (1.0 = exactly
-    # average). >1 rewards, <1 penalises, uniformly across zones.
-    outfield_scale = models.FloatField(default=1.0)
-    # Goalkeeper office value: an explicit goals-prevented scalar. Null => use the
-    # neutral/global-mean goals-prevented at scoring time.
-    gk_goals_prevented = models.FloatField(null=True, blank=True)
+    # The imposed vote. It is both the voto puro and the fantavoto of every player of
+    # this match: with no game played there is no goal, no assist and no card to add.
+    # 6.0 is the conventional "d'ufficio", but a league is free to rule otherwise.
+    voto = models.FloatField(default=6.0)
 
     reason = models.CharField(max_length=200, blank=True, default="")
     is_active = models.BooleanField(default=True)

@@ -119,7 +119,11 @@ def _mod_keeper_clean_sheet(ctx: dict, rs: Ruleset) -> ModifierResult | None:
         return None
     gk = ctx["gk_line"]
     # Imbattuto = the effective keeper played (has a vote) and conceded no goals.
-    imbattuto = bool(gk and not gk.get("sv") and (gk.get("conceded") or 0) == 0)
+    # An OFFICE vote is explicitly not enough: it is a ruling on the vote, not a
+    # match that was played, and there is no clean sheet to be had in a game nobody
+    # played — reading its conceded=0 as one would be inventing an event.
+    imbattuto = bool(gk and not gk.get("sv") and not gk.get("office")
+                     and (gk.get("conceded") or 0) == 0)
     return ModifierResult(
         key="keeper_clean_sheet", eligible=imbattuto,
         value=rs.keeper_clean_sheet_value if imbattuto else 0.0,
@@ -149,8 +153,13 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
     s_ids = [l["player_id"] for l in starters]
     b_ids = [l["player_id"] for l in bench]
     voted = {pid for pid in s_ids + b_ids if not (s_by.get(pid) or b_by.get(pid))["sv"]}
+    # A player whose real match has not been played yet is s.v. on paper but is NOT
+    # a hole the bench should cover — see apply_classic_substitutions. On the bench
+    # he is simply never eligible, which he already is by not being in ``voted``.
+    frozen = {pid for pid in s_ids if s_by[pid].get("pending")}
 
-    res = apply_classic_substitutions(s_ids, b_ids, roles, voted, max_subs=rs.max_substitutions)
+    res = apply_classic_substitutions(s_ids, b_ids, roles, voted,
+                                      max_subs=rs.max_substitutions, frozen=frozen)
 
     name = {l["player_id"]: l.get("name", str(l["player_id"])) for l in starters + bench}
     subs = []
@@ -188,6 +197,9 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
         "bench": [b_by[l["player_id"]] for l in bench],
         "substitutions": subs,
         "unresolved_sv": list(res.unresolved),
+        # Fielded players whose real match has not been played: what the league has
+        # to decide about (wait for the recovery, or impose an office vote).
+        "pending": sorted(frozen),
         "base_total": base_total,
         "modifiers": mods,
         "defense": defense,

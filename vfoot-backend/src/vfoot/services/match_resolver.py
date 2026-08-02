@@ -116,6 +116,71 @@ def resolve_player(player_id: int, cs_id: int, matchday: int, reference=None) ->
     return resolve_matchday(cs_id, matchday, [player_id], reference)[player_id]
 
 
+def pending_player_ids(cs_id: int, matchday: int, player_ids) -> set:
+    """Of these players, the ones whose club has NOT played its match of the matchday.
+
+    The scoring path's entry point into this module: it is what lets a postponement
+    stop being indistinguishable from a senza voto. A player is PENDING when his
+    club's authoritative row for the matchday is not ``data_ready`` — postponed,
+    still to be played, live, or finished but not yet stable. Everyone else (no
+    club here, club not playing this round, match concluded) is left to the normal
+    s.v. treatment, which is the correct one for them.
+
+    Same caveat as ``resolve_matchday``: the club is the player's CURRENT open
+    stint. For a pending match there is no appearance to read the true club from,
+    so there is nothing better available — and the case only bites for a player who
+    changed club between the postponement and the recovery.
+    """
+    player_ids = list(player_ids)
+    if not player_ids:
+        return set()
+    fixtures = matchday_fixtures_by_team(cs_id, matchday)
+    stints = dict(
+        PlayerTeamStint.objects.filter(
+            player_id__in=player_ids,
+            team_season__competition_season_id=cs_id,
+            end_date__isnull=True,
+        ).values_list("player_id", "team_season_id")
+    )
+    out = set()
+    for pid in player_ids:
+        match = fixtures.get(stints.get(pid))
+        if match is not None and not match.data_ready:
+            out.add(pid)
+    return out
+
+
+def pending_matches(cs_id: int, matchday: int, player_ids) -> list:
+    """The distinct real matches behind ``pending_player_ids`` — what the admin has
+    to be told about ("Como-Milan non si è giocata"), rather than a list of players."""
+    player_ids = list(player_ids)
+    if not player_ids:
+        return []
+    fixtures = matchday_fixtures_by_team(cs_id, matchday)
+    stints = dict(
+        PlayerTeamStint.objects.filter(
+            player_id__in=player_ids,
+            team_season__competition_season_id=cs_id,
+            end_date__isnull=True,
+        ).values_list("player_id", "team_season_id")
+    )
+    seen: dict[int, Match] = {}
+    for pid in player_ids:
+        match = fixtures.get(stints.get(pid))
+        if match is not None and not match.data_ready:
+            seen[match.id] = match
+    return [
+        {
+            "match_id": m.id,
+            "status": m.status,
+            "home": m.home_team.team.name,
+            "away": m.away_team.team.name,
+            "kickoff": m.kickoff.isoformat() if m.kickoff else None,
+        }
+        for m in sorted(seen.values(), key=lambda x: (x.kickoff is None, x.kickoff, x.id))
+    ]
+
+
 def matchday_fixtures_by_team(cs_id: int, matchday: int) -> dict:
     """{team_season_id: Match} for one matchday, keeping the authoritative row when a
     club has more than one (postponed shell + replay)."""
