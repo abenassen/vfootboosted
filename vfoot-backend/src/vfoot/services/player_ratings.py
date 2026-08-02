@@ -32,18 +32,10 @@ from pathlib import Path
 from django.conf import settings
 from django.core.cache import cache
 
-from realdata.models import CompetitionSeason, Match, Player
+from realdata.models import CompetitionSeason, Match, Player, PlayerZoneFeature
 from vfoot.services.classic_pagella import data_version, get_reference
 from vfoot.services.vote_reference import scoring_fingerprint
-from vfoot.services.classic_rating import (
-    _minutes_map,
-    _per_match_player_totals,
-    _vote_from_index,
-    defensive_exposure,
-    index_for_role,
-    is_rated,
-    current_role_map,
-)
+from vfoot.services.classic_rating import PROVIDER_SOFASCORE, voto_puro_for_match
 
 log = logging.getLogger(__name__)
 
@@ -80,52 +72,47 @@ VOTE_MIN_EST, VOTE_MAX_EST = 5.0, 6.6
 
 
 def _compute_season_player_ratings(cs_id: int) -> dict:
-    """Bulk pass: per-match features, minutes and the role table are each loaded
-    ONCE for the whole season (a handful of queries)."""
-    match_ids = list(Match.objects
-                     .filter(competition_season_id=cs_id,
-                             status=Match.STATUS_FINISHED)
-                     .values_list("id", flat=True))
-    if not match_ids:
-        return {}
-    ref = get_reference(cs_id)
-    totals = _per_match_player_totals(match_ids)
-    if not totals:
-        # No zone coverage at all (see the guard in _per_match_player_totals).
-        # Everything below reads the same tables, so there is nothing to gain by
-        # going on — and defensive_exposure alone is several queries.
-        return {}
-    minutes = _minutes_map(match_ids)
-    # The defensive exposure is an ARGUMENT to the index, not something read from
-    # the totals, so leaving it out does not omit a detail — it silently scores
-    # every outfield player as if the opponent had created nothing in his zones.
-    # It used to be missing here while ``build_reference`` and
-    # ``voto_puro_for_match`` both pass it, so the listone z-scored an index built
-    # one way against a scale calibrated on another. Cost: +0.157 of a vote on
-    # defenders (who carry the most exposure), +0.063 on midfielders, +0.015 on
-    # attackers and exactly 0 on keepers, whose channel has no exposure term —
-    # which is why POR was the one role landing on a mean of 6.00 while the
-    # listone average sat at 6.09 against the 5.98 of the real pagelle.
-    exposure = defensive_exposure(match_ids, minutes)
-    # Canonical scoring role source (k-means disambiguated), NOT the raw TM seed.
-    roles = current_role_map(only_declared=True)
+    """Average voto puro per player over a season — THE SAME voto puro the pagella
+    shows, because it is literally the same function.
 
+    This used to reimplement the scoring inline, and reimplementing it meant
+    drifting from it. Four divergences had accumulated, none of them visible from
+    the outside: the defensive exposure was not passed to the index at all (+0.157
+    of a vote on defenders); the keeper's evidence damping was skipped, so a keeper
+    who faced one shot was judged on it; the post-adjustments for sending-off, own
+    goal, missed penalty and result mitigation were all missing; and the rated gate
+    ignored the decisive-event override, so a scorer with few minutes was dropped
+    here while the pagella rated him.
+
+    The listone calls this value "la media del voto puro (la nostra pagella)", so
+    anything other than the pagella's own number is a lie in the interface. Going
+    through ``voto_puro_for_match`` costs about 3x (≈4s → ≈10s on a full Serie A
+    season) because the per-match event queries no longer run in bulk — paid once
+    per scoring fingerprint, behind the cache, and worth it to make the two paths
+    incapable of disagreeing.
+    """
+    matches = list(Match.objects
+                   .filter(competition_season_id=cs_id,
+                           status=Match.STATUS_FINISHED))
+    if not matches:
+        return {}
+    # Cheap probe before 380 scoring passes that would each find nothing: a slim
+    # database (see export_dev_db) has no zone features, and the snapshot fallback
+    # in season_player_ratings is what answers for it.
+    if not PlayerZoneFeature.objects.filter(
+            match_id__in=[m.id for m in matches],
+            provider=PROVIDER_SOFASCORE).exists():
+        return {}
+
+    ref = get_reference(cs_id)
     agg: dict[int, list] = defaultdict(lambda: [0.0, 0])
-    for (mid, pid), feats in totals.items():
-        role = roles.get(pid)
-        if not role:
-            continue
-        mins = minutes.get((mid, pid), 0)
-        if mins <= 0 or not is_rated(mins, feats):
-            continue
-        # index_for_role dispatches to the goalkeeper channel for POR, so keepers
-        # now get a season value too (they used to be skipped entirely).
-        vote = _vote_from_index(
-            index_for_role(role, feats, mins, exposure.get((mid, pid), 0.0)),
-            role, mins, ref)
-        a = agg[pid]
-        a[0] += vote
-        a[1] += 1
+    for match in matches:
+        for row in voto_puro_for_match(match, ref):
+            if row["voto_puro"] is None:
+                continue
+            a = agg[row["player_id"]]
+            a[0] += row["voto_puro"]
+            a[1] += 1
     return {pid: {"avg": round(s / n, 2), "n": n}
             for pid, (s, n) in agg.items() if n}
 

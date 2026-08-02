@@ -73,7 +73,10 @@ def weights_fingerprint() -> str:
 # and from the calibration file, so a pure code fix leaves it identical and every
 # cached vote in the wild stays wrong until someone clears the cache by hand.
 #   1 -> 2: the listone was building the index without the defensive exposure.
-SCORING_CODE_VERSION = 2
+#   2 -> 3: the listone now scores through voto_puro_for_match, so it also gets
+#           the keeper evidence damping, the sending-off / own-goal / missed-penalty
+#           drops, the result mitigation and the decisive-event rated override.
+SCORING_CODE_VERSION = 3
 
 
 def scoring_fingerprint() -> str:
