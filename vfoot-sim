@@ -126,6 +126,10 @@ start_frontend() {
     say "frontend  gia' in ascolto sulla $FRONT_PORT, lasciato com'e'"
     return 0
   fi
+  # Lasciata come traccia per `stop`: chiudere una porta che non abbiamo aperto
+  # noi vorrebbe dire spegnere il frontend avviato con ./vfoot-dev, che e'
+  # esattamente cio' che questo script promette di non toccare.
+  : > "$LOGDIR/started-frontend"
   local npm_bin=npm
   command -v npm >/dev/null 2>&1 || {
     # Node qui e' installato come zip nella cartella utente (l'MSI vuole
@@ -147,7 +151,7 @@ cmd_start() {
   export_sim_env
   printf '%sscenario %s%s  orologio simulato: %s%s%s\n' \
     "$BOLD" "$SCENARIO" "$X" "$OK" "$VFOOT_FAKE_NOW" "$X"
-  mkdir -p "$LOGDIR"; : > "$PIDFILE"
+  mkdir -p "$LOGDIR"; : > "$PIDFILE"; rm -f "$LOGDIR/started-frontend"
   kill_port "$BACK_PORT" || true
   start_backend
   start_ticks
@@ -187,8 +191,14 @@ EOF
   else
     say "n/d       backend fermo"
   fi
-  [ -s "$PIDFILE" ] && printf '%s  avviati da questo script: %s pid  (log: %s)%s\n' \
-    "$DIM" "$(wc -l < "$PIDFILE" | tr -d ' ')" "$LOGDIR" "$X"
+  # `|| true`: un comando che RIFERISCE non deve uscire con errore solo perche' non
+  # c'e' niente da riferire. Senza, `status` a simulazione ferma tornava 1, e uno
+  # script che lo interrogasse l'avrebbe letto come un guasto.
+  if [ -s "$PIDFILE" ]; then
+    printf '%s  avviati da questo script: %s pid  (log: %s)%s\n' \
+      "$DIM" "$(wc -l < "$PIDFILE" | tr -d ' ')" "$LOGDIR" "$X"
+  fi
+  return 0
 }
 
 cmd_stop() {
@@ -203,7 +213,12 @@ cmd_stop() {
   # I pid dei figli avviati con nohup non bastano su Windows, dove il processo
   # vero e' un nipote: si chiude anche per porta.
   kill_port "$BACK_PORT" || true
-  kill_port "$FRONT_PORT" || true
+  if [ -f "$LOGDIR/started-frontend" ]; then
+    kill_port "$FRONT_PORT" || true
+    rm -f "$LOGDIR/started-frontend"
+  elif port_busy "$FRONT_PORT"; then
+    say "frontend  lasciato acceso: non l'ha avviato questo script"
+  fi
   # Il cron non ascolta su nessuna porta, quindi va cercato per riga di comando.
   if command -v taskkill.exe >/dev/null 2>&1; then
     "$PY" - <<'EOF' 2>/dev/null || true
