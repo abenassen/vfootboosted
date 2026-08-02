@@ -642,9 +642,9 @@ def _ingest_match(
     # /lineups statistics, so they must be ingested as part of every import.
     cards = _ingest_cards(incidents_rows, match, home_ts, away_ts, player_cache)
 
-    # Idempotent write: drop this match+provider, then bulk insert.
-    PlayerZoneFeature.objects.filter(match=match, provider=PROVIDER).delete()
-    TeamZoneFeature.objects.filter(match=match, provider=PROVIDER).delete()
+    # MatchShot stays delete-and-reinsert: its unique constraint is CONDITIONAL
+    # (~Q(external_id="")), which update_conflicts cannot key on, and it is ~25 rows
+    # a match — nothing worth the complication.
     MatchShot.objects.filter(match=match, provider=PROVIDER).delete()
     MatchShot.objects.bulk_create(shot_rows, batch_size=500, ignore_conflicts=True)
 
@@ -655,29 +655,73 @@ def _ingest_match(
             return "heatmap_points"
         return "heatmap_interpolated"
 
-    player_rows = [
-        PlayerZoneFeature(match=match, player_id=pid, team_side=side, zone_key=zone,
-                          feature_key=key, value=value, provider=PROVIDER,
-                          source_method=method_for(key))
-        for (pid, side, zone, key), value in player_zone.items()
-    ]
-    team_rows = [
-        TeamZoneFeature(match=match, team_side=side, zone_key=zone, feature_key=key,
-                        value=value, provider=PROVIDER, source_method=method_for(key))
-        for (side, zone, key), value in team_zone.items()
-    ]
-    PlayerZoneFeature.objects.bulk_create(player_rows, batch_size=1000, ignore_conflicts=True)
-    TeamZoneFeature.objects.bulk_create(team_rows, batch_size=1000, ignore_conflicts=True)
+    player_written, player_total = _upsert_zone_features(
+        PlayerZoneFeature, match,
+        attnames=("player_id", "team_side", "zone_key", "feature_key"),
+        unique_names=("player", "team_side", "zone_key", "feature_key"),
+        rows={k: (v, method_for(k[3])) for k, v in player_zone.items()})
+    team_written, team_total = _upsert_zone_features(
+        TeamZoneFeature, match,
+        attnames=("team_side", "zone_key", "feature_key"),
+        unique_names=("team_side", "zone_key", "feature_key"),
+        rows={k: (v, method_for(k[2])) for k, v in team_zone.items()})
 
     log(f"  match {match_id} {home_team.get('name')} v {away_team.get('name')}: "
-        f"appearances={appearances} cards={cards} player_rows={len(player_rows)} "
-        f"no_heatmap={no_heatmap}")
+        f"appearances={appearances} cards={cards} "
+        f"player_rows={player_written}/{player_total} no_heatmap={no_heatmap}")
 
     return SofaIngestResult(
         matches=1, appearances=appearances, cards=cards,
-        player_zone_features=len(player_rows), team_zone_features=len(team_rows),
+        player_zone_features=player_total, team_zone_features=team_total,
         players_without_heatmap=no_heatmap,
     )
+
+
+def _upsert_zone_features(model, match, *, attnames: tuple[str, ...],
+                          unique_names: tuple[str, ...],
+                          rows: dict[tuple, tuple[float, str]]) -> tuple[int, int]:
+    """Write a match's zone features WITHOUT dropping and re-inserting them.
+
+    Delete-and-reinsert is the natural way to be idempotent and it was right while
+    a match was imported once, after full time. It is wrong when the same match is
+    imported every ten minutes for two hours: each pass rebuilds ~4.800 rows and
+    every index over them, to change a few hundred numbers.
+
+    So: upsert on the natural key, and — since the read costs one query and saves
+    most of the writes — send only the rows whose value actually moved. During a
+    match the eleven on the pitch keep growing, so the saving is on whoever has
+    already come off and on the dead spells; it is free either way.
+
+    Returns (rows written, rows the match has). ``attnames`` are the column-level
+    names (``player_id``), ``unique_names`` the field-level ones the constraint is
+    declared with (``player``) — Django wants each in its own place.
+
+    The delete at the end is the part that is easy to forget: an upsert never
+    removes what stopped arriving. In a live match values only grow, so it should
+    find nothing — but a re-import after a provider correction (a shot reassigned
+    to another player) would otherwise leave the old row behind for ever, and a
+    stale row in a long-format table is indistinguishable from a real one.
+    """
+    existing: dict[tuple, tuple[int, float]] = {
+        tuple(row[:-2]): (row[-2], row[-1])
+        for row in model.objects.filter(match=match, provider=PROVIDER)
+        .values_list(*attnames, "id", "value")
+    }
+    changed = [key for key, (value, _method) in rows.items()
+               if key not in existing or existing[key][1] != value]
+    if changed:
+        model.objects.bulk_create(
+            [model(match=match, provider=PROVIDER, value=rows[k][0],
+                   source_method=rows[k][1], **dict(zip(attnames, k)))
+             for k in changed],
+            batch_size=1000, update_conflicts=True,
+            update_fields=["value", "source_method"],
+            unique_fields=["match", *unique_names, "provider"],
+        )
+    gone = [rid for key, (rid, _v) in existing.items() if key not in rows]
+    if gone:
+        model.objects.filter(id__in=gone).delete()
+    return len(changed), len(rows)
 
 
 # -- orchestrator --------------------------------------------------------

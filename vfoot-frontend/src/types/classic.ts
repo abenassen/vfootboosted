@@ -34,6 +34,9 @@ export interface ClassicPlayerLine {
   pending?: boolean;
   /** The vote was IMPOSED by the league for a match that was not played. */
   office?: boolean;
+  /** His club's match is being played, or has ended and the provider has not
+   *  settled the data. There IS a vote — it is simply going to move. */
+  provisional?: boolean;
   voto_puro: number | null;
   bonus: number; // goal +3, assist +1, pen save +3
   malus: number; // own goal -2, pen miss -3, card, GK -1/goal conceded
@@ -82,6 +85,8 @@ export interface ClassicTeamDetail {
   total: number; // base_total + applied defence modifier
   goals: number; // classic goals from the total
   defense: ClassicDefenseBonus;
+  /** At least one line is still moving, so this total is too. */
+  provisional?: boolean;
 }
 
 export interface ClassicFixtureDetail {
@@ -100,4 +105,8 @@ export interface ClassicFixtureDetail {
   result: 'home' | 'away' | 'draw';
   home: ClassicTeamDetail;
   away: ClassicTeamDetail;
+  /** Computed on the fly because the matchday is not concluded (nothing frozen). */
+  live?: boolean;
+  /** Some real match behind these votes has not settled: the score can still change. */
+  provisional?: boolean;
 }

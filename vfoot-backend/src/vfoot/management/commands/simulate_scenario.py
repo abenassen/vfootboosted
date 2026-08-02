@@ -56,7 +56,25 @@ class Scenario:
     through: int
     at: str
     seed: int = 2627
+    # Provider id of the match to move to the LAST kick-off slot of its round, so a
+    # scenario can name the match that should be in progress rather than accepting
+    # whichever fixture sorts first. See season_simulator._order_fixtures.
+    headline: str = ""
+    # The league by NAME as well as by id. An id is not portable: it is minted by
+    # whichever database seeded the league, so a scenario written on one machine
+    # pointed at a different league (or at nothing) on the next — and the symptom
+    # was not "league 62 is the wrong one" but "every squad failed to field a legal
+    # XI", which reads like a bug in the fielding. Resolved by name first, and
+    # SEEDED under that name when it is not there, so a scenario is reproducible
+    # from an empty database. Empty name => id only, the old behaviour.
+    league_name: str = ""
+    league_rounds: int = 3   # snake-drafted cycles of 9 rounds each, when seeding
 
+
+# The league every scenario plays in. One name, shared, because the scenarios
+# differ by INSTANT and by nothing else — and because a name survives a database
+# reset in a way an id does not.
+LEAGUE = "Lega Live · Serie A 2026/27"
 
 SCENARIOS = {
     s.name: s for s in (
@@ -69,6 +87,7 @@ SCENARIOS = {
                 "the two clocks visibly apart."),
             season_id=3, league_id=62, through=22,
             at="2027-01-31T18:35:00+01:00",
+            league_name=LEAGUE,
         ),
         Scenario(
             name="g22-pre",
@@ -78,6 +97,20 @@ SCENARIOS = {
                 "and still fieldable by everyone (see the Modello 1 deadline)."),
             season_id=3, league_id=62, through=22,
             at="2027-01-30T14:00:00+01:00",
+            league_name=LEAGUE,
+        ),
+        Scenario(
+            name="napoli-inter",
+            description=(
+                "Sunday night, matchday 22: nine matches played and Napoli-Inter in "
+                "progress at about the half hour. The scenario for watching the live "
+                "pipeline work — the votes of the two squads move every ten minutes, "
+                "the rest of the round is already settled, and the league's tabellini "
+                "are half final and half provisional."),
+            season_id=3, league_id=0, through=22,
+            at="2027-01-31T21:15:00+01:00",
+            headline="16283209",   # SSC Napoli vs Inter, moved to the last slot
+            league_name=LEAGUE,
         ),
         Scenario(
             name="g22-done",
@@ -87,6 +120,7 @@ SCENARIOS = {
                 "one round behind a completed calendar."),
             season_id=3, league_id=62, through=22,
             at="2027-02-01T10:00:00+01:00",
+            league_name=LEAGUE,
         ),
     )
 }
@@ -119,8 +153,10 @@ class Command(BaseCommand):
             for s in SCENARIOS.values():
                 self.stdout.write(self.style.MIGRATE_HEADING(f"{s.name}"))
                 self.stdout.write(f"    {s.description}")
-                self.stdout.write(f"    season {s.season_id}, league {s.league_id}, "
-                                  f"through matchday {s.through}, at {s.at}\n")
+                self.stdout.write(
+                    f"    season {s.season_id}, "
+                    f"league {s.league_name or s.league_id}, "
+                    f"through matchday {s.through}, at {s.at}\n")
             return
 
         scenario = SCENARIOS.get(o["scenario"])
@@ -132,7 +168,7 @@ class Command(BaseCommand):
         seed = o["seed"] if o["seed"] is not None else scenario.seed
 
         if o["check"]:
-            self._report(scenario, at)
+            self._report(scenario, self._league(scenario, create=False), at)
             return
 
         self.stdout.write(self.style.MIGRATE_HEADING(
@@ -142,7 +178,8 @@ class Command(BaseCommand):
         if not o["skip_season"]:
             call_command("simulate_sofascore_season", season=scenario.season_id,
                          through=scenario.through, now=at.isoformat(), seed=seed,
-                         fresh=bool(o["fresh"]))
+                         headline=scenario.headline, fresh=bool(o["fresh"]))
+        league = self._league(scenario, create=True)
         # Everything the calendar has finished is concludable; the round still being
         # played is not. Derived from the clock rather than passed in, so a scenario
         # is defined by ITS INSTANT alone and cannot drift out of step with itself.
@@ -152,16 +189,67 @@ class Command(BaseCommand):
         # from performances that no longer exist — a league whose table cannot be
         # reproduced from the season under it, which is the one thing a scenario
         # must not be.
-        call_command("advance_fantasy_league", league=scenario.league_id,
+        call_command("advance_fantasy_league", league=league.id,
                      through=scenario.through,
                      conclude_through=self._last_complete(scenario, at),
                      seed=seed + 1, redo=True)
 
-        self._report(scenario, at)
+        self._report(scenario, league, at)
         self.stdout.write(self.style.SUCCESS(
             "\nObserve it with:\n"
             f'    $env:VFOOT_FAKE_NOW = "{scenario.at if not o["at"] else at.isoformat()}"\n'
             "    .\\vfoot-dev.ps1 restart"))
+
+    def _league(self, scenario: Scenario, *, create: bool) -> FantasyLeague:
+        """The league this scenario plays in, by name and then by id.
+
+        By NAME first because an id belongs to the database that minted it, and a
+        scenario is supposed to survive a reset. Seeded when it is not there, which
+        is what makes the whole scenario reproducible from an empty database — and
+        idempotent, so the second run costs nothing.
+
+        The check is not just "does a league exist": it must be classic, on THIS
+        season, with rosters. Without the last one every squad silently fails to
+        field a legal XI, and nothing in the output says the league was the problem.
+        """
+        found = None
+        if scenario.league_name:
+            found = FantasyLeague.objects.filter(name=scenario.league_name).first()
+        if found is None and scenario.league_id:
+            found = FantasyLeague.objects.filter(id=scenario.league_id).first()
+        if found is not None and self._usable(found, scenario):
+            return found
+        if not create or not scenario.league_name:
+            raise CommandError(
+                f"No usable league for scenario {scenario.name!r}: it needs a "
+                f"CLASSIC league on season {scenario.season_id} with rosters. "
+                + (f"Found {found.id!r} but it does not qualify. "
+                   if found is not None else "")
+                + "Seed one with `manage.py seed_classic_demo_league "
+                  f"--competition-season {scenario.season_id}`.")
+
+        self.stdout.write(self.style.NOTICE(
+            f"  seeding the league '{scenario.league_name}' (first run here)…"))
+        call_command("seed_classic_demo_league",
+                     league_name=scenario.league_name,
+                     competition_season=scenario.season_id,
+                     cycles=scenario.league_rounds, no_cup=True)
+        league = FantasyLeague.objects.filter(name=scenario.league_name).first()
+        if league is None or not self._usable(league, scenario):
+            raise CommandError(
+                f"Seeding '{scenario.league_name}' did not produce a usable league.")
+        return league
+
+    @staticmethod
+    def _usable(league: FantasyLeague, scenario: Scenario) -> bool:
+        from vfoot.models import FantasyRosterSlot
+
+        return bool(
+            league.mode == FantasyLeague.MODE_CLASSIC
+            and league.reference_season_id == scenario.season_id
+            and FantasyRosterSlot.objects.filter(
+                team__league=league, released_at__isnull=True).exists()
+        )
 
     def _last_complete(self, scenario: Scenario, at) -> int:
         """The highest matchday whose real matches have ALL kicked off and ended.
@@ -184,9 +272,8 @@ class Command(BaseCommand):
                 last = md
         return last
 
-    def _report(self, scenario: Scenario, at) -> None:
+    def _report(self, scenario: Scenario, league: FantasyLeague, at) -> None:
         season = CompetitionSeason.objects.filter(id=scenario.season_id).first()
-        league = FantasyLeague.objects.filter(id=scenario.league_id).first()
         if season is None or league is None:
             raise CommandError("Scenario points at a season or league that is gone.")
 

@@ -4,14 +4,17 @@ Runs frequently (e.g. every minute via cron/systemd on the server). Each run it
 asks the DB "what is due now?" and acts:
 
 * stamps observed full-time on freshly-finished matches;
-* polls in-progress matches (live provisional data);
+* polls in-progress matches (light: lifecycle and score);
+* imports the FULL per-player data of in-progress matches on a slower clock, so
+  the votes move while the match is being played — without promoting it;
 * runs the +15min / +1h post-FT finalization, promoting a match to
   ``data_ready`` at confirmation.
 
-Phase-1 scope: the STATE MACHINE and scheduling decisions are real and applied;
-the per-match SCRAPE calls are stubbed (logged as the action that will be wired
-in the ingestion phase). So the timing/finalization logic is fully exercisable
-now, and the scrapers drop into clearly marked hooks later.
+It is also where the two ways of telling somebody are triggered, and they are not
+interchangeable. The WebSocket nudge goes to pages that are OPEN, after any import
+that changed something. The push goes to people who are NOT looking — a goal by one
+of their players, a sending-off, full time — and never for a vote that moved, which
+would be unbearable.
 
     python manage.py tick                     # apply, real clock
     python manage.py tick --dry-run           # report only
@@ -68,12 +71,22 @@ class Command(BaseCommand):
             self.stdout.write("  nothing due")
             return
 
-        # 1) Stamp observed full-time (state we own).
+        # Imported here and not at module scope: the tick belongs to realdata, the
+        # leagues to vfoot, and only this step needs to cross.
+        from vfoot.services import live_updates
+
+        # 1) Stamp observed full-time (state we own). This is the ONE instant at
+        #    which a match is first seen to be over, so it is where the full-time
+        #    notification belongs — not in the import, which runs again afterwards.
         for m in plan.stamp_ft:
             self.stdout.write(f"  [stamp-ft] {m} — full-time observed")
             if not dry:
                 m.finished_at = now
                 m.save(update_fields=["finished_at"])
+                sent = live_updates.announce_full_time(m)
+                live_updates.broadcast_match(m)
+                if sent:
+                    self.stdout.write(f"    push fine partita: {sent}")
 
         # 2) Live polling: warm + update status/score (honours the per-match
         #    cadence via data_checked_at). Only stamp checked on a real warm, so a
@@ -90,27 +103,53 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(f"  [live-poll] {m} — egress blocked; will retry")
 
-        # 3) Finalization: +15min provisional-final import.
+        # 3) Live import: the full per-player data of a match still being played.
+        #    data_ready is NOT touched — the votes this produces are provisional by
+        #    construction, and that is what the league marks them as.
+        for m in plan.live_import:
+            if dry:
+                self.stdout.write(f"  [live-import] {m} — would warm+import (live)")
+                continue
+            before = live_updates.snapshot_events(m)
+            if not live_ingest.import_live(m):
+                self.stdout.write(f"  [live-import] {m} — egress blocked; will retry")
+                continue
+            m.data_imported_at = now
+            m.save(update_fields=["data_imported_at"])
+            events = live_updates.announce_events(m, before)
+            leagues = live_updates.broadcast_match(m)
+            self.stdout.write(
+                f"  [live-import] {m} — imported (provisional); "
+                f"{leagues} leghe avvisate"
+                + (f", push: {events}" if events else ""))
+
+        # 5) Finalization: +15min provisional-final import.
         for m in plan.final_check:
             if dry:
                 self.stdout.write(f"  [final-check] {m} — would warm+import")
                 continue
             if live_ingest.finalize(m):
                 m.data_checked_at = now
-                m.save(update_fields=["data_checked_at"])
+                m.data_imported_at = now
+                m.save(update_fields=["data_checked_at", "data_imported_at"])
+                live_updates.broadcast_match(m)
                 self.stdout.write(f"  [final-check] {m} — imported (provisional)")
             else:
                 self.stdout.write(f"  [final-check] {m} — egress blocked; will retry")
 
-        # 4) Finalization: +1h confirmation -> data_ready (official).
+        # 6) Finalization: +1h confirmation -> data_ready (official). The nudge here
+        #    is the one that clears the "provvisorio" mark on every open page.
         for m in plan.final_confirm:
             if dry:
                 self.stdout.write(f"  [final-confirm] {m} — would warm+import -> data_ready")
                 continue
             if live_ingest.finalize(m):
                 m.data_checked_at = now
+                m.data_imported_at = now
                 m.data_ready = True
-                m.save(update_fields=["data_checked_at", "data_ready"])
+                m.save(update_fields=["data_checked_at", "data_imported_at",
+                                      "data_ready"])
+                live_updates.broadcast_match(m)
                 self.stdout.write(f"  [final-confirm] {m} — data_ready")
             else:
                 self.stdout.write(f"  [final-confirm] {m} — egress blocked; will retry")

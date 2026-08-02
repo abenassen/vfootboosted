@@ -62,6 +62,10 @@ class Command(BaseCommand):
                             help="Force the minute of matches still in progress; "
                                  "0 derives it from the kick-off.")
         parser.add_argument("--seed", type=int, default=2627)
+        parser.add_argument("--headline", type=str, default="",
+                            help="Provider id of the match to put in the LAST "
+                                 "kick-off slot of its round (the posticipo), so a "
+                                 "scenario can choose which match is in progress.")
         parser.add_argument("--year", type=str, default=None,
                             help="Provider year string (default derived, e.g. 26/27).")
         parser.add_argument("--cache-dir", type=str, default=None)
@@ -93,6 +97,7 @@ class Command(BaseCommand):
                 competition_season=season, cache_dir=cache_dir,
                 through_matchday=through, now=now,
                 live_minute=int(o["live_minute"]), seed=int(o["seed"]), year=year,
+                headline=str(o["headline"] or ""),
                 log=lambda m: self.stdout.write(m))
             plan = report["plan"]
             self.stdout.write(self.style.SUCCESS(

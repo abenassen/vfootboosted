@@ -1,13 +1,19 @@
-"""WebSocket consumer for the live auction room.
+"""WebSocket consumers: the live auction room, and a league's round in progress.
 
-Read-only by design: the browser opens ``ws://.../ws/auctions/<id>/?token=<drf-token>``
-and receives a light ``{"type":"update"}`` nudge every time the room changes; it then
-re-fetches the authoritative state over the existing REST endpoint. All writes (bids,
-nominations, closes, undo) go through the REST API, never through this socket.
+Read-only by design, both of them: the browser opens the socket with its DRF token
+in the query string and receives a light ``{"type":"update"}`` nudge whenever
+something changes; it then re-fetches the authoritative state over the REST
+endpoints it already uses. No state is ever pushed down the socket, so there is
+exactly one way to compute what the page shows and the two paths cannot drift.
 
-Auth reuses the app's DRF token: it is passed as a query-string parameter (browsers
-cannot set Authorization headers on a WebSocket handshake). The connection is refused
-unless the token is valid AND its user is a member of the auction's league.
+Auth reuses the app's DRF token as a query-string parameter (browsers cannot set
+Authorization headers on a WebSocket handshake). A connection is refused unless the
+token is valid AND its user is a member of the league in question.
+
+The two consumers differ in two things only — the group name and the membership
+predicate — which is why the shared part lives in ``_NudgeConsumer``. An auction
+and a matchday being played never happen at the same time, so the layer never
+carries both loads at once.
 """
 
 from __future__ import annotations
@@ -19,15 +25,20 @@ from asgiref.sync import async_to_sync
 from channels.generic.websocket import WebsocketConsumer
 
 from vfoot.services.auction_realtime import group_name
+from vfoot.services.live_realtime import group_name as live_group_name
 
 
-class AuctionConsumer(WebsocketConsumer):
+class _NudgeConsumer(WebsocketConsumer):
+    """Join one group, say hello, forward every nudge. Subclasses answer WHERE
+    (``group_for``) and WHO (``authorised_user``)."""
+
     def connect(self):
-        self.session_id = int(self.scope["url_route"]["kwargs"]["session_id"])
-        if not self._authorised():
+        user_id = self._token_user_id()
+        group = self.group_for(user_id) if user_id else None
+        if group is None:
             self.close(code=4003)
             return
-        self.group = group_name(self.session_id)
+        self.group = group
         async_to_sync(self.channel_layer.group_add)(self.group, self.channel_name)
         self.accept()
         # Tell the freshly-connected client to pull the current state immediately.
@@ -38,25 +49,52 @@ class AuctionConsumer(WebsocketConsumer):
         if group:
             async_to_sync(self.channel_layer.group_discard)(group, self.channel_name)
 
-    def _authorised(self) -> bool:
+    def _token_user_id(self) -> int | None:
         from rest_framework.authtoken.models import Token
-
-        from vfoot.models import AuctionSession, LeagueMembership
 
         qs = parse_qs(self.scope.get("query_string", b"").decode())
         token_key = (qs.get("token") or [None])[0]
         if not token_key:
-            return False
-        token = Token.objects.filter(key=token_key).select_related("user").first()
-        if not token:
-            return False
-        session = AuctionSession.objects.filter(id=self.session_id).first()
-        if not session:
-            return False
-        return LeagueMembership.objects.filter(
-            league_id=session.league_id, user_id=token.user_id
-        ).exists()
+            return None
+        token = Token.objects.filter(key=token_key).only("user_id").first()
+        return token.user_id if token else None
+
+    def group_for(self, user_id: int) -> str | None:
+        raise NotImplementedError
+
+    def _nudge(self, event):
+        self.send(text_data=json.dumps(
+            {"type": "update", "kind": event.get("kind", "state")}))
+
+
+class AuctionConsumer(_NudgeConsumer):
+    def group_for(self, user_id: int) -> str | None:
+        from vfoot.models import AuctionSession, LeagueMembership
+
+        session_id = int(self.scope["url_route"]["kwargs"]["session_id"])
+        session = AuctionSession.objects.filter(id=session_id).only("league_id").first()
+        if session is None:
+            return None
+        if not LeagueMembership.objects.filter(
+                league_id=session.league_id, user_id=user_id).exists():
+            return None
+        return group_name(session_id)
 
     # Group message handler (matches the "auction.update" type sent by the bridge).
-    def auction_update(self, event):
-        self.send(text_data=json.dumps({"type": "update", "kind": event.get("kind", "state")}))
+    auction_update = _NudgeConsumer._nudge
+
+
+class LiveConsumer(_NudgeConsumer):
+    """A league's matchday while it is being played: votes moving, matches ending."""
+
+    def group_for(self, user_id: int) -> str | None:
+        from vfoot.models import LeagueMembership
+
+        league_id = int(self.scope["url_route"]["kwargs"]["league_id"])
+        if not LeagueMembership.objects.filter(
+                league_id=league_id, user_id=user_id).exists():
+            return None
+        return live_group_name(league_id)
+
+    # Matches the "live.update" type sent by live_realtime.broadcast_live.
+    live_update = _NudgeConsumer._nudge

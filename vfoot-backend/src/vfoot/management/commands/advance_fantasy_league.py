@@ -127,8 +127,13 @@ class Command(BaseCommand):
             return
         fixtures = FantasyFixture.objects.filter(fantasy_matchday__in=late)
         FantasyFixtureDetail.objects.filter(fixture__in=fixtures).delete()
+        # 0.0, not None: the column is NOT NULL with a 0.0 default, so nulling it
+        # raised an IntegrityError — and only ever when the rewind had something to
+        # rewind, which is why it survived. An unplayed fixture is identified by its
+        # STATUS everywhere that matters (see _serialize_fixture_row, which only
+        # exposes a score when it is finished), never by a null total.
         fixtures.update(status=FantasyFixture.STATUS_SCHEDULED,
-                        home_total=None, away_total=None)
+                        home_total=0.0, away_total=0.0)
         for md in late:
             md.status = FantasyMatchday.STATUS_PLANNED
             md.concluded_at = None
@@ -253,7 +258,11 @@ class Command(BaseCommand):
                 result = score_and_persist_matchday(
                     md, league, ruleset, fixtures, {}, force=False, update_snapshot=True)
                 if result["missing_teams"]:
-                    names = ", ".join(t["name"] for t in result["missing_teams"].values())
+                    # A LIST of dicts, not a dict: score_and_persist_matchday returns
+                    # it that way so the API can serialise it, and reading it as a
+                    # mapping turned "you have teams without a lineup" — the message
+                    # that says what to do — into an AttributeError.
+                    names = ", ".join(t["name"] for t in result["missing_teams"])
                     raise CommandError(
                         f"Matchday {md.real_matchday}: no lineup for {names}. "
                         f"Field them first (this command does, unless --through cut "

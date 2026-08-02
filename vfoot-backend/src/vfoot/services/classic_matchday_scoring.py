@@ -352,6 +352,112 @@ def score_composed_fixture(
     return build_fixture_payload(fixture_meta, home, away, ruleset)
 
 
+# --------------------------------------------------------------------------- #
+# The same score, computed while the matchday is still being played.           #
+# --------------------------------------------------------------------------- #
+def _live_states(cs_id: int, real_matchday: int, player_ids) -> tuple[set, set]:
+    """(not_started, unstable): the two ways a player's vote can fail to be final.
+
+    ``pending_player_ids`` collapses them into one, and rightly so at conclusion
+    time — a vote that is not final is not a vote. During the round the difference
+    is the whole point:
+
+    * NOT STARTED — his club has not kicked off. There is nothing to show and the
+      bench must not cover him: a match that has not been played is not a bad
+      performance.
+    * UNSTABLE — his club is playing, or has finished and the provider has not
+      settled the data. There IS a vote, computed from what has happened so far;
+      it is simply going to move. Showing it and saying so is the feature.
+    """
+    player_ids = list(player_ids)
+    if not player_ids:
+        return set(), set()
+    fixtures = matchday_fixtures_by_team(cs_id, real_matchday)
+    stints = dict(
+        PlayerTeamStint.objects.filter(
+            player_id__in=player_ids,
+            team_season__competition_season_id=cs_id,
+            end_date__isnull=True,
+        ).values_list("player_id", "team_season_id")
+    )
+    not_started, unstable = set(), set()
+    for pid in player_ids:
+        match = fixtures.get(stints.get(pid))
+        if match is None or match.data_ready:
+            continue
+        if match.status in (Match.STATUS_LIVE, Match.STATUS_FINISHED):
+            unstable.add(pid)
+        else:
+            not_started.add(pid)
+    return not_started, unstable
+
+
+def _mark_unstable(team: dict, unstable: set) -> bool:
+    """Flag every line whose real match is still moving, and the team with it.
+
+    A total made in part of provisional votes is itself provisional — there is no
+    honest way to show a settled number on top of unsettled ones.
+    """
+    any_unstable = False
+    for line in team.get("starters", []) + team.get("bench", []):
+        if line.get("player_id") in unstable and not line.get("office"):
+            line["provisional"] = True
+            any_unstable = True
+        if line.get("pending"):
+            any_unstable = True
+    team["provisional"] = any_unstable
+    return any_unstable
+
+
+def score_fixture_live(fx, league, md, ruleset) -> dict:
+    """The tabellino of a league fixture whose matchday is NOT concluded.
+
+    Same functions as the conclusion, in the same order — that is deliberate, and
+    the property to preserve: when the admin finally concludes, the frozen payload
+    must be the one that was being shown a minute earlier. Anything computed a
+    second way here would drift.
+
+    NOTHING IS PERSISTED. The frozen payload is born at the conclusion and only
+    there, which is what makes reopening a closed matchday pure reading (see
+    docs/classic_live_scoring.md). Writing a provisional payload into
+    FantasyFixtureDetail would destroy that property for the sake of a cache.
+    """
+    index = build_matchday_index(md.real_competition_season_id, md.real_matchday, league)
+    roster_ids = owned_player_ids(fx.home_team) | owned_player_ids(fx.away_team)
+    not_started, unstable = _live_states(
+        md.real_competition_season_id, md.real_matchday, roster_ids)
+    office = office_votes_for(league, md, roster_ids)
+    not_started -= set(office)
+    unstable -= set(office)
+
+    lines = {}
+    for side, team in (("home", fx.home_team), ("away", fx.away_team)):
+        # ``previous`` rather than None: mid-round there is no admin to ask what to
+        # do with a team that did not field, and a preview must not be able to
+        # answer 400. It is a PREVIEW of the most likely conclusion, not a ruling —
+        # the admin still chooses when he closes the round.
+        starters, bench, meta = team_lines_for_conclusion(
+            league, team, fx.competition_id, md.real_matchday, index, "previous",
+            not_started, office)
+        lines[side] = (starters or [], bench or [], meta)
+
+    payload = score_composed_fixture(
+        (lines["home"][0], lines["home"][1]),
+        (lines["away"][0], lines["away"][1]),
+        ruleset,
+        {"fixture_id": fx.id, "fantasy_round": fx.round_no,
+         "real_matchday": md.real_matchday, "stage": fx.stage_id,
+         "home_team": fx.home_team.name, "away_team": fx.away_team.name},
+    )
+    home_unstable = _mark_unstable(payload["home"], unstable)
+    away_unstable = _mark_unstable(payload["away"], unstable)
+    payload["live"] = True
+    payload["provisional"] = home_unstable or away_unstable
+    payload["lineup_source"] = {"home": lines["home"][2].get("source"),
+                                "away": lines["away"][2].get("source")}
+    return payload
+
+
 def _warn_about_unrepaired_lineups(league, md, team_lines) -> list[dict]:
     """Fielded players whose slot was released BEFORE the matchday locked."""
     from vfoot.services import matchday_state

@@ -87,22 +87,50 @@ def poll_live(match) -> bool:
     return True
 
 
-def finalize(match) -> bool:
+def _warm_and_import(match, *, only_finished: bool) -> bool:
     """Warm the full match data and import it OFFLINE (lineups/shotmap/incidents/
     heatmaps -> DB, incl. voto puro). The schedule is warmed too because the import
-    resolves the fixture from it (cache-first, so ~free once Loop A has run). True
-    iff warmed AND imported."""
+    resolves the fixture FROM IT — and that is also why ``only_finished`` has to be
+    passed through: the importer skips anything the schedule does not call finished,
+    so a match still in progress would be silently passed over. True iff warmed AND
+    imported.
+
+    ``skip_existing=False`` always: this is called repeatedly on the same match (the
+    +15min check, the +1h confirmation, and now every live import), and the point of
+    each call is to pick up what has changed since the last one.
+    """
     year = year_for(match)
     if not egress_client.warm_schedule(year):
         return False
+    # 'final' is the kind of FETCH, not a claim about the match: it means "everything
+    # the importer reads", as opposed to the light event the live poll needs.
     if not egress_client.warm_matches([match.external_id], "final"):
         return False
     client = SofaScoreClient(cache_dir=_cache_dir(), logger=lambda _m: None)
     try:
         ingest_sofascore_season(scraper=client, year=year,
-                                match_ids=[int(match.external_id)])
+                                match_ids=[int(match.external_id)],
+                                only_finished=only_finished, skip_existing=False)
     except (SofaScoreBlocked, SofaScoreError):
         # Something the import needed was not in the warm cache and it tried the
         # network (blocked from here). Bail; the next tick retries.
         return False
     return True
+
+
+def finalize(match) -> bool:
+    """The post-full-time import: the match is over, so only a finished one counts."""
+    return _warm_and_import(match, only_finished=True)
+
+
+def import_live(match) -> bool:
+    """Like ``finalize``, but for a match still being played — and the difference is
+    what it does NOT do: ``data_ready`` stays false.
+
+    That flag means "the provider has stopped changing this match", and it is the one
+    marker of instability in the whole system (a vote is provisional exactly when the
+    real match behind it is not data_ready). Importing the per-player data mid-match
+    gives the league a vote that moves; promoting the match would freeze a number the
+    next import is going to change.
+    """
+    return _warm_and_import(match, only_finished=False)

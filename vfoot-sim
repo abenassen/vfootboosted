@@ -4,11 +4,19 @@
 #   di tutti i giorni.
 #
 #     ./vfoot-sim              avvia (scenario predefinito, g22-live)
-#     ./vfoot-sim g22-pre      avvia su un altro scenario
+#     ./vfoot-sim napoli-inter avvia su un altro scenario
 #     ./vfoot-sim --at 2027-01-31T21:15:00+01:00
 #     ./vfoot-sim status       che cosa gira, con che orologio
 #     ./vfoot-sim stop         ferma tutto quello che ha avviato
 #     ./vfoot-sim build        ricostruisce lo stato dello scenario, poi avvia
+#
+#   PERCHE' ACCENDE ANCHE UN REDIS. In sviluppo, senza REDIS_URL, il layer dei
+#   canali e' quello in memoria, che NON fa fan-out fra processi. Il cron dei tick
+#   gira in un processo suo, quindi la spinta WebSocket dopo un import live finisce
+#   nella memoria del cron e alla pagina aperta non arriva mai -- senza un errore da
+#   nessuna parte, il che e' il modo peggiore in cui una cosa puo' non funzionare.
+#   Se c'e' docker (o podman) ne accendiamo uno; se non c'e', lo si dice e la pagina
+#   si aggiorna solo ricaricando.
 #
 #   QUANDO SERVE `build` E NON UN SEMPLICE AVVIO. Un riavvio riporta l'OROLOGIO
 #   all'istante dello scenario, ma non i DATI: il cron intanto ha fatto camminare
@@ -44,6 +52,15 @@ LOGDIR="${TMPDIR:-/tmp}/vfoot-sim"
 PIDFILE="$LOGDIR/pids"
 BACK_PORT=8000
 FRONT_PORT=5173
+REDIS_PORT=6379
+REDIS_NAME=vfoot-sim-redis
+# Le chiavi VAPID della SIMULAZIONE, tenute fuori dal repo e fuori dal .env: sono
+# di questo script e di nessun altro, e un push di prova non deve poter partire con
+# le chiavi di produzione. Sotto ~/.cache e non sotto /tmp perche' rigenerarle
+# invalida le iscrizioni gia' fatte (il browser lega la subscription alla chiave
+# pubblica che ha ricevuto) e ci si ritroverebbe a ri-autorizzare le notifiche a
+# ogni riavvio della macchina.
+VAPID_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/vfoot-sim/vapid"
 
 # Lo scenario e l'istante predefiniti: gli stessi che `manage.py simulate_scenario
 # --list` descrive. Cambiarli qui NON basta -- li' c'e' la definizione vera.
@@ -98,6 +115,51 @@ kill_port() { # porta etichetta -- chiude anche cio' che NON abbiamo avviato noi
   say "porta $1 liberata"
 }
 
+# --- redis: il fan-out fra il cron e il server ------------------------------
+container_cmd() {
+  for c in docker podman; do
+    command -v "$c" >/dev/null 2>&1 && "$c" info >/dev/null 2>&1 && { echo "$c"; return 0; }
+  done
+  return 1
+}
+
+start_redis() {
+  if port_busy "$REDIS_PORT"; then
+    say "redis     gia' in ascolto sulla $REDIS_PORT, lasciato com'e'"
+    export REDIS_URL="redis://127.0.0.1:$REDIS_PORT/1"
+    return 0
+  fi
+  local ct
+  ct=$(container_cmd) || {
+    printf '%ssenza redis la pagina NON si aggiorna da sola:%s il cron e il server\n' "$WARN" "$X"
+    printf '  hanno due layer in memoria separati. Ricarica a mano, oppure installa docker.\n'
+    return 0
+  }
+  # --rm: il contenitore e' usa-e-getta come la simulazione. Se resta in giro, il
+  # prossimo avvio trova la porta occupata e lo riusa, che va bene lo stesso.
+  "$ct" run -d --rm --name "$REDIS_NAME" -p "$REDIS_PORT:6379" redis:7-alpine \
+    > "$LOGDIR/redis.log" 2>&1 || {
+      printf '%sredis non partito%s (vedi %s/redis.log)\n' "$WARN" "$X" "$LOGDIR"; return 0; }
+  wait_port "$REDIS_PORT" 20 || { printf '%sredis non risponde%s\n' "$WARN" "$X"; return 0; }
+  : > "$LOGDIR/started-redis"
+  export REDIS_URL="redis://127.0.0.1:$REDIS_PORT/1"
+  say "redis      $REDIS_URL  (spinte WebSocket fra cron e server)"
+}
+
+# --- chiavi push ------------------------------------------------------------
+load_vapid() {
+  mkdir -p "$(dirname "$VAPID_FILE")"
+  if [ ! -s "$VAPID_FILE" ]; then
+    "$PY" "$MANAGE" vapid_keys 2>/dev/null | grep '^VFOOT_VAPID_' > "$VAPID_FILE.tmp" \
+      && mv "$VAPID_FILE.tmp" "$VAPID_FILE" \
+      || { rm -f "$VAPID_FILE.tmp"; printf '%schiavi VAPID non generate: le notifiche push restano spente%s\n' "$WARN" "$X"; return 0; }
+    say "push      chiavi VAPID generate in $VAPID_FILE"
+  fi
+  # shellcheck disable=SC2046
+  set -a; . "$VAPID_FILE"; set +a
+  export VFOOT_VAPID_SUBJECT="mailto:simulazione@vfoot.it"
+}
+
 # --- avvio ----------------------------------------------------------------
 export_sim_env() {
   # L'istante: quello passato con --at, altrimenti quello dello scenario, letto
@@ -110,16 +172,20 @@ export_sim_env() {
   [ -n "$AT" ] || die "scenario '$SCENARIO' sconosciuto (prova: $PY $MANAGE simulate_scenario --list)"
   export VFOOT_FAKE_NOW="$AT"
   export VFOOT_EGRESS_SIMULATED=true
+  # Un import ogni due minuti invece che ogni dieci: una serata simulata dura
+  # quanto una vera, e aspettare dieci minuti per vedere muovere un voto rende
+  # impossibile capire se la cosa funziona o si e' rotta.
+  export VFOOT_LIVE_IMPORT_MINUTES="${VFOOT_LIVE_IMPORT_MINUTES:-2}"
 }
 
 start_backend() {
   mkdir -p "$LOGDIR"
   ( cd "$REPO/vfoot-backend/src" \
-    && nohup "$PY" manage.py runserver "localhost:$BACK_PORT" --noreload \
+    && nohup "$PY" manage.py runserver "0.0.0.0:$BACK_PORT" --noreload \
        > "$LOGDIR/backend.log" 2>&1 < /dev/null & echo $! >> "$PIDFILE" )
   wait_port "$BACK_PORT" 45 \
     || { tail -20 "$LOGDIR/backend.log" >&2; die "backend non partito"; }
-  say "backend   http://localhost:$BACK_PORT"
+  say "backend   http://localhost:$BACK_PORT  (anche dall'IP di rete, per il telefono)"
 }
 
 start_ticks() {
@@ -151,7 +217,7 @@ start_frontend() {
   }
   mkdir -p "$LOGDIR"
   ( cd "$REPO/vfoot-frontend" \
-    && nohup "$npm_bin" run dev -- --host localhost --port "$FRONT_PORT" \
+    && nohup "$npm_bin" run dev -- --host 0.0.0.0 --port "$FRONT_PORT" \
        > "$LOGDIR/frontend.log" 2>&1 < /dev/null & echo $! >> "$PIDFILE" )
   wait_port "$FRONT_PORT" 45 \
     || { tail -20 "$LOGDIR/frontend.log" >&2; printf '%sfrontend non partito%s\n' "$WARN" "$X"; return 0; }
@@ -163,8 +229,12 @@ cmd_start() {
   export_sim_env
   printf '%sscenario %s%s  orologio simulato: %s%s%s\n' \
     "$BOLD" "$SCENARIO" "$X" "$OK" "$VFOOT_FAKE_NOW" "$X"
-  mkdir -p "$LOGDIR"; : > "$PIDFILE"; rm -f "$LOGDIR/started-frontend"
+  mkdir -p "$LOGDIR"; : > "$PIDFILE"; rm -f "$LOGDIR/started-frontend" "$LOGDIR/started-redis"
   kill_port "$BACK_PORT" || true
+  # Prima del backend e del cron: le variabili devono valere per entrambi, ed e'
+  # esattamente la coppia di processi che deve trovarsi sullo stesso layer.
+  start_redis
+  load_vapid
   start_backend
   start_ticks
   start_frontend
@@ -184,6 +254,8 @@ cmd_status() {
   printf '%sporte%s\n' "$BOLD" "$X"
   port_busy "$BACK_PORT" && say "backend   in ascolto sulla $BACK_PORT" || say "backend   fermo"
   port_busy "$FRONT_PORT" && say "frontend  in ascolto sulla $FRONT_PORT" || say "frontend  fermo"
+  port_busy "$REDIS_PORT" && say "redis     in ascolto sulla $REDIS_PORT" \
+    || say "redis     fermo (la pagina non si aggiorna da sola)"
   printf '%sorologio del server%s\n' "$BOLD" "$X"
   if port_busy "$BACK_PORT"; then
     # L'intestazione c'e' SOLO quando l'orologio e' spostato: la sua assenza e'
@@ -231,6 +303,11 @@ cmd_stop() {
   elif port_busy "$FRONT_PORT"; then
     say "frontend  lasciato acceso: non l'ha avviato questo script"
   fi
+  if [ -f "$LOGDIR/started-redis" ]; then
+    ct=$(container_cmd) && "$ct" rm -f "$REDIS_NAME" >/dev/null 2>&1
+    rm -f "$LOGDIR/started-redis"
+    say "redis     fermato"
+  fi
   # Il cron non ascolta su nessuna porta, quindi va cercato per riga di comando.
   if command -v taskkill.exe >/dev/null 2>&1; then
     "$PY" - <<'EOF' 2>/dev/null || true
@@ -251,7 +328,7 @@ EOF
 }
 
 usage() {
-  sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^#//;s/^ //'
+  sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^#//;s/^ //'
 }
 
 # --- argomenti ------------------------------------------------------------

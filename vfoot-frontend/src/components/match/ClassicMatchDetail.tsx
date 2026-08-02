@@ -57,6 +57,21 @@ const DEF_MODE_LABEL: Record<string, string> = {
   subtract_opponent: 'sottratto alla squadra avversaria',
 };
 
+/** A number that is still moving. Same mark everywhere it appears — on a single
+ *  vote, on a team total, on the fixture — because it is the same statement: the
+ *  real match behind it has not settled, so this will change. */
+function LiveDot({ label = 'provvisorio' }: { label?: string }) {
+  return (
+    <span
+      title="Il dato arriva da una partita ancora in corso: questo numero può ancora cambiare."
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-600"
+    >
+      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
+      {label}
+    </span>
+  );
+}
+
 export function ClassicMatchDetail({
   fixture,
   backTo,
@@ -90,9 +105,12 @@ export function ClassicMatchDetail({
         <MatchScoreHeader
           header={header}
           eyebrow={
-            <SectionTitle>
-              {d.stage ? d.stage : `Giornata ${d.fantasy_round}`} · Serie A reale {d.real_matchday}
-            </SectionTitle>
+            <div className="flex flex-wrap items-center gap-2">
+              <SectionTitle>
+                {d.stage ? d.stage : `Giornata ${d.fantasy_round}`} · Serie A reale {d.real_matchday}
+              </SectionTitle>
+              {d.provisional ? <LiveDot label="in corso" /> : null}
+            </div>
           }
           action={
             <Link to={backTo}>
@@ -135,10 +153,15 @@ export function ClassicMatchDetail({
 function TeamColumn({ name, team, realMatch }: { name: string; team: ClassicTeamDetail; realMatch: boolean }) {
   return (
     <Card className="p-4">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-baseline justify-between gap-2">
         <SectionTitle>{name}</SectionTitle>
-        <div className="text-sm text-slate-600">
-          {team.goals} gol{!realMatch ? <> · <b>{fmt(team.total)}</b> fanta</> : null}
+        <div className="flex items-center gap-1.5 text-sm text-slate-600">
+          {/* A total made in part of provisional votes is itself provisional —
+              there is no honest way to show a settled number on unsettled ones. */}
+          {team.provisional ? <LiveDot /> : null}
+          <span>
+            {team.goals} gol{!realMatch ? <> · <b>{fmt(team.total)}</b> fanta</> : null}
+          </span>
         </div>
       </div>
       {/* Defence modifier is a fantasy-scoring construct: it means nothing for a
@@ -228,6 +251,16 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
       </div>
 
       <div className="flex shrink-0 items-center gap-2 text-right">
+        {/* Outside the s.v. branch on purpose: a player of a match in progress is
+            provisional whether he has a vote yet or not. A reserve keeper reading
+            a flat "n.d." at the fortieth minute says "we have nothing on him",
+            when what is true is "not yet". */}
+        {p.provisional ? (
+          <span
+            title="Partita in corso: questo dato può ancora cambiare"
+            className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-rose-500"
+          />
+        ) : null}
         {p.pending ? (
           // A postponement is not a senza voto and must not read like one: nothing
           // happened yet, the bench does not cover it, and the slot will be settled

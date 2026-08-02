@@ -2033,6 +2033,8 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
                            locked_mds: set[int] | None = None) -> dict:
     mine = bool(my_team_id and (fx.home_team_id == my_team_id or fx.away_team_id == my_team_id))
     played = fx.status == FantasyFixture.STATUS_FINISHED
+    locked = bool(locked_mds is not None and fx.fantasy_matchday_id is not None
+                  and fx.fantasy_matchday.real_matchday in locked_mds)
     return {
         "fixture_id": fx.id,
         "competition_id": fx.competition_id,
@@ -2050,8 +2052,7 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         # Whether this matchday's lineups have locked (its first confirmed kickoff
         # has passed). Read from the REAL calendar, so it stays true no matter how
         # far behind the admin is with his conclusions.
-        "lineup_locked": bool(locked_mds is not None and fx.fantasy_matchday_id is not None
-                              and fx.fantasy_matchday.real_matchday in locked_mds),
+        "lineup_locked": locked,
         "home_team": {"team_id": fx.home_team_id, "name": fx.home_team.name,
                       "crest": fx.home_team.crest},
         "away_team": {"team_id": fx.away_team_id, "name": fx.away_team.name,
@@ -2068,12 +2069,13 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         # earlier — a button the save endpoint could only answer with a 409.
         "can_set_lineup": bool(
             mine and my_roster_ready and not played and fx.fantasy_matchday_id is not None
-            and not (locked_mds is not None and fx.fantasy_matchday.real_matchday in locked_mds)
+            and not locked
         ),
-        # A fixture that has not been played has no rich detail: /fixtures/<id>
-        # answers 404 "No rich detail for this fixture". Saying so here lets the
-        # calendar not offer a link that can only end on an error page.
-        "has_detail": played,
+        # Whether /fixtures/<id> has anything to show. A concluded fixture has its
+        # frozen tabellino; a LOCKED one has the live computation, which is the whole
+        # point of following your own matchday while it is played. Only a round that
+        # has not kicked off has nothing, and there the link would end on a 404.
+        "has_detail": played or locked,
     }
 
 
@@ -2135,12 +2137,21 @@ def _real_matchday_stats(real_competition_season_id: int, real_matchday: int,
             OfficeOverride.objects.filter(league=league, is_active=True)
             .values_list("match_id", flat=True)
         )
+    #
+    # Settled is DATA_READY, not "has a score". A live match has a score — the light
+    # poll writes it every couple of minutes — so counting a score made a round with
+    # three matches in progress read as complete, and the home said "la giornata 22 è
+    # finita, puoi calcolare i punteggi" directly above "intanto si gioca la giornata
+    # 22". Not only contradictory: the conclusion would have been refused anyway,
+    # because scoring keys on data_ready too (see match_resolver.pending_matches). The
+    # two now agree, which is the property that matters — the button is offered
+    # exactly when it works.
     done_by_pair: dict[tuple[int, int], bool] = {}
-    for mid, home_id, away_id, hg, ag in Match.objects.filter(
+    for mid, home_id, away_id, ready in Match.objects.filter(
         competition_season_id=real_competition_season_id, matchday=real_matchday
-    ).values_list("id", "home_team_id", "away_team_id", "home_goals", "away_goals"):
+    ).values_list("id", "home_team_id", "away_team_id", "data_ready"):
         key = (home_id, away_id)
-        settled = (hg is not None and ag is not None) or mid in office_match_ids
+        settled = bool(ready) or mid in office_match_ids
         done_by_pair[key] = done_by_pair.get(key, False) or settled
     total = len(done_by_pair)
     completed = sum(1 for v in done_by_pair.values() if v)
@@ -3916,18 +3927,46 @@ class LeagueStandingsView(APIView):
 
 
 class FixtureDetailView(APIView):
+    """The tabellino of a league fixture — frozen if the matchday is concluded,
+    computed on the spot if it is still being played.
+
+    The two are the same numbers by construction: the live branch runs the very
+    functions the conclusion runs, in the same order. What it does NOT do is
+    persist. ``FantasyFixtureDetail`` is born at the conclusion and nowhere else,
+    so reopening a closed matchday stays pure reading.
+    """
+
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, fixture_id: int):
         fx = get_object_or_404(
-            FantasyFixture.objects.select_related("competition__league", "detail"), id=fixture_id
+            FantasyFixture.objects.select_related(
+                "competition__league", "detail", "fantasy_matchday",
+                "home_team", "away_team"),
+            id=fixture_id,
         )
-        _membership_or_404(fx.competition.league, request.user.id)
+        league = fx.competition.league
+        _membership_or_404(league, request.user.id)
         detail = getattr(fx, "detail", None)
-        if detail is None:
-            return Response({"detail": "No rich detail for this fixture."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(detail.payload)
+        if detail is not None:
+            return Response(detail.payload)
+
+        md = fx.fantasy_matchday
+        if md is None or md.status == FantasyMatchday.STATUS_CONCLUDED:
+            # Concluded without a payload is the genuinely empty case (a legacy
+            # matchday, or one scored before details were kept).
+            return Response({"detail": "No rich detail for this fixture."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        from vfoot.services.classic_matchday_scoring import score_fixture_live
+        from vfoot.services.classic_scoring import Ruleset
+
+        # The snapshot if the round already has one (it is what the conclusion will
+        # use), otherwise the league's current rules.
+        ruleset = (Ruleset.from_snapshot(md.ruleset_snapshot) if md.ruleset_snapshot
+                   else Ruleset.from_league(league))
+        return Response(score_fixture_live(fx, league, md, ruleset))
 
 
 def _zone_grid_keys(cols: int = 5, rows: int = 4) -> list[str]:

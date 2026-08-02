@@ -32,7 +32,13 @@ registerRoute(
     // /api and /ws are the backend, /admin is Django's own UI, /static its assets.
     // (Fetches from the app carry mode:"cors" and never match a NavigationRoute
     // anyway — this is about someone typing the URL or following a link.)
-    denylist: [/^\/api\//, /^\/admin\//, /^\/ws\//, /^\/static\//, /^\/media\//],
+    //
+    // mobile-frame.html is a real FILE in public/, not a client route, so answering
+    // it with the shell gets the app's own 404 — and only on localhost, where the
+    // worker is registered, which makes it look like the preview tool is broken on
+    // one machine and fine on another.
+    denylist: [/^\/api\//, /^\/admin\//, /^\/ws\//, /^\/static\//, /^\/media\//,
+               /^\/mobile-frame\.html/],
   }),
 );
 

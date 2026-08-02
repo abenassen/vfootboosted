@@ -85,6 +85,33 @@ class LiveIngestTests(_Base):
             self.assertFalse(live_ingest.finalize(m))
         ing.assert_not_called()
 
+    def test_import_live_asks_the_importer_not_to_require_a_finished_match(self):
+        """The importer resolves the match from the SCHEDULE and skips whatever the
+        schedule does not call finished. Without only_finished=False the live import
+        would report success and import nothing at all."""
+        m = self._match(status=Match.STATUS_LIVE)
+        with mock.patch.object(live_ingest.egress_client, "warm_schedule",
+                               return_value=True), \
+             mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=True), \
+             mock.patch.object(live_ingest, "ingest_sofascore_season") as ing:
+            self.assertTrue(live_ingest.import_live(m))
+        self.assertIs(ing.call_args.kwargs["only_finished"], False)
+        # And it must not skip a match it has already written rows for: the whole
+        # point of the second import is what changed since the first.
+        self.assertIs(ing.call_args.kwargs["skip_existing"], False)
+
+    def test_import_live_does_not_promote_the_match(self):
+        m = self._match(status=Match.STATUS_LIVE)
+        with mock.patch.object(live_ingest.egress_client, "warm_schedule",
+                               return_value=True), \
+             mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=True), \
+             mock.patch.object(live_ingest, "ingest_sofascore_season"):
+            live_ingest.import_live(m)
+        m.refresh_from_db()
+        self.assertFalse(m.data_ready)
+
 
 class TickWiringTests(_Base):
     def test_final_confirm_sets_data_ready_only_on_success(self):
@@ -112,3 +139,42 @@ class TickWiringTests(_Base):
         with mock.patch.object(live_ingest, "finalize") as fin:
             call_command("tick", "--now", _iso(now), "--dry-run")
         fin.assert_not_called()
+
+    def test_live_import_stamps_its_own_clock_and_leaves_data_ready_alone(self):
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        m = self._match(status=Match.STATUS_LIVE,
+                        kickoff=now - timedelta(minutes=30))
+        with mock.patch.object(live_ingest, "poll_live", return_value=True), \
+             mock.patch.object(live_ingest, "import_live", return_value=True) as imp:
+            call_command("tick", "--now", _iso(now))
+        imp.assert_called_once()
+        m.refresh_from_db()
+        self.assertEqual(m.data_imported_at, now)
+        self.assertFalse(m.data_ready)
+
+    def test_a_blocked_live_import_does_not_stamp(self):
+        """So the next tick retries it instead of waiting out the whole interval."""
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        m = self._match(status=Match.STATUS_LIVE,
+                        kickoff=now - timedelta(minutes=30))
+        with mock.patch.object(live_ingest, "poll_live", return_value=True), \
+             mock.patch.object(live_ingest, "import_live", return_value=False):
+            call_command("tick", "--now", _iso(now))
+        m.refresh_from_db()
+        self.assertIsNone(m.data_imported_at)
+
+    def test_full_time_is_announced_at_the_stamp_and_not_again(self):
+        """The full-time push belongs to ``stamp_ft``, which by construction happens
+        exactly once per match — the later finalization steps must stay silent."""
+        from vfoot.services import live_updates
+
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        m = self._match(status=Match.STATUS_FINISHED)
+        with mock.patch.object(live_updates, "announce_full_time",
+                               return_value=0) as ann:
+            call_command("tick", "--now", _iso(now))          # stamps FT
+            ann.assert_called_once()
+            ann.reset_mock()
+            with mock.patch.object(live_ingest, "finalize", return_value=True):
+                call_command("tick", "--now", _iso(now + timedelta(hours=2)))
+            ann.assert_not_called()

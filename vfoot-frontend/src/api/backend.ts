@@ -913,8 +913,8 @@ export async function adminMarketOffer(
   return auctionPost(`/leagues/${leagueId}/market/offers/${offerId}/${action}`);
 }
 
-/** ws(s):// URL for the live auction room, carrying the DRF token in the query string. */
-export function auctionSocketUrl(auctionId: number): string {
+/** ws(s):// base for this deployment, with the DRF token appended as a query param. */
+function socketUrl(path: string): string {
   const token = getToken() ?? '';
   // Strip the API suffix; in production baseUrl is RELATIVE ('/api/v1' -> ''), so
   // derive scheme+host from the current page (WebSocket needs an absolute URL).
@@ -923,7 +923,17 @@ export function auctionSocketUrl(auctionId: number): string {
     httpBase = `${window.location.protocol}//${window.location.host}${httpBase}`;
   }
   const wsBase = httpBase.replace(/^http/i, 'ws');
-  return `${wsBase}/ws/auctions/${auctionId}/?token=${encodeURIComponent(token)}`;
+  return `${wsBase}${path}?token=${encodeURIComponent(token)}`;
+}
+
+/** ws(s):// URL for the live auction room, carrying the DRF token in the query string. */
+export function auctionSocketUrl(auctionId: number): string {
+  return socketUrl(`/ws/auctions/${auctionId}/`);
+}
+
+/** ws(s):// URL for a league's matchday in progress: votes moving, matches ending. */
+export function liveSocketUrl(leagueId: number): string {
+  return socketUrl(`/ws/leagues/${leagueId}/live/`);
 }
 
 export async function getLeagueFixtures(leagueId: number, competitionId?: number): Promise<LeagueFixtureItem[]> {

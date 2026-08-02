@@ -261,6 +261,11 @@ class Match(models.Model):
     # this flag is what lets a fantasy matchday be computed as definitive.
     data_ready = models.BooleanField(default=False)
     data_checked_at = models.DateTimeField(null=True, blank=True)
+    # Last time the FULL per-player data was imported. Distinct from
+    # data_checked_at, which the light live poll stamps every couple of minutes:
+    # the two have their own cadences (see VFOOT_LIVE_IMPORT_MINUTES) and sharing
+    # one stamp would let the fast one keep the slow one from ever coming due.
+    data_imported_at = models.DateTimeField(null=True, blank=True)
     # When the match was FIRST observed as finished (full time). The scheduler
     # measures the +15min / +1h finalization windows from this, so it must be the
     # real observed FT, not an estimate from kickoff + nominal duration.

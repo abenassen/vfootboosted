@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import { useLeagueContext } from '../league/LeagueContext';
-import { useAuctionSocket } from '../hooks/useAuctionSocket';
+import { useAuctionSocket } from '../hooks/useNudgeSocket';
 import {
   assignPlayer,
   cancelNomination,

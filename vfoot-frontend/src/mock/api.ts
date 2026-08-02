@@ -718,6 +718,10 @@ export function auctionSocketUrl(auctionId: number): string {
   return `ws://mock/ws/auctions/${auctionId}/`;
 }
 
+export function liveSocketUrl(leagueId: number): string {
+  return `ws://mock/ws/leagues/${leagueId}/live/`;
+}
+
 export async function searchPlayers(q: string): Promise<PlayerSearchItem[]> {
   await sleep(80);
   if (q.trim().length < 2) return [];

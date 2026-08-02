@@ -1271,9 +1271,26 @@ def _write(cache_dir: Path, path: str, payload) -> None:
     tmp.replace(target)
 
 
+def _order_fixtures(fixtures: list, headline: str) -> list:
+    """The order in which a round's fixtures take the kick-off slots.
+
+    Stable by (matchday, id), so a match keeps its slot whenever the season is
+    rebuilt — except for ``headline``, which is moved to the LAST slot of its round:
+    the Sunday-night posticipo. That exists so a scenario can say WHICH match should
+    be the one in progress ("the round is played, Napoli-Inter is on now") instead of
+    whichever fixture happens to sort first.
+    """
+    if not headline:
+        return fixtures
+    pick = [f for f in fixtures if str(f.external_id) == str(headline)]
+    if not pick:
+        return fixtures
+    return [f for f in fixtures if str(f.external_id) != str(headline)] + pick
+
+
 def write_season_cache(*, competition_season: CompetitionSeason, cache_dir: Path,
                        through_matchday: int, now: datetime, live_minute: int,
-                       seed: int, year: str, log=print) -> dict:
+                       seed: int, year: str, headline: str = "", log=print) -> dict:
     """Write every provider payload the importer will read. Returns a small report.
 
     Matchdays after ``through_matchday`` are written as fixtures only — no lineups,
@@ -1314,7 +1331,7 @@ def write_season_cache(*, competition_season: CompetitionSeason, cache_dir: Path
     events_by_round: dict[int, list[dict]] = {}
 
     for matchday in sorted(by_round):
-        fixtures = by_round[matchday]
+        fixtures = _order_fixtures(by_round[matchday], headline)
         simulate = matchday <= through_matchday
         kickoffs = None
         if simulate:

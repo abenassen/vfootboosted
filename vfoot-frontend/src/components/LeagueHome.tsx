@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   concludeLeagueMatchday,
@@ -17,6 +17,7 @@ import { useLeagueContext } from '../league/LeagueContext';
 import { competitionFormatLabel } from '../league/competitionFormat';
 import { compColor, type CompColor } from '../league/competitionColors';
 import { useDecisionAlerts } from '../league/useDecisionAlerts';
+import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { Badge, Button, Card, SectionTitle } from './ui';
 import Crest from './Crest';
 import type {
@@ -50,6 +51,10 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   const [marketSession, setMarketSession] = useState<MarketSessionInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // Bumped by the live socket. Everything on this page is derived from the same
+  // five calls, so one counter in their dep array is the whole refresh.
+  const [liveTick, setLiveTick] = useState(0);
+  useLiveSocket(selectedLeagueId ?? null, useCallback(() => setLiveTick((n) => n + 1), []));
 
   useEffect(() => {
     if (!selectedLeagueId) return;
@@ -65,7 +70,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     return () => {
       alive = false;
     };
-  }, [selectedLeagueId]);
+  }, [selectedLeagueId, liveTick]);
 
   useEffect(() => {
     if (!selectedLeagueId) return;
@@ -175,6 +180,23 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   // Every arrear, not only the one that is unblocked right now: closing them in
   // order is what the button does, and the count is the honest size of the backlog.
   const queue = matchdays.filter((m) => m.awaits_conclusion);
+
+  // My matches of the round being PLAYED. They used to disappear from this page
+  // altogether, and it took a while to see why: they are neither "next" (locked,
+  // so there is nothing left to field) nor "results" (nobody has counted them).
+  // Keyed on the round the CALENDAR is playing, not on "locked and unscored" —
+  // with a late admin the arrears are locked and unscored too, and those belong
+  // to the queue banner above, not here.
+  //
+  // Declared here and not with the other memos on purpose: `playingMd` is read
+  // from `matchdays` a few lines up, and a useMemo placed above it would name it
+  // in its dependency array before the binding exists.
+  const liveFixtures = useMemo(() => {
+    if (!playingMd) return [];
+    return fixtures.filter(
+      (f) => f.is_user_involved && f.real_matchday === playingMd.real_matchday,
+    );
+  }, [fixtures, playingMd]);
 
   // Close the whole arrears queue in order, stopping at the first one that needs a
   // decision (a team without a lineup) — that conversation lives in Gestione lega.
@@ -312,6 +334,55 @@ export default function LeagueHome({ competitions }: { competitions: Competition
             <Link to="/market">
               <Button size="sm">Vai al mercato →</Button>
             </Link>
+          </div>
+        </Card>
+      ) : null}
+
+      {/* 0 — what is happening RIGHT NOW. Above everything else because it is the
+          only thing on this page that changes while you look at it. What it offers
+          is the live view, NOT the lineup: the round has locked, and a "Formazione"
+          button here could only end on a 409. */}
+      {liveFixtures.length ? (
+        <Card className="border-2 border-rose-200 bg-rose-50/60 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                Si gioca
+              </span>
+              <SectionTitle className="!mb-0">Giornata {playingMd?.real_matchday}</SectionTitle>
+            </div>
+            <span className="text-[11px] text-slate-500">
+              I voti si aggiornano mentre si gioca e restano provvisori fino a fine partita.
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {liveFixtures.map((f) => (
+              <Link
+                key={f.fixture_id}
+                to={`/matches/${f.fixture_id}`}
+                className="block rounded-xl border border-rose-200 bg-white p-3 transition hover:border-rose-300 hover:shadow-sm"
+              >
+                <div
+                  className={clsx(
+                    'text-[11px] font-bold uppercase tracking-wide',
+                    compColorById.get(f.competition_id)?.text700 ?? 'text-slate-500',
+                  )}
+                >
+                  {compName.get(f.competition_id) ?? 'Competizione'}
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                  <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
+                  <span className="truncate">{f.home_team.name}</span>
+                  <span className="text-slate-400">vs</span>
+                  <span className="truncate">{f.away_team.name}</span>
+                  <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
+                </div>
+                <div className="mt-1.5 text-[11px] font-semibold text-rose-700">
+                  Segui i voti in diretta →
+                </div>
+              </Link>
+            ))}
           </div>
         </Card>
       ) : null}

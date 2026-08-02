@@ -255,14 +255,19 @@ class TickCommandTests(TestCase):
 
 class LivePollCadenceTests(SimpleTestCase):
     """The scrape interval is a knob: the tick may fire every minute, but a single
-    match must not be re-scraped more often than configured."""
+    match must not be re-scraped more often than configured.
+
+    These assert on the ``live_poll`` bucket alone, not on the plan being empty: the
+    same window also feeds ``live_import``, on its own slower clock, and the two
+    cadences are deliberately independent."""
 
     def setUp(self):
         self.now = datetime(2026, 8, 22, 15, 0, tzinfo=UTC)
 
-    def _live(self, last_checked):
+    def _live(self, last_checked, last_imported=None):
         return _m(kickoff=self.now - timedelta(minutes=30),
-                  data_checked_at=last_checked)
+                  data_checked_at=last_checked,
+                  data_imported_at=last_imported)
 
     @override_settings(VFOOT_LIVE_POLL_MINUTES=2)
     def test_never_polled_is_due(self):
@@ -272,7 +277,7 @@ class LivePollCadenceTests(SimpleTestCase):
     @override_settings(VFOOT_LIVE_POLL_MINUTES=2)
     def test_polled_recently_is_skipped(self):
         m = self._live(self.now - timedelta(seconds=30))
-        self.assertTrue(plan_tick(self.now, [m]).is_empty())
+        self.assertEqual(plan_tick(self.now, [m]).live_poll, [])
 
     @override_settings(VFOOT_LIVE_POLL_MINUTES=2)
     def test_polled_longer_ago_than_the_interval_is_due(self):
@@ -283,4 +288,42 @@ class LivePollCadenceTests(SimpleTestCase):
     def test_widening_the_interval_reduces_scraping(self):
         m = self._live(self.now - timedelta(minutes=3))
         # at 5 minutes the same match is NOT yet due (it was at 2)
-        self.assertTrue(plan_tick(self.now, [m]).is_empty())
+        self.assertEqual(plan_tick(self.now, [m]).live_poll, [])
+
+
+class LiveImportCadenceTests(SimpleTestCase):
+    """The full import rides the live window on its OWN clock, and — the part worth
+    a test — on its own stamp. Sharing ``data_checked_at`` with the poll would let
+    the poll, firing five times as often, keep pushing the import's next due time
+    out for as long as the match lasted."""
+
+    def setUp(self):
+        self.now = datetime(2026, 8, 22, 15, 0, tzinfo=UTC)
+
+    def _live(self, last_imported, last_checked=None):
+        return _m(kickoff=self.now - timedelta(minutes=30),
+                  data_checked_at=last_checked or self.now,
+                  data_imported_at=last_imported)
+
+    @override_settings(VFOOT_LIVE_IMPORT_MINUTES=10)
+    def test_never_imported_is_due(self):
+        m = self._live(None)
+        self.assertIn(m, plan_tick(self.now, [m]).live_import)
+
+    @override_settings(VFOOT_LIVE_IMPORT_MINUTES=10)
+    def test_imported_recently_is_skipped(self):
+        m = self._live(self.now - timedelta(minutes=4))
+        self.assertEqual(plan_tick(self.now, [m]).live_import, [])
+
+    @override_settings(VFOOT_LIVE_IMPORT_MINUTES=10)
+    def test_a_poll_a_minute_ago_does_not_postpone_the_import(self):
+        m = self._live(self.now - timedelta(minutes=12),
+                       last_checked=self.now - timedelta(minutes=1))
+        plan = plan_tick(self.now, [m])
+        self.assertIn(m, plan.live_import)
+        self.assertEqual(plan.live_poll, [])  # the poll itself is not yet due
+
+    @override_settings(VFOOT_LIVE_IMPORT_MINUTES=10)
+    def test_a_match_that_has_not_kicked_off_is_not_imported(self):
+        m = _m(kickoff=self.now + timedelta(minutes=30))
+        self.assertEqual(plan_tick(self.now, [m]).live_import, [])

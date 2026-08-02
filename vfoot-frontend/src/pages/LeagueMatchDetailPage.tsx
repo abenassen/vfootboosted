@@ -1,19 +1,32 @@
+import { useCallback, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getFixtureDetail } from '../api';
 import { Card } from '../components/ui';
 import { MatchDetail } from '../components/match/MatchDetail';
 import { ClassicMatchDetail } from '../components/match/ClassicMatchDetail';
+import { useLeagueContext } from '../league/LeagueContext';
+import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { useAsync } from '../utils/useAsync';
 import type { ClassicFixtureDetail } from '../types/classic';
 import type { SimFixtureDetail } from '../types/simulation';
 
 export default function LeagueMatchDetailPage() {
   const { matchId } = useParams();
-  const { data, loading, error } = useAsync(() => getFixtureDetail(matchId ?? ''), [matchId]);
+  const { selectedLeagueId } = useLeagueContext();
+  // Bumped by the socket; the only reason this page ever re-fetches on its own.
+  const [tick, setTick] = useState(0);
+  const { data, loading, error } = useAsync(
+    () => getFixtureDetail(matchId ?? ''),
+    [matchId, tick],
+  );
+  // The nudge carries no data: it says "something moved", and the same REST call
+  // that built this page rebuilds it. One code path, whether you reloaded or the
+  // server told you to.
+  useLiveSocket(selectedLeagueId ?? null, useCallback(() => setTick((n) => n + 1), []));
 
-  if (loading) return <div className="text-sm text-slate-500">Caricamento partita…</div>;
-  if (error || !data) {
-    // A fixture that has not been played has no rich detail, and the API says so
+  if (loading && !data) return <div className="text-sm text-slate-500">Caricamento partita…</div>;
+  if ((error && !data) || (!loading && !data)) {
+    // A fixture whose round has not kicked off has no detail, and the API says so
     // with a 404: that is a normal state, not a failure, and showing it in red
     // made a match simply not played yet look like a broken page. The calendar no
     // longer links these, so getting here means a bookmark or a typed URL.
@@ -24,7 +37,7 @@ export default function LeagueMatchDetailPage() {
           <div className="text-3xl">📋</div>
           <div className="mt-2 font-bold">Partita non ancora giocata</div>
           <p className="mx-auto mt-1 max-w-sm text-sm text-slate-600">
-            Il tabellino compare quando la giornata viene conclusa: prima non ci sono
+            Il tabellino compare quando la giornata comincia: prima non ci sono
             né voti né formazioni da mostrare.
           </p>
           <Link
@@ -38,6 +51,7 @@ export default function LeagueMatchDetailPage() {
     }
     return <Card className="p-4 text-sm text-red-600">Errore nel caricamento della partita: {error?.message ?? 'sconosciuto'}</Card>;
   }
+  if (!data) return null;
   // Classic leagues carry mode:'classic' in the payload -> fantavoto detail (no zone
   // duel). Aura leagues fall through to the zone-duel MatchDetail.
   if ('mode' in data && data.mode === 'classic') {

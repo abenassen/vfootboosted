@@ -125,6 +125,7 @@ type ApiImpl = {
   undoLastAuctionAction: typeof backendApi.undoLastAuctionAction;
   closeAuctionSession: typeof backendApi.closeAuctionSession;
   auctionSocketUrl: typeof backendApi.auctionSocketUrl;
+  liveSocketUrl: typeof backendApi.liveSocketUrl;
   searchPlayers: (q: string, leagueId?: number, limit?: number) => Promise<PlayerSearchItem[]>;
   getAuctionState: (auctionId: number) => Promise<AuctionState>;
   getLeagueFixtures: (leagueId: number, competitionId?: number) => Promise<LeagueFixtureItem[]>;
@@ -215,6 +216,7 @@ export const voidBid = typedImpl.voidBid;
 export const undoLastAuctionAction = typedImpl.undoLastAuctionAction;
 export const closeAuctionSession = typedImpl.closeAuctionSession;
 export const auctionSocketUrl = typedImpl.auctionSocketUrl;
+export const liveSocketUrl = typedImpl.liveSocketUrl;
 export const searchPlayers = typedImpl.searchPlayers;
 export const getAuctionState = typedImpl.getAuctionState;
 export const getLeagueFixtures = typedImpl.getLeagueFixtures;

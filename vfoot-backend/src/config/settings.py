@@ -207,6 +207,14 @@ if _SECURE:
 # the VFOOT_LIVE_POLL_MINUTES env var; no code change needed to retune it.
 VFOOT_LIVE_POLL_MINUTES = float(os.environ.get("VFOOT_LIVE_POLL_MINUTES", "2"))
 
+# How often the FULL per-player data of a live match is re-imported, in minutes.
+# Deliberately much slower than the poll above: the poll reads one small endpoint,
+# this one reads the squad sheet, the shot map and a heatmap per player, and writes
+# a few thousand zone-feature rows. Ten minutes is about the rate at which a
+# performance really changes, and it is what makes the votes move during a match
+# without turning the tick into a load generator.
+VFOOT_LIVE_IMPORT_MINUTES = float(os.environ.get("VFOOT_LIVE_IMPORT_MINUTES", "10"))
+
 # Serve the egress from a generator instead of the network, so a simulated season
 # can be driven through the REAL live pipeline: the same scheduler, the same poll
 # cadence, the same finalization windows, the same import — only the provider is

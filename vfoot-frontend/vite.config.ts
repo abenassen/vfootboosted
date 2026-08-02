@@ -61,7 +61,12 @@ export default defineConfig({
         // testable without a production build.
         enabled: true,
         type: 'module',
-        navigateFallback: 'index.html',
+        // No `navigateFallback` here on purpose. It installs a SECOND navigation
+        // route, ahead of the one src/sw.ts registers, and that one knows nothing
+        // about the denylist — so in dev (and only in dev) a request for a real
+        // file in public/, like /mobile-frame.html, was answered with the SPA shell
+        // and ended on the app's own 404. The worker's own route already does the
+        // job, with the denylist, in dev and in production alike.
       },
     }),
   ],
