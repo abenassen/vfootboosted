@@ -295,6 +295,15 @@ validazione, e le persone coinvolte vanno avvisate:
 - all'admin: *ci sono N offerte da validare*;
 - (a offerta matura per le 24h, lo stesso avviso senza aspettare la chiusura.)
 
+Quello all'admin **va ripetuto finché la coda non è vuota**, non mandato una
+volta sola alla chiusura. La coda non si smaltisce da sola: nessun percorso
+automatico porta un'offerta da `accepted` a `settled`, solo il bottone
+dell'admin. Un'offerta dimenticata lì dentro tiene il giocatore impegnato — non
+è riofferibile nemmeno nella sessione successiva — e la rosa di chi l'ha vinta
+resta ferma. Dal 02/08/2026 la coda almeno sopravvive alla sessione ed è
+raggiungibile (prima spariva con essa), ma resta invisibile a chi non apre
+Gestione lega.
+
 Queste **non possono partire da sole**: non c'è nessuna richiesta a cui
 agganciarle, ed è proprio quando nessuno sta guardando che l'avviso conta.
 `manage.py market_tick` esiste già, è idempotente, e oggi non è agganciato a

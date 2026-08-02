@@ -59,7 +59,9 @@ export const OFFER_TONE: Record<string, 'green' | 'amber' | 'slate' | 'red' | 'b
 };
 export const OFFER_LABEL: Record<string, string> = {
   leading: 'in testa',
-  accepted: 'accettata',
+  // "accettata" suonava come una pratica chiusa, e invece e' il contrario: manca
+  // ancora la decisione dell'admin, e finche' non arriva le rose non si muovono.
+  accepted: 'in attesa di validazione',
   settled: 'conclusa',
   outbid: 'superata',
   rejected: 'rifiutata',
