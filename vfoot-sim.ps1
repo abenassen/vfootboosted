@@ -7,6 +7,7 @@
     .\vfoot-sim.ps1 status       che cosa gira, con che orologio
     .\vfoot-sim.ps1 stop         ferma tutto quello che ha avviato
     .\vfoot-sim.ps1 build        ricostruisce lo stato dello scenario, poi avvia
+    .\vfoot-sim.ps1 reset        riporta all'istante iniziale in pochi secondi
 
   Perche' esiste, visto che ./vfoot-sim gira gia' su Windows: gira in GIT BASH.
   Windows non onora lo shebang, quindi da PowerShell un file senza estensione non
