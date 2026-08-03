@@ -204,6 +204,11 @@ save_snapshot() {
   cp "$db" "$snap.tmp" && mv "$snap.tmp" "$snap" || {
     rm -f "$snap.tmp"
     printf '%sistantanea non salvata%s\n' "$WARN" "$X"; return 0; }
+  # L'istante dell'ultimo `build` di questo scenario, perche' `reset` possa tornare
+  # DA DOVE SI ERA PARTITI. Senza, un `build --at` metteva l'istantanea a un'ora e
+  # `reset` la cercava a quella predefinita dello scenario: due comandi della stessa
+  # coppia che non parlano della stessa serata.
+  printf '%s' "$AT" > "$SNAPDIR/$SCENARIO.last"
   say "istantanea $(du -h "$snap" 2>/dev/null | cut -f1)  ($snap)"
 }
 
@@ -301,11 +306,18 @@ cmd_build() {
 }
 
 cmd_reset() {
+  # L'istante predefinito di `reset` e' quello dell'ULTIMO `build`, non quello dello
+  # scenario: si torna da dove si e' partiti, che e' l'unica cosa che "reset" possa
+  # ragionevolmente voler dire. Un `--at` esplicito vince, per tornare a un istante
+  # costruito in precedenza.
+  [ -n "$AT" ] || [ ! -s "$SNAPDIR/$SCENARIO.last" ] || AT=$(cat "$SNAPDIR/$SCENARIO.last")
   export_sim_env
   local snap db
   snap=$(snap_file)
   [ -f "$snap" ] || die "nessuna istantanea per '$SCENARIO' a $AT.
-  Serve un \`./vfoot-sim build\` una volta sola: e' quello che la crea."
+  Serve un \`./vfoot-sim build\` una volta sola: e' quello che la crea.$(
+     ls "$SNAPDIR"/*.sqlite3 >/dev/null 2>&1 && printf '\n  Disponibili:\n%s' \
+       "$(ls -1 "$SNAPDIR"/*.sqlite3 | sed 's|.*/|    |;s|\.sqlite3$||')")"
   printf '%sriporto %s all istante %s%s\n' "$BOLD" "$SCENARIO" "$VFOOT_FAKE_NOW" "$X"
   # Fermare e' obbligatorio, non cortese: su Windows un server acceso tiene aperto
   # il file e la copia fallisce, e su un sistema che la lascia passare si
