@@ -38,6 +38,18 @@ MAX_PAYLOAD_BYTES = 3000
 # HTTP answers that mean "this subscription no longer exists". Anything else is
 # treated as weather.
 GONE_STATUSES = (404, 410)
+# 403 means the push service will not accept OUR SIGNATURE for this subscription:
+# the browser bound it to the VAPID public key it was given when it subscribed, and
+# ours is no longer that one. It is not "gone" — the install is alive and would
+# accept a push signed with the old key — but with the keys we have it can never
+# succeed again, so retrying it for ever is the same rot by another name.
+#
+# NOT deleted on the first one, deliberately. A server started with the wrong keys
+# 403s on EVERY subscription, and deleting on sight would let one bad deploy erase
+# the whole install base in a single round of notifications. Three consecutive
+# failures cost three pushes to one dead device and make that accident survivable.
+MISMATCHED_KEY_STATUS = 403
+MISMATCHED_KEY_STRIKES = 3
 
 
 def configured() -> bool:
@@ -99,8 +111,16 @@ def _send_one(sub: PushSubscription, payload: str) -> bool:
             log.info("Subscription push non più valida (%s), la rimuovo.", status)
             sub.delete()
             return False
+        failures = sub.failures + 1
+        if status == MISMATCHED_KEY_STATUS and failures >= MISMATCHED_KEY_STRIKES:
+            log.warning(
+                "Subscription push firmata con chiavi VAPID che non sono più le "
+                "nostre (403 per la %s volta), la rimuovo: il browser deve "
+                "ri-iscriversi.", failures)
+            sub.delete()
+            return False
         PushSubscription.objects.filter(id=sub.id).update(
-            failures=sub.failures + 1, last_error_at=timezone.now())
+            failures=failures, last_error_at=timezone.now())
         log.warning("Push non consegnata (stato %s): %s", status, exc)
         return False
     except Exception:                                     # noqa: BLE001

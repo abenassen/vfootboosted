@@ -32,6 +32,27 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+/** Was this subscription created with the key the server signs with TODAY?
+ *
+ *  The browser binds a subscription to the `applicationServerKey` it was handed at
+ *  subscribe time, for good. Change the server's VAPID pair — a redeploy with a new
+ *  secret, a dev machine whose keys differ from production's — and every existing
+ *  subscription starts answering 403: the install is alive, the push simply cannot
+ *  be signed for it any more. Nothing on either side announces this, so the profile
+ *  page went on reporting "attive" for notifications that could never arrive.
+ *
+ *  When the browser will not tell us which key it used (no `options`), we say YES
+ *  rather than re-subscribing on every load: a wrong guess here costs a permission
+ *  round-trip on every visit, and the server side already gives up on a subscription
+ *  that 403s three times. */
+function keyMatches(sub: PushSubscription, publicKey: string): boolean {
+  const current = sub.options?.applicationServerKey;
+  if (!current) return true;
+  const mine = new Uint8Array(current);
+  const theirs = urlBase64ToUint8Array(publicKey);
+  return mine.length === theirs.length && mine.every((b, i) => b === theirs[i]);
+}
+
 export function usePush() {
   const [state, setState] = useState<PushState>({
     available: false,
@@ -48,7 +69,13 @@ export function usePush() {
       let subscribed = false;
       if (cfg.enabled && supportsPush() && !blocked) {
         const reg = await navigator.serviceWorker.ready;
-        subscribed = (await reg.pushManager.getSubscription()) !== null;
+        const sub = await reg.pushManager.getSubscription();
+        // A subscription signed for a key we no longer hold is not a subscription:
+        // reporting it as one is how the profile page came to promise notifications
+        // that the push service was rejecting. Saying "not subscribed" puts the
+        // Attiva button back, and pressing it repairs the whole thing — with no
+        // permission prompt, since that was granted long ago.
+        subscribed = sub !== null && keyMatches(sub, cfg.public_key ?? '');
       }
       setState({ available: cfg.enabled, subscribed, blocked, busy: false, error: null });
     } catch {
@@ -100,8 +127,19 @@ export function usePush() {
       if (!cfg.enabled || !cfg.public_key) throw new Error('Notifiche non configurate sul server.');
 
       const reg = await navigator.serviceWorker.ready;
+      let existing = await reg.pushManager.getSubscription();
+      if (existing && !keyMatches(existing, cfg.public_key)) {
+        // Reusing it would re-save an endpoint that answers 403 for ever, and the
+        // browser refuses to re-subscribe with a different key while this one
+        // lives. Our server is told first, for the same reason `disable` does:
+        // an endpoint dropped here and kept there is one we would push into the
+        // void.
+        await unsubscribePush(existing.endpoint).catch(() => {});
+        await existing.unsubscribe();
+        existing = null;
+      }
       const sub =
-        (await reg.pushManager.getSubscription()) ??
+        existing ??
         (await reg.pushManager.subscribe({
           // Required: we promise every push results in something visible. Silent
           // pushes are not allowed on the web, and iOS revokes for it.
