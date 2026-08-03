@@ -144,7 +144,7 @@ def _sv_line(pid: int, lineup_role: str, name: str | None = None,
     }
 
 
-def _office_line(pid: int, lineup_role: str, voto: float) -> dict:
+def _office_line(pid: int, lineup_role: str, voto: float, name: str | None = None) -> dict:
     """An imposed vote: it IS the voto puro and the fantavoto, with nothing added.
 
     No goal, assist or card can be credited for a match that was not played, so the
@@ -152,11 +152,25 @@ def _office_line(pid: int, lineup_role: str, voto: float) -> dict:
     tabellino, and so the clean-sheet modifier does not mistake it for a game.
     """
     return {
-        "player_id": pid, "name": str(pid), "lineup_role": lineup_role,
+        "player_id": pid, "name": name or str(pid), "lineup_role": lineup_role,
         "role": None, "voto_puro": voto, "fantavoto": voto, "sv": False,
         "pending": False, "office": True,
         "conceded": 0, "entered": False, "entered_for": None, "replaced_by": None,
     }
+
+
+def names_for(player_ids) -> dict[int, str]:
+    """{player_id: the name to show}, with the SAME preference the played line uses
+    (classic_pagella._line), so one player is named one way whether he has a
+    performance behind him or only a placeholder.
+
+    Needed because a placeholder is built without an appearance, and the appearance
+    is where a played line gets its name from. Without this the tabellino fell back
+    to the id — which on a round in progress is most of a bench, and reads like a
+    data corruption rather than a player who has not taken the field."""
+    return {p.id: (p.short_name or p.full_name or str(p.id))
+            for p in Player.objects.filter(id__in=list(player_ids))
+            .only("id", "short_name", "full_name")}
 
 
 def compose_team_lines(
@@ -168,6 +182,7 @@ def compose_team_lines(
     pending: set | None = None,
     office: dict | None = None,
     vacant: set | None = None,
+    names: dict | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Build the ordered (starters, bench) line lists for scoring.
 
@@ -197,24 +212,26 @@ def compose_team_lines(
     pending = pending or set()
     office = office or {}
     vacant = vacant or set()
+    names = names or {}
 
     def line_for(pid: int) -> dict:
         role = role_map.get(pid, "MID")
+        name = names.get(pid)
         if pid in vacant:
-            return _sv_line(pid, role)
+            return _sv_line(pid, role, name)
         if pid in office:
             # The league has ruled on this match: the ruling wins over both the
             # missing data and any partial data the provider may have shipped.
-            return _office_line(pid, role, office[pid])
+            return _office_line(pid, role, office[pid], name)
         if pid in pending:
             # Pending BEFORE the index on purpose: a match that is finished but whose
             # data has not stabilised can already have appearances imported, so a line
             # may well exist — but the vote is not official yet, and counting it would
             # freeze a number that the next import can still move.
-            return _sv_line(pid, role, pending=True)
+            return _sv_line(pid, role, name, pending=True)
         base = index.get(pid)
         if base is None:
-            return _sv_line(pid, role)  # played, not rated: a plain s.v.
+            return _sv_line(pid, role, name)  # played, not rated: a plain s.v.
         line = dict(base)
         line["lineup_role"] = role
         return line
@@ -335,7 +352,8 @@ def team_lines_for_conclusion(league, team, competition_id, real_matchday, index
     # Only the fallback lineup is filtered against today's roster — see compose_team_lines.
     vacant = {p for p in all_ids if p not in owned} if source == "previous" else set()
     starters, bench_lines = compose_team_lines(gk, outfield, bench, index, role_map,
-                                               pending, office, vacant)
+                                               pending, office, vacant,
+                                               names_for(all_ids))
     return starters, bench_lines, {"source": source, "stale": len(vacant)}
 
 

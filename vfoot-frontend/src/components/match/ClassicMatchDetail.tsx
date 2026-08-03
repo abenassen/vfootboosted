@@ -282,14 +282,21 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
             when what is true is "not yet". */}
         {p.provisional ? <LiveBadge /> : null}
         {p.pending ? (
-          // A postponement is not a senza voto and must not read like one: nothing
-          // happened yet, the bench does not cover it, and the slot will be settled
-          // when the match is recovered (or by an office vote).
+          // An unplayed match is not a senza voto and must not read like one:
+          // nothing happened yet, the bench does not cover it, and the slot settles
+          // when the match is played (or by an office vote, if it never is).
+          //
+          // "rinviata" was a lie for most of the players who land here. `pending`
+          // has always meant "his club's match has not been played" — which covers
+          // a genuine postponement AND the 20:45 kick-off that simply has not
+          // happened yet, and on a round in progress the second is nearly all of
+          // them. The badge now says the thing both cases have in common; the
+          // reason is the round's business, not the row's.
           <span
-            title="Partita rinviata: non ancora giocata"
+            title="Il suo club non ha ancora giocato la partita di questa giornata"
             className="rounded border border-dashed border-sky-400 px-1.5 py-0.5 text-[10px] font-bold text-sky-600"
           >
-            rinviata
+            non ancora giocata
           </span>
         ) : p.sv ? (
           // 'dati mancanti' is not a verdict on the player — say so, rather than
