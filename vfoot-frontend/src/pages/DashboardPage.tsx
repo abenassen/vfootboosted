@@ -64,7 +64,19 @@ export default function DashboardPage() {
   const myName = selectedLeague?.team_name ?? null;
   const myRow = myName ? standings.find((s) => s.team === myName) ?? null : null;
   const mine = fixtures.filter((f) => f.is_user_involved);
-  const next = mine.filter((f) => f.status !== 'finished').sort((a, b) => a.round_no - b.round_no)[0] ?? null;
+  // Ordered by REAL MATCHDAY, not by round_no. `round_no` counts turns INSIDE one
+  // competition, so a cup restarts at 1 and its first unplayed tie always won the
+  // sort: with a championship at the twenty-second matchday the line still read
+  // "prossima: giornata 1". The real calendar is the one clock every competition
+  // shares, and it is also the number the rest of the app calls a giornata.
+  const next =
+    mine
+      .filter((f) => f.status !== 'finished')
+      .sort(
+        (a, b) =>
+          (a.real_matchday ?? Number.MAX_SAFE_INTEGER) - (b.real_matchday ?? Number.MAX_SAFE_INTEGER) ||
+          a.round_no - b.round_no,
+      )[0] ?? null;
   const seasonOver = !next && mine.length > 0;
 
   return (
@@ -80,7 +92,13 @@ export default function DashboardPage() {
             <div className="mt-1 text-2xl font-black">{myName ?? 'Spettatore'}</div>
             <div className="text-sm text-slate-500">
               {myRow ? `${myRow.rank}ª in classifica · ${myRow.points} pt` : 'Nessuna squadra associata'}
-              {seasonOver ? ' · campionato concluso' : next ? ` · prossima: giornata ${next.round_no}` : ''}
+              {seasonOver
+                ? ' · campionato concluso'
+                : next?.real_matchday
+                ? ` · prossima: giornata ${next.real_matchday}`
+                : next
+                ? ` · prossima: ${next.competition_name}` // non ancora calendarizzata
+                : ''}
             </div>
           </div>
           {/* No "Formazione" button here any more: with a championship and a cup
