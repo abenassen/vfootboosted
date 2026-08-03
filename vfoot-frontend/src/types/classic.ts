@@ -27,7 +27,12 @@ export interface ClassicPlayerLine {
   role_known?: boolean; // false => role GUESSED (squad data incomplete for him)
   sv: boolean; // senza voto: didn't play / not rated
   // Why he is s.v. — 'dati_mancanti' is OUR gap, not a judgement on the player.
-  sv_reason?: 'dati_mancanti' | 'impiego_insufficiente' | null;
+  /** Why there is no vote. `non_entrato` is the whole bench on a normal weekend
+   *  and says what we know; `dati_mancanti` is the rare case where a player has
+   *  minutes and no performance behind them, i.e. OUR hole. Payloads frozen
+   *  before the two were told apart carry `dati_mancanti` with zero minutes —
+   *  see `svKind`, which reads them for what they are. */
+  sv_reason?: 'non_entrato' | 'dati_mancanti' | 'impiego_insufficiente' | null;
   /** His club's match has not been played (a postponement). Reads as s.v. in the
    *  sum but is NOT one: the bench does not cover it, and the league settles it
    *  later — by the recovery, or by an office vote. */

@@ -59,6 +59,19 @@ function EventIcons({ ev }: { ev?: ClassicPlayerEvents }) {
   );
 }
 
+/** Which of the three s.v. this is, reading a frozen payload for what it means.
+ *
+ *  Before the backend told them apart, an unused substitute was written down as
+ *  `dati_mancanti` — "no data" — which says the opposite of the truth: we have his
+ *  data, and it says he never came on. Zero minutes settles it without a migration,
+ *  and it is the same test the backend now makes at the source. A real hole keeps
+ *  its badge: minutes on the pitch and no performance behind them. */
+function svKind(p: ClassicPlayerLine): 'non_entrato' | 'dati_mancanti' | 'sv' {
+  if (p.sv_reason === 'non_entrato') return 'non_entrato';
+  if (p.sv_reason === 'dati_mancanti') return p.minutes ? 'dati_mancanti' : 'non_entrato';
+  return 'sv';
+}
+
 const DEF_MODE_LABEL: Record<string, string> = {
   add_own: 'aggiunto alla propria squadra',
   subtract_opponent: 'sottratto alla squadra avversaria',
@@ -281,9 +294,24 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
         ) : p.sv ? (
           // 'dati mancanti' is not a verdict on the player — say so, rather than
           // letting a gap in our data read as "he did nothing".
-          p.sv_reason === 'dati_mancanti' ? (
+          svKind(p) === 'non_entrato' ? (
+            // The bench, said plainly. And it is a DIFFERENT sentence depending on
+            // whether the match is over: at the fortieth minute "non ha giocato" is
+            // not yet true, and a reserve keeper can still come on. `provisional`
+            // is the same mark the rest of the row uses for "this can still move".
             <span
-              title="Nessun dato disponibile per questo giocatore in questa partita"
+              title={
+                p.provisional
+                  ? 'Non ancora entrato: la partita è in corso, può ancora giocare'
+                  : 'Non è entrato in campo: nessun minuto giocato'
+              }
+              className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500"
+            >
+              {p.provisional ? 'in panchina' : 'non ha giocato'}
+            </span>
+          ) : svKind(p) === 'dati_mancanti' ? (
+            <span
+              title="Ha giocato, ma non abbiamo la sua prestazione per questa partita"
               className="rounded border border-dashed border-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-amber-600"
             >
               n.d.

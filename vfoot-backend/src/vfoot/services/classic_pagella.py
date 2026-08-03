@@ -268,12 +268,19 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
 
     # Voto puro from the heuristic. Keepers now have their OWN channel (anchored on
     # goals prevented), so they are no longer pinned to a flat baseline.
-    # s.v. has exactly two legitimate causes, and they are NOT the same thing:
-    # too little football played, or no data at all for this match. Say which —
-    # an unexplained s.v. on a player who scored reads as a scoring bug.
+    # s.v. has THREE legitimate causes, and they are not the same thing: he never
+    # came on, he played too little to be read, or we are missing the match. Say
+    # which — an unexplained s.v. on a player who scored reads as a scoring bug.
     if row is None:
-        return {**base, "sv": True, "sv_reason": "dati_mancanti", "voto_puro": None,
-                "bonus": 0.0, "malus": 0.0, "fantavoto": None}
+        # The rating layer only emits a row for a player who was on the pitch, so
+        # an unused substitute lands here — and calling that "missing data" says
+        # the opposite of the truth. We have his data; it says he never played.
+        # The genuine hole is a player with minutes and no performance behind
+        # them, which is rare enough to be worth telling apart rather than
+        # burying under the same badge as the whole bench.
+        return {**base, "sv": True,
+                "sv_reason": "non_entrato" if not app.minutes_played else "dati_mancanti",
+                "voto_puro": None, "bonus": 0.0, "malus": 0.0, "fantavoto": None}
     if not row.get("rated") or row.get("voto_puro") is None:
         return {**base, "sv": True, "sv_reason": "impiego_insufficiente",
                 "voto_puro": None, "bonus": 0.0, "malus": 0.0, "fantavoto": None}
