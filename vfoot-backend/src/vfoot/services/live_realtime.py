@@ -25,7 +25,33 @@ that in dev the page updates on reload; see ``vfoot-sim``, which starts one.
 """
 from __future__ import annotations
 
+import logging
+
+log = logging.getLogger(__name__)
+
 GROUP_PREFIX = "live_league_"
+
+# The web server's event loop, registered ONLY by the development in-process tick
+# (see config/asgi.py and realdata/services/tick_thread.py). None everywhere else,
+# which is every production process: there the tick is its own service and the
+# fan-out is Redis's job.
+_SERVER_LOOP = None
+
+
+def use_server_loop(loop) -> None:
+    """Deliver nudges on THIS loop instead of a private one.
+
+    ``InMemoryChannelLayer`` is built on ``asyncio.Queue``, and those queues belong
+    to the loop the consumers are waiting in. A nudge sent through
+    ``async_to_sync`` from another thread runs in a NEW loop: the message is put on
+    the queue and the waiting consumer's future is resolved from the wrong thread,
+    so an idle server never wakes up to notice. Nothing raises — the browser simply
+    stops being told anything, which is the same silence this module's docstring
+    warns about for the cross-process case, arrived at by a different road.
+    """
+    global _SERVER_LOOP
+    _SERVER_LOOP = loop
+    log.warning("spinte live: registrato il loop del server (%r)", loop)
 
 
 def group_name(league_id: int) -> str:
@@ -47,10 +73,22 @@ def broadcast_live(league_id: int, kind: str = "scores") -> None:
     layer = get_channel_layer()
     if layer is None:
         return
+    message = {"type": "live.update", "kind": kind, "league_id": league_id}
     try:
-        async_to_sync(layer.group_send)(
-            group_name(league_id),
-            {"type": "live.update", "kind": kind, "league_id": league_id},
-        )
+        if _SERVER_LOOP is not None and not _SERVER_LOOP.is_closed():
+            # On the server's own loop, and NOT waited on: the tick has imported
+            # what it came to import, and whether a browser hears about it is not
+            # its business to block for.
+            import asyncio
+
+            asyncio.run_coroutine_threadsafe(
+                layer.group_send(group_name(league_id), message), _SERVER_LOOP)
+            return
+        async_to_sync(layer.group_send)(group_name(league_id), message)
     except Exception:  # noqa: BLE001
+        # Era un `return` muto. Un layer che non consegna e non lo dice e' il modo
+        # in cui questa faccenda si nasconde: la pagina smette di aggiornarsi e non
+        # c'e' niente da nessuna parte. Non risolleva -- il tick ha importato, e
+        # quello resta valido -- ma lascia una traccia.
+        log.exception("spinta live fallita per la lega %s", league_id)
         return

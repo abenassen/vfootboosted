@@ -83,6 +83,9 @@ SNAPDIR="${XDG_CACHE_HOME:-$HOME/.cache}/vfoot-sim/snapshots"
 # --list` descrive. Cambiarli qui NON basta -- li' c'e' la definizione vera.
 SCENARIO="g22-live"
 AT=""
+# Acceso da start_redis quando un Redis non c'e' e non si puo' accendere: da li' in
+# poi il tick non e' piu' un processo a parte, ma un thread del server.
+TICK_IN_PROCESS=""
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; OK=$'\033[32m'; WARN=$'\033[33m'; ERR=$'\033[31m'; X=$'\033[0m'
 die()  { printf '%serrore:%s %s\n' "$ERR" "$X" "$*" >&2; exit 1; }
@@ -148,8 +151,13 @@ start_redis() {
   fi
   local ct
   ct=$(container_cmd) || {
-    printf '%ssenza redis la pagina NON si aggiorna da sola:%s il cron e il server\n' "$WARN" "$X"
-    printf '  hanno due layer in memoria separati. Ricarica a mano, oppure installa docker.\n'
+    # Niente Redis: invece di rinunciare alla spinta, si toglie di mezzo la ragione
+    # per cui serviva. Il layer in memoria non attraversa i PROCESSI, quindi il tick
+    # va a girare DENTRO il server -- stesso processo, stesso layer, spinta che
+    # arriva. Vale solo in sviluppo (vedi realdata/services/tick_thread.py).
+    TICK_IN_PROCESS=1
+    printf '%sniente docker:%s il tick girera'"'"' DENTRO il server, cosi'"'"' la spinta\n' "$WARN" "$X"
+    printf '  WebSocket arriva lo stesso senza Redis (solo in sviluppo).\n'
     return 0
   }
   # --rm: il contenitore e' usa-e-getta come la simulazione. Se resta in giro, il
@@ -232,6 +240,9 @@ export_sim_env() {
 
 start_backend() {
   mkdir -p "$LOGDIR"
+  # Deve valere per il PROCESSO DEL SERVER, quindi si esporta qui e non altrove:
+  # e' il server che ospitera' il tick.
+  [ -n "$TICK_IN_PROCESS" ] && export VFOOT_TICK_IN_PROCESS=true VFOOT_TICK_EVERY=60
   ( cd "$REPO/vfoot-backend/src" \
     && nohup "$PY" manage.py runserver "0.0.0.0:$BACK_PORT" --noreload \
        > "$LOGDIR/backend.log" 2>&1 < /dev/null & echo $! >> "$PIDFILE" )
@@ -241,6 +252,13 @@ start_backend() {
 }
 
 start_ticks() {
+  if [ -n "$TICK_IN_PROCESS" ]; then
+    # Avviarlo anche qui vorrebbe dire DUE scheduler sulla stessa banca dati, che si
+    # contendono gli stessi import: il secondo trova sempre "nothing due" e ogni
+    # tanto i due si pestano su una scrittura.
+    say "cron      dentro il server (log: $LOGDIR/backend.log)"
+    return 0
+  fi
   mkdir -p "$LOGDIR"
   # -u: senza, python bufferizza lo stdout quando non e' un terminale, e un log
   # che si riempie a blocchi di qualche kilobyte resta vuoto per mezz'ora. Questo
