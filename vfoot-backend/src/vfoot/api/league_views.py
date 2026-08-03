@@ -104,6 +104,7 @@ from vfoot.services.competition_stages import (
     stage_has_results,
 )
 from vfoot.services.competition_wizard import WizardError, create_competition, qualified_team_count
+from vfoot.services.league_competitions import main_competition
 from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic_lineup
 from vfoot.services.classic_pagella import get_reference, pagella_for_match
 from vfoot.services.league_decisions import (
@@ -3902,15 +3903,16 @@ class LeagueStandingsView(APIView):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _membership_or_404(league, request.user.id)
         # A standings table is COMPETITION-scoped, not league-scoped. Use the given
-        # competition; default to the first round-robin (a knockout has no table).
+        # competition; without one, the league's principal competition — the
+        # round-robin with the most matches (services/league_competitions), not
+        # whichever happened to be created first. The chosen id goes back in the
+        # response, so a caller that cares can say which table it is showing.
         comp_param = request.query_params.get("competition_id")
         comp = None
         if comp_param:
             comp = league.competitions.filter(id=comp_param).first()
         if comp is None:
-            comp = (league.competitions.filter(competition_type=FantasyCompetition.TYPE_ROUND_ROBIN)
-                    .order_by("id").first()
-                    or league.competitions.order_by("id").first())
+            comp = main_competition(league)
         pw, pd, pl = (comp.points_win, comp.points_draw, comp.points_loss) if comp else (3, 1, 0)
 
         fixtures = (
