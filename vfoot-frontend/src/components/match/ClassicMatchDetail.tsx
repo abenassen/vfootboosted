@@ -59,6 +59,28 @@ function EventIcons({ ev }: { ev?: ClassicPlayerEvents }) {
   );
 }
 
+const LINEUP_TO_ROLE: Record<string, ClassicRole> = {
+  GK: 'POR',
+  DEF: 'DIF',
+  MID: 'CEN',
+  ATT: 'ATT',
+};
+
+/** The role to draw on the chip.
+ *
+ *  `role` is read off the PERFORMANCE, so a placeholder line — nobody who has not
+ *  taken the field — has none, and the chip came out blank: an empty coloured box
+ *  next to a name, on exactly the rows a manager is scanning to see WHO of his is
+ *  still to play. `lineup_role` is on every line and says the same thing in the
+ *  lineup's vocabulary.
+ *
+ *  Drawn solid, not dashed: this is not an inference from match data (which is what
+ *  `role_known === false` marks) but the league's own frozen role — the very one the
+ *  save endpoint validated the lineup against. */
+function roleOf(p: ClassicPlayerLine): ClassicRole | null {
+  return p.role ?? LINEUP_TO_ROLE[p.lineup_role] ?? null;
+}
+
 /** Which of the three s.v. this is, reading a frozen payload for what it means.
  *
  *  Before the backend told them apart, an unused substitute was written down as
@@ -233,6 +255,7 @@ function TeamColumn({ name, team, realMatch }: { name: string; team: ClassicTeam
 function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: number; bench?: boolean }) {
   const [open, setOpen] = useState(false);
   const played = !p.sv && p.fantavoto != null;
+  const role = roleOf(p);
   const why = p.explanation;
   const hasWhy = !!why && (why.contributions.length > 0 || why.other_count > 0);
   // a benched player who never entered and has no vote is greyed out
@@ -245,18 +268,22 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
           <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-400">{order}</span>
         ) : null}
         {/* A guessed role is drawn hollow with a '?': showing it solid would state
-            as fact something we inferred because his squad data is incomplete. */}
-        <span
-          title={p.role_known === false ? 'Ruolo non disponibile: stimato dai dati della partita' : undefined}
-          className={
-            p.role_known === false
-              ? 'rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-500'
-              : `rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[p.role]}`
-          }
-        >
-          {ROLE_LABEL[p.role]}
-          {p.role_known === false ? '?' : ''}
-        </span>
+            as fact something we inferred because his squad data is incomplete.
+            No role at all draws NOTHING — an empty coloured box is worse than a
+            gap, because it looks like a chip whose label failed to load. */}
+        {role ? (
+          <span
+            title={p.role_known === false ? 'Ruolo non disponibile: stimato dai dati della partita' : undefined}
+            className={
+              p.role_known === false
+                ? 'rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-500'
+                : `rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[role]}`
+            }
+          >
+            {ROLE_LABEL[role]}
+            {p.role_known === false ? '?' : ''}
+          </span>
+        ) : null}
         <span className="min-w-0">
           <span className={`block truncate text-sm font-semibold text-slate-800 ${p.replaced_by ? 'line-through opacity-60' : ''}`}>
             {p.name}

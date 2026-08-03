@@ -21,7 +21,10 @@ export interface ClassicPlayerEvents {
 export interface ClassicPlayerLine {
   player_id: number;
   name: string;
-  role: ClassicRole;
+  /** Null on a placeholder line: it is read off the PERFORMANCE, and a player with
+   *  no performance has none. `lineup_role` is always there and carries the same
+   *  fact in the lineup's own vocabulary — see `roleOf`. */
+  role: ClassicRole | null;
   lineup_role: ClassicLineupRole;
   minutes: number;
   role_known?: boolean; // false => role GUESSED (squad data incomplete for him)
