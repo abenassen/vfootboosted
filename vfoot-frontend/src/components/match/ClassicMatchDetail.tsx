@@ -27,7 +27,14 @@ function fmt(n: number): string {
 }
 
 // Goal / assist / card / own-goal markers shown next to a player's name.
-function EventIcons({ ev }: { ev: ClassicPlayerEvents }) {
+//
+// `ev` is OPTIONAL, and the guard is the whole point. A placeholder line — senza
+// voto, imposed vote, club that has not played — carries no events at all, and
+// reading one threw here and took the entire tabellino down with it: a white page
+// where the crash was, with nothing on screen to say so. The absence is a normal
+// state with an obvious rendering, which is no marks at all.
+function EventIcons({ ev }: { ev?: ClassicPlayerEvents }) {
+  if (!ev) return null;
   const items: { node: string; n: number; title: string }[] = [
     { node: '⚽', n: ev.goals, title: 'gol' },
     { node: '👟', n: ev.assists, title: 'assist' },

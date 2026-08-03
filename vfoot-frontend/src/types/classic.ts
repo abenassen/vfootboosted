@@ -41,7 +41,12 @@ export interface ClassicPlayerLine {
   bonus: number; // goal +3, assist +1, pen save +3
   malus: number; // own goal -2, pen miss -3, card, GK -1/goal conceded
   fantavoto: number | null; // voto_puro + bonus - malus
-  events: ClassicPlayerEvents;
+  /** Absent on a line that stands in for a player with no performance behind it:
+   *  a senza voto, an imposed vote, a club whose match has not been played. There
+   *  are no events to report, and the placeholder says so by omission — which the
+   *  type has to admit, because a required field here made the renderer trust a
+   *  value that has never been there. */
+  events?: ClassicPlayerEvents;
   /** Why the voto puro came out where it did, in vote points against the average
    *  player in the same role. Absent for s.v. — explaining a vote that does not
    *  exist would mean inventing one. */
