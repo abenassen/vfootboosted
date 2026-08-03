@@ -30,6 +30,15 @@ import type {
   LeagueStandingRow,
 } from '../types/league';
 
+/** How far ahead a fixture may be and still count as "prossima partita", measured
+ *  in REAL matchdays — the unit the whole league is scheduled in.
+ *
+ *  Four is about a month of football: near enough that setting a lineup for it is
+ *  a sensible thing to do now, far enough that a cup tie a fortnight out is not
+ *  hidden. Beyond it the fixture is not something you can act on, and putting it
+ *  beside this weekend's match only made both look equally urgent. */
+const NEXT_MATCH_HORIZON = 4;
+
 /** The league at a glance, in the order a participant actually wants it:
  *  my next matches first (with the way to field a team for each), then the last
  *  results, then what has been happening, and only then the league-wide tables
@@ -113,14 +122,36 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   // keying on that alone kept offering a round played weeks ago — and hid the one
   // still open — every time an admin was late. A locked round that has not been
   // scored yet belongs to the ledger banner below, not here.
+  //
+  // IN DATE ORDER, and only what is actually near. Both parts were missing and
+  // both misread the same way: the list was sorted by the competition's OWN round
+  // number, which is not a date — a cup at its round 3 came before a championship
+  // at its round 23 although the championship is this Saturday and the cup is in
+  // May. And nothing was dropped, so a competition whose next tie is five rounds
+  // out sat next to this weekend's match as if the two were equally imminent.
   const nextByCompetition = useMemo(() => {
     const out = new Map<number, LeagueFixtureItem>();
-    for (const f of [...mine].sort((a, b) => a.round_no - b.round_no)) {
+    const byDate = [...mine].sort(
+      (a, b) =>
+        (a.real_matchday ?? Number.POSITIVE_INFINITY) - (b.real_matchday ?? Number.POSITIVE_INFINITY) ||
+        a.round_no - b.round_no,
+    );
+    for (const f of byDate) {
       if (f.status !== 'finished' && !f.lineup_locked && !out.has(f.competition_id)) {
         out.set(f.competition_id, f);
       }
     }
-    return [...out.values()];
+    // Map iteration preserves insertion order, so this is already date-ordered.
+    const all = [...out.values()];
+    const anchor = all.find((f) => typeof f.real_matchday === 'number')?.real_matchday;
+    if (anchor == null) return all;
+    return all.filter((f, i) => {
+      // The nearest one is shown whatever the distance: if the whole league is a
+      // month away, "nothing" would be a worse answer than "the first thing".
+      if (i === 0) return true;
+      if (typeof f.real_matchday !== 'number') return false;
+      return f.real_matchday - anchor <= NEXT_MATCH_HORIZON;
+    });
   }, [mine]);
 
   const lastResults = useMemo(
