@@ -368,10 +368,15 @@ def score_composed_fixture(
     ruleset: Ruleset,
     fixture_meta: dict,
 ) -> dict:
-    """Score both composed teams and return the payload. Pure given the line lists."""
+    """Score both composed teams and return the payload. Pure given the line lists.
+
+    ``fixture_meta["home_advantage"]`` dice se in QUESTA partita giocare in casa
+    conta: viaggia nel meta e non come argomento a parte perché è un dato della
+    partita, come il turno e la fase, e ogni chiamante ce l'ha già in mano.
+    """
     home = score_team(home_lines[0], home_lines[1], ruleset)
     away = score_team(away_lines[0], away_lines[1], ruleset)
-    resolve_fixture(home, away, ruleset)
+    resolve_fixture(home, away, ruleset, bool(fixture_meta.get("home_advantage")))
     return build_fixture_payload(fixture_meta, home, away, ruleset)
 
 
@@ -484,6 +489,7 @@ def live_scorer(league, md, ruleset):
             {"fixture_id": fx.id, "fantasy_round": fx.round_no,
              "real_matchday": md.real_matchday, "stage": fx.stage_id,
              "competition_id": fx.competition_id,
+             "home_advantage": fx.home_advantage,
              "home_team": fx.home_team.name, "away_team": fx.away_team.name},
         )
         home_unstable = _mark_unstable(payload["home"], unstable)
@@ -617,6 +623,7 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
         payload = score_composed_fixture(home_ln, away_ln, ruleset, {
             "fixture_id": fx.id, "fantasy_round": fx.round_no, "real_matchday": md.real_matchday,
             "stage": fx.stage_id, "competition_id": fx.competition_id,
+            "home_advantage": fx.home_advantage,
             "home_team": fx.home_team.name, "away_team": fx.away_team.name,
         })
         fx.home_total = float(payload["home_goals"])

@@ -98,6 +98,10 @@ export interface ClassicTeamDetail {
   total: number; // base_total + applied defence modifier
   goals: number; // classic goals from the total
   defense: ClassicDefenseBonus;
+  /** Ogni modificatore applicato alla squadra, difesa compresa. Il fattore campo
+   *  (`home_advantage`) esiste solo qui: non ha una sezione sua perché è un
+   *  modificatore come gli altri, con una condizione che riguarda la partita. */
+  modifiers?: Array<{ key: string; eligible: boolean; value: number; scope: string; detail?: unknown }>;
   /** At least one line is still moving, so this total is too. */
   provisional?: boolean;
 }

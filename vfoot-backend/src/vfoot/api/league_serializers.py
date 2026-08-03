@@ -155,12 +155,19 @@ class CompetitionStageRuleCreateSerializer(serializers.Serializer):
     random_seed = serializers.IntegerField(required=False, default=42)
 
 
+PRIZE_STATS = ["avg_score", "goals_for", "goals_against", "best_round", "wins"]
+
+
 class CompetitionPrizeCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120)
     icon = serializers.CharField(max_length=8, required=False, allow_blank=True)
     condition_type = serializers.ChoiceField(
-        choices=["final_table_range", "stage_table_range", "stage_winner", "stage_loser"]
+        choices=["final_table_range", "stage_table_range", "stage_winner", "stage_loser",
+                 "stat_top", "stat_bottom"]
     )
+    # Only for the two stat conditions: which measure the record is on. The
+    # direction (highest / lowest) is the condition itself.
+    stat = serializers.ChoiceField(choices=PRIZE_STATS, required=False, allow_blank=True)
     source_stage_id = serializers.IntegerField(required=False, allow_null=True)
     rank_from = serializers.IntegerField(required=False, allow_null=True)
     rank_to = serializers.IntegerField(required=False, allow_null=True)
@@ -183,9 +190,13 @@ class WizardPrizeSerializer(serializers.Serializer):
 
     name = serializers.CharField(max_length=120)
     icon = serializers.CharField(max_length=8, required=False, allow_blank=True)
-    condition = serializers.ChoiceField(choices=["winner", "runner_up", "rank"], default="winner")
+    condition = serializers.ChoiceField(choices=["winner", "runner_up", "rank", "stat"],
+                                        default="winner")
     rank_from = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     rank_to = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    # "stat" only: which record, and from which end.
+    stat = serializers.ChoiceField(choices=PRIZE_STATS, required=False, allow_blank=True)
+    direction = serializers.ChoiceField(choices=["top", "bottom"], required=False, default="top")
 
 
 class CompetitionPointsSerializer(serializers.Serializer):
@@ -200,6 +211,11 @@ class CompetitionWizardSerializer(serializers.Serializer):
     team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
     qualification = WizardQualificationSerializer(required=False, allow_null=True)
     legs = serializers.IntegerField(required=False, default=1, min_value=1, max_value=MAX_LEGS)
+    # Turni a eliminazione: 1 = gara secca, 2 = andata e ritorno (due giornate).
+    # ``final_legs`` permette il caso più comune di tutti — andata e ritorno fino
+    # alla semifinale, finale in gara unica.
+    knockout_legs = serializers.IntegerField(required=False, default=1, min_value=1, max_value=2)
+    final_legs = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=2)
     groups = serializers.IntegerField(required=False, default=1, min_value=1, max_value=8)
     advance_per_group = serializers.IntegerField(required=False, default=2, min_value=1, max_value=8)
     points = CompetitionPointsSerializer(required=False)
@@ -221,6 +237,8 @@ class CompetitionWizardPreviewSerializer(serializers.Serializer):
     team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
     qualification = WizardQualificationSerializer(required=False, allow_null=True)
     legs = serializers.IntegerField(required=False, default=1, min_value=1, max_value=MAX_LEGS)
+    knockout_legs = serializers.IntegerField(required=False, default=1, min_value=1, max_value=2)
+    final_legs = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=2)
     groups = serializers.IntegerField(required=False, default=1, min_value=1, max_value=8)
     advance_per_group = serializers.IntegerField(required=False, default=2, min_value=1, max_value=8)
 

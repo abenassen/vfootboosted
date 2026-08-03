@@ -257,6 +257,7 @@ export async function createLeague(req: CreateLeagueRequest) {
     defense_bonus_enabled: true,
     defense_bonus_mode: 'add_own',
     keeper_clean_sheet_enabled: false,
+    home_advantage_bonus: 0,
     enforce_lineup_deadline: true,
     invite_code: `MOCK${id}`,
     invite_link: `/join/MOCK${id}`,
@@ -291,13 +292,18 @@ export async function updateMyTeam(leagueId: number, patch: { name?: string; cre
 export async function getLeagueActivity(_leagueId: number, _limit = 12) {
   await sleep(80);
   return [] as Array<{
-    kind: 'acquisto' | 'decisione' | 'giornata';
+    kind: 'acquisto' | 'decisione' | 'giornata' | 'competizione' | 'premio';
     at: string | null;
     text: string;
     detail: string | null;
     team_id: number | null;
     crest: string | null;
   }>;
+}
+
+export async function getManagerHonours(userId: number) {
+  await sleep(60);
+  return { user_id: userId, username: 'demo', awards: [] };
 }
 
 export async function getLeagueDetail(leagueId: number): Promise<LeagueDetail> {
@@ -633,6 +639,7 @@ export async function createCompetitionPrize(
     icon: req.icon ?? '\u{1F3C6}',
     condition_type: req.condition_type,
     condition_label: req.condition_type,
+    stat: req.stat ?? '',
     source_stage_id: req.source_stage_id ?? null,
     source_stage_name: null,
     rank_from: req.rank_from ?? null,

@@ -20,6 +20,7 @@ import type {
   ReferenceSeason,
   WizardPrizeSpec,
 } from '../types/league';
+import { DEFAULT_RECORD, PRIZE_RECORDS, recordByValue } from '../utils/prizes';
 
 type Format = 'league' | 'cup' | 'groups_knockout';
 type ParticipantsSource = 'teams' | 'qualified';
@@ -187,6 +188,11 @@ export default function CompetitionCreatePage() {
 
   // format options
   const [legs, setLegs] = useState(1);
+  // Turni a eliminazione: gara secca o andata e ritorno. Separato da `legs`, che
+  // è quante volte gira un girone: sono due domande diverse e una competizione a
+  // gironi + finali le fa entrambe.
+  const [knockoutLegs, setKnockoutLegs] = useState(1);
+  const [finalSingle, setFinalSingle] = useState(true);
   // Shown only after a click on Continua, so the form does not greet you in red.
   const [showStep1Errors, setShowStep1Errors] = useState(false);
 
@@ -310,6 +316,8 @@ export default function CompetitionCreatePage() {
         team_ids: source === 'teams' ? selectedTeamIds : undefined,
         qualification,
         legs,
+        knockout_legs: knockoutLegs,
+        final_legs: knockoutLegs === 2 && finalSingle ? 1 : undefined,
         groups,
         advance_per_group: advance,
       });
@@ -323,7 +331,7 @@ export default function CompetitionCreatePage() {
       setPlan(null);
       setPlanErr(e instanceof Error ? e.message : 'Anteprima non disponibile.');
     }
-  }, [selectedLeagueId, format, source, selectedTeamIds, qualification, legs, groups, advance, qualStageId]);
+  }, [selectedLeagueId, format, source, selectedTeamIds, qualification, legs, knockoutLegs, finalSingle, groups, advance, qualStageId]);
 
   useEffect(() => {
     void refreshPlan();
@@ -378,6 +386,8 @@ export default function CompetitionCreatePage() {
         team_ids: source === 'teams' ? selectedTeamIds : undefined,
         qualification,
         legs,
+        knockout_legs: knockoutLegs,
+        final_legs: knockoutLegs === 2 && finalSingle ? 1 : undefined,
         groups,
         advance_per_group: advance,
         points: { win: pointsWin, draw: pointsDraw, loss: pointsLoss },
@@ -612,6 +622,48 @@ export default function CompetitionCreatePage() {
               </div>
             )}
           </Card>
+
+          {/* knockout options: valgono per la coppa e per i gironi+finali */}
+          {format !== 'league' ? (
+            <Card className="p-4 sm:p-5">
+              <SectionTitle>Turni a eliminazione</SectionTitle>
+              <div className="mt-3 space-y-3">
+                <Field
+                  label="Come si gioca ogni turno"
+                  hint="Andata e ritorno occupa due giornate per turno, e in quel caso il fattore campo della lega (se attivo) vale in entrambe."
+                >
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[1, 2].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setKnockoutLegs(n)}
+                        className={
+                          'rounded-xl border px-2 py-2 text-sm font-semibold ' +
+                          (knockoutLegs === n
+                            ? 'border-slate-900 bg-slate-900 text-white'
+                            : 'border-slate-200 bg-white text-slate-600')
+                        }
+                      >
+                        {n === 1 ? 'Gara secca' : 'Andata e ritorno'}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+                {knockoutLegs === 2 ? (
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={finalSingle}
+                      onChange={(e) => setFinalSingle(e.target.checked)}
+                    />
+                    <span>Finale in gara unica</span>
+                    <span className="text-[11px] text-slate-500">(come quasi tutte le coppe vere)</span>
+                  </label>
+                ) : null}
+              </div>
+            </Card>
+          ) : null}
 
           {/* format options */}
           {format !== 'cup' ? (
@@ -926,8 +978,32 @@ export default function CompetitionCreatePage() {
                         {format === 'league' ? 'Chi arriva secondo' : 'Chi perde la finale'}
                       </option>
                       <option value="rank">Una posizione in classifica</option>
+                      <option value="stat">Un primato (media, attacco, difesa…)</option>
                     </select>
                   </div>
+                  {prize.condition === 'stat' ? (
+                    <div className="mt-2">
+                      <select
+                        className={inputCls}
+                        value={`${prize.stat ?? DEFAULT_RECORD.stat}_${prize.direction ?? DEFAULT_RECORD.direction}`}
+                        onChange={(e) => {
+                          const rec = recordByValue(e.target.value);
+                          setPrizes((prev) =>
+                            prev.map((p, i) => (i === idx ? { ...p, stat: rec.stat, direction: rec.direction } : p))
+                          );
+                        }}
+                      >
+                        {PRIZE_RECORDS.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        Si assegna a fine competizione, su tutte le giornate giocate.
+                      </div>
+                    </div>
+                  ) : null}
                   {prize.condition === 'rank' ? (
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <Field label="Dalla posizione">

@@ -40,6 +40,16 @@ import type {
  *  beside this weekend's match only made both look equally urgent. */
 const NEXT_MATCH_HORIZON = 4;
 
+/** One glyph per kind of news. Not 'premio': that line already begins with the
+ *  trophy the admin picked for the prize itself. */
+const ACTIVITY_ICON: Record<LeagueActivityItem['kind'], string> = {
+  acquisto: '🔁',
+  decisione: '🗳️',
+  giornata: '🏁',
+  competizione: '🎌',
+  premio: '🏆',
+};
+
 /** The league at a glance, in the order a participant actually wants it:
  *  my next matches first (with the way to field a team for each), then the last
  *  results, then what has been happening, and only then the league-wide tables
@@ -623,17 +633,45 @@ export default function LeagueHome({ competitions }: { competitions: Competition
           <SectionTitle>News</SectionTitle>
           {activity.length ? (
             <ul className="mt-2 space-y-1.5">
-              {activity.slice(0, 5).map((a, i) => (
-                <li key={`${a.kind}-${i}`} className="flex items-start gap-2 text-sm">
-                  <span className="mt-0.5 shrink-0" aria-hidden>
-                    {a.kind === 'acquisto' ? '🔁' : a.kind === 'decisione' ? '🗳️' : '🏁'}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-slate-700">{a.text}</span>
-                    {a.detail ? <span className="block text-xs text-slate-400">{a.detail}</span> : null}
-                  </span>
-                </li>
-              ))}
+              {activity.slice(0, 5).map((a, i) => {
+                // A trophy is the one thing in this feed worth stopping on: it is
+                // the end of months of play, and a line identical to "acquisto:
+                // Tizio" would let it go by unnoticed.
+                const isPrize = a.kind === 'premio';
+                const isEnd = a.kind === 'competizione';
+                return (
+                  <li
+                    key={`${a.kind}-${i}`}
+                    className={
+                      'flex items-start gap-2 text-sm ' +
+                      (isPrize || isEnd ? 'rounded-lg bg-amber-50 px-2 py-1.5' : '')
+                    }
+                  >
+                    {/* A prize carries its OWN trophy inside the text — the one the
+                        admin chose for it — so the row adds no glyph of its own. */}
+                    {isPrize ? null : (
+                      <span className="mt-0.5 shrink-0" aria-hidden>
+                        {ACTIVITY_ICON[a.kind] ?? '🏁'}
+                      </span>
+                    )}
+                    <span className="min-w-0">
+                      <span
+                        className={
+                          'block truncate ' +
+                          (isPrize ? 'font-semibold text-amber-900' : isEnd ? 'text-amber-900' : 'text-slate-700')
+                        }
+                      >
+                        {a.text}
+                      </span>
+                      {a.detail ? (
+                        <span className={'block text-xs ' + (isPrize || isEnd ? 'text-amber-700' : 'text-slate-400')}>
+                          {a.detail}
+                        </span>
+                      ) : null}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <div className="mt-2 text-sm text-slate-500">

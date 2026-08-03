@@ -73,6 +73,8 @@ def create_competition(
     team_ids: list[int] | None = None,
     qualification: dict | None = None,
     legs: int = 1,
+    knockout_legs: int = 1,
+    final_legs: int | None = None,
     groups: int = 1,
     advance_per_group: int = 2,
     points: dict | None = None,
@@ -90,6 +92,9 @@ def create_competition(
         raise WizardError("Esiste già una competizione con questo nome in questa lega.")
 
     legs = max(1, min(MAX_LEGS, int(legs or 1)))
+    # Un turno a eliminazione si gioca una volta o due: "tre volte" non è un turno.
+    knockout_legs = 2 if int(knockout_legs or 1) == 2 else 1
+    final_legs = knockout_legs if final_legs is None else (2 if int(final_legs) == 2 else 1)
     groups = max(1, int(groups or 1))
     advance_per_group = max(1, int(advance_per_group or 1))
 
@@ -182,6 +187,8 @@ def create_competition(
                 team_ids=resolved_team_ids or None,
                 expected_teams=expected_teams,
                 seed=seed,
+                knockout_legs=knockout_legs,
+                final_legs=final_legs,
             )
         else:
             build_groups_knockout_graph(
@@ -192,6 +199,8 @@ def create_competition(
                 advance_per_group=advance_per_group,
                 legs=legs,
                 seed=seed,
+                knockout_legs=knockout_legs,
+                final_legs=final_legs,
             )
     except ValueError as exc:
         raise WizardError(str(exc)) from exc

@@ -201,7 +201,20 @@ export function ClassicMatchDetail({
   );
 }
 
-function TeamColumn({ name, team, realMatch }: { name: string; team: ClassicTeamDetail; realMatch: boolean }) {
+function TeamColumn({
+  name,
+  team,
+  realMatch,
+}: {
+  name: string;
+  team: ClassicTeamDetail;
+  realMatch: boolean;
+}) {
+  // Il bonus casa viaggia come un modificatore qualunque nel payload: lo si
+  // legge da lì invece di ricalcolarlo, così il tabellino non può dissentire
+  // dal punteggio che sta mostrando.
+  const homeBonus =
+    team.modifiers?.find((m) => m.key === 'home_advantage' && m.eligible)?.value ?? 0;
   return (
     <Card className="p-4">
       <div className="flex items-baseline justify-between gap-2">
@@ -233,6 +246,13 @@ function TeamColumn({ name, team, realMatch }: { name: string; team: ClassicTeam
               · totale {fmt(team.base_total)} {team.defense.applied >= 0 ? '+' : '−'}
               {fmt(Math.abs(team.defense.applied))} = {fmt(team.total)}
             </span>
+          ) : null}
+          {/* Il fattore campo si vede solo dove è stato assegnato: dirlo anche a
+              chi gioca fuori casa ("non hai preso il bonus") sarebbe rumore. */}
+          {homeBonus ? (
+            <div className="text-slate-600">
+              🏟 Fattore campo: <b className="text-emerald-700">+{fmt(homeBonus)}</b>
+            </div>
           ) : null}
         </div>
       ) : null}

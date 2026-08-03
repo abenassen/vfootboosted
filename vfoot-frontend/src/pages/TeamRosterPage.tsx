@@ -5,6 +5,7 @@ import { getTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import RosterView from '../components/RosterView';
 import Crest from '../components/Crest';
+import HonoursBoard from '../components/HonoursBoard';
 
 /** Another participant's roster, in the same structured view as one's own — the
  *  read-only counterpart of the Squad page, reached from the League page. The
@@ -51,6 +52,15 @@ export default function TeamRosterPage() {
           </Link>
         </div>
       </Card>
+      {/* Before the roster: what he has WON says more about a rival than which
+          twenty-five players he owns, and it is the reason to open his page. */}
+      {data.team.manager_user_id ? (
+        <HonoursBoard
+          userId={data.team.manager_user_id}
+          name={data.team.manager}
+          own={Boolean(data.is_own)}
+        />
+      ) : null}
       <RosterView data={data} />
     </div>
   );

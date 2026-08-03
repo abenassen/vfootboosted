@@ -43,6 +43,16 @@ class FantasyLeague(models.Model):
     # kickoff of the real matchday. Turn OFF for test leagues played on an ALREADY
     # FINISHED season, where every kickoff is in the past and would block editing.
     enforce_lineup_deadline = models.BooleanField(default=True)
+    # Fattore campo: quanto vale giocare in casa, in punti di fantavoto aggiunti
+    # alla squadra di casa. 0 = spento (il default: e' un modificatore in piu', non
+    # una regola del fantacalcio).
+    #
+    # Si applica SOLO dove giocare in casa vuol dire qualcosa, e chi lo decide non
+    # e' questa impostazione ma la singola partita (``FantasyFixture.home_advantage``):
+    # un girone di sola andata, o la tornata dispari di un campionato, non hanno un
+    # campo — assegnare li' un bonus regalerebbe punti a chi capita sorteggiato in
+    # casa. La lega dice QUANTO vale; il calendario dice DOVE vale.
+    home_advantage_bonus = models.FloatField(default=0.0)
     # Real-world season this fantasy league is played on top of (e.g. Serie A
     # 2025-26). Competition rounds map to this season's real matchdays.
     reference_season = models.ForeignKey(
@@ -534,6 +544,25 @@ class CompetitionPrize(models.Model):
     CONDITION_STAGE_TABLE_RANGE = "stage_table_range"
     CONDITION_STAGE_WINNER = "stage_winner"
     CONDITION_STAGE_LOSER = "stage_loser"
+    # Not a position but a record: the highest (or lowest) value of one measure
+    # over the whole competition. "Media punteggio piu' alta", "miglior attacco",
+    # "peggior difesa" — the honours a league invents for itself, which a table
+    # position cannot express and which are the ones people actually argue about.
+    CONDITION_STAT_TOP = "stat_top"
+    CONDITION_STAT_BOTTOM = "stat_bottom"
+
+    STAT_AVG_SCORE = "avg_score"
+    STAT_GOALS_FOR = "goals_for"
+    STAT_GOALS_AGAINST = "goals_against"
+    STAT_BEST_ROUND = "best_round"
+    STAT_WINS = "wins"
+    STATS = [
+        (STAT_AVG_SCORE, "Media punteggio"),
+        (STAT_GOALS_FOR, "Gol fatti"),
+        (STAT_GOALS_AGAINST, "Gol subiti"),
+        (STAT_BEST_ROUND, "Miglior punteggio in una giornata"),
+        (STAT_WINS, "Vittorie"),
+    ]
 
     competition = models.ForeignKey(FantasyCompetition, on_delete=models.CASCADE, related_name="prizes")
     name = models.CharField(max_length=120)
@@ -547,9 +576,16 @@ class CompetitionPrize(models.Model):
             (CONDITION_STAGE_TABLE_RANGE, "Stage table range"),
             (CONDITION_STAGE_WINNER, "Stage winner"),
             (CONDITION_STAGE_LOSER, "Stage loser"),
+            (CONDITION_STAT_TOP, "Highest of a measure"),
+            (CONDITION_STAT_BOTTOM, "Lowest of a measure"),
         ],
         default=CONDITION_FINAL_TABLE_RANGE,
     )
+    # Which measure, for the two conditions above. The DIRECTION is the condition
+    # and not part of the name on purpose: "miglior difesa" and "peggior difesa"
+    # read the same number from opposite ends, and a league that wants the joke
+    # prize should not need a second measure to get it.
+    stat = models.CharField(max_length=24, blank=True, default="", choices=STATS)
     # CASCADE, not PROTECT: a prize and the stage that decides it are cascaded
     # together when their competition goes, and PROTECT made that deletion
     # impossible at the database level — a cup with a "chi vince la finale" prize
@@ -591,6 +627,18 @@ class FantasyFixture(models.Model):
         choices=[(STATUS_SCHEDULED, "Scheduled"), (STATUS_LIVE, "Live"), (STATUS_FINISHED, "Finished")],
         default=STATUS_SCHEDULED,
     )
+    # Giocare in casa, qui, conta? Deciso quando la partita viene generata e non
+    # ricavabile dopo: dipende da come e' fatto il turno, non da chi ci gioca.
+    #
+    # * andata e ritorno (turno a eliminazione a due gare, tornata pari di un
+    #   girone): si', ognuno ospita una volta e il campo e' un vantaggio simmetrico;
+    # * gara secca, o la tornata dispari in piu' di un campionato: NO, campo
+    #   neutro. Chi ospita e' stato deciso dal sorteggio, e un bonus li' sarebbe
+    #   un regalo a sorte.
+    #
+    # Il valore del bonus e' della lega (``FantasyLeague.home_advantage_bonus``);
+    # questo campo dice soltanto se c'e' un campo di cui tener conto.
+    home_advantage = models.BooleanField(default=False)
 
     # Real match source used to score this fantasy fixture in simulation
     source_real_match = models.ForeignKey(Match, on_delete=models.SET_NULL, null=True, blank=True, related_name="mapped_fantasy_fixtures")

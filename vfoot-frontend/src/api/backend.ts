@@ -39,6 +39,7 @@ import type {
   CreateLeagueRequest,
   JoinLeagueRequest,
   LeagueDetail,
+  ManagerHonours,
   RealSeasonItem,
   ReferenceSeason,
   LeagueFixtureItem,
@@ -409,7 +410,7 @@ export async function updateMyTeam(
 }
 
 export interface LeagueActivityItem {
-  kind: 'acquisto' | 'decisione' | 'giornata';
+  kind: 'acquisto' | 'decisione' | 'giornata' | 'competizione' | 'premio';
   at: string | null;
   text: string;
   detail: string | null;
@@ -420,6 +421,15 @@ export interface LeagueActivityItem {
 /** Recent goings-on in the league, newest first. */
 export async function getLeagueActivity(leagueId: number, limit = 12): Promise<LeagueActivityItem[]> {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/activity?limit=${limit}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** The albo d'oro of one manager — everything he has won, in every league we
+ *  share with him. 404 when we share none: see ManagerHonoursView. */
+export async function getManagerHonours(userId: number): Promise<ManagerHonours> {
+  const res = await fetch(`${baseUrl()}/managers/${userId}/honours`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
@@ -455,6 +465,9 @@ export interface LeagueSettingsPatch {
   defense_bonus_enabled?: boolean;
   defense_bonus_mode?: 'add_own' | 'subtract_opponent';
   keeper_clean_sheet_enabled?: boolean;
+  /** Punti di fantavoto a chi gioca in casa. 0 = spento. Si applica solo dove la
+   *  partita ha un campo (`FantasyFixture.home_advantage`). */
+  home_advantage_bonus?: number;
   enforce_lineup_deadline?: boolean;
 }
 

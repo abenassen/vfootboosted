@@ -50,6 +50,9 @@ class Ruleset:
     defense_mode: str = "add_own"  # add_own | subtract_opponent
     keeper_clean_sheet_enabled: bool = False
     keeper_clean_sheet_value: float = 1.0
+    # Fattore campo: quanto vale giocare in casa. 0 = spento. SE valga, in una data
+    # partita, non lo decide la lega ma il calendario — v. FantasyFixture.home_advantage.
+    home_advantage_bonus: float = 0.0
 
     @classmethod
     def from_league(cls, league) -> "Ruleset":
@@ -60,6 +63,7 @@ class Ruleset:
             # Field added during wiring; getattr keeps the engine usable before then.
             keeper_clean_sheet_enabled=bool(getattr(league, "keeper_clean_sheet_enabled", False)),
             keeper_clean_sheet_value=float(getattr(league, "keeper_clean_sheet_value", 1.0)),
+            home_advantage_bonus=float(getattr(league, "home_advantage_bonus", 0.0) or 0.0),
         )
 
     def to_snapshot(self) -> dict:
@@ -72,6 +76,7 @@ class Ruleset:
             "defense_mode": self.defense_mode,
             "keeper_clean_sheet_enabled": self.keeper_clean_sheet_enabled,
             "keeper_clean_sheet_value": self.keeper_clean_sheet_value,
+            "home_advantage_bonus": self.home_advantage_bonus,
         }
 
     @classmethod
@@ -82,6 +87,7 @@ class Ruleset:
             defense_mode=snap.get("defense_mode", "add_own"),
             keeper_clean_sheet_enabled=snap.get("keeper_clean_sheet_enabled", False),
             keeper_clean_sheet_value=snap.get("keeper_clean_sheet_value", 1.0),
+            home_advantage_bonus=snap.get("home_advantage_bonus", 0.0),
         )
 
 
@@ -209,13 +215,28 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
 # --------------------------------------------------------------------------- #
 # Fixture resolution — apply cross-team modifiers and convert to goals.        #
 # --------------------------------------------------------------------------- #
-def resolve_fixture(home: dict, away: dict, rs: Ruleset) -> dict:
+def resolve_fixture(home: dict, away: dict, rs: Ruleset, home_advantage: bool = False) -> dict:
     """Given the two ``score_team`` dicts, apply every modifier (self-add or
     subtract-from-opponent), convert each total to goals, and decide the result.
-    Mutates ``home``/``away`` (adds applied/total/goals) and returns a summary."""
+    Mutates ``home``/``away`` (adds applied/total/goals) and returns a summary.
+
+    ``home_advantage`` è un fatto della PARTITA, non della lega: la lega dice
+    quanto vale giocare in casa, il calendario dice se in questa partita giocare
+    in casa vuol dire qualcosa (andata e ritorno sì, gara secca no). Arriva da
+    ``FantasyFixture.home_advantage``; il default è "campo neutro" perché il
+    motore viene usato anche dove una partita non c'è (simulazioni, prove).
+    """
     totals = {"home": home["base_total"], "away": away["base_total"]}
     applied = {"home": 0.0, "away": 0.0}
     sides = {"home": home, "away": away}
+
+    # Un modificatore come gli altri, così entra nel conteggio e nel tabellino
+    # senza che nulla a valle debba conoscerlo: ha solo una condizione che
+    # nessun altro ha, cioè da che parte del campo si gioca.
+    if home_advantage and rs.home_advantage_bonus:
+        home["modifiers"] = list(home["modifiers"]) + [ModifierResult(
+            key="home_advantage", eligible=True, value=float(rs.home_advantage_bonus),
+            scope=SELF_ADD, detail={"bonus": float(rs.home_advantage_bonus)})]
 
     for side, team in sides.items():
         other = "away" if side == "home" else "home"

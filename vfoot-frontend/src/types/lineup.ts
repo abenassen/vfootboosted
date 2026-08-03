@@ -37,7 +37,13 @@ export interface TeamLineupPlayer {
 }
 
 export interface TeamLineupContext {
-  team: { team_id: number; name: string; manager?: string; crest?: string | null };
+  team: {
+    team_id: number;
+    name: string;
+    manager?: string;
+    manager_user_id?: number;
+    crest?: string | null;
+  };
   is_own?: boolean;
   competitions: { competition_id: number; name: string }[];
   competition: number | null; // the competition this lineup refers to

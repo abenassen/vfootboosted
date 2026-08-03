@@ -18,6 +18,7 @@ import type {
   CompetitionSchedulePreview,
   CompetitionStageItem,
 } from '../types/league';
+import { DEFAULT_RECORD, PRIZE_RECORDS, recordByValue } from '../utils/prizes';
 
 const PRIZE_ICONS = ['🏆', '🥇', '🥈', '🥉', '🛡️', '⭐', '👑', '🎖️', '🐐', '💩'];
 const inputCls = 'w-full rounded-xl border border-slate-200 px-3 py-2 text-sm';
@@ -50,8 +51,9 @@ export default function CompetitionEditPage() {
 
   const [prizeName, setPrizeName] = useState('');
   const [prizeIcon, setPrizeIcon] = useState('🏆');
-  const [prizeCondition, setPrizeCondition] = useState<'winner' | 'runner_up' | 'rank'>('winner');
+  const [prizeCondition, setPrizeCondition] = useState<'winner' | 'runner_up' | 'rank' | 'stat'>('winner');
   const [prizeRankFrom, setPrizeRankFrom] = useState(1);
+  const [prizeRecord, setPrizeRecord] = useState(DEFAULT_RECORD.value);
 
   const isAdmin = selectedLeague?.role === 'admin';
 
@@ -363,6 +365,7 @@ export default function CompetitionEditPage() {
               {comp.format === 'league' ? 'Chi arriva secondo' : "Chi perde l'ultimo turno"}
             </option>
             <option value="rank">Una posizione in classifica</option>
+            <option value="stat">Un primato (media, attacco, difesa…)</option>
           </select>
           {prizeCondition === 'rank' ? (
             <input
@@ -373,6 +376,15 @@ export default function CompetitionEditPage() {
               onChange={(e) => setPrizeRankFrom(Math.max(1, Number(e.target.value) || 1))}
             />
           ) : null}
+          {prizeCondition === 'stat' ? (
+            <select className={inputCls} value={prizeRecord} onChange={(e) => setPrizeRecord(e.target.value)}>
+              {PRIZE_RECORDS.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <Button
             size="sm"
             disabled={busy || !prizeName.trim()}
@@ -380,7 +392,17 @@ export default function CompetitionEditPage() {
               void run(async () => {
                 const lastStage = stages.length ? stages[stages.length - 1] : null;
                 const isKnockoutEnd = comp.format === 'cup' || comp.format === 'groups_knockout';
-                if (prizeCondition === 'rank') {
+                if (prizeCondition === 'stat') {
+                  // A record is read off the whole competition, so there is no
+                  // stage to point at and no shape to special-case.
+                  const record = recordByValue(prizeRecord);
+                  await createCompetitionPrize(compId, {
+                    name: prizeName.trim(),
+                    icon: prizeIcon,
+                    condition_type: record.direction === 'top' ? 'stat_top' : 'stat_bottom',
+                    stat: record.stat,
+                  });
+                } else if (prizeCondition === 'rank') {
                   await createCompetitionPrize(compId, {
                     name: prizeName.trim(),
                     icon: prizeIcon,

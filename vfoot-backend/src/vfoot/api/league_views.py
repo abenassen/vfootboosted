@@ -5,6 +5,7 @@ import io
 import logging
 from random import Random
 
+from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import Count, Q
 from django.http import Http404
@@ -118,7 +119,7 @@ from vfoot.services.player_ratings import (
     latest_market_values, player_values, previous_season_with_data,
 )
 from vfoot.services.match_resolver import matchday_fixtures_by_team
-from vfoot.services import lineup_repair, matchday_state
+from vfoot.services import honours, knockout, lineup_repair, matchday_state
 
 log = logging.getLogger(__name__)
 
@@ -273,6 +274,7 @@ class LeagueDetailView(APIView):
                 "defense_bonus_enabled": league.defense_bonus_enabled,
                 "defense_bonus_mode": league.defense_bonus_mode,
                 "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
+                "home_advantage_bonus": league.home_advantage_bonus,
                 "enforce_lineup_deadline": league.enforce_lineup_deadline,
                 "initial_budget": league.initial_budget,
                 "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
@@ -324,13 +326,21 @@ class LeagueDetailView(APIView):
         )
 
 
+_COMPETITION_END_DETAIL = {
+    FantasyCompetition.FORMAT_LEAGUE: "campionato concluso",
+    FantasyCompetition.FORMAT_CUP: "coppa assegnata",
+    FantasyCompetition.FORMAT_GROUPS_KNOCKOUT: "gironi e finali conclusi",
+}
+
+
 class LeagueActivityView(APIView):
     """What has happened in the league lately, newest first.
 
     Merged from the records that already exist rather than from a new event table:
     a roster slot knows when it was acquired, a decision when it was settled, a
-    matchday when it was concluded. That keeps the feed honest — it cannot drift
-    from what actually happened — at the cost of three small queries.
+    matchday when it was concluded, a competition that it has run out of rounds.
+    That keeps the feed honest — it cannot drift from what actually happened — at
+    the cost of a few small queries.
     """
 
     authentication_classes = [TokenAuthentication]
@@ -381,10 +391,81 @@ class LeagueActivityView(APIView):
                 "crest": None,
             })
 
+        # The end of a competition and the honours it settled. Both derived, like
+        # everything else here — and both dated from the ledger, so they appear
+        # exactly where the matchday that decided them appears and not at the top
+        # of the feed for ever.
+        board = honours.league_honours(league)
+        for row in board["finished"]:
+            comp = row["competition"]
+            items.append({
+                "kind": "competizione",
+                "at": row["at"].isoformat() if row["at"] else None,
+                "text": f"{comp.name}: è finita",
+                "detail": _COMPETITION_END_DETAIL.get(comp.format, "competizione conclusa"),
+                "team_id": None,
+                "crest": None,
+            })
+        crests = dict(FantasyTeam.objects.filter(league=league).values_list("id", "crest"))
+        for award in board["awards"]:
+            names = _team_names(award["team_ids"])
+            prize = award["prize"]
+            items.append({
+                "kind": "premio",
+                "at": award["at"].isoformat() if award["at"] else None,
+                "text": f"{prize.icon or '🏆'} {prize.name}: {', '.join(names)}",
+                "detail": f"{award['competition'].name} · {describe_condition(prize)}",
+                # One winner gets his crest next to the line; a shared record has
+                # no single face and gets none.
+                "team_id": award["team_ids"][0] if len(award["team_ids"]) == 1 else None,
+                "crest": (crests.get(award["team_ids"][0])
+                          if len(award["team_ids"]) == 1 else None),
+            })
+
         # Undated rows (older data, or a field never filled) sink rather than
         # jumping to the top of a feed sorted by a missing value.
         items.sort(key=lambda i: i["at"] or "", reverse=True)
         return Response(items[:limit])
+
+
+class ManagerHonoursView(APIView):
+    """L'albo d'oro di un fantallenatore — il suo, o quello di chiunque altro.
+
+    Deliberately not league-scoped. A league lasts one season and a manager does
+    not: a palmarès that started again every August would be worth nothing, and
+    what makes it worth looking at is precisely that the cups pile up.
+
+    What the VIEWER may see is another matter, and the answer is: the leagues you
+    share with him. Not because a trophy is a secret, but because the name of a
+    league he plays in elsewhere is his business and not the whole site's — and
+    because "who else is this person playing with" is exactly the sort of thing
+    that should not leak out of a fantasy football app. Looking at yourself is the
+    one case with no filter.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, user_id: int):
+        manager = get_object_or_404(User, id=user_id)
+        if manager.id == request.user.id:
+            visible = None
+        else:
+            mine = set(LeagueMembership.objects.filter(user=request.user)
+                       .values_list("league_id", flat=True))
+            theirs = set(LeagueMembership.objects.filter(user=manager)
+                         .values_list("league_id", flat=True))
+            shared = mine & theirs
+            if not shared:
+                raise Http404("No league in common")
+            visible = list(shared)
+
+        awards = honours.manager_honours(manager, leagues=visible)
+        return Response({
+            "user_id": manager.id,
+            "username": manager.username,
+            "awards": [honours.serialize_award(a) for a in awards],
+        })
 
 
 class LeagueMyTeamView(APIView):
@@ -594,6 +675,21 @@ class LeagueSettingsUpdateView(APIView):
             league.keeper_clean_sheet_enabled = bool(request.data.get("keeper_clean_sheet_enabled"))
             fields.append("keeper_clean_sheet_enabled")
 
+        if "home_advantage_bonus" in request.data:
+            try:
+                bonus = float(request.data.get("home_advantage_bonus") or 0)
+            except (TypeError, ValueError):
+                return Response({"detail": "home_advantage_bonus non valido."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            # Un tetto c'e', ed e' basso di proposito: sei punti di fantavoto sono
+            # un gol pieno regalato prima del calcio d'inizio. Il fattore campo e'
+            # una spinta, non un handicap.
+            if not (0 <= bonus <= 6):
+                return Response({"detail": "Il fattore campo deve essere tra 0 e 6."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            league.home_advantage_bonus = bonus
+            fields.append("home_advantage_bonus")
+
         if "enforce_lineup_deadline" in request.data:
             league.enforce_lineup_deadline = bool(request.data.get("enforce_lineup_deadline"))
             fields.append("enforce_lineup_deadline")
@@ -628,6 +724,7 @@ class LeagueSettingsUpdateView(APIView):
             "defense_bonus_enabled": league.defense_bonus_enabled,
             "defense_bonus_mode": league.defense_bonus_mode,
             "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
+            "home_advantage_bonus": league.home_advantage_bonus,
             "enforce_lineup_deadline": league.enforce_lineup_deadline,
             "initial_budget": league.initial_budget,
             "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
@@ -1182,6 +1279,8 @@ class CompetitionWizardCreateView(APIView):
                 team_ids=data.get("team_ids"),
                 qualification=data.get("qualification"),
                 legs=data.get("legs", 1),
+                knockout_legs=data.get("knockout_legs", 1),
+                final_legs=data.get("final_legs"),
                 groups=data.get("groups", 1),
                 advance_per_group=data.get("advance_per_group", 2),
                 points=data.get("points"),
@@ -1271,7 +1370,8 @@ class CompetitionWizardPreviewView(APIView):
             return Response({"detail": "Servono almeno 2 squadre."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            stages = _plan_preview(fmt, n, legs, groups, advance)
+            stages = _plan_preview(fmt, n, legs, groups, advance,
+                                   data.get("knockout_legs", 1), data.get("final_legs"))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1305,9 +1405,18 @@ class CompetitionWizardPreviewView(APIView):
         )
 
 
-def _plan_preview(fmt: str, n: int, legs: int, groups: int, advance: int) -> list[dict]:
-    """Stage-by-stage shape of a spec, with no side effects."""
+def _plan_preview(fmt: str, n: int, legs: int, groups: int, advance: int,
+                  knockout_legs: int = 1, final_legs: int | None = None) -> list[dict]:
+    """Stage-by-stage shape of a spec, with no side effects.
+
+    ``knockout_legs``/``final_legs`` must move in lockstep with ``_knockout_chain``:
+    this is the number the wizard shows before building, and a preview that
+    promises three giornate for something that will take five is worse than no
+    preview at all."""
     from vfoot.services.competition_stages import knockout_stage_name, rounds_per_leg
+
+    ko_legs = 2 if knockout_legs == 2 else 1
+    fin_legs = ko_legs if final_legs is None else (2 if final_legs == 2 else 1)
 
     def bracket(entry: int, start_order: int) -> list[dict]:
         out: list[dict] = []
@@ -1322,21 +1431,22 @@ def _plan_preview(fmt: str, n: int, legs: int, groups: int, advance: int) -> lis
                     "type": "knockout",
                     "order_index": order,
                     "teams": (entry - base) * 2,
-                    "rounds": 1,
-                    "matches": entry - base,
+                    "rounds": ko_legs,
+                    "matches": (entry - base) * ko_legs,
                 }
             )
             order += 1
         size = base
         while size >= 2:
+            this_legs = fin_legs if size == 2 else ko_legs
             out.append(
                 {
                     "name": knockout_stage_name(size),
                     "type": "knockout",
                     "order_index": order,
                     "teams": size,
-                    "rounds": 1,
-                    "matches": size // 2,
+                    "rounds": this_legs,
+                    "matches": (size // 2) * this_legs,
                 }
             )
             order += 1
@@ -1825,6 +1935,7 @@ def _serialize_prize(prize: CompetitionPrize) -> dict:
         "icon": prize.icon or "🏆",
         "condition_type": prize.condition_type,
         "condition_label": describe_condition(prize),
+        "stat": prize.stat,
         "source_stage_id": prize.source_stage_id,
         "source_stage_name": prize.source_stage.name if prize.source_stage_id else None,
         "rank_from": prize.rank_from,
@@ -1874,11 +1985,20 @@ class CompetitionPrizeListCreateView(APIView):
             rank_from = None
             rank_to = None
 
+        stat = data.get("stat") or ""
+        if cond in [CompetitionPrize.CONDITION_STAT_TOP, CompetitionPrize.CONDITION_STAT_BOTTOM]:
+            if not stat:
+                return Response({"detail": "Serve la misura su cui si vince il primato."},
+                                status=status.HTTP_400_BAD_REQUEST)
+        else:
+            stat = ""
+
         prize = CompetitionPrize.objects.create(
             competition=comp,
             name=data["name"],
             icon=data.get("icon") or "🏆",
             condition_type=cond,
+            stat=stat,
             source_stage=source_stage,
             rank_from=rank_from,
             rank_to=rank_to,
@@ -2532,6 +2652,11 @@ class LeagueMatchdayConcludeView(APIView):
         md.save(update_fields=["status", "concluded_at", "concluded_by",
                                "awaiting_since", "awaiting_reason", "nudged_at"])
 
+        # LAST, and after the matchday is marked concluded: the honours are dated
+        # from the ledger, so asking before this save would find the competition
+        # complete and its date missing.
+        finished = _competitions_that_just_ended(league)
+
         return Response(
             {
                 "fantasy_matchday_id": md.id,
@@ -2543,8 +2668,43 @@ class LeagueMatchdayConcludeView(APIView):
                 "missing_real_scores": missing_goals,
                 "done_stages": done_stages,
                 "resolved_target_stages": resolved_targets,
+                # What this conclusion ENDED, if anything. The admin clicks
+                # "concludi" thirty-eight times and the thirty-eighth is the one
+                # that assigns the scudetto; without this the screen said the same
+                # thing as the other thirty-seven.
+                "finished_competitions": finished,
             }
         )
+
+
+def _competitions_that_just_ended(league) -> list[dict]:
+    """Competitions the league has finished but not yet marked as finished.
+
+    ``status`` is a cached flag, not the truth — ``honours.is_complete`` is, and it
+    is derived from the fixtures. Writing the flag here is what lets a competition
+    page say "conclusa" without recomputing, and returning only the ones that were
+    still ACTIVE is what makes this the announcement of an event rather than a
+    standing list: conclude another matchday and it does not fire again.
+    """
+    out = []
+    for comp in FantasyCompetition.objects.filter(league=league).exclude(
+            status=FantasyCompetition.STATUS_DONE):
+        if not honours.is_complete(comp):
+            continue
+        comp.status = FantasyCompetition.STATUS_DONE
+        comp.save(update_fields=["status"])
+        out.append({
+            "competition_id": comp.id,
+            "name": comp.name,
+            "format": comp.format,
+            "prizes": [{"name": a["prize"].name,
+                        "icon": a["prize"].icon or "🏆",
+                        "condition_label": describe_condition(a["prize"]),
+                        "winner_team_ids": a["team_ids"],
+                        "winner_team_names": _team_names(a["team_ids"])}
+                       for a in honours.prize_awards(comp)],
+        })
+    return out
 
 
 class LeagueMatchdayAwaitView(APIView):
@@ -3837,11 +3997,31 @@ def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, 
         rounds = []
         for rno in sorted(by_round):
             fs = by_round[rno]
+            # Chi è passato, e perché. Su un tabellone il risultato non basta a
+            # dirlo: un 1-1 da solo non dice niente, e prima il turno seguente
+            # compariva con dentro una squadra che a schermo non aveva vinto
+            # nulla. Un turno alla volta — dentro un turno una squadra gioca una
+            # sfida sola, quindi il vincitore la identifica.
+            passed = {t.winner_id: t for t in knockout.tie_outcomes(fs)}
+            rows = []
+            for f in fs:
+                row = _serialize_fixture_row(f, my_team_id, current_md, False,
+                                             awaiting_mds, locked_mds)
+                winner = next((tid for tid in (f.home_team_id, f.away_team_id)
+                               if tid in passed), None)
+                row["advanced_team_id"] = winner
+                # Solo quando il risultato da solo non lo spiega: "passa perché ha
+                # segnato di più" non è una notizia.
+                row["advanced_reason"] = (
+                    passed[winner].reason
+                    if winner is not None and passed[winner].reason != knockout.BY_GOALS
+                    else None
+                )
+                rows.append(row)
             rounds.append({
                 "round_no": rno,
                 "label": _KO_ROUND_LABELS.get(len(fs), f"Turno {rno}"),
-                "fixtures": [_serialize_fixture_row(f, my_team_id, current_md, False,
-                                                    awaiting_mds, locked_mds) for f in fs],
+                "fixtures": rows,
             })
         base["rounds"] = rounds
     else:
@@ -4287,7 +4467,11 @@ class LeagueTeamLineupView(APIView):
             {
                 "team": {"team_id": team.id, "name": team.name,
                          "crest": team.crest,
-                         "manager": team.manager.user.username},
+                         "manager": team.manager.user.username,
+                         # The account behind the team, so the page can ask for
+                         # his albo d'oro — which belongs to the MANAGER and not
+                         # to the team he happens to field in this league.
+                         "manager_user_id": team.manager.user_id},
                 "is_own": is_own,
                 "competitions": [{"competition_id": c["id"], "name": c["name"]} for c in competitions],
                 "competition": competition_id,

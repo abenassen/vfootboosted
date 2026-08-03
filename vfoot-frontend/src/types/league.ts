@@ -57,6 +57,7 @@ export interface LeagueDetail {
   defense_bonus_enabled: boolean;
   defense_bonus_mode: 'add_own' | 'subtract_opponent';
   keeper_clean_sheet_enabled: boolean;
+  home_advantage_bonus: number;
   enforce_lineup_deadline: boolean;
   invite_code: string;
   invite_link: string;
@@ -115,18 +116,57 @@ export interface CompetitionRule {
   rank_to: number | null;
 }
 
+/** A position ('...table_range', 'stage_winner'/'stage_loser') or a record
+ *  ('stat_top'/'stat_bottom' over one `PrizeStat`). */
+export type PrizeConditionType =
+  | 'final_table_range'
+  | 'stage_table_range'
+  | 'stage_winner'
+  | 'stage_loser'
+  | 'stat_top'
+  | 'stat_bottom';
+
+export type PrizeStat = 'avg_score' | 'goals_for' | 'goals_against' | 'best_round' | 'wins';
+
 export interface CompetitionPrizeItem {
   prize_id: number;
   name: string;
   icon: string;
-  condition_type: 'final_table_range' | 'stage_table_range' | 'stage_winner' | 'stage_loser';
+  condition_type: PrizeConditionType;
   condition_label: string;
+  /** Only for the two `stat_*` conditions; '' otherwise. */
+  stat: PrizeStat | '';
   source_stage_id: number | null;
   source_stage_name: string | null;
   rank_from: number | null;
   rank_to: number | null;
   winner_team_ids: number[];
   winner_team_names: string[];
+}
+
+/** One line of an albo d'oro: a prize, where it was won, and when. */
+export interface HonourItem {
+  prize_id: number;
+  name: string;
+  icon: string;
+  condition_label: string;
+  competition_id: number;
+  competition_name: string;
+  competition_format: string;
+  league_id: number;
+  league_name: string;
+  team_id: number | null;
+  team_name: string | null;
+  crest: string;
+  /** How many other teams tied for the same record. 0 for an outright win. */
+  shared_with: number;
+  at: string | null;
+}
+
+export interface ManagerHonours {
+  user_id: number;
+  username: string;
+  awards: HonourItem[];
 }
 
 export type ResultView = 'classifica' | 'tabellone' | 'risultati';
@@ -312,7 +352,8 @@ export interface CompetitionStageRuleCreateResult {
 export interface CompetitionPrizeCreateRequest {
   name: string;
   icon?: string;
-  condition_type: 'final_table_range' | 'stage_table_range' | 'stage_winner' | 'stage_loser';
+  condition_type: PrizeConditionType;
+  stat?: PrizeStat;
   source_stage_id?: number;
   rank_from?: number;
   rank_to?: number;
@@ -338,7 +379,7 @@ export interface CompetitionStageItem {
 
 // ---- guided creation ----
 
-export type WizardPrizeCondition = 'winner' | 'runner_up' | 'rank';
+export type WizardPrizeCondition = 'winner' | 'runner_up' | 'rank' | 'stat';
 
 export interface WizardPrizeSpec {
   name: string;
@@ -346,6 +387,9 @@ export interface WizardPrizeSpec {
   condition: WizardPrizeCondition;
   rank_from?: number;
   rank_to?: number;
+  /** 'stat' only: which record, and from which end of it. */
+  stat?: PrizeStat;
+  direction?: 'top' | 'bottom';
 }
 
 export interface WizardQualificationSpec {
@@ -362,6 +406,10 @@ export interface CompetitionWizardRequest {
   team_ids?: number[];
   qualification?: WizardQualificationSpec | null;
   legs?: number;
+  /** Turni a eliminazione: 1 = gara secca, 2 = andata e ritorno (due giornate).
+   *  `final_legs` sovrascrive solo l'ultimo turno. */
+  knockout_legs?: number;
+  final_legs?: number;
   groups?: number;
   advance_per_group?: number;
   points?: { win: number; draw: number; loss: number };
@@ -570,6 +618,13 @@ export interface LeagueFixtureItem {
    *  and some real match behind it has not settled. Distinguishes "0-0 because it
    *  has not started" from "0-0 at the twentieth minute" — the same two numbers. */
   score_provisional?: boolean;
+  /** Knockout sections only: who went through. Not always the higher score — a tie
+   *  is settled by the aggregate score and then by home advantage (see the backend
+   *  `knockout` service). */
+  advanced_team_id?: number | null;
+  /** Why, when the result alone does not say it ('punteggio', 'fattore campo').
+   *  Null when they simply scored more. */
+  advanced_reason?: string | null;
   is_user_involved: boolean;
   /** Decided server-side: also depends on the roster, which the calendar does not
    *  load. False on an empty roster — there would be nothing to field. */

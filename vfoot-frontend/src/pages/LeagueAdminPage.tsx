@@ -124,6 +124,7 @@ export default function LeagueAdminPage() {
       defense_bonus_enabled: d.defense_bonus_enabled,
       defense_bonus_mode: d.defense_bonus_mode,
       keeper_clean_sheet_enabled: d.keeper_clean_sheet_enabled,
+      home_advantage_bonus: d.home_advantage_bonus,
       enforce_lineup_deadline: d.enforce_lineup_deadline,
     };
   }
@@ -784,6 +785,27 @@ export default function LeagueAdminPage() {
                         </label>
                         <div className="mt-1 text-[11px] text-slate-500">
                           +1 al fantatotale se il portiere schierato prende voto e non subisce gol.
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <span>Fattore campo</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={6}
+                            step={0.5}
+                            value={draft.home_advantage_bonus ?? 0}
+                            onChange={(e) => set({ home_advantage_bonus: Number(e.target.value) })}
+                            className="w-16 rounded-lg border px-2 py-1 text-sm"
+                          />
+                          <span className="text-slate-500">al fantatotale di chi gioca in casa</span>
+                        </label>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          0 = spento. Vale <b>solo dove il campo esiste</b>: turni di coppa con andata e ritorno e
+                          tornate di andata e ritorno di un campionato o girone. In una gara secca, o nella tornata
+                          dispari in più, chi ospita l'ha deciso il calendario e il bonus non viene assegnato.
                         </div>
                       </div>
 

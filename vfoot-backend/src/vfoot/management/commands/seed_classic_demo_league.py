@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import timedelta
 import random
 
 from django.contrib.auth.models import User
@@ -381,11 +382,19 @@ class Command(BaseCommand):
         now = timezone.now()
         n_rounds = 9 * cycles
         real_matchdays = list(range(1, n_rounds + 1))
+        # A season takes a season. Stamping every conclusion with the same instant
+        # made the league's whole history a single millisecond, and anything that
+        # reads it in order — the news feed, the honours board — came out shuffled
+        # by the microsecond the rows happened to be written in, with the last
+        # matchday of the year sitting under an auction that "followed" it.
         matchday_by_real = {
             rm: FantasyMatchday.objects.create(
                 league=league, real_competition_season=season, real_matchday=rm,
-                status=FantasyMatchday.STATUS_CONCLUDED, concluded_at=now, concluded_by=owner)
+                status=FantasyMatchday.STATUS_CONCLUDED, concluded_by=owner,
+                concluded_at=now - timedelta(days=7 * (n_rounds - rm)))
             for rm in real_matchdays}
+        # ...and the squads were bought BEFORE the first ball was kicked.
+        bought_at = now - timedelta(days=7 * n_rounds + 3)
 
         teams, depth = [], {}
         for i in range(team_count):
@@ -404,7 +413,8 @@ class Command(BaseCommand):
             CompetitionTeam.objects.create(competition=competition, team=team,
                                            source=CompetitionTeam.SOURCE_MANUAL)
             FantasyRosterSlot.objects.bulk_create(
-                [FantasyRosterSlot(team=team, player_id=p["player_id"], purchase_price=p["price"])
+                [FantasyRosterSlot(team=team, player_id=p["player_id"],
+                                   purchase_price=p["price"], acquired_at=bought_at)
                  for p in squads[i]])
             LeaguePlayerRole.objects.bulk_create(
                 [LeaguePlayerRole(league=league, player_id=p["player_id"], role=p["role"],
@@ -502,21 +512,38 @@ class Command(BaseCommand):
         return home_id
 
     def _build_cup(self, league, teams):
-        """A FLAT single-elimination cup over the second half (no stages)."""
+        """A single-elimination cup over the second half, ONE PHASE PER ROUND.
+
+        The phases are not decoration. A cup with no ``CompetitionStage`` rows
+        cannot say what winning it means: "chi vince la finale" is a prize on a
+        phase, and without one the honours fall back to a league table read over a
+        bracket — which is not the same question and need not have the same answer.
+        This is the shape the wizard builds for a real cup; the seed now matches it.
+        """
         tbi = self._ctx["tbi"]
         cup = FantasyCompetition.objects.create(
             league=league, name="Coppa Classic",
             competition_type=FantasyCompetition.TYPE_KNOCKOUT,
+            format=FantasyCompetition.FORMAT_CUP,
             status=FantasyCompetition.STATUS_DONE)
         current = [t.id for t in teams[:CUP_TEAMS]]
         for tid in current:
             CompetitionTeam.objects.create(competition=cup, team=tbi[tid],
                                            source=CompetitionTeam.SOURCE_MANUAL)
         n_fx = 0
-        for rno, (stage, rm) in enumerate(CUP_ROUNDS, start=1):
+        for rno, (label, rm) in enumerate(CUP_ROUNDS, start=1):
+            stage_obj = CompetitionStage.objects.create(
+                competition=cup, name=label, stage_type=CompetitionStage.TYPE_KNOCKOUT,
+                order_index=rno, round_offset=rno - 1, planned_rounds=1,
+                expected_participants=len(current), status=CompetitionStage.STATUS_DONE)
+            for tid in current:
+                CompetitionStageParticipant.objects.create(
+                    stage=stage_obj, team=tbi[tid],
+                    source=CompetitionStageParticipant.SOURCE_MANUAL)
             nxt = []
             for i in range(0, len(current), 2):
-                nxt.append(self._play_fixture(cup, None, rno, rm, current[i], current[i + 1], stage_label=stage))
+                nxt.append(self._play_fixture(cup, stage_obj, rno, rm, current[i],
+                                              current[i + 1], stage_label=label))
                 n_fx += 1
             current = nxt
         return n_fx, tbi[current[0]].name

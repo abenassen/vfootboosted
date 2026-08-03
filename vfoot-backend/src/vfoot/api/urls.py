@@ -37,6 +37,7 @@ from vfoot.api.league_views import (
     CompetitionResolveDependenciesView,
     LeagueDetailView,
     LeagueActivityView,
+    ManagerHonoursView,
     LeagueMyTeamView,
     LeagueJoinView,
     LeagueListCreateView,
@@ -129,6 +130,9 @@ urlpatterns = [
     path("leagues/<int:league_id>", LeagueDetailView.as_view(), name="league-detail"),
     path("leagues/<int:league_id>/team", LeagueMyTeamView.as_view(), name="league-my-team"),
     path("leagues/<int:league_id>/activity", LeagueActivityView.as_view(), name="league-activity"),
+    # Not under a league: an albo d'oro belongs to the manager and spans every
+    # league he has played in. See ManagerHonoursView for who may read whose.
+    path("managers/<int:user_id>/honours", ManagerHonoursView.as_view(), name="manager-honours"),
     path("leagues/<int:league_id>/fixtures", LeagueFixturesView.as_view(), name="league-fixtures"),
     path("leagues/<int:league_id>/championship-players", LeagueChampionshipPlayersView.as_view(), name="league-championship-players"),
     path("leagues/<int:league_id>/real-fixtures", LeagueRealFixturesView.as_view(), name="league-real-fixtures"),

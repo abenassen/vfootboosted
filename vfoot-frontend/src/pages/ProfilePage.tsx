@@ -3,6 +3,7 @@ import { Button, Card, SectionTitle } from '../components/ui';
 import Avatar from '../components/Avatar';
 import AvatarBuilder from '../components/AvatarBuilder';
 import NotificationsCard from '../components/NotificationsCard';
+import HonoursBoard from '../components/HonoursBoard';
 import { useAuth } from '../auth/AuthContext';
 import { changePassword, updateProfile } from '../api';
 import { ApiError } from '../api/backend';
@@ -120,6 +121,10 @@ export default function ProfilePage() {
           <div className="truncate text-sm text-slate-500">{user?.email || 'Email non impostata'}</div>
         </div>
       </Card>
+
+      {/* What you have won, in every league you play in — the one thing on this
+          page that is not a setting, and the reason to come back to it. */}
+      {user ? <HonoursBoard userId={user.id} own /> : null}
 
       {/* Notifications + install. High on the page on purpose: on iOS the
           install is a prerequisite for notifications and nothing else announces it. */}

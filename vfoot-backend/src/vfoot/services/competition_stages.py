@@ -91,12 +91,39 @@ def stage_team_count(stage: CompetitionStage) -> int:
     return actual or max(0, stage.expected_participants or 0)
 
 
+def stage_legs(stage: CompetitionStage) -> int:
+    """Quante volte si gioca ogni accoppiamento di questa fase.
+
+    Per un turno a eliminazione sono 1 (gara secca) o 2 (andata e ritorno): un
+    terzo incontro fra le stesse due squadre non e' un turno, e' un'altra cosa.
+    """
+    legs = max(1, min(MAX_LEGS, stage.legs or 1))
+    if stage.stage_type == CompetitionStage.TYPE_KNOCKOUT:
+        return min(2, legs)
+    return legs
+
+
+def home_advantage_for_leg(leg: int, legs: int) -> bool:
+    """La tornata ``leg`` di ``legs`` si gioca su un campo, o in campo neutro?
+
+    Le tornate si compensano a coppie: nella prima ospito io, nella seconda tu.
+    Se sono in numero DISPARI l'ultima non ha una gemella — qualcuno giocherebbe
+    in casa una volta in piu' degli altri — e allora si gioca in campo neutro.
+    Il caso piu' comune e' anche il piu' facile da dimenticare: la sola andata
+    (``legs`` = 1) e' tutta campo neutro, perche' chi ospita l'ha deciso il
+    sorteggio del calendario e non il merito.
+    """
+    return leg <= legs - (legs % 2)
+
+
 def planned_rounds_for(stage: CompetitionStage) -> int:
     if stage.stage_type == CompetitionStage.TYPE_KNOCKOUT:
-        return 1
+        # Andata e ritorno occupano DUE turni della competizione, quindi due
+        # giornate: il calendario le distribuisce come qualunque altra coppia di
+        # turni, e le due gare del confronto restano una sfida sola (v. knockout).
+        return stage_legs(stage)
     n = stage_team_count(stage)
-    legs = max(1, min(MAX_LEGS, stage.legs or 1))
-    return max(1, rounds_per_leg(n) * legs)
+    return max(1, rounds_per_leg(n) * stage_legs(stage))
 
 
 @transaction.atomic
@@ -184,7 +211,11 @@ def competition_round_rows(competition: FantasyCompetition) -> list[dict]:
     for rno in sorted(rows):
         row = rows[rno]
         stage_label = " / ".join(row.pop("stage_names"))
-        if row["local_rounds"] > 1:
+        if row["stage_type"] == CompetitionStage.TYPE_KNOCKOUT and row["local_rounds"] == 2:
+            # Due turni di una fase a eliminazione sono una sfida sola giocata due
+            # volte: "Semifinali · giornata 2" suonerebbe come un secondo turno.
+            row["label"] = f"{stage_label} · {'andata' if row['local_round'] == 1 else 'ritorno'}"
+        elif row["local_rounds"] > 1:
             row["label"] = f"{stage_label} · giornata {row['local_round']}"
         else:
             row["label"] = stage_label
@@ -301,16 +332,17 @@ def _generate_round_robin_stage_fixtures(stage: CompetitionStage, seed: int = 42
         return 0
 
     rounds = _round_robin_rounds(team_ids, seed=seed)
-    legs = max(1, min(MAX_LEGS, stage.legs or 1))
+    legs = stage_legs(stage)
     base = stage.round_offset or 0
 
     FantasyFixture.objects.filter(stage=stage).delete()
     fixtures: list[FantasyFixture] = []
     for leg in range(1, legs + 1):
         # Even legs are the return legs: same pairings, ground swapped. With an odd
-        # number of legs somebody ends up one home game ahead — unavoidable, and
-        # harmless while home advantage is worth nothing in the scoring.
+        # number of legs somebody would end up one home game ahead — so that last
+        # tornata is played on neutral ground and the home bonus does not apply.
         swap = leg % 2 == 0
+        at_home = home_advantage_for_leg(leg, legs)
         for local_round, pairs in enumerate(rounds, start=1):
             round_no = base + (leg - 1) * len(rounds) + local_round
             for home_id, away_id in pairs:
@@ -323,6 +355,7 @@ def _generate_round_robin_stage_fixtures(stage: CompetitionStage, seed: int = 42
                         leg_no=leg,
                         home_team_id=h,
                         away_team_id=a,
+                        home_advantage=at_home,
                     )
                 )
 
@@ -341,19 +374,29 @@ def _generate_knockout_stage_fixtures(stage: CompetitionStage, seed: int = 42) -
     rng.shuffle(team_ids)
 
     FantasyFixture.objects.filter(stage=stage).delete()
-    round_no = (stage.round_offset or 0) + 1
+    base = (stage.round_offset or 0) + 1
+    legs = stage_legs(stage)
     fixtures: list[FantasyFixture] = []
     for i in range(0, len(team_ids), 2):
-        fixtures.append(
-            FantasyFixture(
-                competition=stage.competition,
-                stage=stage,
-                round_no=round_no,
-                leg_no=1,
-                home_team_id=team_ids[i],
-                away_team_id=team_ids[i + 1],
+        a, b = team_ids[i], team_ids[i + 1]
+        for leg in range(1, legs + 1):
+            # Andata e ritorno: stessa sfida, campi invertiti, e il turno successivo
+            # della competizione — cioe' un'altra giornata, che e' il punto. Con la
+            # gara secca (legs = 1) non cambia nulla rispetto a prima.
+            home, away = (b, a) if leg == 2 else (a, b)
+            fixtures.append(
+                FantasyFixture(
+                    competition=stage.competition,
+                    stage=stage,
+                    round_no=base + leg - 1,
+                    leg_no=leg,
+                    home_team_id=home,
+                    away_team_id=away,
+                    # Una sfida a due gare ha un campo per ciascuno; una gara secca
+                    # e' campo neutro, chi "ospita" l'ha deciso il sorteggio.
+                    home_advantage=legs == 2,
+                )
             )
-        )
 
     FantasyFixture.objects.bulk_create(fixtures, batch_size=500, ignore_conflicts=True)
     return FantasyFixture.objects.filter(stage=stage).count()
@@ -409,19 +452,25 @@ def _stage_table_ranking(source_stage: CompetitionStage, cut_round: int | None =
 
 
 def _stage_winners_or_losers(source_stage: CompetitionStage, mode: str) -> list[int]:
-    winners: list[int] = []
-    losers: list[int] = []
-    fixtures = FantasyFixture.objects.filter(stage=source_stage, status=FantasyFixture.STATUS_FINISHED).order_by("id")
-    for fx in fixtures:
-        if fx.home_total == fx.away_total:
-            continue
-        if fx.home_total > fx.away_total:
-            winners.append(fx.home_team_id)
-            losers.append(fx.away_team_id)
-        else:
-            winners.append(fx.away_team_id)
-            losers.append(fx.home_team_id)
-    return winners if mode == CompetitionStageRule.MODE_WINNERS else losers
+    """Chi passa e chi esce da una fase a eliminazione.
+
+    Una sfida in parità NON è più un turno senza vincitore: la si decide col
+    punteggio (vedi ``knockout``, che è la stessa regola letta dai premi). Prima
+    veniva semplicemente saltata, e siccome il turno successivo si sorteggia solo
+    quando la sua regola produce un campo, un pareggio in semifinale lasciava la
+    finale non sorteggiata e la competizione senza fine.
+    """
+    from vfoot.services.knockout import tie_outcomes
+
+    fixtures = list(
+        FantasyFixture.objects.filter(stage=source_stage, status=FantasyFixture.STATUS_FINISHED)
+        .select_related("detail")
+        .order_by("id")
+    )
+    outcomes = tie_outcomes(fixtures)
+    if mode == CompetitionStageRule.MODE_WINNERS:
+        return [t.winner_id for t in outcomes]
+    return [t.loser_id for t in outcomes]
 
 
 def rule_is_ready(rule: CompetitionStageRule) -> bool:
@@ -575,12 +624,20 @@ def _knockout_chain(
     entry_team_count: int,
     start_order: int,
     seed: int,
+    legs: int = 1,
+    final_legs: int | None = None,
 ) -> list[CompetitionStage]:
     """Bracket stages for ``entry_team_count`` teams, each fed by the previous one.
 
     Participants are NOT assigned here — the caller either seeds the first stage
     with real teams or points a rule at it.
+
+    ``legs`` = 2 makes every round a two-legged tie. ``final_legs`` overrides it
+    for the last round alone, because that is how cups are actually played:
+    andata e ritorno fino alla semifinale, finale in gara secca.
     """
+    legs = 2 if legs == 2 else 1
+    final_legs = legs if final_legs is None else (2 if final_legs == 2 else 1)
     stages: list[CompetitionStage] = []
     order = start_order
     base = _floor_power_of_two(entry_team_count)
@@ -591,6 +648,7 @@ def _knockout_chain(
             name="Turno preliminare",
             stage_type=CompetitionStage.TYPE_KNOCKOUT,
             order_index=order,
+            legs=legs,
             expected_participants=(entry_team_count - base) * 2,
         )
         stages.append(play_in)
@@ -603,6 +661,7 @@ def _knockout_chain(
             name=knockout_stage_name(size),
             stage_type=CompetitionStage.TYPE_KNOCKOUT,
             order_index=order,
+            legs=final_legs if size == 2 else legs,
             expected_participants=size,
         )
         stages.append(stage)
@@ -648,15 +707,21 @@ def build_cup_graph(
     team_ids: list[int] | None = None,
     expected_teams: int | None = None,
     seed: int = 42,
+    knockout_legs: int = 1,
+    final_legs: int | None = None,
 ) -> dict:
     """A straight bracket. ``team_ids`` when the field is known, ``expected_teams``
-    when it is still a promise (a cup fed by a table that has not been played)."""
+    when it is still a promise (a cup fed by a table that has not been played).
+
+    ``knockout_legs`` = 2 plays every round over andata e ritorno; ``final_legs``
+    lets the final be a single match anyway, which is how most cups are run."""
     _clear_stage_graph(competition)
     n = len(team_ids) if team_ids else int(expected_teams or 0)
     if n < 2:
         raise ValueError("At least 2 teams are required.")
 
-    stages = _knockout_chain(competition, entry_team_count=n, start_order=1, seed=seed)
+    stages = _knockout_chain(competition, entry_team_count=n, start_order=1, seed=seed,
+                             legs=knockout_legs, final_legs=final_legs)
     recompute_round_layout(competition)
 
     fixtures_created = 0
@@ -714,6 +779,8 @@ def build_groups_knockout_graph(
     advance_per_group: int = 2,
     legs: int = 1,
     seed: int = 42,
+    knockout_legs: int = 1,
+    final_legs: int | None = None,
 ) -> dict:
     """Group stage(s), then a bracket for whoever finishes high enough.
 
@@ -756,7 +823,8 @@ def build_groups_knockout_graph(
         )
         group_stages.append(stage)
 
-    ko_stages = _knockout_chain(competition, entry_team_count=qualified, start_order=2, seed=seed)
+    ko_stages = _knockout_chain(competition, entry_team_count=qualified, start_order=2, seed=seed,
+                                legs=knockout_legs, final_legs=final_legs)
     first_ko = ko_stages[0]
     for stage in group_stages:
         CompetitionStageRule.objects.create(
