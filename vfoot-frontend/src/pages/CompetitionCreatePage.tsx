@@ -152,14 +152,14 @@ function PlanSummary({ plan }: { plan: CompetitionWizardPlan }) {
           <div className="shrink-0 text-right text-[11px] text-slate-500">
             <div>{s.teams} squadre</div>
             <div>
-              {s.rounds} {s.rounds === 1 ? 'giornata' : 'giornate'} · {s.matches} {s.matches === 1 ? 'gara' : 'gare'}
+              {s.rounds} {s.rounds === 1 ? 'turno' : 'turni'} · {s.matches} {s.matches === 1 ? 'gara' : 'gare'}
             </div>
           </div>
         </div>
       ))}
       <div className="pt-1 text-xs text-slate-500">
         In tutto <b className="text-slate-800">{plan.total_rounds}</b>{' '}
-        {plan.total_rounds === 1 ? 'giornata' : 'giornate'} da collocare sul calendario reale.
+        {plan.total_rounds === 1 ? 'turno' : 'turni'} da collocare sul calendario reale.
       </div>
     </div>
   );
@@ -568,7 +568,7 @@ export default function CompetitionCreatePage() {
                     {qualifiableRounds.map(({ compName, row }) => (
                       <option key={`${row.stage_id}:${row.round_no}`} value={`${row.stage_id}:${row.round_no}`}>
                         {compName} — {row.label}
-                        {row.real_matchday ? ` (giornata reale ${row.real_matchday})` : ''}
+                        {row.real_matchday ? ` (giornata ${row.real_matchday})` : ''}
                       </option>
                     ))}
                   </select>
@@ -747,7 +747,7 @@ export default function CompetitionCreatePage() {
                 {plan?.constraint ? (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                     {plan.constraint}: non può cominciare prima della{' '}
-                    <b>{plan.min_start_matchday}ª giornata reale</b>.
+                    <b>{plan.min_start_matchday}ª giornata</b>.
                   </div>
                 ) : null}
                 {/* How long the season actually is, said once: without it the two
@@ -761,7 +761,7 @@ export default function CompetitionCreatePage() {
                   </div>
                 ) : null}
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Dalla giornata reale">
+                  <Field label="Dalla giornata">
                     <div className="flex gap-1.5">
                       <input
                         type="number"
@@ -780,7 +780,7 @@ export default function CompetitionCreatePage() {
                       </button>
                     </div>
                   </Field>
-                  <Field label="Alla giornata reale" hint="Vuoto = una dopo l'altra, senza soste.">
+                  <Field label="Alla giornata" hint="Vuoto = uno dopo l'altro, senza soste.">
                     <div className="flex gap-1.5">
                       <input
                         type="number"

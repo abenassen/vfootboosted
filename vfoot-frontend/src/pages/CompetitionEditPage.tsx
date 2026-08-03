@@ -218,8 +218,8 @@ export default function CompetitionEditPage() {
       <Card className="p-4 sm:p-5">
         <SectionTitle>Calendario</SectionTitle>
         <div className="mt-1 text-xs text-slate-500">
-          Ogni giornata della competizione si gioca su una giornata reale. La distribuzione è automatica; qui la
-          correggi. Una giornata non può precedere quella prima di lei.
+          Ogni turno della competizione si gioca su una giornata di Serie A. La distribuzione è automatica; qui la
+          correggi. Un turno non può precedere quello prima di lui.
         </div>
         {schedule?.constraints?.length ? (
           <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
@@ -249,7 +249,7 @@ export default function CompetitionEditPage() {
                 <option value="">non assegnata</option>
                 {(schedule?.available_real_matchdays ?? []).map((md) => (
                   <option key={md} value={md}>
-                    Giornata reale {md}
+                    Giornata {md}
                   </option>
                 ))}
               </select>

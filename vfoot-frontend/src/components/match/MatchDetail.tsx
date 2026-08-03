@@ -66,7 +66,7 @@ export function MatchDetail({
           header={vm.header}
           eyebrow={
             <SectionTitle>
-              Giornata {data.fantasy_round} · Serie A reale {data.real_matchday}
+              Turno {data.fantasy_round} · giornata {data.real_matchday}
             </SectionTitle>
           }
           action={

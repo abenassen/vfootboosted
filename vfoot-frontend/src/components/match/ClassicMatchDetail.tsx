@@ -154,7 +154,10 @@ export function ClassicMatchDetail({
           eyebrow={
             <div className="flex flex-wrap items-center gap-2">
               <SectionTitle>
-                {d.stage ? d.stage : `Giornata ${d.fantasy_round}`} · Serie A reale {d.real_matchday}
+                {/* "Turno" is the competition's own unit, "giornata" is Serie A's,
+                    and they are never the same word. The stage name wins when there
+                    is one: "Semifinali" says more than any number. */}
+                {d.stage ? d.stage : `Turno ${d.fantasy_round}`} · giornata {d.real_matchday}
               </SectionTitle>
               {d.provisional ? <LiveBadge label="in corso" /> : null}
             </div>
