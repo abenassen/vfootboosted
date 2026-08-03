@@ -10,10 +10,11 @@ exist, and a cup scheduled to start before the round that decides who plays it.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import timedelta
 
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from realdata.models import Competition, CompetitionSeason, Season, Team, TeamSeason, Match
@@ -40,7 +41,13 @@ def _make_season(matchdays: int = 38) -> CompetitionSeason:
     away = TeamSeason.objects.create(
         team=Team.objects.create(external_id="a", name="Away FC"), competition_season=cs
     )
-    base = datetime(2025, 8, 24, 18, 0, tzinfo=dt_timezone.utc)
+    # RELATIVE to now, and in the future. These tests are about structure — round
+    # numbering, qualification rules, calendar constraints — and none of them means
+    # to describe a season that has already been played. With a fixed 2025 date they
+    # did exactly that as soon as the wall clock passed it, and a season entirely in
+    # the past is a different thing with different rules (nothing can be fielded any
+    # more), which is not what any assertion here is checking.
+    base = timezone.now() + timedelta(days=1)
     Match.objects.bulk_create(
         [
             Match(

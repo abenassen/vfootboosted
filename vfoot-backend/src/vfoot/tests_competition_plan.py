@@ -413,16 +413,21 @@ class CompetitionPlanTests(TestCase):
             FantasyFixture.objects.filter(competition=cup, stage__name="Finale").count(), 0,
             "meglio nessun sorteggio che un sorteggio su un turno gia' chiuso")
 
-    def test_a_league_replaying_an_old_season_draws_normally(self):
-        """The escape hatch that keeps the refusal honest, and the case it is FOR.
+    def test_a_league_with_no_lineup_deadline_draws_normally(self):
+        """The one league where "this matchday has kicked off" says nothing.
 
-        A league replaying a finished season has every kickoff in the past —
-        including the matchdays it has not reached yet — so "this one has already
-        kicked off" says nothing about it. The league is perfectly alive: its ledger
-        is at round 7 and its cup is booked at round 8, still ahead of it. Judging
-        those rounds by kickoff would declare every one of them impossible and leave
-        the competition permanently undrawn.
+        A league played over an ALREADY FINISHED season — which is a testing setup,
+        not something anyone runs for real — has every kickoff in the past, including
+        the matchdays it has not reached yet, and turns `enforce_lineup_deadline` off
+        precisely for that. The fieldability check has to go inert there, or every
+        round of every competition is "impossible" and no cup can ever be drawn.
+
+        It is the FLAG that decides this, not a guess about the season: the same
+        state in a real league (the season has genuinely run out) is a real
+        end-of-season and must still be refused.
         """
+        self.league.enforce_lineup_deadline = False
+        self.league.save(update_fields=["enforce_lineup_deadline"])
         champ, champ_stage = self._championship()
         cup = self._cup_from_table(champ_stage)
         Match.objects.filter(competition_season=self.cs).update(
@@ -439,15 +444,17 @@ class CompetitionPlanTests(TestCase):
             self.assertGreater(fx.fantasy_matchday.real_matchday, 7)
 
     def test_a_phase_whose_matchdays_the_league_already_counted_is_refused(self):
-        """The case I had written off as an accepted cost, and it is not one.
+        """The guard that still works where the other one is switched off.
 
-        When every matchday of the season has kicked off the fieldability check goes
-        inert (it has to, or the league above breaks) — so on its own it would let a
-        very late cup be drawn onto rounds the ledger CLOSED weeks ago. Nothing
-        rescores a concluded matchday, so those ties would sit at 0-0 for ever in a
-        competition that can no longer finish. The ledger is the second test, and it
-        catches exactly what the first cannot see.
+        With `enforce_lineup_deadline` off the fieldability check is inert by design
+        — so on its own it would let a very late cup be drawn onto rounds the ledger
+        CLOSED weeks ago. Nothing rescores a concluded matchday, so those ties would
+        sit at 0-0 for ever in a competition that can no longer finish. The ledger
+        asks a question that is true either way, and catches exactly what the
+        fieldability check cannot see.
         """
+        self.league.enforce_lineup_deadline = False
+        self.league.save(update_fields=["enforce_lineup_deadline"])
         champ, champ_stage = self._championship()
         cup = self._cup_from_table(champ_stage)
         booked = sorted(int(v) for v in cup.round_calendar.values())

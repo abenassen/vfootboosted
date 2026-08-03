@@ -477,21 +477,19 @@ def plan_rounds(competition: FantasyCompetition, now=None) -> dict:
 
     from vfoot.services import matchday_state  # local: matchday_state imports models only
 
-    # A matchday is "gone" only where there is still football to move TO. Two ways
-    # that fails, and in both this whole mechanism must be inert rather than
-    # declaring every round unplaceable and refusing to draw anything:
+    # A matchday is "gone" only for a league that HAS a deadline. Without one —
+    # ``enforce_lineup_deadline`` off, which is the flag that exists for a league
+    # played over an ALREADY FINISHED season, i.e. for testing — every kickoff is in
+    # the past by construction, including the matchdays the league has not reached
+    # yet, so "this one has already started" says nothing about anything. There the
+    # whole mechanism must be inert; the guard that still applies is the LEDGER one
+    # (``rounds_already_counted``), which asks a question that is true either way.
     #
-    # * the league has no deadline at all (``enforce_lineup_deadline`` off) — the
-    #   historical replays and the demo leagues, played over a season that is
-    #   entirely in the past and whose lineups are edited freely. This exists to
-    #   protect a deadline; with no deadline there is nothing to protect;
-    # * the season has NO fieldable matchday left. Then "move it later" has no
-    #   meaning: the competition is being resolved retrospectively, and refusing
-    #   would leave it permanently undrawn instead of merely late.
+    # Deliberately NOT extended to "the real season has run out of fieldable
+    # matchdays". That is a genuine end-of-season state in a real league, and there
+    # refusing to draw is the right answer — not a special case to be waved through.
     locked = (matchday_state.locked_matchdays(csid, now)
               if competition.league.enforce_lineup_deadline else set())
-    if locked and not (set(all_matchdays) - locked):
-        locked = set()
     drawn = set(
         FantasyFixture.objects.filter(competition=competition).values_list("round_no", flat=True)
     )
