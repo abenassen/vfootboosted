@@ -243,8 +243,14 @@ start_backend() {
   # Deve valere per il PROCESSO DEL SERVER, quindi si esporta qui e non altrove:
   # e' il server che ospitera' il tick.
   [ -n "$TICK_IN_PROCESS" ] && export VFOOT_TICK_IN_PROCESS=true VFOOT_TICK_EVERY=60
+  # -u come per il cron, e per la stessa ragione: quando il tick gira DENTRO questo
+  # processo, quello che stampa finisce qui. Senza, python bufferizza lo stdout (non
+  # e' un terminale) e le righe del tick restano invisibili per mezz'ora -- durante
+  # questa sessione ha fatto sembrare che il tick non stesse girando affatto, mentre
+  # stava importando regolarmente. Il logging si scarica da solo ed e' per questo che
+  # si vedeva solo lui: due meta' dello stesso log con due comportamenti diversi.
   ( cd "$REPO/vfoot-backend/src" \
-    && nohup "$PY" manage.py runserver "0.0.0.0:$BACK_PORT" --noreload \
+    && nohup "$PY" -u manage.py runserver "0.0.0.0:$BACK_PORT" --noreload \
        > "$LOGDIR/backend.log" 2>&1 < /dev/null & echo $! >> "$PIDFILE" )
   wait_port "$BACK_PORT" 45 \
     || { tail -20 "$LOGDIR/backend.log" >&2; die "backend non partito"; }
