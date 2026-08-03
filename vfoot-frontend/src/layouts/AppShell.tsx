@@ -12,6 +12,7 @@ import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { compColor } from '../league/competitionColors';
 import { useDecisionAlerts } from '../league/useDecisionAlerts';
+import { PageErrorBoundary } from '../components/PageErrorBoundary';
 import UpdateBanner from '../components/UpdateBanner';
 
 // League-scoped navigation (left sidebar + mobile bar): everything here is about
@@ -467,7 +468,11 @@ export default function AppShell() {
             </div>
           ) : null}
 
-          <Outlet />
+          {/* Keyed on the route: a boundary that has caught STAYS caught, so
+              without this the card would follow you onto pages that work. */}
+          <PageErrorBoundary key={location.pathname}>
+            <Outlet />
+          </PageErrorBoundary>
         </main>
       </div>
 
