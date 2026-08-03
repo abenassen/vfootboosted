@@ -125,6 +125,14 @@ def playing_matchday(league, now=None) -> int | None:
     A postponed shell is skipped: it has been moved out of its window and its
     replay is a separate row with its own kickoff — which correctly makes the
     matchday 'playing' again on the day of the recovery.
+
+    A match already promoted to ``data_ready`` is skipped too, and that one is not
+    an optimisation: the time window is 3 hours from kick-off, while the data
+    settles at +1h from full time, i.e. around +2h45. So for the quarter of an hour
+    between the two the round was BOTH 'being played' and 'complete', and the home
+    said "la giornata 22 e' finita, puoi calcolare i punteggi" directly above "si
+    gioca la giornata 22" — every single round, not only in the simulator. The
+    window bounds when we start looking; what ends a round is its data settling.
     """
     now = now or timezone.now()
     cs = league.reference_season
@@ -136,6 +144,7 @@ def playing_matchday(league, now=None) -> int | None:
             kickoff__lte=now,
             kickoff__gt=now - MATCH_WINDOW,
             matchday__isnull=False,
+            data_ready=False,
         )
         .exclude(status__in=[Match.STATUS_POSTPONED, Match.STATUS_CANCELLED])
         .order_by("kickoff")

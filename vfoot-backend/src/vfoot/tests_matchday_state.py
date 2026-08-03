@@ -90,9 +90,24 @@ class TwoClocksTests(TestCase):
         self.assertEqual(locked, {16})
 
     def test_playing_matchday_is_the_one_on_the_pitch(self):
+        # An hour after kick-off the data cannot have settled yet — it is promoted at
+        # +1h from FULL TIME. The fixture is built already-ready for the ledger tests,
+        # so put it back to what it really is at this instant.
+        Match.objects.filter(external_id="a16").update(data_ready=False)
         self.assertEqual(matchday_state.playing_matchday(self.league, DEC20 + timedelta(hours=1)), 16)
         # ...and nothing between rounds, three hours after the last kickoff.
         self.assertIsNone(matchday_state.playing_matchday(self.league, DEC20 + timedelta(days=2)))
+
+    def test_a_round_whose_data_has_settled_is_no_longer_on_the_pitch(self):
+        """The time window is 3h from kick-off, the data settles at ~+2h45: for the
+        quarter of an hour between the two the round used to be BOTH 'being played'
+        and 'complete', and the home said so out loud, one line above the other."""
+        settled = DEC20 + timedelta(hours=2, minutes=50)
+        # data_ready is already True on a16 from setUp; the postponed shell is skipped
+        # for its own reason, so nothing of matchday 16 is on the pitch any more.
+        self.assertIsNone(matchday_state.playing_matchday(self.league, settled))
+        # Still inside the window, but only because the clock says so.
+        self.assertLess(settled, DEC20 + matchday_state.MATCH_WINDOW)
 
     def test_a_postponed_shell_does_not_keep_the_round_on_the_pitch(self):
         """Its window has passed; only the recovery row can make 16 'playing' again."""

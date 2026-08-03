@@ -1,7 +1,14 @@
 # Voti live durante la giornata — piano di lavoro
 
-Stato: **da fare**, punti 1→6. Deciso in una sessione del 2026-08-02; questo
-documento e' autosufficiente, non serve aver visto quella conversazione.
+Stato: **fatto**, punti 1→6, il 2026-08-03. Il piano resta qui perche' spiega
+*perche'* le cose sono come sono; per rifare le prove salta a
+[Come provarlo](#come-provarlo), che e' stato riscritto su quello che succede
+davvero e non su quello che ci si aspettava.
+
+Una correzione al punto 5 arrivata mentre si costruiva: l'evento da notificare e'
+**fine PARTITA**, non fine giornata — e' l'istante in cui i voti di quei giocatori
+smettono di muoversi, ed e' cio' che aspetta chi segue la propria giornata. La
+fine della giornata e' un evento dell'amministratore e ha gia' il suo messaggio.
 
 ## Il buco che chiude
 
@@ -223,28 +230,73 @@ l'accesso alla **visione live** (`/matches/<fixture_id>`), non la formazione.
 
 ## Come provarlo
 
-La stagione simulata e la pipeline finta esistono gia':
-
 ```
-./vfoot-sim                 # accende backend + frontend + cron, orologio al 31/01/2027 18:35
+./vfoot-sim build napoli-inter    # la PRIMA volta su una macchina, o dopo un reset
+./vfoot-sim napoli-inter          # le volte successive
 ./vfoot-sim status
 ./vfoot-sim stop
 ```
 
-Scenario `g22-live`: g22 a meta', una partita in corso. Vedi
-`realdata/services/egress_sim.py` (il provider finto) e
-`vfoot/management/commands/simulate_scenario.py`.
+Scenario `napoli-inter`: domenica sera, nove partite giocate e Napoli-Inter in
+corso al 30° circa. Serve `build` la prima volta perche' lo scenario deve
+ricostruire la stagione simulata e **seminare la lega**; poi e' idempotente. Se il
+cron ha girato piu' di qualche minuto, `build` di nuovo — un riavvio riporta
+indietro l'orologio ma non i dati, e i due divergono in modi non ovvi (l'intestazione
+di `vfoot-sim` li elenca).
 
-**Da estendere nel punto 1**: `egress_sim._matches` scrive il payload completo solo
-se `kind == "final"` o la partita e' finita. Il nuovo import live dovra' chiedere
-lo stesso `kind` (o se ne aggiunge uno), altrimenti il provider simulato servira'
-solo l'evento leggero e l'import non trovera' nulla.
+Cosa gira: backend, frontend, il cron dei tick, e un **Redis** in un contenitore.
+Il Redis non e' un dettaglio: senza, il cron e il server hanno due layer di canali
+in memoria separati, la spinta WebSocket non attraversa e la pagina non si aggiorna
+mai — senza un errore da nessuna parte.
 
-## Test da scrivere
+### I voti che si muovono
 
-* `live_import` non alza `data_ready`, e lo rialza `final_confirm`.
-* due import a distanza di tempo su una partita in corso: i voti cambiano, e le
-  righe scritte sono meno delle righe totali (l'upsert scarta le invariate).
-* `FixtureDetailView` su giornata non conclusa: risponde 200, marca instabili le
-  righe della partita ancora in corso, e **non** crea `FantasyFixtureDetail`.
-* alla conclusione, il payload congelato e quello calcolato al volo coincidono.
+Apri il tabellino della tua partita di lega (`/matches/<id>`, oppure dalla home,
+riquadro "SI GIOCA") **e non toccare niente**. Ogni due minuti simulati il tick
+importa, spinge il nudge, e la pagina rilegge da sola: minuti e voti dei giocatori
+delle partite in corso cambiano sotto gli occhi. Il puntino rosso a fianco di un
+voto, e il segno "PROVVISORIO" sul totale di squadra, dicono che quel numero si
+muovera' ancora.
+
+`tail -f $TMPDIR/vfoot-sim/tick.log` mostra il lato server (`live-import … N leghe
+avvisate`).
+
+### Le notifiche push
+
+Funziona anche in sviluppo, `npm run dev` compreso — verificato, worker freddo
+incluso. Le chiavi VAPID le genera `vfoot-sim` da solo, sotto `~/.cache/vfoot-sim`.
+
+1. Profilo → **Attiva le notifiche**. Il permesso **devi darlo tu a mano**: un
+   click sintetico (automazione) non porta l'attivazione utente e Chrome risponde
+   `default` senza disegnare nulla.
+2. Se non compare nessuna finestra, guarda la **campanella sbarrata** nella barra
+   degli indirizzi: con i "messaggi discreti" attivi Chrome sopprime la richiesta e
+   lascia solo quell'icona, che sfugge se non sai che c'e'. Il messaggio d'errore
+   dell'app lo dice.
+3. L'evento piu' facile da far scattare e' la **fine partita**: arriva a chiunque
+   abbia un giocatore in campo, mentre per un gol serve che segni proprio il tuo.
+   Avvia con `--at` due minuti prima del 105° dal calcio d'inizio e aspetta il tick.
+
+**La trappola che costa piu' tempo di tutte:** se deregistri un service worker, o
+spegni il server della sua origine, le push restano **in coda su FCM** (TTL 24 ore)
+e arrivano tutte insieme quando Chrome si riconnette. FCM risponde 201 lo stesso,
+quindi il server riferisce "consegnata" in perfetta buona fede e sembra un difetto
+nostro. Se le notifiche smettono di comparire: **una sola origine, una sola
+iscrizione, e riavvia Chrome** prima di sospettare del codice.
+
+## Test automatici
+
+`manage.py test` — 550, verdi. I nuovi:
+
+* `realdata/tests_live_pipeline.py` — `import_live` chiede `only_finished=False` e
+  `skip_existing=False`, non alza `data_ready`, stampa il proprio orologio, e la
+  fine partita si annuncia una volta sola (allo `stamp_ft`, non alle finalizzazioni).
+* `realdata/tests_zone_upsert.py` — la riga sopravvive al secondo import, i valori
+  invariati non si riscrivono, le chiavi sparite si cancellano.
+* `realdata/tests_calendar_scheduler.py` — le due cadenze sono indipendenti: un
+  poll di un minuto fa non rimanda l'import.
+* `vfoot/tests_live_detail.py` — la giornata in corso risponde 200 e **non** crea
+  `FantasyFixtureDetail`; non-cominciata e in-corso sono due stati distinti.
+* `vfoot/tests_live_updates.py` — chi ha schierato il giocatore riceve, chi no non
+  riceve, lo stesso gol non parte due volte, un voto che cambia non e' un evento.
+* `vfoot/tests_live_ws.py` — rotta, token in query string, non-membro rifiutato.
