@@ -1,28 +1,17 @@
-import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getLeagueFixtures, getLeagueStandings } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Card, SectionTitle } from '../components/ui';
 import SetupBanner from '../components/SetupBanner';
 import LeagueHome from '../components/LeagueHome';
 import { useCompetitionContext } from '../league/CompetitionContext';
-import type { LeagueFixtureItem, LeagueStandingRow } from '../types/league';
 
+// This page no longer fetches the standings or the fixtures. Both existed only to
+// feed the identity card above, and both are fetched again by LeagueHome right
+// below — the standings call in particular is the one that had to GUESS a
+// competition (see LeagueStandingsView: "the first round-robin, by id").
 export default function DashboardPage() {
   const { leagues, selectedLeagueId, selectedLeague } = useLeagueContext();
   const { competitions } = useCompetitionContext();
-  const [standings, setStandings] = useState<LeagueStandingRow[]>([]);
-  const [fixtures, setFixtures] = useState<LeagueFixtureItem[]>([]);
-
-  useEffect(() => {
-    if (!selectedLeagueId) {
-      setStandings([]);
-      setFixtures([]);
-      return;
-    }
-    void getLeagueStandings(selectedLeagueId).then((r) => setStandings(r.standings)).catch(() => setStandings([]));
-    void getLeagueFixtures(selectedLeagueId).then(setFixtures).catch(() => setFixtures([]));
-  }, [selectedLeagueId]);
 
   // No league => there is exactly ONE thing to do here, so the page is that one
   // thing and nothing else. The rest of the app is hidden from the menu too (see
@@ -62,22 +51,6 @@ export default function DashboardPage() {
   }
 
   const myName = selectedLeague?.team_name ?? null;
-  const myRow = myName ? standings.find((s) => s.team === myName) ?? null : null;
-  const mine = fixtures.filter((f) => f.is_user_involved);
-  // Ordered by REAL MATCHDAY, not by round_no. `round_no` counts turns INSIDE one
-  // competition, so a cup restarts at 1 and its first unplayed tie always won the
-  // sort: with a championship at the twenty-second matchday the line still read
-  // "prossima: giornata 1". The real calendar is the one clock every competition
-  // shares, and it is also the number the rest of the app calls a giornata.
-  const next =
-    mine
-      .filter((f) => f.status !== 'finished')
-      .sort(
-        (a, b) =>
-          (a.real_matchday ?? Number.MAX_SAFE_INTEGER) - (b.real_matchday ?? Number.MAX_SAFE_INTEGER) ||
-          a.round_no - b.round_no,
-      )[0] ?? null;
-  const seasonOver = !next && mine.length > 0;
 
   return (
     <div className="space-y-4">
@@ -90,16 +63,21 @@ export default function DashboardPage() {
           <div>
             <SectionTitle>{selectedLeague?.name}</SectionTitle>
             <div className="mt-1 text-2xl font-black">{myName ?? 'Spettatore'}</div>
-            <div className="text-sm text-slate-500">
-              {myRow ? `${myRow.rank}ª in classifica · ${myRow.points} pt` : 'Nessuna squadra associata'}
-              {seasonOver
-                ? ' · campionato concluso'
-                : next?.real_matchday
-                ? ` · prossima: giornata ${next.real_matchday}`
-                : next
-                ? ` · prossima: ${next.competition_name}` // non ancora calendarizzata
-                : ''}
-            </div>
+            {/* WHO you are, and nothing else.
+
+                Rank, points, wins and average are COMPETITION-scoped. They were
+                shown here as if a league had exactly one table, and WHICH one was
+                decided server-side by "the oldest round-robin, by id" — so a league
+                with two championships got one of the two answers with nothing on
+                screen saying which. They now live in each competition's own block,
+                under its name.
+
+                The matchday is gone too, for a different reason: LeagueHome, two
+                lines below, already states BOTH clocks ("si gioca la 22 · prossima
+                da schierare: la 23"). Saying it twice is how the two came to
+                disagree — this line used to read "giornata 1" while that one said
+                22. */}
+            {myName ? null : <div className="text-sm text-slate-500">Nessuna squadra associata</div>}
           </div>
           {/* No "Formazione" button here any more: with a championship and a cup
               running together it could only guess which one you meant. The
@@ -111,13 +89,6 @@ export default function DashboardPage() {
               it announced an open market that did not exist. The real state of
               the auction and of the offer market is shown by LeagueHome, and only
               when there is one. */}
-          <div className="flex flex-wrap items-center gap-2">
-            {myRow ? (
-              <span className="text-xs text-slate-500">
-                {myRow.wins}V · {myRow.draws}N · {myRow.losses}P · media {myRow.avg_score_for.toFixed(1)}
-              </span>
-            ) : null}
-          </div>
         </div>
       </Card>
 

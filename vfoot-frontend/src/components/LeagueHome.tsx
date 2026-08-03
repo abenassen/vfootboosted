@@ -27,6 +27,7 @@ import type {
   LeagueDetail,
   LeagueFixtureItem,
   LeagueMatchdayItem,
+  LeagueStandingRow,
 } from '../types/league';
 
 /** The league at a glance, in the order a participant actually wants it:
@@ -468,8 +469,13 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                   <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
                 </div>
                 <div className="mt-1 text-xs text-slate-500">
-                  {f.round_label ?? `Giornata ${f.round_no}`}
-                  {typeof f.real_matchday === 'number' ? ` · giornata reale ${f.real_matchday}` : ''}
+                  {/* TURNO for the unit inside a competition, GIORNATA for the real
+                      Serie A one — never the same word for both, which is what this
+                      line used to do two words apart ("Giornata 3 · giornata reale
+                      27"). `round_label` already carries the knockout's own name
+                      ("Semifinali"), which beats any number. */}
+                  {f.round_label ?? `Turno ${f.round_no}`}
+                  {typeof f.real_matchday === 'number' ? ` · giornata ${f.real_matchday}` : ''}
                 </div>
                 {f.can_set_lineup ? (
                   <Link
@@ -639,6 +645,12 @@ function CompetitionBlock({
               {tables.length > 1 ? (
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{s.name}</div>
               ) : null}
+              {/* Where you stand, IN THIS TABLE. It used to sit in the league's
+                  identity card, which could only ever show one competition's
+                  numbers and never said which — and with two round-robin
+                  competitions, or two groups, "1ª · 36 pt" is simply not a
+                  statement about a league. Here the name is one line above it. */}
+              <MyStanding rows={s.standings ?? []} myTeamName={myTeamName} color={color} />
               <ol className="mt-1 divide-y text-sm">
                 {(s.standings ?? []).slice(0, 5).map((row) => (
                   <li
@@ -671,8 +683,8 @@ function CompetitionBlock({
         <div className="mt-3">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             {new Set(shown.map((f) => f.stage_name)).size === 1
-              ? shown[0]?.round_label ?? `Giornata ${round}`
-              : `Giornata ${round}`}
+              ? shown[0]?.round_label ?? `Turno ${round}`
+              : `Turno ${round}`}
           </div>
           <div className="mt-1.5 space-y-1">
             {shown.slice(0, 4).map((f) => (
@@ -684,6 +696,35 @@ function CompetitionBlock({
         <div className="mt-2 text-sm text-slate-500">Non è ancora cominciata.</div>
       )}
     </Card>
+  );
+}
+
+/** Your line in ONE table: position, points, and the record behind them.
+ *
+ *  Nothing here is new — it is what the home page always showed, moved to where it
+ *  is true. A team can be first in the championship and third in its group, and the
+ *  only honest place for either number is under the name of the thing it counts. */
+function MyStanding({
+  rows,
+  myTeamName,
+  color,
+}: {
+  rows: LeagueStandingRow[];
+  myTeamName: string | null;
+  color: CompColor;
+}) {
+  const me = myTeamName ? rows.find((r) => r.team === myTeamName) ?? null : null;
+  // Not in this table is a normal state, not an error: the other group, or a
+  // spectator. Saying nothing is the right amount.
+  if (!me) return null;
+  return (
+    <div className={clsx('mt-1 rounded-lg px-2 py-1 text-xs font-semibold', color.bg50, color.text800)}>
+      {me.rank}ª · {me.points} pt
+      <span className="font-normal">
+        {' '}
+        · {me.wins}V {me.draws}N {me.losses}P · media {me.avg_score_for.toFixed(1)}
+      </span>
+    </div>
   );
 }
 
