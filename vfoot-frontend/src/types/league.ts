@@ -153,7 +153,24 @@ export interface CompetitionSection {
 
 export type CompetitionFormat = 'league' | 'cup' | 'groups_knockout' | 'custom';
 
-/** One round of a competition, named the way the user named its stage. */
+/** Why a phase that is planned has not been drawn yet.
+ *
+ *  Only `da_giocare` is normal. The other three are ways a competition stops
+ *  moving without anything looking broken, so they are named rather than left to
+ *  be inferred from an empty round. */
+export interface CompetitionBlocker {
+  kind: 'da_giocare' | 'da_conteggiare' | 'recupero' | 'sorgente_da_definire';
+  detail: string;
+  real_matchday: number | null;
+  source_competition_id: number;
+  source_round?: number | null;
+}
+
+/** One round of a competition, named the way the user named its stage.
+ *
+ *  These come from the PLAN, so a round with no fixtures is in the list too — that
+ *  is the point. `pending` says its teams are not known yet and `rule_text` says
+ *  what will decide them. */
 export interface CompetitionRoundRow {
   round_no: number;
   stage_id: number | null;
@@ -163,6 +180,44 @@ export interface CompetitionRoundRow {
   local_rounds: number;
   label: string;
   real_matchday: number | null;
+  /** Fixtures this round actually has. Zero + `pending` = waiting on a rule. */
+  fixtures?: number;
+  pending?: boolean;
+  rule_text?: string | null;
+  blocker?: CompetitionBlocker | null;
+  /** How many matches the round will hold once the draw is made. */
+  expected_fixtures?: number;
+}
+
+/** A whole phase of the competition, with the rule that fills it. Read when
+ *  naming every undrawn round would be N copies of one sentence. */
+export interface CompetitionStagePlan {
+  stage_id: number;
+  name: string;
+  stage_type: 'round_robin' | 'knockout';
+  order_index: number;
+  first_round: number;
+  last_round: number;
+  planned_rounds: number;
+  first_matchday: number | null;
+  last_matchday: number | null;
+  fixtures: number;
+  expected_participants: number;
+  expected_fixtures_per_round: number;
+  pending: boolean;
+  rules: Array<{
+    mode: 'table_range' | 'winners' | 'losers';
+    text: string;
+    source_stage_id: number;
+    source_stage_name: string;
+    source_competition_id: number;
+    source_competition_name: string;
+    source_round: number | null;
+    ready: boolean;
+    blocker: CompetitionBlocker | null;
+  }>;
+  rule_text: string;
+  blocker: CompetitionBlocker | null;
 }
 
 export interface CompetitionDependency {
@@ -184,6 +239,7 @@ export interface CompetitionItem {
   status: 'draft' | 'active' | 'done';
   structure_locked: boolean;
   rounds: CompetitionRoundRow[];
+  stage_plan?: CompetitionStagePlan[];
   round_calendar: Record<string, number>;
   dependencies: CompetitionDependency[];
   points: { win: number; draw: number; loss: number };
@@ -563,8 +619,27 @@ export interface LeagueMatchdayItem {
     total: number;
     finished: number;
   };
+  /** Phases of OTHER competitions whose field this matchday decides. Empty for
+   *  almost every round; when it is not, closing (or parking) this one is not a
+   *  bookkeeping detail — a cup is waiting on it. */
+  decides?: MatchdayImpact[];
   concluded_at: string | null;
   concluded_by: string | null;
+}
+
+/** A phase that cannot be drawn until a given matchday is counted. */
+export interface MatchdayImpact {
+  competition_id: number;
+  competition_name: string;
+  stage_id: number;
+  stage_name: string;
+  rule_text: string;
+  blocker_kind: CompetitionBlocker['kind'];
+  /** The first matchday the waiting phase is itself planned for. */
+  target_matchday: number | null;
+  /** That matchday has already locked: the phase has missed its slot and will have
+   *  to be moved forward when it is finally drawn. */
+  at_risk: boolean;
 }
 
 export interface LeagueStandingRow {

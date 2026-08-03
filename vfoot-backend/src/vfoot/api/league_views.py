@@ -92,7 +92,7 @@ from vfoot.services.fantasy_simulation import (
     generate_knockout_fixtures,
     generate_round_robin_fixtures,
 )
-from vfoot.services import competition_calendar
+from vfoot.services import competition_calendar, competition_plan
 from vfoot.services.competition_prizes import describe_condition, prize_winner_team_ids
 from vfoot.services.competition_stages import (
     MAX_LEGS,
@@ -1409,10 +1409,14 @@ def _serialize_competition(comp: FantasyCompetition) -> dict:
     fixture_count = comp.fixtures.count()
     finished_count = comp.fixtures.filter(status=FantasyFixture.STATUS_FINISHED).count()
     calendar = {str(k): int(v) for k, v in (comp.round_calendar or {}).items() if str(k).isdigit()}
-    rounds = [
-        {**row, "real_matchday": calendar.get(str(row["round_no"]))}
-        for row in competition_round_rows(comp)
-    ]
+    # Every round the PLAN foresees, not only the ones that have fixtures: a cup's
+    # final exists as a reserved matchday long before the semifinal names its two
+    # teams, and a calendar built from fixtures alone cannot show it at all. The
+    # stage plan is computed ONCE and shared with the rounds — explaining a blockage
+    # reads the ledger, and this serializer runs for every competition of the league
+    # on every page.
+    plans = competition_plan.stage_plan(comp)
+    rounds = competition_plan.round_plan_rows(comp, plans=plans)
     return {
         "competition_id": comp.id,
         "name": comp.name,
@@ -1424,6 +1428,10 @@ def _serialize_competition(comp: FantasyCompetition) -> dict:
         # have been played. The UI reads this to know which edits to offer.
         "structure_locked": finished_count > 0,
         "rounds": rounds,
+        # Per PHASE, for the case where naming every undrawn round would be N copies
+        # of the same sentence: a group stage entered by the top four of a
+        # championship is one rule, not six placeholder matches.
+        "stage_plan": plans,
         "round_calendar": calendar,
         "dependencies": competition_calendar.dependencies(comp),
         "points": {
@@ -2298,6 +2306,11 @@ class LeagueMatchdayListView(APIView):
                  if league.reference_season_id else {})
         locked = (matchday_state.locked_matchdays(league.reference_season_id)
                   if league.reference_season_id else set())
+        # Which of these matchdays another competition is WAITING ON. The league
+        # advances past an unclosed round on purpose; a cup fed by its table cannot,
+        # and until this was said out loud a competition could sit undrawn for weeks
+        # with nothing on any screen connecting the two.
+        decides = competition_plan.matchday_impacts(league)
         payload = []
         for md in rows:
             real_stats = _real_matchday_stats(md.real_competition_season_id, md.real_matchday, league)
@@ -2355,6 +2368,8 @@ class LeagueMatchdayListView(APIView):
                     "real_matchday": md.real_matchday,
                     "real_completion": real_stats,
                     "fixtures": {"total": fx_total, "finished": fx_finished},
+                    # The phases this matchday decides the field of, if any.
+                    "decides": decides.get(md.real_matchday, []),
                     "concluded_at": md.concluded_at.isoformat() if md.concluded_at else None,
                     "concluded_by": md.concluded_by.username if md.concluded_by_id else None,
                 }
@@ -2587,6 +2602,10 @@ class LeagueMatchdayAwaitView(APIView):
             "awaiting_since": md.awaiting_since.isoformat() if md.awaiting_since else None,
             "awaiting_reason": md.awaiting_reason,
             "ledger_matchday": new_pointer.real_matchday if new_pointer else None,
+            # Parking a matchday is the one gesture that can silently stall another
+            # competition: the league steps over the round, and a cup reading its
+            # table does not. Say which, at the moment the decision is made.
+            "decides": competition_plan.matchday_impacts(league).get(md.real_matchday, []),
         })
 
 

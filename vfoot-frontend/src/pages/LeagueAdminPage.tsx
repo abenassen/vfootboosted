@@ -1274,6 +1274,33 @@ export default function LeagueAdminPage() {
                               {md.concluded_by ? ` · conclusa da ${md.concluded_by}` : ''}
                               {md.awaiting_reason ? ` · ${md.awaiting_reason}` : ''}
                             </div>
+                            {/* What ELSE hangs on this one. Said here because this is
+                                where the two gestures that stall a competition live:
+                                closing late, and parking for a recovery. The league
+                                steps over an open round by design — a cup reading its
+                                table cannot, and there was nothing anywhere to say so. */}
+                            {(md.decides ?? []).length ? (
+                              <div className="mt-1.5 rounded-lg border border-slate-200 bg-white/70 px-2 py-1.5 text-xs text-slate-700">
+                                <b>Decide una fase:</b>
+                                <ul className="mt-0.5 space-y-0.5">
+                                  {(md.decides ?? []).map((d) => (
+                                    <li key={d.stage_id}>
+                                      {d.competition_name} · {d.stage_name} — {d.rule_text}
+                                      {d.at_risk ? (
+                                        <span className="ml-1 font-semibold text-amber-700">
+                                          (le sue giornate sono già passate: verrà spostata più avanti)
+                                        </span>
+                                      ) : d.target_matchday != null ? (
+                                        <span className="text-slate-500">
+                                          {' '}
+                                          · si gioca alla giornata {d.target_matchday}
+                                        </span>
+                                      ) : null}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
                             {md.phase === 'current' || md.phase === 'awaiting' ? (
                               <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <Button

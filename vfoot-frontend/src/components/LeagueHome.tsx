@@ -28,6 +28,7 @@ import type {
   LeagueFixtureItem,
   LeagueMatchdayItem,
   LeagueStandingRow,
+  MatchdayImpact,
 } from '../types/league';
 
 /** How far ahead a fixture may be and still count as "prossima partita", measured
@@ -212,6 +213,21 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   // Every arrear, not only the one that is unblocked right now: closing them in
   // order is what the button does, and the count is the honest size of the backlog.
   const queue = matchdays.filter((m) => m.awaits_conclusion);
+  // What ELSE is waiting on those matchdays. The league steps over an unclosed
+  // round by design, so an admin has no reason to hurry — unless a competition
+  // cannot be drawn until he does, which is invisible from anywhere else.
+  const blockedPhases = useMemo(() => {
+    const seen = new Set<number>();
+    const out: MatchdayImpact[] = [];
+    for (const md of [...queue, ...awaitingMds]) {
+      for (const d of md.decides ?? []) {
+        if (seen.has(d.stage_id)) continue;
+        seen.add(d.stage_id);
+        out.push(d);
+      }
+    }
+    return out;
+  }, [queue, awaitingMds]);
 
   // THE ROUND YOU ARE IN: begun and not yet counted. Not "being played" — that was
   // the first attempt and it was too narrow, because your own match came and went
@@ -344,6 +360,35 @@ export default function LeagueHome({ competitions }: { competitions: Competition
           {queue.length && awaitingMds.length ? (
             <div className="mt-2 text-xs text-emerald-800">
               In attesa di recupero: giornata {awaitingMds.map((m) => m.real_matchday).join(', ')}.
+            </div>
+          ) : null}
+          {/* The consequence nobody could see. A league advancing past an unclosed
+              round is normal; a competition that cannot be drawn because of it is
+              not, and it stays stuck without a single message anywhere. */}
+          {blockedPhases.length ? (
+            <div className="mt-2 rounded-lg border border-slate-300 bg-white/70 p-2 text-xs text-slate-700">
+              <div className="font-semibold">
+                {blockedPhases.length === 1
+                  ? 'Una fase è ferma in attesa di queste giornate:'
+                  : 'Alcune fasi sono ferme in attesa di queste giornate:'}
+              </div>
+              <ul className="mt-1 space-y-0.5">
+                {blockedPhases.map((d) => (
+                  <li key={d.stage_id}>
+                    <b>
+                      {d.competition_name} · {d.stage_name}
+                    </b>{' '}
+                    — {d.rule_text}
+                    {d.at_risk ? (
+                      <span className="ml-1 font-semibold text-amber-700">
+                        (le sue giornate sono già passate: verrà spostata più avanti)
+                      </span>
+                    ) : d.target_matchday != null ? (
+                      <span className="text-slate-500"> · in calendario alla giornata {d.target_matchday}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
         </Card>
@@ -646,6 +691,10 @@ function CompetitionBlock({
   const shown = fixtures.filter((f) => f.round_no === round);
   const started = fixtures.some((f) => f.status === 'finished');
   const tables = (structure?.sections ?? []).filter((s) => s.type === 'round_robin');
+  // What this competition still has to come but cannot name yet. Without it a cup
+  // whose semifinals are in the books reads as over: the final has no fixtures, so
+  // there was nothing on this card to say it exists.
+  const upcoming = (competition.stage_plan ?? []).filter((s) => s.pending);
 
   return (
     <Card className={clsx('border-l-4 p-4', color.border600)}>
@@ -723,9 +772,28 @@ function CompetitionBlock({
             ))}
           </div>
         </div>
-      ) : (
+      ) : upcoming.length ? null : (
         <div className="mt-2 text-sm text-slate-500">Non è ancora cominciata.</div>
       )}
+
+      {/* What is still to come and has no teams yet. A line, not a card: the detail
+          — the rule, the matchdays, what is holding it up — lives in the calendar,
+          and here the point is only that it EXISTS. */}
+      {upcoming.map((s) => (
+        <Link
+          key={s.stage_id}
+          to="/matches"
+          className="mt-2 block rounded-xl border border-dashed border-slate-300 px-3 py-2 hover:border-slate-400"
+        >
+          <div className="flex items-baseline justify-between gap-2">
+            <span className={clsx('text-sm font-semibold', color.text700)}>{s.name}</span>
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              da definire
+            </span>
+          </div>
+          <div className="text-xs text-slate-500">{s.rule_text || 'Partecipanti da sorteggiare'}</div>
+        </Link>
+      ))}
     </Card>
   );
 }

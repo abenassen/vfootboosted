@@ -398,6 +398,93 @@ def schedule(
     }
 
 
+def _first_free_matchday(matchdays, locked, floor, end) -> int | None:
+    """The earliest matchday still fieldable, after ``floor``, preferring the span."""
+    def usable(md):
+        return md not in locked and (floor is None or md > floor)
+
+    inside = [md for md in matchdays if usable(md) and (end is None or md <= end)]
+    if inside:
+        return inside[0]
+    # Out of the declared span is better than in the past: a competition that has
+    # overrun its window is a scheduling problem the admin can see and fix, a
+    # competition placed on a matchday that has already kicked off is a tie nobody
+    # can field.
+    outside = [md for md in matchdays if usable(md)]
+    return outside[0] if outside else None
+
+
+@transaction.atomic
+def reflow_pending_rounds(competition: FantasyCompetition, now=None) -> dict:
+    """Move the rounds that are not drawn yet off matchdays that can no longer be played.
+
+    A stage fed by a rule comes into being LATE by construction — it exists the day
+    the competition is created and gets its fixtures weeks later, when the round it
+    reads has been played and counted. Usually that is well before the dates the plan
+    reserved for it. But it is exactly what a postponement and a forgotten conclusion
+    both delay, and when the delay outruns the plan the fixtures are created on
+    matchdays whose lineups locked days ago: a semifinal nobody was ever able to
+    field, scored on the performances of a round played before it was drawn.
+
+    So: a round that ALREADY HAS FIXTURES never moves — it may have lineups against
+    it, and a played round must keep the matchday it was played on. An undrawn round
+    whose matchday has locked is pushed to the first one still open, and everything
+    after it follows, because two rounds of a competition cannot share a matchday.
+
+    When there is nowhere left to go (the season is over) the plan is left exactly as
+    it is and the caller is told: inventing a date outside the season would be worse
+    than an honest overrun.
+    """
+    stored = {int(k): int(v) for k, v in (competition.round_calendar or {}).items() if str(k).isdigit()}
+    rows = competition_round_rows(competition)
+    round_nos = [r["round_no"] for r in rows]
+    if not stored or not round_nos:
+        return {"moved": {}, "warnings": []}
+
+    csid, all_matchdays = season_matchdays(competition)
+    if not csid or not all_matchdays:
+        return {"moved": {}, "warnings": []}
+
+    from vfoot.services import matchday_state  # local: matchday_state imports models only
+
+    locked = matchday_state.locked_matchdays(csid, now)
+    drawn = set(
+        FantasyFixture.objects.filter(competition=competition).values_list("round_no", flat=True)
+    )
+
+    out: dict[int, int] = {}
+    warnings: list[str] = []
+    floor: int | None = None
+    for rno in round_nos:
+        want = stored.get(rno)
+        if rno in drawn:
+            if want is not None:
+                out[rno] = want
+                floor = want if floor is None else max(floor, want)
+            continue
+        if want is not None and want not in locked and (floor is None or want > floor):
+            out[rno] = want
+            floor = want
+            continue
+        chosen = _first_free_matchday(all_matchdays, locked, floor, competition.end_matchday)
+        if chosen is None:
+            if want is not None:
+                out[rno] = want
+                warnings.append(
+                    f"turno {rno}: non restano giornate su cui spostarlo, resta alla {want}ª"
+                )
+            continue
+        out[rno] = chosen
+        floor = chosen
+
+    moved = {rno: md for rno, md in out.items() if stored.get(rno) != md}
+    if moved:
+        competition.round_calendar = {str(k): int(v) for k, v in out.items()}
+        competition.save(update_fields=["round_calendar"])
+        apply_round_calendar(competition, csid)
+    return {"moved": moved, "warnings": warnings}
+
+
 def stage_round_bounds(competition: FantasyCompetition) -> dict[int, dict]:
     """First/last real matchday of each stage, for "when does this stage play?"."""
     calendar = {int(k): int(v) for k, v in (competition.round_calendar or {}).items() if str(k).isdigit()}

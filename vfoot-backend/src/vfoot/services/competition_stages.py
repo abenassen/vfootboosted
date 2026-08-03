@@ -478,7 +478,17 @@ def resolve_stage(stage: CompetitionStage, seed: int = 42) -> dict:
     # already known: a play-in bracket whose byes are in place would otherwise be
     # drawn between the byes alone, and the winners coming up would have nowhere
     # to go. Half a field is not a field.
-    fixtures_created = 0 if unresolved else generate_stage_fixtures(stage, seed=seed)
+    fixtures_created = 0
+    if not unresolved:
+        # BEFORE drawing, not after: the dates the plan reserved for this stage may
+        # have gone by while it waited for its source (a postponement, or an admin
+        # who closed the deciding round late). Fixtures created onto a matchday that
+        # has already kicked off are a tie nobody could ever field. Local import —
+        # competition_calendar reads this module.
+        from vfoot.services.competition_calendar import reflow_pending_rounds
+
+        reflow_pending_rounds(stage.competition)
+        fixtures_created = generate_stage_fixtures(stage, seed=seed)
     if fixtures_created:
         # New fixtures inherit the calendar their rounds were already planned for.
         apply_round_calendar(stage.competition)
