@@ -35,7 +35,7 @@ export interface ClassicPlayerLine {
    *  minutes and no performance behind them, i.e. OUR hole. Payloads frozen
    *  before the two were told apart carry `dati_mancanti` with zero minutes —
    *  see `svKind`, which reads them for what they are. */
-  sv_reason?: 'non_entrato' | 'dati_mancanti' | 'impiego_insufficiente' | null;
+  sv_reason?: 'non_entrato' | 'dati_mancanti' | 'impiego_insufficiente' | 'in_campo' | null;
   /** His club's match has not been played (a postponement). Reads as s.v. in the
    *  sum but is NOT one: the bench does not cover it, and the league settles it
    *  later — by the recovery, or by an office vote. */

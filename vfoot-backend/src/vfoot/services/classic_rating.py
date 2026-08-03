@@ -1760,7 +1760,8 @@ def result_mitigation(raw_vote: float, gd_on: int,
 
 
 def voto_puro_for_match(match, reference: dict,
-                        spread_k: float = VOTE_SPREAD_K) -> list[dict]:
+                        spread_k: float = VOTE_SPREAD_K,
+                        always_rate: set | None = None) -> list[dict]:
     """Per-player voto puro for one match. List of dicts with components.
 
     Players below the rating threshold get ``rated=False`` and ``voto_puro=None``
@@ -1770,6 +1771,15 @@ def voto_puro_for_match(match, reference: dict,
     pooled outfield reference (or the GK one if his features give him away) and
     flagged ``role_known=False``. Dropping him used to render as s.v., which is a
     verdict on his performance — so a goalscorer could be shown as unrated.
+
+    ``always_rate`` exempts a set of players from the minutes/involvement gate. Its
+    one caller is the LIVE path (see ``classic_pagella.players_on_pitch``): senza
+    voto is a verdict on a FINISHED performance, and at the tenth minute of a match
+    everyone on the pitch is below the gate — declaring the whole XI s.v. says
+    "they did nothing" when what is true is "they have barely started". They get
+    the vote their ten minutes are worth, shrunk toward 6 by the same Bayesian
+    weight that handles any short outing, and it moves as they play. It never fires
+    at conclusion time, which is why the FINAL s.v. is exactly what it was before.
     """
     totals = _per_match_player_totals([match.id])
     minutes = _minutes_map([match.id])
@@ -1792,6 +1802,7 @@ def voto_puro_for_match(match, reference: dict,
     og_adj = {pid: d['penalty'] for pid, d in og_info.items()}
     pen_adj = penalty_missed_adjustments(match.id)
     outfield_roles = (Player.ROLE_DEF, Player.ROLE_MID, Player.ROLE_FWD)
+    always_rate = always_rate or set()
 
     results = []
     for (mid, pid), feats in totals.items():
@@ -1805,8 +1816,10 @@ def voto_puro_for_match(match, reference: dict,
         # features identified him. Only an unknown outfielder needs the pool.
         ref_key = role if role else POOLED_OUTFIELD
         # Rated if he played/was involved enough, OR was in a decisive event
-        # (goal/assist/own goal/sending-off), OR won/conceded a penalty.
-        rated = (is_rated(mins, feats) or pid in forcing
+        # (goal/assist/own goal/sending-off), OR won/conceded a penalty, OR the
+        # caller says the gate does not apply to him yet (he is still on the pitch
+        # of a match in progress — see ``always_rate``).
+        rated = (is_rated(mins, feats) or pid in forcing or pid in always_rate
                  or feats.get("penalties_won", 0.0) > 0
                  or feats.get("penalties_conceded", 0.0) > 0)
         # A keeper's match is also judged by HOW MUCH of it reached him: one shot on

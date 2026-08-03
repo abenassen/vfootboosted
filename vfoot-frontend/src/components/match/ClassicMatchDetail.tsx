@@ -88,7 +88,8 @@ function roleOf(p: ClassicPlayerLine): ClassicRole | null {
  *  data, and it says he never came on. Zero minutes settles it without a migration,
  *  and it is the same test the backend now makes at the source. A real hole keeps
  *  its badge: minutes on the pitch and no performance behind them. */
-function svKind(p: ClassicPlayerLine): 'non_entrato' | 'dati_mancanti' | 'sv' {
+function svKind(p: ClassicPlayerLine): 'non_entrato' | 'dati_mancanti' | 'in_campo' | 'sv' {
+  if (p.sv_reason === 'in_campo') return 'in_campo';
   if (p.sv_reason === 'non_entrato') return 'non_entrato';
   if (p.sv_reason === 'dati_mancanti') return p.minutes ? 'dati_mancanti' : 'non_entrato';
   return 'sv';
@@ -261,8 +262,13 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
   const role = roleOf(p);
   const why = p.explanation;
   const hasWhy = !!why && (why.contributions.length > 0 || why.other_count > 0);
+  // He is on the pitch of a match in progress and has no vote YET. Not a senza
+  // voto, and the row has to stop treating him like one twice over: he carries his
+  // own pulsing badge (so the generic "live" one beside it would say it again),
+  // and a substitute who has just come on is anything but inactive.
+  const onPitchNow = p.sv && svKind(p) === 'in_campo';
   // a benched player who never entered and has no vote is greyed out
-  const inactive = bench && !p.entered && !played;
+  const inactive = bench && !p.entered && !played && !onPitchNow;
   return (
     <>
     <div className={`flex items-center justify-between gap-2 py-1.5 ${inactive ? 'opacity-50' : ''}`}>
@@ -310,7 +316,7 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
             provisional whether he has a vote yet or not. A reserve keeper reading
             a flat "n.d." at the fortieth minute says "we have nothing on him",
             when what is true is "not yet". */}
-        {p.provisional ? <LiveBadge /> : null}
+        {p.provisional && !onPitchNow ? <LiveBadge /> : null}
         {p.pending ? (
           // An unplayed match is not a senza voto and must not read like one:
           // nothing happened yet, the bench does not cover it, and the slot settles
@@ -331,7 +337,19 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
         ) : p.sv ? (
           // 'dati mancanti' is not a verdict on the player — say so, rather than
           // letting a gap in our data read as "he did nothing".
-          svKind(p) === 'non_entrato' ? (
+          svKind(p) === 'in_campo' ? (
+            // He is playing RIGHT NOW and we have nothing on him yet — which is
+            // not a senza voto and must not be printed as one. S.V. is a verdict
+            // on a finished performance; at the fifth minute there is no
+            // performance to judge, only a match that has barely started.
+            <span
+              title="È in campo: la partita è in corso e il suo voto non è ancora determinabile"
+              className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700"
+            >
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-500" />
+              in campo
+            </span>
+          ) : svKind(p) === 'non_entrato' ? (
             // The bench, said plainly. And it is a DIFFERENT sentence depending on
             // whether the match is over: at the fortieth minute "non ha giocato" is
             // not yet true, and a reserve keeper can still come on. `provisional`

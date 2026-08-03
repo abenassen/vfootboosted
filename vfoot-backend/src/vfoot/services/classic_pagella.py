@@ -236,9 +236,44 @@ def _goals_conceded_by_keeper(match_id: int, keeper_apps=None) -> dict[int, int]
     return out
 
 
+def match_in_progress(match) -> bool:
+    """The ball is still rolling: nobody's performance is complete yet.
+
+    NOT the same as "not final". A match that has ended and whose data the provider
+    has not settled is unstable but OVER — every verdict on it is legitimate, it may
+    just move by a tenth. This is the narrower state where a verdict would be a
+    statement about a match that has not happened.
+    """
+    return match.status == Match.STATUS_LIVE and not match.data_ready
+
+
+def players_on_pitch(apps) -> set[int]:
+    """Of a match IN PROGRESS, who is on the field right now.
+
+    There is no minute on the ``Match`` row — the provider ships one only inside
+    the live payload, which we do not keep — so the clock is read from the
+    appearances themselves: whoever has been on longest has been on since kick-off,
+    and his minutes ARE the elapsed time. Anyone below that has left the field
+    (substituted, or sent off), and his performance IS complete even though the
+    match is not.
+
+    A minute of tolerance because the provider rounds, and starters count at
+    minute zero: at kick-off the whole XI reads 0', and calling them "not on the
+    pitch" would be exactly the misreading this exists to remove.
+    """
+    elapsed = max((a.minutes_played or 0 for a in apps), default=0)
+    return {
+        a.player_id
+        for a in apps
+        if (a.is_starter or (a.minutes_played or 0) > 0)
+        and (a.minutes_played or 0) >= elapsed - 1
+    }
+
+
 def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
           cards: dict, conceded: int, explanation: dict | None = None,
-          missed_pens: int = 0, saved_pens: int = 0) -> dict:
+          missed_pens: int = 0, saved_pens: int = 0,
+          on_pitch: bool = False) -> dict:
     pid = app.player_id
     c = cards.get(pid, {})
     card_malus = c.get("malus", 0.0)
@@ -278,11 +313,18 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
         # The genuine hole is a player with minutes and no performance behind
         # them, which is rare enough to be worth telling apart rather than
         # burying under the same badge as the whole bench.
-        return {**base, "sv": True,
-                "sv_reason": "non_entrato" if not app.minutes_played else "dati_mancanti",
+        #
+        # Unless he is ON THE PITCH: at the fifth minute a player can perfectly
+        # well have no feature rows yet (the heatmap has nothing to spread), and
+        # both of the other two answers would be false — he has neither stayed on
+        # the bench nor gone missing from our data.
+        reason = ("in_campo" if on_pitch
+                  else "non_entrato" if not app.minutes_played else "dati_mancanti")
+        return {**base, "sv": True, "sv_reason": reason,
                 "voto_puro": None, "bonus": 0.0, "malus": 0.0, "fantavoto": None}
     if not row.get("rated") or row.get("voto_puro") is None:
-        return {**base, "sv": True, "sv_reason": "impiego_insufficiente",
+        return {**base, "sv": True,
+                "sv_reason": "in_campo" if on_pitch else "impiego_insufficiente",
                 "voto_puro": None, "bonus": 0.0, "malus": 0.0, "fantavoto": None}
     base["sv_reason"] = None
     # Why this vote. Only for a rated player: explaining a vote that does not
@@ -346,7 +388,14 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
     if reference is None:
         reference = get_reference(match.competition_season_id)
 
-    vp_rows = {r["player_id"]: r for r in voto_puro_for_match(match, reference)}
+    apps = list(MatchAppearance.objects.filter(match=match).select_related("player"))
+    # While the match is being PLAYED, the minutes/involvement gate is asking a
+    # question nobody can answer yet. Whoever is on the pitch is rated on what he
+    # has done so far; whoever has already come off is judged normally, because for
+    # him the match IS over. See classic_rating.voto_puro_for_match(always_rate=).
+    on_pitch = players_on_pitch(apps) if match_in_progress(match) else set()
+    vp_rows = {r["player_id"]: r
+               for r in voto_puro_for_match(match, reference, always_rate=on_pitch)}
     if averages is None:
         averages = get_role_averages(match.competition_season_id)
     feats = _per_match_player_totals([match.id])
@@ -355,7 +404,6 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
     cards = _cards_for_match(match.id)
     missed_pens = _missed_penalties_for_match(match.id)
     saved_pens = _penalties_saved_for_match(match.id)
-    apps = list(MatchAppearance.objects.filter(match=match).select_related("player"))
     pids = [a.player_id for a in apps]
     # Base: the season's disambiguated role (same source the voto puro was scored
     # against), so a league-less match detail agrees with the vote it shows.
@@ -413,7 +461,8 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           full=full_explanation)
         line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded, why,
                      missed_pens=missed_pens.get(a.player_id, 0),
-                     saved_pens=saved_pens.get(a.player_id, 0))
+                     saved_pens=saved_pens.get(a.player_id, 0),
+                     on_pitch=a.player_id in on_pitch)
         buckets[a.side]["starters" if a.is_starter else "bench"].append(line)
 
     return {
