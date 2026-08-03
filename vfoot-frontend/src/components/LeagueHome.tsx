@@ -187,15 +187,19 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   // yours to follow until the admin closes it, whether or not there is a ball
   // rolling at the moment you happen to open the page.
   //
-  // The last unconcluded one that has begun: with a late admin several rounds are
-  // begun-and-unscored, and the arrears belong to the banner above, not here.
+  // Whichever is ON THE PITCH if any, otherwise the last one that has begun. Not
+  // simply the last: a matchday PARKED for a postponement is reopened on the night
+  // of the recovery — it is being played weeks after the rounds that overtook it —
+  // and taking the highest number would have offered you round 22 while your round
+  // 16 was being decided in front of you. With a late admin several rounds are
+  // begun-and-unscored; those arrears belong to the banner above, not here.
   //
   // Declared here and not with the other memos on purpose: it reads `matchdays`
   // a few lines up, and a useMemo placed above them would name them in its
   // dependency array before the bindings exist.
   const openMd = useMemo(() => {
     const begun = matchdays.filter((m) => m.has_kicked_off && m.status !== 'concluded');
-    return begun.length ? begun[begun.length - 1] : null;
+    return begun.find((m) => m.is_playing) ?? begun[begun.length - 1] ?? null;
   }, [matchdays]);
 
   // Three states, three headlines. "Si gioca" while there is football on; "Risultato
