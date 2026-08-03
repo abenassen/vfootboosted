@@ -260,6 +260,11 @@ def build_fixture_payload(fixture_meta: dict, home: dict, away: dict, ruleset: R
         "fantasy_round": fixture_meta.get("fantasy_round"),
         "real_matchday": fixture_meta.get("real_matchday"),
         "stage": fixture_meta.get("stage"),
+        # Which competition this fixture belongs to. The page opened from the home
+        # had no way to know, so the shell kept pointing at whatever competition was
+        # selected before — you could read a cup tie under a "CHAMPIONSHIP" banner,
+        # with the side menu offering that other competition's calendar.
+        "competition_id": fixture_meta.get("competition_id"),
         "home_team": fixture_meta.get("home_team"),
         "away_team": fixture_meta.get("away_team"),
         "home_goals": home["goals"],
@@ -478,6 +483,7 @@ def live_scorer(league, md, ruleset):
             ruleset,
             {"fixture_id": fx.id, "fantasy_round": fx.round_no,
              "real_matchday": md.real_matchday, "stage": fx.stage_id,
+             "competition_id": fx.competition_id,
              "home_team": fx.home_team.name, "away_team": fx.away_team.name},
         )
         home_unstable = _mark_unstable(payload["home"], unstable)
@@ -610,7 +616,8 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
         away_ln = team_lines.get((fx.id, "away")) or ([], [])
         payload = score_composed_fixture(home_ln, away_ln, ruleset, {
             "fixture_id": fx.id, "fantasy_round": fx.round_no, "real_matchday": md.real_matchday,
-            "stage": fx.stage_id, "home_team": fx.home_team.name, "away_team": fx.away_team.name,
+            "stage": fx.stage_id, "competition_id": fx.competition_id,
+            "home_team": fx.home_team.name, "away_team": fx.away_team.name,
         })
         fx.home_total = float(payload["home_goals"])
         fx.away_total = float(payload["away_goals"])

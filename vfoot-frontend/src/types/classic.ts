@@ -108,6 +108,9 @@ export interface ClassicFixtureDetail {
   fantasy_round: number;
   real_matchday: number;
   stage?: string | null; // knockout stage label (e.g. "Quarti di finale"), null in a league
+  /** The competition this fixture belongs to. Absent on payloads frozen before it
+   *  was recorded — the shell simply does not realign for those. */
+  competition_id?: number | null;
   home_team: string;
   away_team: string;
   home_goals: number;

@@ -1,10 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getFixtureDetail } from '../api';
 import { Card } from '../components/ui';
 import { MatchDetail } from '../components/match/MatchDetail';
 import { ClassicMatchDetail } from '../components/match/ClassicMatchDetail';
 import { useLeagueContext } from '../league/LeagueContext';
+import { useCompetitionContext } from '../league/CompetitionContext';
 import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { useAsync } from '../utils/useAsync';
 import type { ClassicFixtureDetail } from '../types/classic';
@@ -23,6 +24,21 @@ export default function LeagueMatchDetailPage() {
   // that built this page rebuilds it. One code path, whether you reloaded or the
   // server told you to.
   useLiveSocket(selectedLeagueId ?? null, useCallback(() => setTick((n) => n + 1), []));
+
+  // Bring the shell onto THIS fixture's competition. You can reach a match from the
+  // home page, which lists every competition together, so the selection made
+  // elsewhere has nothing to do with what you just opened: the banner announced one
+  // competition while the page showed a tie from another, and the side menu offered
+  // the wrong calendar to go back to. The fixture knows which one it is; nothing was
+  // telling the shell.
+  const { selectedCompetitionId, setSelectedCompetitionId } = useCompetitionContext();
+  const fixtureCompetitionId =
+    data && 'competition_id' in data ? (data as ClassicFixtureDetail).competition_id : null;
+  useEffect(() => {
+    if (fixtureCompetitionId && fixtureCompetitionId !== selectedCompetitionId) {
+      setSelectedCompetitionId(fixtureCompetitionId);
+    }
+  }, [fixtureCompetitionId, selectedCompetitionId, setSelectedCompetitionId]);
 
   if (loading && !data) return <div className="text-sm text-slate-500">Caricamento partita…</div>;
   if ((error && !data) || (!loading && !data)) {
