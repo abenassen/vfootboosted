@@ -413,11 +413,16 @@ class CompetitionPlanTests(TestCase):
             FantasyFixture.objects.filter(competition=cup, stage__name="Finale").count(), 0,
             "meglio nessun sorteggio che un sorteggio su un turno gia' chiuso")
 
-    def test_a_season_entirely_in_the_past_is_still_allowed_to_draw(self):
-        """The escape hatch that keeps the refusal honest. A league replaying a
-        finished season has no matchday that was ever fieldable — "move it later" has
-        no meaning there — so the mechanism goes inert instead of declaring every
-        round impossible and leaving the competition permanently undrawn."""
+    def test_a_league_replaying_an_old_season_draws_normally(self):
+        """The escape hatch that keeps the refusal honest, and the case it is FOR.
+
+        A league replaying a finished season has every kickoff in the past —
+        including the matchdays it has not reached yet — so "this one has already
+        kicked off" says nothing about it. The league is perfectly alive: its ledger
+        is at round 7 and its cup is booked at round 8, still ahead of it. Judging
+        those rounds by kickoff would declare every one of them impossible and leave
+        the competition permanently undrawn.
+        """
         champ, champ_stage = self._championship()
         cup = self._cup_from_table(champ_stage)
         Match.objects.filter(competition_season=self.cs).update(
@@ -427,6 +432,59 @@ class CompetitionPlanTests(TestCase):
         self._conclude_through(7)
 
         self.assertEqual(FantasyFixture.objects.filter(competition=cup).count(), 2)
+        # ...and they are on rounds the ledger has NOT counted, which is the whole
+        # difference from the case below.
+        for fx in FantasyFixture.objects.filter(competition=cup).select_related(
+                "fantasy_matchday"):
+            self.assertGreater(fx.fantasy_matchday.real_matchday, 7)
+
+    def test_a_phase_whose_matchdays_the_league_already_counted_is_refused(self):
+        """The case I had written off as an accepted cost, and it is not one.
+
+        When every matchday of the season has kicked off the fieldability check goes
+        inert (it has to, or the league above breaks) — so on its own it would let a
+        very late cup be drawn onto rounds the ledger CLOSED weeks ago. Nothing
+        rescores a concluded matchday, so those ties would sit at 0-0 for ever in a
+        competition that can no longer finish. The ledger is the second test, and it
+        catches exactly what the first cannot see.
+        """
+        champ, champ_stage = self._championship()
+        cup = self._cup_from_table(champ_stage)
+        booked = sorted(int(v) for v in cup.round_calendar.values())
+
+        # A season entirely in the past — so the fieldability check is inert — and a
+        # postponement on the very round that decides the cup.
+        Match.objects.filter(competition_season=self.cs).update(
+            kickoff=self.now - timedelta(days=1))
+        self._play_real_matchdays(self.MATCHDAYS)
+        self._map_sources(champ)
+        self._conclude_through(6)
+        md7 = FantasyMatchday.objects.get(
+            league=self.league, real_matchday=int(champ.round_calendar["7"]))
+        self.client.post(f"/api/v1/leagues/{self.league.id}/matchdays/{md7.id}/await",
+                         {"awaiting": True, "reason": "rinviata"}, format="json")
+
+        # The league runs on and counts right past the matchdays the cup was booked
+        # for — they are closed now, and nothing goes back over a closed round.
+        for md in FantasyMatchday.objects.filter(
+                league=self.league, real_matchday__lte=booked[-1] + 1,
+                status=FantasyMatchday.STATUS_PLANNED).order_by("real_matchday"):
+            r = self.client.post(
+                f"/api/v1/leagues/{self.league.id}/matchdays/{md.id}/conclude", {}, format="json")
+            self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(FantasyFixture.objects.filter(competition=cup).count(), 0)
+
+        # Only now is the recovery counted, and the draw finally becomes possible —
+        # too late.
+        r = self.client.post(
+            f"/api/v1/leagues/{self.league.id}/matchdays/{md7.id}/conclude", {}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+
+        self.assertEqual(FantasyFixture.objects.filter(competition=cup).count(), 0,
+                         "una partita agganciata a una giornata conclusa non verra' mai calcolata")
+        plan = self._plan_for(cup, "Semifinali")
+        self.assertTrue(plan["pending"])
+        self.assertEqual(plan["blocker"]["kind"], "senza_giornate")
 
     def test_a_drawn_round_is_never_moved(self):
         """Reflow may only touch rounds nobody could have fielded. A round that has

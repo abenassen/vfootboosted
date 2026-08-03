@@ -414,6 +414,36 @@ def _first_free_matchday(matchdays, locked, floor, end) -> int | None:
     return outside[0] if outside else None
 
 
+def rounds_already_counted(competition: FantasyCompetition, round_nos) -> list[int]:
+    """Of these rounds, the ones planned on a matchday the league has ALREADY SCORED.
+
+    The second, independent reason a stage must not be drawn — and the one the
+    fieldability check cannot see, because it is switched off exactly where this
+    bites. A fixture hung on a concluded matchday is never scored by anything: the
+    conclusion has happened, and nothing goes back over it. It would sit in the
+    calendar at 0-0 for ever, in a competition that can no longer finish.
+
+    This is a statement about the LEDGER, not about kickoff times, which is what
+    makes it right for the two leagues the deadline check has to ignore: a league
+    replaying a season from ten years ago has every kickoff in the past and a ledger
+    that is only at matchday 12, so its cup at matchday 15 is perfectly drawable.
+    """
+    from vfoot.models import FantasyMatchday
+
+    calendar = {int(k): int(v) for k, v in (competition.round_calendar or {}).items()
+                if str(k).isdigit()}
+    wanted = {calendar[r] for r in round_nos if r in calendar}
+    if not wanted:
+        return []
+    counted = set(
+        FantasyMatchday.objects.filter(
+            league_id=competition.league_id, real_matchday__in=wanted,
+            status=FantasyMatchday.STATUS_CONCLUDED,
+        ).values_list("real_matchday", flat=True)
+    )
+    return [r for r in round_nos if calendar.get(r) in counted]
+
+
 def plan_rounds(competition: FantasyCompetition, now=None) -> dict:
     """Where each round WOULD go if the calendar were re-laid out right now.
 

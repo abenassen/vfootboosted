@@ -487,19 +487,33 @@ def resolve_stage(stage: CompetitionStage, seed: int = 42) -> dict:
         # who closed the deciding round late). Fixtures created onto a matchday that
         # has already kicked off are a tie nobody could ever field. Local import —
         # competition_calendar reads this module.
-        from vfoot.services.competition_calendar import reflow_pending_rounds
+        from vfoot.services.competition_calendar import (
+            reflow_pending_rounds, rounds_already_counted,
+        )
 
         calendar = reflow_pending_rounds(stage.competition)
-        # ...and if there is nowhere left in the season, DO NOT DRAW. This is the
-        # end of the line for the delay: a bracket created on rounds that kicked off
-        # weeks ago would be scored on performances nobody chose a lineup for, and
-        # would hand out a trophy for a competition that was never played. The stage
-        # stays empty and says why; whether to call the competition off is the
-        # admin's decision, not something to do to him by side effect.
-        mine = set(range(
+        # ...and if the delay has outrun the season, DO NOT DRAW. Two ways it has,
+        # and they are independent because each is invisible to the other's test:
+        #
+        # * no matchday is still FIELDABLE for these rounds — the tie would be one
+        #   nobody could choose a lineup for, decided by whatever fallback the
+        #   conclusion applies, and it would hand out a trophy for a competition
+        #   that was never played;
+        # * the matchday has already been COUNTED. The fieldability check is
+        #   deliberately inert on a league with no lineup deadline and on a season
+        #   with nothing left to field (see plan_rounds), which is precisely where
+        #   this one bites: the fixture would hang off a concluded round and no
+        #   code path would ever score it. A permanent 0-0.
+        #
+        # The stage stays empty and says why. Whether to call the competition off is
+        # the admin's decision, not something to do to him by side effect.
+        mine = list(range(
             (stage.round_offset or 0) + 1,
             (stage.round_offset or 0) + (stage.planned_rounds or 1) + 1))
-        no_matchdays_left = bool(mine & set(calendar["unplaceable"]))
+        no_matchdays_left = bool(
+            set(mine) & set(calendar["unplaceable"])
+            or rounds_already_counted(stage.competition, mine)
+        )
         if not no_matchdays_left:
             fixtures_created = generate_stage_fixtures(stage, seed=seed)
     if fixtures_created:

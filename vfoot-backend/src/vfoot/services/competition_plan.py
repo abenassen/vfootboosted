@@ -205,9 +205,15 @@ def stage_plan(competition: FantasyCompetition, league=None) -> list[dict]:
     cache: dict[str, set[int]] = {}
 
     def unplaceable() -> set[int]:
+        """Rounds that can no longer be played — the same two tests the draw makes,
+        so the calendar cannot promise a sorteggio that `resolve_stage` will refuse."""
         if "v" not in cache:
-            from vfoot.services.competition_calendar import plan_rounds
-            cache["v"] = set(plan_rounds(competition)["unplaceable"])
+            from vfoot.services.competition_calendar import (
+                plan_rounds, rounds_already_counted,
+            )
+            all_rounds = [r["round_no"] for r in competition_round_rows(competition)]
+            cache["v"] = (set(plan_rounds(competition)["unplaceable"])
+                          | set(rounds_already_counted(competition, all_rounds)))
         return cache["v"]
 
     out = []
@@ -227,7 +233,7 @@ def stage_plan(competition: FantasyCompetition, league=None) -> list[dict]:
         if rules and not fixtures and set(range(first_round, last_round + 1)) & unplaceable():
             blockers.append({
                 "kind": "senza_giornate",
-                "detail": "non restano giornate su cui giocarla in questa stagione",
+                "detail": "le giornate su cui doveva giocarsi sono passate o già conteggiate",
                 "real_matchday": None,
                 "source_competition_id": competition.id,
             })
