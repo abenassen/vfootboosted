@@ -479,8 +479,22 @@ def reflow_pending_rounds(competition: FantasyCompetition, now=None) -> dict:
 
     moved = {rno: md for rno, md in out.items() if stored.get(rno) != md}
     if moved:
+        fields = ["round_calendar"]
         competition.round_calendar = {str(k): int(v) for k, v in out.items()}
-        competition.save(update_fields=["round_calendar"])
+        # If the delay pushed the competition past the window it declared, the
+        # window has to follow. Leaving it behind is not a cosmetic mismatch: the
+        # admin's own calendar page runs `schedule`, which only keeps a round whose
+        # matchday is INSIDE the span — so a cup moved to matchday 13 with an end
+        # still at 9 would be silently dragged back into a round already played the
+        # next time anyone opened that page and saved.
+        last = max(out.values(), default=None)
+        if last is not None and competition.end_matchday is not None and last > competition.end_matchday:
+            competition.end_matchday = last
+            fields.append("end_matchday")
+            warnings.append(
+                f"la competizione sfora la finestra dichiarata: fine spostata alla {last}ª giornata"
+            )
+        competition.save(update_fields=fields)
         apply_round_calendar(competition, csid)
     return {"moved": moved, "warnings": warnings}
 

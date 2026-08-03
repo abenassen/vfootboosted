@@ -268,6 +268,74 @@ class CompetitionPlanTests(TestCase):
         cup.refresh_from_db()
         self.assertEqual(int(cup.round_calendar["1"]), min(landed))
 
+    def test_the_cup_simply_starts_later_when_nobody_closed_the_rounds_in_time(self):
+        """The sequence in full, told from the outside: the admin does not close the
+        rounds that decide the cup; the matchdays the cup was booked for arrive and go
+        by; then he closes.
+
+        What must be true in the middle is that NOTHING happened — no half-drawn tie,
+        no fixture on a round nobody could field, no lineup owed for a match that does
+        not exist. The cup does not lose its rounds, it starts later.
+        """
+        champ, champ_stage = self._championship()
+        cup = self._cup_from_table(champ_stage)
+        booked = sorted(int(v) for v in cup.round_calendar.values())
+
+        # Weeks of football: the championship is played, the cup's own matchdays come
+        # and go, and the ledger has not moved at all.
+        self._play_real_matchdays(booked[-1] + 2)
+        self._map_sources(champ)
+
+        # In the middle: the cup has no fixtures, so there was never anything to
+        # field, to score, or to miss.
+        self.assertEqual(FantasyFixture.objects.filter(competition=cup).count(), 0)
+        self.assertEqual(
+            FantasyFixture.objects.filter(
+                competition=cup, fantasy_matchday__real_matchday__in=booked).count(), 0)
+        blocker = self._plan_for(cup, "Semifinali")["blocker"]
+        self.assertEqual(blocker["kind"], "da_conteggiare")
+
+        # He finally closes. Only now does the cup exist — and not where it was booked.
+        self._conclude_through(7)
+        semis = list(FantasyFixture.objects.filter(competition=cup)
+                     .select_related("fantasy_matchday"))
+        self.assertEqual(len(semis), 2)
+        landed = {fx.fantasy_matchday.real_matchday for fx in semis}
+        self.assertTrue(all(md not in booked for md in landed),
+                        f"le giornate prenotate erano gia' passate: {landed}")
+        self.assertTrue(all(md > booked[-1] for md in landed))
+
+        # No round was lost on the way: the cup still has all of them, in order.
+        cup.refresh_from_db()
+        plan = sorted(int(v) for v in cup.round_calendar.values())
+        self.assertEqual(len(plan), len(booked))
+        self.assertEqual(plan, sorted(set(plan)), "due turni sulla stessa giornata")
+        # And the declared window followed, so the next `schedule` cannot drag it back.
+        if cup.end_matchday is not None:
+            self.assertGreaterEqual(cup.end_matchday, plan[-1])
+
+    def test_the_declared_window_follows_the_competition_that_overran_it(self):
+        """A cup told to end by matchday 9 and drawn at 12 has outlived its window.
+        The window has to move with it — the admin's own calendar page re-runs
+        `schedule`, which keeps only rounds INSIDE the span, so a stale end would
+        drag the cup back onto rounds that have already been played."""
+        champ, champ_stage = self._championship()
+        cup = self._cup_from_table(champ_stage, end_matchday=9)
+        self.assertEqual(cup.end_matchday, 9)
+
+        self._play_real_matchdays(11)
+        self._map_sources(champ)
+        self._conclude_through(7)
+
+        cup.refresh_from_db()
+        last = max(int(v) for v in cup.round_calendar.values())
+        self.assertGreater(last, 9)
+        self.assertGreaterEqual(cup.end_matchday, last)
+        # And the guarantee that motivates it: re-scheduling now leaves it alone.
+        competition_calendar.schedule(cup)
+        cup.refresh_from_db()
+        self.assertEqual(max(int(v) for v in cup.round_calendar.values()), last)
+
     def test_a_drawn_round_is_never_moved(self):
         """Reflow may only touch rounds nobody could have fielded. A round that has
         fixtures may already carry lineups, and a played one must keep the matchday
