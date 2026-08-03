@@ -479,6 +479,7 @@ def resolve_stage(stage: CompetitionStage, seed: int = 42) -> dict:
     # drawn between the byes alone, and the winners coming up would have nowhere
     # to go. Half a field is not a field.
     fixtures_created = 0
+    calendar = {"moved": {}, "warnings": []}
     if not unresolved:
         # BEFORE drawing, not after: the dates the plan reserved for this stage may
         # have gone by while it waited for its source (a postponement, or an admin
@@ -487,7 +488,7 @@ def resolve_stage(stage: CompetitionStage, seed: int = 42) -> dict:
         # competition_calendar reads this module.
         from vfoot.services.competition_calendar import reflow_pending_rounds
 
-        reflow_pending_rounds(stage.competition)
+        calendar = reflow_pending_rounds(stage.competition)
         fixtures_created = generate_stage_fixtures(stage, seed=seed)
     if fixtures_created:
         # New fixtures inherit the calendar their rounds were already planned for.
@@ -498,6 +499,12 @@ def resolve_stage(stage: CompetitionStage, seed: int = 42) -> dict:
         "resolved_rule_participants": resolved,
         "unresolved_rules": unresolved,
         "fixtures_created": fixtures_created,
+        # WHERE it ended up, when that is not where the plan said. The degenerate
+        # case — a phase drawn so late that the season has no fieldable matchday
+        # left — cannot be fixed here (there is nowhere to put it), so it is
+        # REPORTED instead of being drawn onto a past round in silence.
+        "calendar_moved": calendar["moved"],
+        "calendar_warnings": calendar["warnings"],
     }
 
 
@@ -505,17 +512,22 @@ def resolve_pending_stages(competition: FantasyCompetition, seed: int = 42) -> d
     """Try to fill every stage that is still waiting on a rule, earliest first."""
     filled = 0
     still_waiting = 0
+    moved: dict[int, int] = {}
+    warnings: list[str] = []
     for stage in CompetitionStage.objects.filter(competition=competition).order_by("order_index", "id"):
         if not CompetitionStageRule.objects.filter(target_stage=stage).exists():
             continue
         if FantasyFixture.objects.filter(stage=stage).exists():
             continue
         result = resolve_stage(stage, seed=seed)
+        moved.update(result["calendar_moved"])
+        warnings.extend(result["calendar_warnings"])
         if result["fixtures_created"]:
             filled += 1
         else:
             still_waiting += 1
-    return {"stages_filled": filled, "stages_waiting": still_waiting}
+    return {"stages_filled": filled, "stages_waiting": still_waiting,
+            "calendar_moved": moved, "calendar_warnings": warnings}
 
 
 # ---------------------------------------------------------------------------
