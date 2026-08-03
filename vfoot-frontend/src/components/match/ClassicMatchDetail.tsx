@@ -59,14 +59,19 @@ const DEF_MODE_LABEL: Record<string, string> = {
 
 /** A number that is still moving. Same mark everywhere it appears — on a single
  *  vote, on a team total, on the fixture — because it is the same statement: the
- *  real match behind it has not settled, so this will change. */
-function LiveDot({ label = 'provvisorio' }: { label?: string }) {
+ *  real match behind it has not settled, so this will change.
+ *
+ *  VIOLET, not red, and that is not a taste. This row already speaks in colour:
+ *  emerald is a bonus, rose is a malus, and the fantavoto itself is one or the
+ *  other side of six. A red mark next to a red number reads as "another malus".
+ *  Violet is the only strong colour the row does not already use for something. */
+function LiveBadge({ label = 'live' }: { label?: string }) {
   return (
     <span
       title="Il dato arriva da una partita ancora in corso: questo numero può ancora cambiare."
-      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-600"
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-700"
     >
-      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
+      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-500" />
       {label}
     </span>
   );
@@ -109,7 +114,7 @@ export function ClassicMatchDetail({
               <SectionTitle>
                 {d.stage ? d.stage : `Giornata ${d.fantasy_round}`} · Serie A reale {d.real_matchday}
               </SectionTitle>
-              {d.provisional ? <LiveDot label="in corso" /> : null}
+              {d.provisional ? <LiveBadge label="in corso" /> : null}
             </div>
           }
           action={
@@ -158,7 +163,7 @@ function TeamColumn({ name, team, realMatch }: { name: string; team: ClassicTeam
         <div className="flex items-center gap-1.5 text-sm text-slate-600">
           {/* A total made in part of provisional votes is itself provisional —
               there is no honest way to show a settled number on unsettled ones. */}
-          {team.provisional ? <LiveDot /> : null}
+          {team.provisional ? <LiveBadge label="provvisorio" /> : null}
           <span>
             {team.goals} gol{!realMatch ? <> · <b>{fmt(team.total)}</b> fanta</> : null}
           </span>
@@ -255,12 +260,7 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
             provisional whether he has a vote yet or not. A reserve keeper reading
             a flat "n.d." at the fortieth minute says "we have nothing on him",
             when what is true is "not yet". */}
-        {p.provisional ? (
-          <span
-            title="Partita in corso: questo dato può ancora cambiare"
-            className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-rose-500"
-          />
-        ) : null}
+        {p.provisional ? <LiveBadge /> : null}
         {p.pending ? (
           // A postponement is not a senza voto and must not read like one: nothing
           // happened yet, the bench does not cover it, and the slot will be settled

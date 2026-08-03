@@ -142,7 +142,17 @@ if _REDIS_URL:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [_REDIS_URL]},
+            # socket_timeout is NOT optional here, and the number has to be bigger
+            # than channels_redis's own `brpop_timeout` (5 s). An idle consumer sits
+            # on a BLOCKING pop of five seconds; redis-py 8 with no socket timeout
+            # RAISES `TimeoutError: Timeout reading from ...` on that wait instead of
+            # returning empty-handed, which kills the consumer, drops the WebSocket,
+            # and has the browser reconnect — every five seconds, for ever. What it
+            # looks like from outside is a page that re-reads itself constantly and a
+            # server log full of disconnections, with nothing obviously wrong.
+            # Verified: with no socket_timeout the pop raises, with 30 it returns None.
+            "CONFIG": {"hosts": [{"address": _REDIS_URL, "socket_timeout": 30,
+                                  "socket_connect_timeout": 5}]},
         }
     }
 else:

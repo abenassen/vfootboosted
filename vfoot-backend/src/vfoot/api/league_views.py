@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 from random import Random
 
 from django.db import transaction
@@ -117,6 +118,8 @@ from vfoot.services.player_ratings import (
 )
 from vfoot.services.match_resolver import matchday_fixtures_by_team
 from vfoot.services import lineup_repair, matchday_state
+
+log = logging.getLogger(__name__)
 
 # Frozen listone role (POR/DIF/CEN/ATT) -> frontend lineup taxonomy (GK/DEF/MID/ATT).
 _CLASSIC_ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
@@ -2028,13 +2031,54 @@ def _fixture_phase(fx: FantasyFixture, current_real_md: int | None,
     return "future"
 
 
+def _live_totals(league: FantasyLeague, fixtures, locked_mds: set[int]) -> dict:
+    """{fixture_id: {"home_total", "away_total", "provisional"}} for the rounds that
+    have begun and are not concluded.
+
+    Computed here rather than left to the client because it is the same number the
+    tabellino shows, from the same functions: a calendar that said "vs" while the
+    tabellino behind it said 66-72 would be two answers to one question. One
+    scorer per matchday — the half-second index is per ROUND, not per fixture.
+    """
+    if not locked_mds:
+        return {}
+    from vfoot.services.classic_matchday_scoring import live_scorer
+    from vfoot.services.classic_scoring import Ruleset
+
+    by_md: dict[int, list] = {}
+    for fx in fixtures:
+        md = fx.fantasy_matchday if fx.fantasy_matchday_id else None
+        if (md is None or md.status == FantasyMatchday.STATUS_CONCLUDED
+                or fx.status == FantasyFixture.STATUS_FINISHED
+                or md.real_matchday not in locked_mds):
+            continue
+        by_md.setdefault(md.id, []).append(fx)
+    out: dict[int, dict] = {}
+    for group in by_md.values():
+        md = group[0].fantasy_matchday
+        ruleset = (Ruleset.from_snapshot(md.ruleset_snapshot) if md.ruleset_snapshot
+                   else Ruleset.from_league(league))
+        try:
+            score = live_scorer(league, md, ruleset)
+        except Exception:  # noqa: BLE001 — a calendar must render without the extra
+            log.exception("Punteggi provvisori non calcolabili per la giornata %s", md.id)
+            continue
+        for fx in group:
+            p = score(fx)
+            out[fx.id] = {"home_total": p["home_goals"], "away_total": p["away_goals"],
+                          "provisional": bool(p.get("provisional"))}
+    return out
+
+
 def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_real_md: int | None = None,
                            my_roster_ready: bool = False, awaiting_mds: set[int] | None = None,
-                           locked_mds: set[int] | None = None) -> dict:
+                           locked_mds: set[int] | None = None,
+                           live_totals: dict | None = None) -> dict:
     mine = bool(my_team_id and (fx.home_team_id == my_team_id or fx.away_team_id == my_team_id))
     played = fx.status == FantasyFixture.STATUS_FINISHED
     locked = bool(locked_mds is not None and fx.fantasy_matchday_id is not None
                   and fx.fantasy_matchday.real_matchday in locked_mds)
+    live = (live_totals or {}).get(fx.id)
     return {
         "fixture_id": fx.id,
         "competition_id": fx.competition_id,
@@ -2057,7 +2101,14 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
                       "crest": fx.home_team.crest},
         "away_team": {"team_id": fx.away_team_id, "name": fx.away_team.name,
                       "crest": fx.away_team.crest},
-        "score": {"home_total": fx.home_total, "away_total": fx.away_total} if played else None,
+        "score": ({"home_total": fx.home_total, "away_total": fx.away_total} if played
+                  else {"home_total": live["home_total"], "away_total": live["away_total"]}
+                  if live else None),
+        # The score above is a PARTIAL one: the round has begun and nobody has
+        # counted it. Said explicitly rather than left to be inferred from the
+        # status, because "0-0 because it has not started" and "0-0 at the
+        # twentieth minute" are the same two numbers.
+        "score_provisional": bool(live and live["provisional"]) if not played else False,
         "is_user_involved": mine,
         # Whether a lineup can be set for THIS fixture, decided here rather than in
         # the UI: it also depends on the roster, which the calendar does not load.
@@ -2105,9 +2156,11 @@ class LeagueFixturesView(APIView):
         # One query for the whole calendar, not one per fixture.
         my_roster_ready = bool(my_team_id) and FantasyRosterSlot.objects.filter(
             team_id=my_team_id, released_at__isnull=True).exists()
+        rows = list(qs[:200])
+        live_totals = _live_totals(league, rows, locked_mds)
         items = [_serialize_fixture_row(fx, my_team_id, current_real_md, my_roster_ready,
-                                        awaiting_mds, locked_mds)
-                 for fx in qs[:200]]
+                                        awaiting_mds, locked_mds, live_totals)
+                 for fx in rows]
         return Response(items)
 
 
@@ -2242,6 +2295,8 @@ class LeagueMatchdayListView(APIView):
         playing = matchday_state.playing_matchday(league)
         locks = (matchday_state.matchday_locks(league.reference_season_id)
                  if league.reference_season_id else {})
+        locked = (matchday_state.locked_matchdays(league.reference_season_id)
+                  if league.reference_season_id else set())
         payload = []
         for md in rows:
             real_stats = _real_matchday_stats(md.real_competition_season_id, md.real_matchday, league)
@@ -2269,6 +2324,15 @@ class LeagueMatchdayListView(APIView):
                     "phase": phase,
                     "is_fieldable": md.real_matchday == fieldable,
                     "is_playing": md.real_matchday == playing,
+                    # THREE states, not two, and the middle one is the one that was
+                    # missing. `has_kicked_off` says the round has begun — its first
+                    # confirmed kickoff has passed — and it stays true for the whole
+                    # round, including the Saturday night when nothing is on the
+                    # pitch and the Monday when everything is over but the admin has
+                    # not counted it yet. `is_playing` is the narrower "there is a
+                    # ball rolling RIGHT NOW". A page that keyed on the second one
+                    # made your own match come and go between kick-offs.
+                    "has_kicked_off": md.real_matchday in locked,
                     "lineup_lock_at": lock_at.isoformat() if lock_at else None,
                     # Two different questions. `can_conclude` is "may this one be
                     # closed RIGHT NOW" (it enforces the order, so behind an unclosed

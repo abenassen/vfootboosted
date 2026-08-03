@@ -181,22 +181,40 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   // order is what the button does, and the count is the honest size of the backlog.
   const queue = matchdays.filter((m) => m.awaits_conclusion);
 
-  // My matches of the round being PLAYED. They used to disappear from this page
-  // altogether, and it took a while to see why: they are neither "next" (locked,
-  // so there is nothing left to field) nor "results" (nobody has counted them).
-  // Keyed on the round the CALENDAR is playing, not on "locked and unscored" —
-  // with a late admin the arrears are locked and unscored too, and those belong
-  // to the queue banner above, not here.
+  // THE ROUND YOU ARE IN: begun and not yet counted. Not "being played" — that was
+  // the first attempt and it was too narrow, because your own match came and went
+  // between one kick-off and the next. A round begins on Saturday afternoon and is
+  // yours to follow until the admin closes it, whether or not there is a ball
+  // rolling at the moment you happen to open the page.
   //
-  // Declared here and not with the other memos on purpose: `playingMd` is read
-  // from `matchdays` a few lines up, and a useMemo placed above it would name it
-  // in its dependency array before the binding exists.
-  const liveFixtures = useMemo(() => {
-    if (!playingMd) return [];
+  // The last unconcluded one that has begun: with a late admin several rounds are
+  // begun-and-unscored, and the arrears belong to the banner above, not here.
+  //
+  // Declared here and not with the other memos on purpose: it reads `matchdays`
+  // a few lines up, and a useMemo placed above them would name them in its
+  // dependency array before the bindings exist.
+  const openMd = useMemo(() => {
+    const begun = matchdays.filter((m) => m.has_kicked_off && m.status !== 'concluded');
+    return begun.length ? begun[begun.length - 1] : null;
+  }, [matchdays]);
+
+  // Three states, three headlines. "Si gioca" while there is football on; "Risultato
+  // finale" once every real match has settled and only the admin's click is missing;
+  // and the plain in-between, which is most of a weekend.
+  const openPhase: 'playing' | 'final' | 'open' = openMd
+    ? openMd.is_playing
+      ? 'playing'
+      : openMd.real_completion?.is_completed
+      ? 'final'
+      : 'open'
+    : 'open';
+
+  const openFixtures = useMemo(() => {
+    if (!openMd) return [];
     return fixtures.filter(
-      (f) => f.is_user_involved && f.real_matchday === playingMd.real_matchday,
+      (f) => f.is_user_involved && f.real_matchday === openMd.real_matchday,
     );
-  }, [fixtures, playingMd]);
+  }, [fixtures, openMd]);
 
   // Close the whole arrears queue in order, stopping at the first one that needs a
   // decision (a team without a lineup) — that conversation lives in Gestione lega.
@@ -338,30 +356,60 @@ export default function LeagueHome({ competitions }: { competitions: Competition
         </Card>
       ) : null}
 
-      {/* 0 — what is happening RIGHT NOW. Above everything else because it is the
-          only thing on this page that changes while you look at it. What it offers
-          is the live view, NOT the lineup: the round has locked, and a "Formazione"
+      {/* 0 — THE ROUND YOU ARE IN. Above everything else: while a round is open it
+          is the only thing on this page anyone opens the app for. What it offers is
+          the tabellino, NOT the lineup — the round has locked, and a "Formazione"
           button here could only end on a 409. */}
-      {liveFixtures.length ? (
-        <Card className="border-2 border-rose-200 bg-rose-50/60 p-4">
+      {openFixtures.length ? (
+        <Card
+          className={clsx(
+            'border-2 p-4',
+            openPhase === 'playing'
+              ? 'border-violet-200 bg-violet-50/60'
+              : openPhase === 'final'
+              ? 'border-emerald-200 bg-emerald-50/50'
+              : 'border-slate-200',
+          )}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-                Si gioca
+              <span
+                className={clsx(
+                  'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white',
+                  openPhase === 'playing'
+                    ? 'bg-violet-600'
+                    : openPhase === 'final'
+                    ? 'bg-emerald-600'
+                    : 'bg-slate-500',
+                )}
+              >
+                {openPhase === 'playing' ? (
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                ) : null}
+                {openPhase === 'playing'
+                  ? 'Si gioca'
+                  : openPhase === 'final'
+                  ? 'Risultato finale'
+                  : 'In corso'}
               </span>
-              <SectionTitle className="!mb-0">Giornata {playingMd?.real_matchday}</SectionTitle>
+              <SectionTitle className="!mb-0">Giornata {openMd?.real_matchday}</SectionTitle>
             </div>
             <span className="text-[11px] text-slate-500">
-              I voti si aggiornano mentre si gioca e restano provvisori fino a fine partita.
+              {openPhase === 'playing'
+                ? 'I voti si aggiornano mentre si gioca e restano provvisori fino a fine partita.'
+                : openPhase === 'final'
+                ? 'Tutte le partite reali sono finite: manca solo il conteggio della lega.'
+                : `${openMd?.real_completion.completed ?? 0} partite di Serie A su ${
+                    openMd?.real_completion.total ?? 0
+                  } sono già archiviate.`}
             </span>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {liveFixtures.map((f) => (
+            {openFixtures.map((f) => (
               <Link
                 key={f.fixture_id}
                 to={`/matches/${f.fixture_id}`}
-                className="block rounded-xl border border-rose-200 bg-white p-3 transition hover:border-rose-300 hover:shadow-sm"
+                className="block rounded-xl border border-slate-200 bg-white p-3 transition hover:border-slate-300 hover:shadow-sm"
               >
                 <div
                   className={clsx(
@@ -374,12 +422,15 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                 <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
                   <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
                   <span className="truncate">{f.home_team.name}</span>
-                  <span className="text-slate-400">vs</span>
+                  {/* The running score, which is the whole reason to look. */}
+                  <span className="shrink-0 font-mono tabular-nums text-slate-700">
+                    {f.score ? `${Math.round(f.score.home_total)}–${Math.round(f.score.away_total)}` : 'vs'}
+                  </span>
                   <span className="truncate">{f.away_team.name}</span>
                   <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
                 </div>
-                <div className="mt-1.5 text-[11px] font-semibold text-rose-700">
-                  Segui i voti in diretta →
+                <div className="mt-1.5 text-[11px] font-semibold text-slate-500">
+                  {openPhase === 'playing' ? 'Segui i voti in diretta →' : 'Apri il tabellino →'}
                 </div>
               </Link>
             ))}

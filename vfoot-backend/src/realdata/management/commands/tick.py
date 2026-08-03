@@ -75,6 +75,12 @@ class Command(BaseCommand):
         # leagues to vfoot, and only this step needs to cross.
         from vfoot.services import live_updates
 
+        # Collected across every step and sent ONCE at the end. A Sunday evening
+        # tick imports three matches; nudging inside the loop had every open page
+        # re-read the whole calendar three times in eight seconds, for a round that
+        # changed once.
+        nudge: set[int] = set()
+
         # 1) Stamp observed full-time (state we own). This is the ONE instant at
         #    which a match is first seen to be over, so it is where the full-time
         #    notification belongs — not in the import, which runs again afterwards.
@@ -84,7 +90,7 @@ class Command(BaseCommand):
                 m.finished_at = now
                 m.save(update_fields=["finished_at"])
                 sent = live_updates.announce_full_time(m)
-                live_updates.broadcast_match(m)
+                nudge |= live_updates.leagues_to_nudge(m)
                 if sent:
                     self.stdout.write(f"    push fine partita: {sent}")
 
@@ -117,10 +123,9 @@ class Command(BaseCommand):
             m.data_imported_at = now
             m.save(update_fields=["data_imported_at"])
             events = live_updates.announce_events(m, before)
-            leagues = live_updates.broadcast_match(m)
+            nudge |= live_updates.leagues_to_nudge(m)
             self.stdout.write(
-                f"  [live-import] {m} — imported (provisional); "
-                f"{leagues} leghe avvisate"
+                f"  [live-import] {m} — imported (provisional)"
                 + (f", push: {events}" if events else ""))
 
         # 5) Finalization: +15min provisional-final import.
@@ -132,7 +137,7 @@ class Command(BaseCommand):
                 m.data_checked_at = now
                 m.data_imported_at = now
                 m.save(update_fields=["data_checked_at", "data_imported_at"])
-                live_updates.broadcast_match(m)
+                nudge |= live_updates.leagues_to_nudge(m)
                 self.stdout.write(f"  [final-check] {m} — imported (provisional)")
             else:
                 self.stdout.write(f"  [final-check] {m} — egress blocked; will retry")
@@ -149,10 +154,14 @@ class Command(BaseCommand):
                 m.data_ready = True
                 m.save(update_fields=["data_checked_at", "data_imported_at",
                                       "data_ready"])
-                live_updates.broadcast_match(m)
+                nudge |= live_updates.leagues_to_nudge(m)
                 self.stdout.write(f"  [final-confirm] {m} — data_ready")
             else:
                 self.stdout.write(f"  [final-confirm] {m} — egress blocked; will retry")
+
+        if nudge:
+            live_updates.broadcast_leagues(nudge)
+            self.stdout.write(f"  {len(nudge)} leghe avvisate")
 
         if not dry:
             self.stdout.write(self.style.SUCCESS("  applied"))

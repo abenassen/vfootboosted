@@ -507,6 +507,10 @@ export interface LeagueFixtureItem {
   home_team: { team_id: number; name: string; crest?: string | null };
   away_team: { team_id: number; name: string; crest?: string | null };
   score: { home_total: number; away_total: number } | null;
+  /** The score above is a PARTIAL one: the round has begun, nobody has counted it,
+   *  and some real match behind it has not settled. Distinguishes "0-0 because it
+   *  has not started" from "0-0 at the twentieth minute" — the same two numbers. */
+  score_provisional?: boolean;
   is_user_involved: boolean;
   /** Decided server-side: also depends on the roster, which the calendar does not
    *  load. False on an empty roster — there would be nothing to field. */
@@ -526,8 +530,14 @@ export interface LeagueMatchdayItem {
   phase: 'concluded' | 'current' | 'awaiting' | 'future';
   /** The earliest matchday whose lineups can still be set. */
   is_fieldable: boolean;
-  /** A match of this round is on the pitch right now. */
+  /** A match of this round is on the pitch right now. Narrow on purpose: false on
+   *  the Saturday night between two kick-offs, and false once the data has settled. */
   is_playing: boolean;
+  /** The round has BEGUN — its first confirmed kickoff has passed — and stays true
+   *  for the whole round, including the gaps between matches and the wait for the
+   *  admin's conclusion. This is what "your match of this round is worth looking at"
+   *  keys on; `is_playing` is only whether there is a ball rolling this minute. */
+  has_kicked_off?: boolean;
   lineup_lock_at: string | null;
   /** May be closed right now (enforces the order). */
   can_conclude: boolean;

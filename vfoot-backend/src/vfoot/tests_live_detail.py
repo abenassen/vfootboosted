@@ -14,10 +14,11 @@ bench must not cover him; the second has a vote that is simply going to move.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone as dttz
+from datetime import timedelta
 
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
@@ -31,7 +32,10 @@ from vfoot.models import (
 )
 from vfoot.services.classic_matchday_scoring import _live_states, _mark_unstable
 
-SAT = datetime(2027, 1, 30, 14, 0, tzinfo=dttz.utc)
+# Relative to the real clock, not a fixed date: half of what is under test keys on
+# whether the round HAS KICKED OFF, and a 2027 fixture is in the future for a suite
+# run in 2026 — the calendar would answer "not begun" and prove nothing.
+SAT = timezone.now() - timedelta(hours=1)
 
 
 class LiveDetailTests(TestCase):
@@ -148,6 +152,34 @@ class LiveDetailTests(TestCase):
         self.md.save(update_fields=["status"])
         res = self.client.get(f"/api/v1/fixtures/{self.fixture.id}")
         self.assertEqual(res.status_code, 404)
+
+    # -- the calendar ------------------------------------------------------- #
+    def test_the_calendar_carries_the_partial_score_of_a_round_that_has_begun(self):
+        """It used to say "vs" over a match two thirds played, while the tabellino
+        one tap away said 66-72 — two answers to one question."""
+        SavedLineupSnapshot.objects.create(
+            league_id=str(self.league.id), matchday_id="22",
+            lineup_id=f"team{self.mine.id}",
+            gk_player_id=str(self._player("Portiere", self.playing[0]).id),
+            starter_player_ids=[self._player("Attaccante", self.playing[1]).id],
+            bench_player_ids=[])
+        res = self.client.get(f"/api/v1/leagues/{self.league.id}/fixtures")
+        self.assertEqual(res.status_code, 200)
+        row = next(r for r in res.data if r["fixture_id"] == self.fixture.id)
+        self.assertIsNotNone(row["score"])
+        self.assertTrue(row["score_provisional"])
+        self.assertTrue(row["has_detail"])
+
+    def test_a_round_that_has_not_kicked_off_has_no_score_at_all(self):
+        """Zero-zero because it has not started and zero-zero at the twentieth
+        minute are the same two numbers; only one of them may be shown."""
+        Match.objects.filter(competition_season=self.cs).update(
+            kickoff=timezone.now() + timedelta(days=3))
+        res = self.client.get(f"/api/v1/leagues/{self.league.id}/fixtures")
+        row = next(r for r in res.data if r["fixture_id"] == self.fixture.id)
+        self.assertIsNone(row["score"])
+        self.assertFalse(row["score_provisional"])
+        self.assertFalse(row["has_detail"])
 
     def test_the_frozen_payload_wins_when_there_is_one(self):
         FantasyFixtureDetail.objects.create(

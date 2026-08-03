@@ -35,7 +35,21 @@ export default function MatchesPage() {
 
   const isKnockout = selectedCompetition?.competition_type === 'knockout';
   const rounds = useMemo(() => [...new Set(fixtures.map((f) => f.round_no))].sort((a, b) => a - b), [fixtures]);
-  const activeRound = round ?? rounds[0] ?? null;
+  /** Where the calendar opens. The first round is almost never the answer: in
+   *  February it means scrolling past twenty played rounds to reach the one you
+   *  are in. In order of what somebody opening this page wants:
+   *    1. the LAST round that has begun and has not been counted — the one being
+   *       played, or the one waiting for the admin;
+   *    2. otherwise the first round still to come;
+   *    3. otherwise the last one, because the season is over. */
+  const defaultRound = useMemo(() => {
+    const begun = rounds.filter((r) =>
+      fixtures.some((f) => f.round_no === r && f.lineup_locked && f.status !== 'finished'));
+    if (begun.length) return begun[begun.length - 1];
+    const next = rounds.find((r) => fixtures.some((f) => f.round_no === r && f.status !== 'finished'));
+    return next ?? rounds[rounds.length - 1] ?? null;
+  }, [rounds, fixtures]);
+  const activeRound = round ?? defaultRound;
   const shown = useMemo(() => fixtures.filter((f) => f.round_no === activeRound), [fixtures, activeRound]);
   /** A round's name. When parallel groups share it there is no single stage to
    *  name it after — taking the first fixture's label made a whole round read as
@@ -135,6 +149,11 @@ export default function MatchesPage() {
 
 function FixtureRow({ f, myTeam }: { f: LeagueFixtureItem; myTeam: string | null }) {
   const finished = f.status === 'finished' && f.score;
+  // A round that has begun and has not been counted carries a PARTIAL score, the
+  // same number its tabellino shows. Before this the calendar said "vs" over a
+  // match that was two thirds played.
+  const partial = !finished && !!f.score;
+  const hasScore = finished || partial;
   const hs = f.score?.home_total ?? 0;
   const as = f.score?.away_total ?? 0;
   const homeWin = !!finished && hs > as;
@@ -152,11 +171,25 @@ function FixtureRow({ f, myTeam }: { f: LeagueFixtureItem; myTeam: string | null
       </div>
       {/* A played match shows a score plate; an unplayed one used to show "vs" in
           the same white box with a shadow, which reads as a button. */}
-      {finished ? (
-        <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 font-mono text-sm font-bold shadow-sm">
-          <span className={homeWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(hs)}</span>
-          <span className="text-slate-300">-</span>
-          <span className={awayWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(as)}</span>
+      {hasScore ? (
+        <div className="flex flex-col items-center">
+          <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 font-mono text-sm font-bold shadow-sm">
+            <span className={homeWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(hs)}</span>
+            <span className="text-slate-300">-</span>
+            <span className={awayWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(as)}</span>
+          </div>
+          {partial ? (
+            <span
+              className={clsx(
+                'mt-0.5 text-[9px] font-bold uppercase tracking-wide',
+                f.score_provisional ? 'text-violet-600' : 'text-slate-400',
+              )}
+            >
+              {/* "live" = qualcosa si muove ancora; "da conteggiare" = il numero è
+                  quello definitivo, manca solo che l'amministratore chiuda. */}
+              {f.score_provisional ? 'live' : 'da conteggiare'}
+            </span>
+          ) : null}
         </div>
       ) : (
         <span className="px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">vs</span>

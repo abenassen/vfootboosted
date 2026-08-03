@@ -323,9 +323,19 @@ class Command(BaseCommand):
                 counts["scheduled"] += 1
             match.kickoff_provisional = not simulated
             match.data_checked_at = now
+            # And the OTHER stamp, which is the whole reason this line exists: the
+            # live import has its own cadence and its own clock, and ``_purge`` has
+            # just erased the per-player data of everything that is not finished. A
+            # stamp left behind from a later instant would sit in the future, the
+            # tick would report "nothing due" on a match plainly in progress, and
+            # the simulation would look broken in a way that has nothing to do with
+            # the pipeline. None means "never imported", which after the purge is
+            # exactly true.
+            match.data_imported_at = now if match.data_ready else None
             match.save(update_fields=["status", "data_ready", "finished_at",
                                       "home_goals", "away_goals",
-                                      "kickoff_provisional", "data_checked_at"])
+                                      "kickoff_provisional", "data_checked_at",
+                                      "data_imported_at"])
 
         self.stdout.write(self.style.SUCCESS(
             f"matches settled: {counts['finished']} finished, {counts['live']} live, "

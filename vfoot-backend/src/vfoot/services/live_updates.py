@@ -60,14 +60,29 @@ def leagues_following(match: Match):
         reference_season_id=match.competition_season_id)
 
 
-def broadcast_match(match: Match) -> int:
-    """Nudge every league following this match. Returns how many were nudged."""
+def leagues_to_nudge(match: Match) -> set[int]:
+    """The league ids that would want to hear about this match changing.
+
+    Collected rather than nudged on the spot: a tick that imports the three matches
+    of a Sunday evening would otherwise send three nudges, and every open page would
+    re-read the whole calendar three times in eight seconds. The round changed once.
+    """
+    return set(leagues_following(match).values_list("id", flat=True))
+
+
+def broadcast_leagues(league_ids) -> int:
+    """Send ONE nudge per league. Returns how many went out."""
     from vfoot.services.live_realtime import broadcast_live
 
-    ids = list(leagues_following(match).values_list("id", flat=True))
+    ids = sorted(set(league_ids))
     for league_id in ids:
         broadcast_live(league_id, kind="scores")
     return len(ids)
+
+
+def broadcast_match(match: Match) -> int:
+    """Nudge every league following this match — the single-match convenience."""
+    return broadcast_leagues(leagues_to_nudge(match))
 
 
 # --------------------------------------------------------------------------- #

@@ -409,6 +409,70 @@ def _mark_unstable(team: dict, unstable: set) -> bool:
     return any_unstable
 
 
+def live_scorer(league, md, ruleset):
+    """Prepare a matchday ONCE, then score any number of its fixtures.
+
+    The expensive half is per-MATCHDAY, not per-fixture: ``build_matchday_index``
+    runs the pagella over all ten real matches of the round (half a second), and
+    the two instability sets are the same question for the whole league. A
+    calendar showing the five provisional scores of a round paid that five times
+    before this existed.
+
+    Returns a callable ``score(fixture) -> payload``.
+    """
+    index = build_matchday_index(md.real_competition_season_id, md.real_matchday, league)
+    # Rosters AND everyone actually FIELDED this round. Not the same set, and the
+    # difference is not a corner case: the submitted lineup is authoritative and is
+    # scored as sent, so a player sold since the lock still has a line in the
+    # tabellino. Asking the states only about today's rosters left exactly those
+    # lines unmarked — scored from a match in progress, and shown as if settled.
+    ids = set(
+        FantasyRosterSlot.objects.filter(team__league=league, released_at__isnull=True)
+        .values_list("player_id", flat=True)
+    )
+    for snap in SavedLineupSnapshot.objects.filter(
+            league_id=str(league.id), matchday_id=str(md.real_matchday)):
+        if snap.gk_player_id:
+            ids.add(int(snap.gk_player_id))
+        ids.update(int(x) for x in (snap.starter_player_ids or []))
+        ids.update(int(x) for x in (snap.bench_player_ids or []))
+    not_started, unstable = _live_states(
+        md.real_competition_season_id, md.real_matchday, ids)
+    office = office_votes_for(league, md, ids)
+    not_started -= set(office)
+    unstable -= set(office)
+
+    def score(fx) -> dict:
+        lines = {}
+        for side, team in (("home", fx.home_team), ("away", fx.away_team)):
+            # ``previous`` rather than None: mid-round there is no admin to ask what
+            # to do with a team that did not field, and a preview must not be able
+            # to answer 400. It is a PREVIEW of the most likely conclusion, not a
+            # ruling — the admin still chooses when he closes the round.
+            starters, bench, meta = team_lines_for_conclusion(
+                league, team, fx.competition_id, md.real_matchday, index, "previous",
+                not_started, office)
+            lines[side] = (starters or [], bench or [], meta)
+
+        payload = score_composed_fixture(
+            (lines["home"][0], lines["home"][1]),
+            (lines["away"][0], lines["away"][1]),
+            ruleset,
+            {"fixture_id": fx.id, "fantasy_round": fx.round_no,
+             "real_matchday": md.real_matchday, "stage": fx.stage_id,
+             "home_team": fx.home_team.name, "away_team": fx.away_team.name},
+        )
+        home_unstable = _mark_unstable(payload["home"], unstable)
+        away_unstable = _mark_unstable(payload["away"], unstable)
+        payload["live"] = True
+        payload["provisional"] = home_unstable or away_unstable
+        payload["lineup_source"] = {"home": lines["home"][2].get("source"),
+                                    "away": lines["away"][2].get("source")}
+        return payload
+
+    return score
+
+
 def score_fixture_live(fx, league, md, ruleset) -> dict:
     """The tabellino of a league fixture whose matchday is NOT concluded.
 
@@ -422,40 +486,7 @@ def score_fixture_live(fx, league, md, ruleset) -> dict:
     docs/classic_live_scoring.md). Writing a provisional payload into
     FantasyFixtureDetail would destroy that property for the sake of a cache.
     """
-    index = build_matchday_index(md.real_competition_season_id, md.real_matchday, league)
-    roster_ids = owned_player_ids(fx.home_team) | owned_player_ids(fx.away_team)
-    not_started, unstable = _live_states(
-        md.real_competition_season_id, md.real_matchday, roster_ids)
-    office = office_votes_for(league, md, roster_ids)
-    not_started -= set(office)
-    unstable -= set(office)
-
-    lines = {}
-    for side, team in (("home", fx.home_team), ("away", fx.away_team)):
-        # ``previous`` rather than None: mid-round there is no admin to ask what to
-        # do with a team that did not field, and a preview must not be able to
-        # answer 400. It is a PREVIEW of the most likely conclusion, not a ruling —
-        # the admin still chooses when he closes the round.
-        starters, bench, meta = team_lines_for_conclusion(
-            league, team, fx.competition_id, md.real_matchday, index, "previous",
-            not_started, office)
-        lines[side] = (starters or [], bench or [], meta)
-
-    payload = score_composed_fixture(
-        (lines["home"][0], lines["home"][1]),
-        (lines["away"][0], lines["away"][1]),
-        ruleset,
-        {"fixture_id": fx.id, "fantasy_round": fx.round_no,
-         "real_matchday": md.real_matchday, "stage": fx.stage_id,
-         "home_team": fx.home_team.name, "away_team": fx.away_team.name},
-    )
-    home_unstable = _mark_unstable(payload["home"], unstable)
-    away_unstable = _mark_unstable(payload["away"], unstable)
-    payload["live"] = True
-    payload["provisional"] = home_unstable or away_unstable
-    payload["lineup_source"] = {"home": lines["home"][2].get("source"),
-                                "away": lines["away"][2].get("source")}
-    return payload
+    return live_scorer(league, md, ruleset)(fx)
 
 
 def _warn_about_unrepaired_lineups(league, md, team_lines) -> list[dict]:
