@@ -35,6 +35,7 @@ const BLOCKER_TONE: Record<CompetitionBlocker['kind'], string> = {
   da_conteggiare: 'border-emerald-300 bg-emerald-50 text-emerald-800',
   recupero: 'border-amber-300 bg-amber-50 text-amber-800',
   sorgente_da_definire: 'border-slate-200 bg-slate-50 text-slate-600',
+  senza_giornate: 'border-rose-300 bg-rose-50 text-rose-800',
 };
 
 /** What the reader can do about it, which is the part the raw reason does not say. */
@@ -46,7 +47,14 @@ const BLOCKER_HINT: Record<CompetitionBlocker['kind'], string> = {
     'sarà sorteggiata quando quella giornata verrà conteggiata, e se nel frattempo le sue ' +
     'giornate saranno passate verrà spostata più avanti.',
   sorgente_da_definire: '',
+  senza_giornate:
+    'Il sorteggio non verrà più fatto: giocarla su giornate già iniziate darebbe una ' +
+    'competizione senza formazioni, decisa da partite scelte da nessuno. Da Gestione lega ' +
+    'puoi annullarla, oppure lasciarla lì e riproporla la stagione prossima.',
 };
+
+/** The one blocker that is not a wait: nothing will unblock it. */
+const isTerminal = (b: CompetitionBlocker | null | undefined) => b?.kind === 'senza_giornate';
 
 // Calendar of the CURRENTLY selected competition (set via the competition switcher):
 // a round selector, the round's fixtures, each clickable to the rich detail.
@@ -302,13 +310,21 @@ function PendingPhase({ entry, seasonName }: { entry: Extract<CalendarEntry, { k
   // One line for the phase: the worst blocker across its stages, since the reader
   // needs to know what is holding it up, not how many things are.
   const blocker = entry.plans.map((p) => p.blocker).find(Boolean) ?? null;
+  // "Da definire" would be a lie here: nothing is going to define it. The season has
+  // no matchday left, so the phase is not late — it is over before it started.
+  const terminal = isTerminal(blocker);
 
   return (
-    <Card className="border-2 border-dashed border-slate-300 p-4">
+    <Card className={clsx('border-2 border-dashed p-4', terminal ? 'border-rose-300' : 'border-slate-300')}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SectionTitle className="!mb-0">{entry.label}</SectionTitle>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-          partecipanti da definire
+        <span
+          className={clsx(
+            'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+            terminal ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500',
+          )}
+        >
+          {terminal ? 'non più disputabile' : 'partecipanti da definire'}
         </span>
       </div>
 
@@ -326,7 +342,11 @@ function PendingPhase({ entry, seasonName }: { entry: Extract<CalendarEntry, { k
         <div className="rounded-xl border border-slate-100 p-3">
           <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Quando</div>
           <div className="mt-0.5 text-sm text-slate-700">
-            {first == null
+            {terminal
+              ? // The reserved matchdays are still in the plan, but they have gone
+                // by — printing them as a date would read as a promise.
+                'Le giornate riservate sono passate.'
+              : first == null
               ? 'Nessuna giornata riservata.'
               : first === last
               ? `Giornata ${first} di ${seasonName}`

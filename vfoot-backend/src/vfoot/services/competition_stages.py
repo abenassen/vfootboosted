@@ -479,7 +479,8 @@ def resolve_stage(stage: CompetitionStage, seed: int = 42) -> dict:
     # drawn between the byes alone, and the winners coming up would have nowhere
     # to go. Half a field is not a field.
     fixtures_created = 0
-    calendar = {"moved": {}, "warnings": []}
+    calendar = {"moved": {}, "unplaceable": [], "warnings": []}
+    no_matchdays_left = False
     if not unresolved:
         # BEFORE drawing, not after: the dates the plan reserved for this stage may
         # have gone by while it waited for its source (a postponement, or an admin
@@ -489,7 +490,18 @@ def resolve_stage(stage: CompetitionStage, seed: int = 42) -> dict:
         from vfoot.services.competition_calendar import reflow_pending_rounds
 
         calendar = reflow_pending_rounds(stage.competition)
-        fixtures_created = generate_stage_fixtures(stage, seed=seed)
+        # ...and if there is nowhere left in the season, DO NOT DRAW. This is the
+        # end of the line for the delay: a bracket created on rounds that kicked off
+        # weeks ago would be scored on performances nobody chose a lineup for, and
+        # would hand out a trophy for a competition that was never played. The stage
+        # stays empty and says why; whether to call the competition off is the
+        # admin's decision, not something to do to him by side effect.
+        mine = set(range(
+            (stage.round_offset or 0) + 1,
+            (stage.round_offset or 0) + (stage.planned_rounds or 1) + 1))
+        no_matchdays_left = bool(mine & set(calendar["unplaceable"]))
+        if not no_matchdays_left:
+            fixtures_created = generate_stage_fixtures(stage, seed=seed)
     if fixtures_created:
         # New fixtures inherit the calendar their rounds were already planned for.
         apply_round_calendar(stage.competition)
@@ -500,11 +512,13 @@ def resolve_stage(stage: CompetitionStage, seed: int = 42) -> dict:
         "unresolved_rules": unresolved,
         "fixtures_created": fixtures_created,
         # WHERE it ended up, when that is not where the plan said. The degenerate
-        # case — a phase drawn so late that the season has no fieldable matchday
-        # left — cannot be fixed here (there is nowhere to put it), so it is
-        # REPORTED instead of being drawn onto a past round in silence.
+        # case — a phase whose source arrives so late that the season has no
+        # fieldable matchday left — cannot be fixed here (there is nowhere to put
+        # it), so it is REFUSED and reported instead of being drawn onto a past
+        # round in silence.
         "calendar_moved": calendar["moved"],
         "calendar_warnings": calendar["warnings"],
+        "no_matchdays_left": no_matchdays_left,
     }
 
 
@@ -514,6 +528,7 @@ def resolve_pending_stages(competition: FantasyCompetition, seed: int = 42) -> d
     still_waiting = 0
     moved: dict[int, int] = {}
     warnings: list[str] = []
+    unplayable: list[int] = []
     for stage in CompetitionStage.objects.filter(competition=competition).order_by("order_index", "id"):
         if not CompetitionStageRule.objects.filter(target_stage=stage).exists():
             continue
@@ -522,12 +537,17 @@ def resolve_pending_stages(competition: FantasyCompetition, seed: int = 42) -> d
         result = resolve_stage(stage, seed=seed)
         moved.update(result["calendar_moved"])
         warnings.extend(result["calendar_warnings"])
+        if result["no_matchdays_left"]:
+            unplayable.append(stage.id)
         if result["fixtures_created"]:
             filled += 1
         else:
             still_waiting += 1
     return {"stages_filled": filled, "stages_waiting": still_waiting,
-            "calendar_moved": moved, "calendar_warnings": warnings}
+            "calendar_moved": moved, "calendar_warnings": warnings,
+            # Stages that will never be drawn now: the season ran out. The caller
+            # surfaces this — it is the one outcome the admin has to act on.
+            "stages_without_matchdays": unplayable}
 
 
 # ---------------------------------------------------------------------------

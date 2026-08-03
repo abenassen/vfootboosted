@@ -200,6 +200,16 @@ def stage_plan(competition: FantasyCompetition, league=None) -> list[dict]:
                  .select_related("source_stage", "source_stage__competition")):
         rules_by_target.setdefault(rule.target_stage_id, []).append(rule)
 
+    # Computed at most once, and only if some stage actually needs it: this
+    # serializer runs for every competition of the league on every page.
+    cache: dict[str, set[int]] = {}
+
+    def unplaceable() -> set[int]:
+        if "v" not in cache:
+            from vfoot.services.competition_calendar import plan_rounds
+            cache["v"] = set(plan_rounds(competition)["unplaceable"])
+        return cache["v"]
+
     out = []
     for stage in stages:
         first_round = (stage.round_offset or 0) + 1
@@ -209,6 +219,18 @@ def stage_plan(competition: FantasyCompetition, league=None) -> list[dict]:
         fixtures = fixture_rounds.get(stage.id, 0)
         described = []
         blockers = []
+        # Is there anywhere left in the season to play it? Asked only for a stage
+        # that is still waiting — for everyone else the answer is "it is already
+        # scheduled" and the query would be pure cost. See plan_rounds: the same
+        # arithmetic the reflow uses, so the calendar cannot promise a slot the
+        # draw will then refuse.
+        if rules and not fixtures and set(range(first_round, last_round + 1)) & unplaceable():
+            blockers.append({
+                "kind": "senza_giornate",
+                "detail": "non restano giornate su cui giocarla in questa stagione",
+                "real_matchday": None,
+                "source_competition_id": competition.id,
+            })
         for rule in rules:
             why = blocker(rule, league) if not fixtures else None
             described.append({
@@ -224,8 +246,11 @@ def stage_plan(competition: FantasyCompetition, league=None) -> list[dict]:
             })
             if why is not None:
                 blockers.append(why)
-        # The one worth showing: a deadlock beats a wait, and a wait beats nothing.
-        rank = {"recupero": 0, "da_conteggiare": 1, "sorgente_da_definire": 2, "da_giocare": 3}
+        # The one worth showing: "it can no longer be played" beats a deadlock, a
+        # deadlock beats a wait, and a wait beats nothing. Naming the wait on a
+        # phase that has run out of season would be answering the wrong question.
+        rank = {"senza_giornate": -1, "recupero": 0, "da_conteggiare": 1,
+                "sorgente_da_definire": 2, "da_giocare": 3}
         worst = min(blockers, key=lambda b: rank.get(b["kind"], 9), default=None)
         out.append({
             "stage_id": stage.id,

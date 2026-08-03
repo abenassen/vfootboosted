@@ -159,7 +159,10 @@ export type CompetitionFormat = 'league' | 'cup' | 'groups_knockout' | 'custom';
  *  moving without anything looking broken, so they are named rather than left to
  *  be inferred from an empty round. */
 export interface CompetitionBlocker {
-  kind: 'da_giocare' | 'da_conteggiare' | 'recupero' | 'sorgente_da_definire';
+  /** `senza_giornate` is the only one that is not a wait: the season has no
+   *  fieldable matchday left, so the phase will never be drawn and the admin has to
+   *  decide what to do with the competition. */
+  kind: 'da_giocare' | 'da_conteggiare' | 'recupero' | 'sorgente_da_definire' | 'senza_giornate';
   detail: string;
   real_matchday: number | null;
   source_competition_id: number;

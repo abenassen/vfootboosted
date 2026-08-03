@@ -336,6 +336,98 @@ class CompetitionPlanTests(TestCase):
         cup.refresh_from_db()
         self.assertEqual(max(int(v) for v in cup.round_calendar.values()), last)
 
+    def test_a_recovery_finally_played_draws_the_phase_it_was_holding(self):
+        """The postponement, end to end. The matchday is parked, the league runs on
+        past it, and the cup stays undrawn the whole time — no half draw from an
+        incomplete table. The recovery is played, the admin closes the parked round
+        OUT of order (which is exactly what the awaiting state is for), and only then
+        does the cup exist."""
+        champ, champ_stage = self._championship()
+        cup = self._cup_from_table(champ_stage)
+
+        self._play_real_matchdays(7)
+        self._map_sources(champ)
+        self._conclude_through(6)
+        md7 = FantasyMatchday.objects.get(
+            league=self.league, real_matchday=int(champ.round_calendar["7"]))
+        self.client.post(f"/api/v1/leagues/{self.league.id}/matchdays/{md7.id}/await",
+                         {"awaiting": True, "reason": "rinviata"}, format="json")
+
+        # The league advances past it: later rounds close, the cup does NOT fill.
+        self.assertEqual(FantasyFixture.objects.filter(competition=cup).count(), 0)
+        self.assertEqual(self._plan_for(cup, "Semifinali")["blocker"]["kind"], "recupero")
+
+        # The recovery is played and the parked round is closed at last.
+        r = self.client.post(
+            f"/api/v1/leagues/{self.league.id}/matchdays/{md7.id}/conclude", {}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+
+        self.assertEqual(FantasyFixture.objects.filter(competition=cup).count(), 2)
+        self.assertFalse(self._plan_for(cup, "Semifinali")["pending"])
+
+    def test_the_rounds_are_compacted_not_shifted_by_a_fixed_amount(self):
+        """A competition booked on 8-9-11 does not come out as 12-13-15. Each round
+        asks for the FIRST free matchday after the previous one, so the gaps of the
+        original plan survive only where they are still usable — which is what lets a
+        three-round phase fit into the last three matchdays of a season."""
+        champ, champ_stage = self._championship()
+        cup = self._cup_from_table(champ_stage, name="Coppa", fmt="groups_knockout",
+                                   groups=1, advance_per_group=2, legs=1)
+        # Book the group's three rounds with a hole in the middle: 8, 9, 11 (+ final).
+        cup.round_calendar = {"1": 8, "2": 9, "3": 11, "4": 12}
+        cup.save(update_fields=["round_calendar"])
+
+        # Everything up to 11 has kicked off: the whole phase has to move.
+        self._play_real_matchdays(11)
+        competition_calendar.reflow_pending_rounds(cup)
+
+        cup.refresh_from_db()
+        plan = [int(cup.round_calendar[str(r)]) for r in (1, 2, 3, 4)]
+        self.assertEqual(plan, [12, 13, 14, 15], "i turni vanno compattati, non traslati")
+
+    def test_a_phase_with_no_matchdays_left_is_refused_not_drawn_in_the_past(self):
+        """The end of the line. Only ONE matchday of the season is still fieldable and
+        the cup needs two, so its final has nowhere to go — and drawing it on a round
+        that kicked off weeks ago would produce a tie nobody could field, hanging off
+        a matchday the ledger has already closed, which nothing would ever score. It
+        is refused and it says so; calling the competition off is the admin's
+        decision, not a side effect."""
+        champ, champ_stage = self._championship()
+        cup = self._cup_from_table(champ_stage)
+
+        # Everything up to the second-to-last matchday has kicked off: one slot left,
+        # two rounds to place.
+        Match.objects.filter(competition_season=self.cs,
+                             matchday__lt=self.MATCHDAYS).update(
+            kickoff=self.now - timedelta(days=1))
+        self._play_real_matchdays(7)
+        self._map_sources(champ)
+        self._conclude_through(7)
+
+        cup.refresh_from_db()
+        # The semifinals fit in the last slot; the final does not, and is left alone.
+        final = self._plan_for(cup, "Finale")
+        self.assertTrue(final["pending"])
+        self.assertEqual(final["blocker"]["kind"], "senza_giornate")
+        self.assertEqual(
+            FantasyFixture.objects.filter(competition=cup, stage__name="Finale").count(), 0,
+            "meglio nessun sorteggio che un sorteggio su un turno gia' chiuso")
+
+    def test_a_season_entirely_in_the_past_is_still_allowed_to_draw(self):
+        """The escape hatch that keeps the refusal honest. A league replaying a
+        finished season has no matchday that was ever fieldable — "move it later" has
+        no meaning there — so the mechanism goes inert instead of declaring every
+        round impossible and leaving the competition permanently undrawn."""
+        champ, champ_stage = self._championship()
+        cup = self._cup_from_table(champ_stage)
+        Match.objects.filter(competition_season=self.cs).update(
+            kickoff=self.now - timedelta(days=1))
+        self._play_real_matchdays(7)
+        self._map_sources(champ)
+        self._conclude_through(7)
+
+        self.assertEqual(FantasyFixture.objects.filter(competition=cup).count(), 2)
+
     def test_a_drawn_round_is_never_moved(self):
         """Reflow may only touch rounds nobody could have fielded. A round that has
         fixtures may already carry lineups, and a played one must keep the matchday

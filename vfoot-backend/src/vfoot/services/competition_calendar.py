@@ -414,45 +414,60 @@ def _first_free_matchday(matchdays, locked, floor, end) -> int | None:
     return outside[0] if outside else None
 
 
-@transaction.atomic
-def reflow_pending_rounds(competition: FantasyCompetition, now=None) -> dict:
-    """Move the rounds that are not drawn yet off matchdays that can no longer be played.
+def plan_rounds(competition: FantasyCompetition, now=None) -> dict:
+    """Where each round WOULD go if the calendar were re-laid out right now.
 
-    A stage fed by a rule comes into being LATE by construction — it exists the day
-    the competition is created and gets its fixtures weeks later, when the round it
-    reads has been played and counted. Usually that is well before the dates the plan
-    reserved for it. But it is exactly what a postponement and a forgotten conclusion
-    both delay, and when the delay outruns the plan the fixtures are created on
-    matchdays whose lineups locked days ago: a semifinal nobody was ever able to
-    field, scored on the performances of a round played before it was drawn.
+    Pure — it writes nothing — so the same arithmetic answers both "move it" and
+    "can it still be played at all". Returns ``mapping`` (round -> real matchday),
+    ``unplaceable`` (rounds with nowhere left to go, which keep their old date) and
+    ``warnings``.
 
-    So: a round that ALREADY HAS FIXTURES never moves — it may have lineups against
-    it, and a played round must keep the matchday it was played on. An undrawn round
-    whose matchday has locked is pushed to the first one still open, and everything
-    after it follows, because two rounds of a competition cannot share a matchday.
+    The rules, in order of who wins:
 
-    When there is nowhere left to go (the season is over) the plan is left exactly as
-    it is and the caller is told: inventing a date outside the season would be worse
-    than an honest overrun.
+    * a round that ALREADY HAS FIXTURES never moves. It may have lineups against it,
+      and a played round must keep the matchday its performances came from;
+    * an undrawn round whose matchday is still open keeps it too — the plan is not
+      rewritten for the fun of it;
+    * anything else takes the EARLIEST matchday still open after the previous round.
+      Which means this is not a rigid shift: a competition booked on 8-9-11 whose
+      dates have gone by comes out compacted onto three consecutive rounds, because
+      each one asks for the first free slot rather than for "its own date plus N".
+      The gaps of the original plan survive only where they are still usable.
     """
     stored = {int(k): int(v) for k, v in (competition.round_calendar or {}).items() if str(k).isdigit()}
     rows = competition_round_rows(competition)
     round_nos = [r["round_no"] for r in rows]
+    empty = {"mapping": {}, "unplaceable": [], "warnings": []}
     if not stored or not round_nos:
-        return {"moved": {}, "warnings": []}
+        return empty
 
     csid, all_matchdays = season_matchdays(competition)
     if not csid or not all_matchdays:
-        return {"moved": {}, "warnings": []}
+        return empty
 
     from vfoot.services import matchday_state  # local: matchday_state imports models only
 
-    locked = matchday_state.locked_matchdays(csid, now)
+    # A matchday is "gone" only where there is still football to move TO. Two ways
+    # that fails, and in both this whole mechanism must be inert rather than
+    # declaring every round unplaceable and refusing to draw anything:
+    #
+    # * the league has no deadline at all (``enforce_lineup_deadline`` off) — the
+    #   historical replays and the demo leagues, played over a season that is
+    #   entirely in the past and whose lineups are edited freely. This exists to
+    #   protect a deadline; with no deadline there is nothing to protect;
+    # * the season has NO fieldable matchday left. Then "move it later" has no
+    #   meaning: the competition is being resolved retrospectively, and refusing
+    #   would leave it permanently undrawn instead of merely late.
+    locked = (matchday_state.locked_matchdays(csid, now)
+              if competition.league.enforce_lineup_deadline else set())
+    if locked and not (set(all_matchdays) - locked):
+        locked = set()
     drawn = set(
         FantasyFixture.objects.filter(competition=competition).values_list("round_no", flat=True)
     )
 
     out: dict[int, int] = {}
+    unplaceable: list[int] = []
     warnings: list[str] = []
     floor: int | None = None
     for rno in round_nos:
@@ -468,14 +483,42 @@ def reflow_pending_rounds(competition: FantasyCompetition, now=None) -> dict:
             continue
         chosen = _first_free_matchday(all_matchdays, locked, floor, competition.end_matchday)
         if chosen is None:
+            unplaceable.append(rno)
             if want is not None:
                 out[rno] = want
                 warnings.append(
-                    f"turno {rno}: non restano giornate su cui spostarlo, resta alla {want}ª"
+                    f"turno {rno}: non restano giornate su cui giocarlo in questa stagione"
                 )
             continue
         out[rno] = chosen
         floor = chosen
+
+    return {"mapping": out, "unplaceable": unplaceable, "warnings": warnings}
+
+
+@transaction.atomic
+def reflow_pending_rounds(competition: FantasyCompetition, now=None) -> dict:
+    """Move the rounds that are not drawn yet off matchdays that can no longer be played.
+
+    A stage fed by a rule comes into being LATE by construction — it exists the day
+    the competition is created and gets its fixtures weeks later, when the round it
+    reads has been played and counted. Usually that is well before the dates the plan
+    reserved for it. But it is exactly what a postponement and a forgotten conclusion
+    both delay, and when the delay outruns the plan the fixtures are created on
+    matchdays whose lineups locked days ago: a semifinal nobody was ever able to
+    field, scored on the performances of a round played before it was drawn.
+
+    Where each round goes is ``plan_rounds``. This writes the answer down.
+
+    When there is nowhere left to go (the season is over) the plan is left exactly as
+    it is and the round comes back in ``unplaceable``: inventing a date outside the
+    season would be worse than an honest "this cannot be played any more", and the
+    caller must NOT draw a stage whose rounds are in there.
+    """
+    plan = plan_rounds(competition, now)
+    out, warnings = plan["mapping"], list(plan["warnings"])
+    stored = {int(k): int(v) for k, v in (competition.round_calendar or {}).items() if str(k).isdigit()}
+    csid, _ = season_matchdays(competition)
 
     moved = {rno: md for rno, md in out.items() if stored.get(rno) != md}
     if moved:
@@ -496,7 +539,7 @@ def reflow_pending_rounds(competition: FantasyCompetition, now=None) -> dict:
             )
         competition.save(update_fields=fields)
         apply_round_calendar(competition, csid)
-    return {"moved": moved, "warnings": warnings}
+    return {"moved": moved, "unplaceable": plan["unplaceable"], "warnings": warnings}
 
 
 def stage_round_bounds(competition: FantasyCompetition) -> dict[int, dict]:
