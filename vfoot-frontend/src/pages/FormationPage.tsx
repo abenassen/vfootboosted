@@ -21,6 +21,12 @@ const ROLE_WORD: Record<PlayerRole, string> = {
   MID: 'centrocampista',
   ATT: 'attaccante',
 };
+const ROLE_WORD_PLURAL: Record<PlayerRole, string> = {
+  GK: 'portieri',
+  DEF: 'difensori',
+  MID: 'centrocampisti',
+  ATT: 'attaccanti',
+};
 const ROLE_LABEL_SHORT = ROLE_LABEL;
 const ROLE_CHIP: Record<PlayerRole, string> = {
   GK: 'bg-amber-500',
@@ -29,6 +35,7 @@ const ROLE_CHIP: Record<PlayerRole, string> = {
   ATT: 'bg-orange-500',
 };
 const ROLE_ORDER: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 }; // P, D, C, A
+const ROLES: PlayerRole[] = ['GK', 'DEF', 'MID', 'ATT'];
 
 // Mirror of vfoot/services/formation_rules.validate_classic_lineup — the server
 // validates identically; this is the live UI guide. Returns Italian violations.
@@ -46,6 +53,51 @@ function validateClassic(roles: PlayerRole[], c: ClassicConstraints): string[] {
       errs.push(`Meno di 6 ${ROLE_LABEL[role]} (${c.per_role[role].max} max, ne hai ${cnt[role]}).`);
   });
   return errs;
+}
+
+// Why a bench player cannot go on the pitch RIGHT NOW, or null if he can.
+//
+// These are the same rules validateClassic checks, only asked one player AHEAD:
+// telling a manager that his XI is illegal once he has built it means he has to
+// undo his own work to find out what was wrong. Asked here, the illegal lineup is
+// never built and the reason arrives on the row he is clicking.
+function promotionBlock(
+  p: TeamLineupPlayer,
+  starters: TeamLineupPlayer[],
+  benchPool: TeamLineupPlayer[],
+  c: ClassicConstraints | null,
+): string | null {
+  if (starters.length >= XI) return 'Undici completo: manda prima un titolare in panchina.';
+  const cnt: Record<PlayerRole, number> = { GK: 0, DEF: 0, MID: 0, ATT: 0 };
+  starters.forEach((s) => (cnt[s.role] += 1));
+  // One goalkeeper, in both modes.
+  if (p.role === 'GK' && cnt.GK >= 1) return 'C’è già un portiere fra i titolari: mandalo in panchina prima.';
+  if (!c) return null; // aura: any shape is legal
+  const max = c.per_role[p.role].max;
+  if (cnt[p.role] >= max) return `Hai già ${max} ${ROLE_WORD_PLURAL[p.role]}: è il massimo.`;
+  // A minimum is never broken by the pick itself, but by the PLACE it takes up:
+  // with a defender still to come and one place left, a third attacker is already
+  // an illegal eleven — it just does not look like one yet.
+  cnt[p.role] += 1;
+  const free = XI - (starters.length + 1);
+  const missing: string[] = [];
+  let needed = 0;
+  (ROLES).forEach((r) => {
+    // Only count what the bench can actually supply: a squad genuinely short of
+    // defenders must still be allowed to field eleven players.
+    const spare = benchPool.filter((b) => b.role === r && b.player_id !== p.player_id).length;
+    const n = Math.min(Math.max(0, c.per_role[r].min - cnt[r]), spare);
+    if (n > 0) {
+      needed += n;
+      missing.push(`${n} ${n === 1 ? ROLE_WORD[r] : ROLE_WORD_PLURAL[r]}`);
+    }
+  });
+  if (needed > free) {
+    const left =
+      free === 0 ? 'Non resterebbe nessun posto' : free === 1 ? 'Resterebbe un solo posto' : `Resterebbero ${free} posti`;
+    return `${left} e ${needed === 1 ? 'ti serve' : 'ti servono'} ancora ${missing.join(' e ')}.`;
+  }
+  return null;
 }
 
 // Bench player_ids in priority order: honour `seed` first (saved/explicit order),
@@ -133,6 +185,9 @@ export default function FormationPage() {
   // are what keeps the pitch at eleven while the module is still being decided.
   const [vacancies, setVacancies] = useState<PlayerRole[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
+  // Why the last attempted promotion was refused, pinned to the row that was
+  // clicked — the explanation belongs where the finger is, not in the header.
+  const [refused, setRefused] = useState<{ player_id: number; reason: string } | null>(null);
   const [allComps, setAllComps] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -146,11 +201,15 @@ export default function FormationPage() {
 
   // Suggestion / default: a balanced 4-4-2 by inferred role, each slot the best
   // available by recent form (falls back across roles if a line is short).
-  const suggest = (roster: TeamLineupPlayer[]): number[] => {
+  const suggest = (roster: TeamLineupPlayer[], c: ClassicConstraints | null): number[] => {
     const byForm = (a: TeamLineupPlayer, b: TeamLineupPlayer) => b.form - a.form;
     const gk = [...roster].filter((p) => p.role === 'GK').sort(byForm)[0];
     const chosen = new Set<number>();
-    if (gk) chosen.add(gk.player_id);
+    const cnt: Record<PlayerRole, number> = { GK: 0, DEF: 0, MID: 0, ATT: 0 };
+    if (gk) {
+      chosen.add(gk.player_id);
+      cnt.GK = 1;
+    }
     const targets: [PlayerRole, number][] = [['DEF', 4], ['MID', 4], ['ATT', 2]];
     const out: number[] = [];
     for (const [role, n] of targets) {
@@ -160,16 +219,20 @@ export default function FormationPage() {
         .slice(0, n)
         .forEach((p) => {
           chosen.add(p.player_id);
+          cnt[role] += 1;
           out.push(p.player_id);
         });
     }
-    // top up to 10 outfielders from whoever is left, by form
+    // Top up to 10 outfielders from whoever is left, by form — but never past a
+    // role's ceiling: a short line used to be filled with a sixth midfielder, so
+    // the suggestion itself proposed a lineup the save would then refuse.
     roster
       .filter((p) => p.role !== 'GK' && !chosen.has(p.player_id))
       .sort(byForm)
       .forEach((p) => {
-        if (out.length < XI - 1) {
+        if (out.length < XI - 1 && (!c || cnt[p.role] < c.per_role[p.role].max)) {
           chosen.add(p.player_id);
+          cnt[p.role] += 1;
           out.push(p.player_id);
         }
       });
@@ -197,7 +260,7 @@ export default function FormationPage() {
         if (saved && (saved.gk_player_id || saved.starter_player_ids.length)) {
           starters = [...(saved.gk_player_id ? [saved.gk_player_id] : []), ...saved.starter_player_ids].slice(0, XI);
         } else {
-          starters = suggest(d.roster);
+          starters = suggest(d.roster, d.mode === 'classic' ? d.rules.classic_constraints : null);
         }
         setStarterIds(starters);
         setBenchOrder(orderBench(d.roster, starters, saved?.bench_player_ids ?? []));
@@ -223,6 +286,11 @@ export default function FormationPage() {
   const isClassic = ctx.mode === 'classic';
   const constraints = ctx.rules.classic_constraints;
 
+  const chosen = starterIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
+  const notChosen = ctx.roster.filter((p) => !starterIds.includes(p.player_id));
+  const blockReasonFor = (p: TeamLineupPlayer) =>
+    promotionBlock(p, chosen, notChosen, isClassic ? constraints : null);
+
   // Toggling a player keeps the ordered bench in sync: a demoted starter joins the
   // bench at the LOWEST priority (end); a promoted bench player leaves it.
   //
@@ -231,13 +299,22 @@ export default function FormationPage() {
   // the pitch, leaving nine or ten dots and no sign of what was missing. Instead
   // the vacated place stays, tagged with the role it came from.
   const toggleStarter = (id: number) => {
-    const role = byId.get(id)?.role;
+    const player = byId.get(id);
+    const role = player?.role;
     if (starterIds.includes(id)) {
       setStarterIds((s) => s.filter((x) => x !== id));
       setBenchOrder((b) => (b.includes(id) ? b : [...b, id]));
       if (role) setVacancies((v) => [...v, role]);
+      setRefused(null);
     } else {
-      if (starterIds.length >= XI) return;
+      // Refuse the move rather than accept it and condemn the lineup: the same
+      // rules the save enforces, applied to this one player, with the reason.
+      const reason = player ? blockReasonFor(player) : null;
+      if (reason) {
+        setRefused({ player_id: id, reason });
+        return;
+      }
+      setRefused(null);
       setStarterIds((s) => [...s, id]);
       setBenchOrder((b) => b.filter((x) => x !== id));
       setVacancies((v) => {
@@ -266,6 +343,14 @@ export default function FormationPage() {
   const classicErrors = isClassic && constraints ? validateClassic(starterRoles, constraints) : [];
   const gkOk = gkStarters.length === 1;
   const canSave = starterIds.length === XI && gkOk && classicErrors.length === 0;
+  const saveBlock = canSave
+    ? null
+    : classicErrors[0] ??
+      (starterIds.length !== XI
+        ? `Servono ${XI} titolari (ne hai ${starterIds.length}).`
+        : gkStarters.length === 0
+          ? 'Manca il portiere.'
+          : 'Un solo portiere fra i titolari.');
 
   const onSave = async () => {
     if (!canSave || !selectedLeagueId || matchday == null) return;
@@ -360,10 +445,19 @@ export default function FormationPage() {
                 </option>
               ))}
             </select>
-            <Button variant="secondary" onClick={() => setStarterIds(suggest(ctx.roster))}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setStarterIds(suggest(ctx.roster, isClassic ? constraints : null));
+                setVacancies([]);
+                setRefused(null);
+              }}
+            >
               Suggerisci XI
             </Button>
-            <Button onClick={onSave} disabled={!canSave || saving}>
+            {/* A grey Salva that does not say why is a dead end: the tooltip carries
+                the first thing standing in the way. */}
+            <Button onClick={onSave} disabled={!canSave || saving} title={canSave ? undefined : saveBlock ?? undefined}>
               {saving ? 'Salvataggio…' : 'Salva'}
             </Button>
           </div>
@@ -445,6 +539,8 @@ export default function FormationPage() {
                 selected={selected === p.player_id}
                 onSelect={() => setSelected((s) => (s === p.player_id ? null : p.player_id))}
                 onToggle={() => toggleStarter(p.player_id)}
+                blocked={blockReasonFor(p)}
+                note={refused?.player_id === p.player_id ? refused.reason : null}
                 order={i + 1}
                 canUp={i > 0}
                 canDown={i < bench.length - 1}
@@ -466,6 +562,8 @@ function RosterRow({
   selected,
   onSelect,
   onToggle,
+  blocked,
+  note,
   order,
   canUp,
   canDown,
@@ -477,6 +575,10 @@ function RosterRow({
   selected: boolean;
   onSelect: () => void;
   onToggle: () => void;
+  /** Why he cannot be promoted right now (null = he can). */
+  blocked?: string | null;
+  /** The refusal, shown after an attempt: the tooltip alone is invisible on touch. */
+  note?: string | null;
   order?: number;
   canUp?: boolean;
   canDown?: boolean;
@@ -507,6 +609,7 @@ function RosterRow({
             )}
             {p.next_match ? <span className="text-slate-400"> · {fixtureLabel(p.next_match)}</span> : null}
           </span>
+          {note ? <span className="mt-1 block text-[11px] font-semibold text-rose-600">{note}</span> : null}
           {selected ? <PlayerDetails p={p} /> : null}
         </span>
       </button>
@@ -532,9 +635,20 @@ function RosterRow({
           </div>
         ) : null}
         <div className="flex overflow-hidden rounded-lg border border-slate-200 text-[11px] font-semibold">
+          {/* Deliberately not `disabled`: a disabled button swallows the click AND
+              its own tooltip, so it would refuse without ever saying why. It looks
+              unavailable and, if pressed, explains itself on the row. */}
           <button
             onClick={onToggle}
-            className={isStarter ? 'bg-slate-900 px-3 py-1 text-white' : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'}
+            title={blocked ?? undefined}
+            aria-disabled={blocked ? true : undefined}
+            className={
+              isStarter
+                ? 'bg-slate-900 px-3 py-1 text-white'
+                : blocked
+                  ? 'cursor-not-allowed bg-slate-50 px-3 py-1 text-slate-300'
+                  : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'
+            }
           >
             Titolare
           </button>
