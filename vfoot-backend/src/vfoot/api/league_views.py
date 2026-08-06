@@ -2307,6 +2307,42 @@ def _competition_round_nos(comp: FantasyCompetition) -> list[int]:
     return [row["round_no"] for row in competition_round_rows(comp)]
 
 
+def _real_matchday_stats_bulk(real_competition_season_id: int, matchdays: list[int],
+                              league: FantasyLeague | None = None) -> dict[int, dict]:
+    """Lo stesso conto di ``_real_matchday_stats``, per TUTTE le giornate in una volta.
+
+    Chiesto una giornata alla volta costava quattro interrogazioni ciascuna, e la
+    pagina che le elenca ne chiede trentotto: erano centosettanta query per
+    disegnare un calendario che non cambia mai. La regola (una partita conta una
+    volta per accoppiamento, ed e' risolta se ``data_ready`` o se la lega ci ha
+    messo un voto d'ufficio) e' identica — qui e' solo raggruppata per giornata.
+    """
+    if not matchdays:
+        return {}
+    office_match_ids = set()
+    if league is not None:
+        office_match_ids = set(
+            OfficeOverride.objects.filter(league=league, is_active=True)
+            .values_list("match_id", flat=True)
+        )
+    by_md: dict[int, dict[tuple[int, int], bool]] = {md: {} for md in matchdays}
+    for mid, md, home_id, away_id, ready in Match.objects.filter(
+        competition_season_id=real_competition_season_id, matchday__in=matchdays
+    ).values_list("id", "matchday", "home_team_id", "away_team_id", "data_ready"):
+        pairs = by_md.setdefault(int(md), {})
+        key = (home_id, away_id)
+        settled = bool(ready) or mid in office_match_ids
+        pairs[key] = pairs.get(key, False) or settled
+
+    out = {}
+    for md, pairs in by_md.items():
+        total = len(pairs)
+        completed = sum(1 for v in pairs.values() if v)
+        out[md] = {"total": total, "completed": completed,
+                   "is_completed": total > 0 and completed == total}
+    return out
+
+
 def _real_matchday_stats(real_competition_season_id: int, real_matchday: int,
                          league: FantasyLeague | None = None) -> dict:
     # A postponed-and-replayed match appears TWICE in a real matchday: a stale
@@ -2441,11 +2477,27 @@ class LeagueMatchdayListView(APIView):
         # and until this was said out loud a competition could sit undrawn for weeks
         # with nothing on any screen connecting the two.
         decides = competition_plan.matchday_impacts(league)
+        # Tre conti che erano dentro il ciclo, uno per giornata: su una stagione
+        # intera facevano centosettanta interrogazioni per un elenco che quasi
+        # sempre non cambia. Sono gli stessi conti, fatti una volta sola.
+        stats_by_md: dict[int, dict[int, dict]] = {}
+        for csid in {md.real_competition_season_id for md in rows}:
+            stats_by_md[csid] = _real_matchday_stats_bulk(
+                csid, [md.real_matchday for md in rows if md.real_competition_season_id == csid],
+                league)
+        fx_counts: dict[int, list[int]] = {}
+        for md_id, st in FantasyFixture.objects.filter(fantasy_matchday__in=rows).values_list(
+                "fantasy_matchday_id", "status"):
+            row = fx_counts.setdefault(md_id, [0, 0])
+            row[0] += 1
+            if st == FantasyFixture.STATUS_FINISHED:
+                row[1] += 1
+
         payload = []
         for md in rows:
-            real_stats = _real_matchday_stats(md.real_competition_season_id, md.real_matchday, league)
-            fx_total = md.fixtures.count()
-            fx_finished = md.fixtures.filter(status=FantasyFixture.STATUS_FINISHED).count()
+            real_stats = stats_by_md.get(md.real_competition_season_id, {}).get(
+                md.real_matchday, {"total": 0, "completed": 0, "is_completed": False})
+            fx_total, fx_finished = fx_counts.get(md.id, (0, 0))
             if md.status == FantasyMatchday.STATUS_CONCLUDED:
                 phase = "concluded"
             elif md.status == FantasyMatchday.STATUS_AWAITING:
@@ -4099,6 +4151,13 @@ class CompetitionStructureView(APIView):
         current_md = current.real_matchday if current else None
         pw, pd, pl = comp.points_win, comp.points_draw, comp.points_loss
         rel = ("competition", "stage", "fantasy_matchday", "home_team", "away_team", "detail")
+        # Il tabellino serve per due numeri (i punteggi di squadra), ma si porta
+        # dietro `payload`: l'intero referto, venticinque giocatori con tutte le
+        # loro statistiche, in JSON. Caricarlo per ogni partita significava
+        # deserializzare centinaia di referti per disegnare una classifica —
+        # l'80% del tempo di questa pagina se ne andava in `json.loads`, e non
+        # per calcolare qualcosa, solo per leggere righe che nessuno guardava.
+        defer = ("detail__payload",)
 
         awaiting_mds = {md.real_matchday for md in matchday_state.awaiting_matchdays(league)}
         locked_mds = (matchday_state.locked_matchdays(league.reference_season_id)
@@ -4107,14 +4166,14 @@ class CompetitionStructureView(APIView):
         if stages:
             sections = [
                 _section(s.name, s.stage_type, s.order_index,
-                         s.fixtures.select_related(*rel), my_team_id, current_md, pw, pd, pl,
+                         s.fixtures.select_related(*rel).defer(*defer), my_team_id, current_md, pw, pd, pl,
                          stage=s, awaiting_mds=awaiting_mds, locked_mds=locked_mds)
                 for s in stages
             ]
         else:
             sections = [
                 _section(comp.name, comp.competition_type, 1,
-                         comp.fixtures.select_related(*rel), my_team_id, current_md, pw, pd, pl,
+                         comp.fixtures.select_related(*rel).defer(*defer), my_team_id, current_md, pw, pd, pl,
                          awaiting_mds=awaiting_mds, locked_mds=locked_mds)
             ]
         return Response({
@@ -4147,6 +4206,9 @@ class LeagueStandingsView(APIView):
             FantasyFixture.objects.filter(status=FantasyFixture.STATUS_FINISHED)
             .filter(competition=comp if comp else None)
             .select_related("home_team", "away_team", "detail")
+            # Stessa ragione della vista struttura: della `detail` servono due
+            # numeri, non il referto intero.
+            .defer("detail__payload")
         ) if comp else FantasyFixture.objects.none()
         rows: dict[int, dict] = {}
         names: dict[int, str] = {}

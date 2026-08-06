@@ -66,6 +66,10 @@ def competition_fixtures(competition: FantasyCompetition) -> list[FantasyFixture
     return list(
         FantasyFixture.objects.filter(competition=competition)
         .select_related("fantasy_matchday", "detail")
+        # Dei tabellini servono i punteggi di squadra, non i referti: `payload` e'
+        # l'intera pagella di venticinque giocatori e deserializzarla costa piu'
+        # di tutto il resto messo insieme.
+        .defer("detail__payload")
         .order_by("id")
     )
 

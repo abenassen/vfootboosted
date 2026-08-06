@@ -465,6 +465,7 @@ def _stage_winners_or_losers(source_stage: CompetitionStage, mode: str) -> list[
     fixtures = list(
         FantasyFixture.objects.filter(stage=source_stage, status=FantasyFixture.STATUS_FINISHED)
         .select_related("detail")
+        .defer("detail__payload")
         .order_by("id")
     )
     outcomes = tie_outcomes(fixtures)
