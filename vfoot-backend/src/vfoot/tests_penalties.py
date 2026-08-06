@@ -106,13 +106,13 @@ class LaSerieTests(SimpleTestCase):
         self.assertEqual(r["winner"], "home")
         self.assertLessEqual(len(r["home"]), 5)
 
-    def test_va_alla_morte_improvvisa_e_prima_o_poi_finisce(self):
+    def test_va_a_oltranza_e_prima_o_poi_finisce(self):
         """Con due squadre identiche i primi cinque tiri pareggiano: si continua,
         ma non all'infinito."""
         r = P.shootout(team([6.0] * 10, base=1), team([6.0] * 10, base=1))
         self.assertLessEqual(len(r["home"]), P.MAX_ROUNDS)
         self.assertEqual(len(r["home"]), len(r["away"]),
-                         "la morte improvvisa si decide a parita' di tiri, non a meta' turno")
+                         "l'oltranza si decide a parita' di tiri battuti, non a meta' turno")
 
     def test_una_serie_ancora_pari_lascia_decidere_al_criterio_dopo(self):
         """Il motore non inventa un vincitore: dice che non c'e', e la catena

@@ -55,7 +55,9 @@ BASE = 0.75
 K = 0.08
 FLOOR, CEILING = 0.55, 0.92
 # Oltre i primi cinque si continua a oltranza, ma non all'infinito: finiti gli
-# undici, la sfida torna al criterio successivo della catena (il fattore campo).
+# undici tiratori, la sfida torna al criterio successivo della catena (il fattore
+# campo). Nei rigori veri non serve un limite perche' prima o poi qualcuno
+# sbaglia; qui serve, perche' un tabellone che non si chiude blocca la coppa.
 MAX_ROUNDS = 11
 NEUTRAL_VOTE = 6.0
 
@@ -154,9 +156,10 @@ def shootout(home_lines: list[dict], away_lines: list[dict],
                 "roll": r,
                 "scored": scored,
             })
-        # Dopo i primi cinque si decide al primo scarto: e' la morte improvvisa,
-        # e va controllata solo quando entrambe hanno tirato lo stesso numero di
-        # volte, altrimenti chi tira per primo vincerebbe a meta' turno.
+        # Finiti i cinque si va A OLTRANZA: uno per parte, e vince chi si trova
+        # avanti A PARITA' DI TIRI BATTUTI. Il controllo va fatto solo a giro
+        # chiuso, altrimenti chi tira per primo vincerebbe a meta' turno -- gli
+        # basterebbe segnare, senza dare all'altro la sua occasione di pareggiare.
         if i + 1 >= 5 and score["home"] != score["away"] \
                 and len(kicks["home"]) == len(kicks["away"]):
             break
