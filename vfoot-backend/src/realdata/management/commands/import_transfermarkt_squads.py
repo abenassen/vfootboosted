@@ -477,6 +477,34 @@ class Command(BaseCommand):
         self.stdout.write(f"Goalkeeper tags set/changed  : {s['gk_tagged']}")
         self.stdout.write(f"Classic roles set/changed    : {s['role_set']}")
         if not dry:
+            # ORDER MATTERS. First the GLOBAL roles, then each league's listone.
+            #
+            # The global pass re-derives CurrentPlayerRole for the whole season's
+            # squads, so a player who signed today is described the same way as
+            # everyone else — measured where there is play data, provider position
+            # where there is not — and BOTH variants are stored. That is what lets
+            # the per-league pass below resolve him under the league's own
+            # role_mode. Run in the other order he would still have no row, and
+            # the seeding would fall through to Player.classic_role_seed: one raw
+            # provider value for every league, which is to say a league's choice of
+            # role mode silently not applying to its newest players.
+            #
+            # Destructive on CurrentPlayerRole and additive on LeaguePlayerRole,
+            # deliberately: the global estimate is allowed to improve whenever new
+            # football has been played, while a role already frozen INSIDE a league
+            # never moves — a squad must not find itself holding a player who had a
+            # different role when he was paid for.
+            from vfoot.services.role_inference import refresh_current_roles
+            roles = refresh_current_roles(cs)
+            if roles["written"]:
+                self.stdout.write(
+                    f"Ruoli globali (su {roles['data_season']}) : "
+                    f"{roles['stored']} righe, {roles['measured']} misurati, "
+                    f"{roles['sofa']} da posizione, {roles['default']} default")
+            else:
+                self.stdout.write(self.style.WARNING(
+                    f"RUOLI GLOBALI NON AGGIORNATI : {roles['detail']}"))
+
             # The rosters just moved, so every classic league playing on this
             # season has a listone that no longer matches reality. Roles stay
             # frozen — the snapshot is additive — but a player who arrived today
@@ -487,7 +515,8 @@ class Command(BaseCommand):
             seeded = opened = leagues = 0
             for league in FantasyLeague.objects.filter(
                     mode=FantasyLeague.MODE_CLASSIC, reference_season=cs):
-                summary = snapshot_league_listone(league)
+                # notify=True only here: this is the run nobody is watching.
+                summary = snapshot_league_listone(league, notify=True)
                 leagues += 1
                 seeded += summary.get("created", 0)
                 opened += summary.get("decisions_opened", 0)

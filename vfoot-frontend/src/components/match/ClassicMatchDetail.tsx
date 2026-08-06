@@ -108,10 +108,13 @@ const DEF_MODE_LABEL: Record<string, string> = {
  *  emerald is a bonus, rose is a malus, and the fantavoto itself is one or the
  *  other side of six. A red mark next to a red number reads as "another malus".
  *  Violet is the only strong colour the row does not already use for something. */
-function LiveBadge({ label = 'live' }: { label?: string }) {
+function LiveBadge({
+  label = 'live',
+  title = 'Il dato arriva da una partita ancora in corso: questo numero può ancora cambiare.',
+}: { label?: string; title?: string }) {
   return (
     <span
-      title="Il dato arriva da una partita ancora in corso: questo numero può ancora cambiare."
+      title={title}
       className="inline-flex shrink-0 items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-700"
     >
       <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-500" />
@@ -160,7 +163,20 @@ export function ClassicMatchDetail({
                     is one: "Semifinali" says more than any number. */}
                 {d.stage ? d.stage : `Turno ${d.fantasy_round}`} · giornata {d.real_matchday}
               </SectionTitle>
-              {d.provisional ? <LiveBadge label="in corso" /> : null}
+              {/* "In corso" and "provvisorio" are not the same claim, and one badge
+                  for both told the wrong one half the time: a match that ENDED
+                  twenty minutes ago still carries movable votes (the provider
+                  confirms an hour later), and labelling that "in corso" says the
+                  ball is still rolling. The clock rides with the live label —
+                  from the appearances, so it costs nothing. */}
+              {d.live ? (
+                <LiveBadge label={d.minute != null ? `in corso · ${d.minute}'` : 'in corso'} />
+              ) : d.provisional ? (
+                <LiveBadge
+                  label="provvisorio"
+                  title="La partita è finita, ma i dati non sono ancora confermati: questi numeri possono cambiare di poco."
+                />
+              ) : null}
             </div>
           }
           action={

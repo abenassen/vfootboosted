@@ -61,16 +61,30 @@ self.addEventListener('push', (event) => {
     data = { title: 'Vfoot Boosted', body: event.data?.text() ?? '' };
   }
   event.waitUntil(
-    self.registration.showNotification(data.title || 'Vfoot Boosted', {
-      body: data.body || '',
-      icon: '/icons/icon-192.png',
-      badge: '/icons/maskable-192.png',
-      // Same tag => the new notification REPLACES the old one instead of
-      // stacking. Keyed per subject by the server (decision-<id>), so three
-      // updates about one decision stay one line in the shade.
-      tag: data.tag || 'vfoot',
-      data: { url: data.url || '/home' },
-    }),
+    (async () => {
+      await self.registration.showNotification(data.title || 'Vfoot Boosted', {
+        body: data.body || '',
+        icon: '/icons/icon-192.png',
+        badge: '/icons/maskable-192.png',
+        // Same tag => the new notification REPLACES the old one instead of
+        // stacking. Keyed per subject by the server (decision-<id>), so three
+        // updates about one decision stay one line in the shade.
+        tag: data.tag || 'vfoot',
+        data: { url: data.url || '/home' },
+      });
+      // ...and tell any window that is already open, so the app and the shade do
+      // not disagree. Web Push and the running SPA are two separate channels: a
+      // notification saying "3 roles to decide" beside a badge still reading zero
+      // is worse than no badge at all. Tapping the notification is already
+      // consistent (notificationclick NAVIGATES the client, remounting the app);
+      // this covers the case where the reader simply switches to a tab that was
+      // open all along. The message carries no state — only "something about
+      // <tag> moved" — so whoever listens re-reads over REST, same as everywhere.
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const client of clients) {
+        client.postMessage({ type: 'push', tag: data.tag || 'vfoot' });
+      }
+    })(),
   );
 });
 

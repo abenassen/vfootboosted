@@ -578,6 +578,88 @@ class RealChampionshipTests(TestCase):
         statuses = {f["status"] for f in resp.data["matchdays"][0]["fixtures"]}
         self.assertIn("postponed", statuses)  # no played sibling -> still shown
 
+    def test_a_match_in_progress_is_offered_for_reading(self):
+        """The calendar used to hand out the link only at the final whistle, so the
+        one round worth following while it happens was the one with no way in."""
+        Match.objects.filter(id=self.match.id).update(
+            status=Match.STATUS_LIVE, data_ready=False)
+        league, user = self._league()
+        req = APIRequestFactory().get(f"/leagues/{league.id}/real-fixtures?matchday=1")
+        force_authenticate(req, user=user)
+        resp = LeagueRealFixturesView.as_view()(req, league_id=league.id)
+        resp.render()
+        fx = next(f for f in resp.data["matchdays"][0]["fixtures"]
+                  if f["id"] == self.match.id)
+        self.assertEqual(fx["status"], "live")
+        self.assertTrue(fx["has_detail"])
+
+    def test_the_votes_of_a_live_match_are_marked_as_movable(self):
+        """Shown, but never as a verdict: at the fiftieth minute every number on
+        the page can still change."""
+        Match.objects.filter(id=self.match.id).update(
+            status=Match.STATUS_LIVE, data_ready=False)
+        league, user = self._league()
+        req = APIRequestFactory().get(
+            f"/leagues/{league.id}/real-matches/{self.match.id}")
+        force_authenticate(req, user=user)
+        resp = LeagueRealMatchDetailView.as_view()(
+            req, league_id=league.id, match_id=self.match.id)
+        resp.render()
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["live"])
+        self.assertTrue(resp.data["provisional"])
+        self.assertTrue(resp.data["home"]["provisional"])
+        self.assertTrue(resp.data["away"]["provisional"])
+
+    def test_a_finished_but_unconfirmed_match_is_provisional_without_being_live(self):
+        """The two states are not one: at the final whistle the votes can still move
+        by a tenth until the provider confirms, but nobody else is coming on — so
+        the totals stay marked and the individual lines do not."""
+        Match.objects.filter(id=self.match.id).update(
+            status=Match.STATUS_FINISHED, data_ready=False)
+        league, user = self._league()
+        req = APIRequestFactory().get(
+            f"/leagues/{league.id}/real-matches/{self.match.id}")
+        force_authenticate(req, user=user)
+        resp = LeagueRealMatchDetailView.as_view()(
+            req, league_id=league.id, match_id=self.match.id)
+        resp.render()
+        self.assertFalse(resp.data["live"])
+        self.assertTrue(resp.data["provisional"])
+        self.assertIsNone(resp.data["minute"])
+        lines = resp.data["home"]["starters"] + resp.data["home"]["bench"]
+        self.assertFalse(any(l.get("provisional") for l in lines))
+
+    def test_a_live_match_carries_its_clock_and_marks_every_line(self):
+        Match.objects.filter(id=self.match.id).update(
+            status=Match.STATUS_LIVE, data_ready=False)
+        league, user = self._league()
+        req = APIRequestFactory().get(
+            f"/leagues/{league.id}/real-matches/{self.match.id}")
+        force_authenticate(req, user=user)
+        resp = LeagueRealMatchDetailView.as_view()(
+            req, league_id=league.id, match_id=self.match.id)
+        resp.render()
+        # The clock is whoever has been on longest, read off the appearances.
+        longest = max(a.minutes_played or 0 for a in
+                      MatchAppearance.objects.filter(match=self.match))
+        self.assertEqual(resp.data["minute"], longest)
+        lines = resp.data["home"]["starters"] + resp.data["home"]["bench"]
+        self.assertTrue(all(l.get("provisional") for l in lines))
+
+    def test_a_settled_match_is_not_marked_provisional(self):
+        Match.objects.filter(id=self.match.id).update(
+            status=Match.STATUS_FINISHED, data_ready=True)
+        league, user = self._league()
+        req = APIRequestFactory().get(
+            f"/leagues/{league.id}/real-matches/{self.match.id}")
+        force_authenticate(req, user=user)
+        resp = LeagueRealMatchDetailView.as_view()(
+            req, league_id=league.id, match_id=self.match.id)
+        resp.render()
+        self.assertFalse(resp.data["live"])
+        self.assertFalse(resp.data["provisional"])
+
     def test_detail_404_without_appearances(self):
         league, user = self._league()
         empty = Match.objects.create(

@@ -971,16 +971,6 @@ export async function acceptAllLeagueDecisions(): Promise<{ resolved: number; bl
   await sleep(60);
   return { resolved: 0, blocked_reason: null };
 }
-export async function refreshLeagueDecisions(): Promise<{
-  seeded: number;
-  opened: number;
-  roster: number;
-  blocked_reason: string | null;
-}> {
-  await sleep(60);
-  return { seeded: 0, opened: 0, roster: 0, blocked_reason: null };
-}
-
 // Push needs a real server (VAPID keys, a subscription store) and a real browser
 // endpoint; in mock mode it is simply reported as unavailable.
 export async function getPushConfig(): Promise<{ enabled: boolean; public_key: string }> {

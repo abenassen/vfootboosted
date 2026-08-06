@@ -166,7 +166,7 @@ def players_needing_decision(league, *,
 
 
 @transaction.atomic
-def open_role_decisions(league, *, opened_by=None,
+def open_role_decisions(league, *, opened_by=None, notify: bool = False,
                         min_market_value: int = RELEVANCE_MIN_VALUE_EUR) -> int:
     """Create the blocking decisions for this league's unresolvable players.
 
@@ -215,7 +215,41 @@ def open_role_decisions(league, *, opened_by=None,
             options=ROLE_OPTIONS, proposed=proposed, rationale=rationale,
             blocks_market=True, opened_by=opened_by))
     LeagueDecision.objects.bulk_create(made, ignore_conflicts=True)
+    if made and notify:
+        _push_new_decisions(league, len(made))
     return len(made)
+
+
+def _push_new_decisions(league, n: int) -> int:
+    """Tell the admin the queue has grown, because nothing else will.
+
+    Only from the unattended path. A snapshot run while the admin is looking at
+    the screen — creating the league, opening the market — already puts the
+    questions in front of him; a notification about what he is already reading is
+    noise. The one that matters is the Transfermarkt import at six in the morning,
+    which is precisely when nobody is watching and the market stays blocked for
+    those players until someone answers.
+    """
+    from vfoot.services import push_channel
+
+    admins = [m.user for m in LeagueMembership.objects
+              .filter(league=league, role=LeagueMembership.ROLE_ADMIN)
+              .select_related("user")]
+    if league.owner and league.owner not in admins:
+        admins.append(league.owner)
+    sent = 0
+    for user in admins:
+        sent += push_channel.send_to_user(
+            user,
+            title=f"🗳️ {n} {'nuovo ruolo' if n == 1 else 'nuovi ruoli'} da decidere",
+            body=(f"{league.name}: il mercato reale ha portato giocatori che il "
+                  f"listone non sa classificare. Restano non acquistabili finché "
+                  f"non decidi."),
+            url="/decisioni",
+            # One tag per league: a second import before the admin has answered
+            # replaces the notification instead of stacking another copy.
+            tag=f"decisions-{league.id}")
+    return sent
 
 
 def blocking_decisions(league):

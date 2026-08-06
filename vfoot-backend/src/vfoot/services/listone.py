@@ -32,9 +32,9 @@ from realdata.models import Player, PlayerTeamStint
 from vfoot.models import LeaguePlayerRole, CurrentPlayerRole
 
 
-def _open_role_decisions(league):   # thin indirection, keeps the import lazy
+def _open_role_decisions(league, notify):   # thin indirection, keeps the import lazy
     from vfoot.services.league_decisions import open_role_decisions
-    return open_role_decisions(league)
+    return open_role_decisions(league, notify=notify)
 
 
 def eligible_player_ids(competition_season_id: int) -> set[int]:
@@ -48,8 +48,15 @@ def eligible_player_ids(competition_season_id: int) -> set[int]:
                .values_list("player_id", flat=True).distinct())
 
 
-def snapshot_league_listone(league, *, reset: bool = False) -> dict:
-    """Snapshot/refresh the league's frozen role listone. Returns a summary dict."""
+def snapshot_league_listone(league, *, reset: bool = False,
+                            notify: bool = False) -> dict:
+    """Snapshot/refresh the league's frozen role listone. Returns a summary dict.
+
+    ``notify`` pushes any NEW questions to the league's admins. Off by default and
+    passed only by the Transfermarkt import: every other caller runs while somebody
+    is looking at the result (creating the league, opening the market), and a
+    notification about the screen you are already on is noise.
+    """
     if league.reference_season_id is None:
         raise ValueError(
             f"League {league.id} has no reference_season; cannot build a listone.")
@@ -112,5 +119,5 @@ def snapshot_league_listone(league, *, reset: bool = False) -> dict:
 
     # Whatever the seeding could not settle becomes an explicit question for the
     # admin, and blocks the market until answered.
-    summary["decisions_opened"] = _open_role_decisions(league)
+    summary["decisions_opened"] = _open_role_decisions(league, notify)
     return summary

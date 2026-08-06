@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getRealFixtures } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
+import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { Badge, Card, SectionTitle } from '../components/ui';
 import type { RealFixtureItem, RealFixturesResponse } from '../types/realChampionship';
 
@@ -14,20 +15,42 @@ export default function RealChampionshipPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [matchday, setMatchday] = useState<number | null>(null);
+  // Bumped by the socket; the only reason this page ever re-fetches on its own.
+  const [tick, setTick] = useState(0);
 
+  // Whether anything has ever been on screen, so the spinner and the error box
+  // only take over a page that has nothing to show yet.
+  const loadedRef = useRef(false);
+
+  // Changing LEAGUE drops the chosen round — it belongs to the old calendar. A
+  // live nudge must NOT: you would be pulled back to the current matchday every
+  // time a vote moved, which is precisely while you are most likely to be reading
+  // another round. Hence two effects rather than one.
   useEffect(() => {
     setMatchday(null);
+  }, [selectedLeagueId]);
+
+  useEffect(() => {
     if (!selectedLeagueId) {
       setData(null);
       return;
     }
-    setLoading(true);
+    // Only the FIRST load blanks the page: a re-fetch pushed while you are reading
+    // must not replace the calendar with "Caricamento…".
+    if (!loadedRef.current) setLoading(true);
     setError(null);
     void getRealFixtures(selectedLeagueId)
-      .then(setData)
+      .then((res) => {
+        setData(res);
+        loadedRef.current = true;
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [selectedLeagueId]);
+  }, [selectedLeagueId, tick]);
+
+  // Same nudge the match detail listens to: every live import of a match in this
+  // championship refreshes the scores and the in-corso marks in place.
+  useLiveSocket(selectedLeagueId ?? null, useCallback(() => setTick((n) => n + 1), []));
 
   const matchdays = useMemo(
     () => (data?.matchdays ?? []).map((g) => g.matchday).filter((m): m is number => m != null),
@@ -40,8 +63,8 @@ export default function RealChampionshipPage() {
   );
 
   if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega.</div>;
-  if (loading) return <div className="text-sm text-slate-500">Caricamento calendario…</div>;
-  if (error) return <div className="text-sm text-red-600">Errore: {error}</div>;
+  if (loading && !data) return <div className="text-sm text-slate-500">Caricamento calendario…</div>;
+  if (error && !data) return <div className="text-sm text-red-600">Errore: {error}</div>;
   if (!data?.season)
     return <div className="text-sm text-slate-500">Questa lega non ha una stagione di riferimento.</div>;
 

@@ -129,4 +129,11 @@ export interface ClassicFixtureDetail {
   live?: boolean;
   /** Some real match behind these votes has not settled: the score can still change. */
   provisional?: boolean;
+  /**
+   * Minutes played by whoever has been on longest — the clock of a real match in
+   * progress. Null once it is over. Only the real-match detail sends it: a fantasy
+   * fixture spans ten real matches at ten different minutes, and there is no single
+   * clock to show.
+   */
+  minute?: number | null;
 }

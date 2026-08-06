@@ -44,6 +44,9 @@ const NEXT_MATCH_HORIZON = 4;
  *  trophy the admin picked for the prize itself. */
 const ACTIVITY_ICON: Record<LeagueActivityItem['kind'], string> = {
   acquisto: '🔁',
+  // Not the same glyph as `acquisto`: one is a manager spending credits, the
+  // other is a real club signing a player, and the feed shows them side by side.
+  mercato_reale: '✍️',
   decisione: '🗳️',
   giornata: '🏁',
   competizione: '🎌',
@@ -165,8 +168,22 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     });
   }, [mine]);
 
+  // IN DATE ORDER, for the same reason the block above is: `round_no` is the
+  // competition's OWN turn number, not a date. Sorting the finished ones by it
+  // let the championship — at its round 22 while a cup is at its round 3 — take
+  // all four slots for good, so a semifinal played yesterday never appeared and
+  // the block was "the last four of the championship" wearing the name of the
+  // league's last four.
   const lastResults = useMemo(
-    () => [...mine].filter((f) => f.status === 'finished').sort((a, b) => b.round_no - a.round_no).slice(0, 4),
+    () =>
+      [...mine]
+        .filter((f) => f.status === 'finished')
+        .sort(
+          (a, b) =>
+            (b.real_matchday ?? Number.NEGATIVE_INFINITY) - (a.real_matchday ?? Number.NEGATIVE_INFINITY) ||
+            b.round_no - a.round_no,
+        )
+        .slice(0, 4),
     [mine],
   );
 

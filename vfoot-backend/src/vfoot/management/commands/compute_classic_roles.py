@@ -14,12 +14,10 @@ started listone is frozen and re-running this must never disturb it.
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
 
 from realdata.models import CompetitionSeason, Player
-from vfoot.models import CurrentPlayerRole
 from vfoot.services.role_inference import (
-    LOW_CONFIDENCE, infer_roles, tm_positions,
+    LOW_CONFIDENCE, infer_roles, store_roles, tm_positions,
 )
 
 
@@ -96,16 +94,9 @@ class Command(BaseCommand):
         if o["dry_run"]:
             self.stdout.write("\n[dry-run] nulla e' stato scritto")
             return
-        # CurrentPlayerRole is "the current role", one row per player and no season
-        # dimension: a recompute overwrites the whole table in place.
-        with transaction.atomic():
-            CurrentPlayerRole.objects.all().delete()
-            CurrentPlayerRole.objects.bulk_create([
-                CurrentPlayerRole(
-                    player_id=r.player_id,
-                    category=r.category, confidence=r.confidence,
-                    role_margin=r.role_margin,
-                    role_data=r.role_data, role_mitigated=r.role_mitigated,
-                    method=r.method, tm_position=r.tm_position)
-                for r in rep.results], batch_size=500)
-        self.stdout.write(self.style.SUCCESS(f"\n{len(rep.results)} ruoli salvati."))
+        # Same write the Transfermarkt import performs after every scrape, on
+        # purpose: the season's opening run and the in-season top-up must produce
+        # the same table, or the roles a league sees would depend on which of the
+        # two last touched them.
+        n = store_roles(rep)
+        self.stdout.write(self.style.SUCCESS(f"\n{n} ruoli salvati."))

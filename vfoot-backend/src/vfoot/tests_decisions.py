@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
-from datetime import date
+from datetime import date, timedelta
+from unittest.mock import patch
 
 from realdata.models import (
     Competition, CompetitionSeason, Player, PlayerMarketValue, PlayerTeamStint,
@@ -15,6 +17,7 @@ from vfoot.models import (
     FantasyLeague, LeagueDecision, LeagueMembership, LeaguePlayerRole,
     CurrentPlayerRole,
 )
+from vfoot.services import push_channel
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
     open_role_decisions, resolve, unavailable_players, undecided_player_ids,
@@ -260,6 +263,9 @@ class LateArrivalTests(DecisionQueueTests):
         self.snapshot = snapshot_league_listone
 
     def test_a_late_arrival_is_seeded_and_can_block_the_market(self):
+        """Through the snapshot itself, which is what the Transfermarkt import runs
+        for every classic league on the season right after it has written the new
+        stints — the arrival and the question it raises are the same event."""
         self._player("Titolare", method=CurrentPlayerRole.METHOD_TM,
                      tm_position="centre-back", role="DIF")
         self.snapshot(self.league)
@@ -268,12 +274,9 @@ class LateArrivalTests(DecisionQueueTests):
         # ...the January window opens and an unclassifiable winger arrives.
         self._player("Arrivato a gennaio", method=CurrentPlayerRole.METHOD_DEFAULT)
 
-        self.client.force_authenticate(user=self.admin)
-        r = self.client.post(f"/api/v1/leagues/{self.league.id}/decisions/refresh",
-                             format="json")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["opened"], 1)
-        self.assertIsNotNone(r.json()["blocked_reason"])
+        summary = self.snapshot(self.league)
+        self.assertEqual(summary["decisions_opened"], 1)
+        self.assertIsNotNone(market_blocked_reason(self.league))
 
     def test_opening_the_market_catches_up_with_the_roster_by_itself(self):
         """Opening the market seeds whoever has arrived since — and opens for
@@ -618,18 +621,16 @@ class LeagueCreationTests(DecisionQueueTests):
         self.assertFalse(LeaguePlayerRole.objects.filter(league=new).exists())
         self.assertFalse(LeagueDecision.objects.filter(league=new).exists())
 
-    def test_the_refresh_is_refused_where_there_is_no_listone(self):
-        """The action is classic-only; running it on an aura league would seed it
-        with per-role rows nothing there reads."""
+    def test_an_aura_league_is_never_given_a_listone(self):
+        """The listone is a classic-mode object; seeding one into an aura league
+        would fill it with per-role rows nothing there reads. Every entry point to
+        the snapshot is gated on the mode, so the league simply never gets one."""
         r = self._create("aura")
         aura = FantasyLeague.objects.get(id=r.json()["league_id"])
         LeagueMembership.objects.filter(league=aura, user=self.admin).update(role="admin")
 
         listed = self.client.get(f"/api/v1/leagues/{aura.id}/decisions").json()
         self.assertFalse(listed["has_listone"])
-        refresh = self.client.post(f"/api/v1/leagues/{aura.id}/decisions/refresh",
-                                   format="json")
-        self.assertEqual(refresh.status_code, 400)
         self.assertFalse(LeaguePlayerRole.objects.filter(league=aura).exists())
 
 
@@ -733,3 +734,158 @@ class ConsultationEmailTests(DecisionQueueTests):
             self._consult(d)
             self._resolve(d, "CEN")
         self.assertEqual(self.mail.outbox, [])
+
+
+class NewDecisionNotificationTests(LateArrivalTests):
+    """The admin is told the queue has grown — but only when nobody was watching.
+
+    The market stays blocked for a player in limbo, so a question raised at six in
+    the morning by the Transfermarkt import is work that will sit untouched until
+    someone happens to open the page. That is the one case worth a push.
+    """
+
+    def test_the_unattended_import_path_notifies_the_admin(self):
+        self.snapshot(self.league)
+        self._player("Arrivato a gennaio", method=CurrentPlayerRole.METHOD_DEFAULT)
+
+        with patch.object(push_channel, "send_to_user", return_value=1) as send:
+            summary = self.snapshot(self.league, notify=True)
+
+        self.assertEqual(summary["decisions_opened"], 1)
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(send.call_args.args[0], self.admin)
+        # One tag per league: a second import before he has answered replaces the
+        # notification rather than stacking another copy of it.
+        self.assertEqual(send.call_args.kwargs["tag"], f"decisions-{self.league.id}")
+        self.assertEqual(send.call_args.kwargs["url"], "/decisioni")
+
+    def test_a_snapshot_the_admin_is_watching_stays_silent(self):
+        """League creation, opening the market: the questions are already on the
+        screen he is looking at, and a notification about that is noise."""
+        self.snapshot(self.league)
+        self._player("Arrivato a gennaio", method=CurrentPlayerRole.METHOD_DEFAULT)
+
+        with patch.object(push_channel, "send_to_user") as send:
+            summary = self.snapshot(self.league)          # notify defaults to False
+
+        self.assertEqual(summary["decisions_opened"], 1)
+        send.assert_not_called()
+
+    def test_an_import_that_raises_nothing_notifies_nobody(self):
+        self.snapshot(self.league)
+        with patch.object(push_channel, "send_to_user") as send:
+            summary = self.snapshot(self.league, notify=True)
+        self.assertEqual(summary["decisions_opened"], 0)
+        send.assert_not_called()
+
+
+class RealSigningFeedTests(DecisionQueueTests):
+    """"Who is new to MY listone", on the league's home feed — the coups only.
+
+    Deliberately NOT derived from the roster stint. A stint records when we first
+    SAW a player in a squad: the season's first import opens one for all 660 of
+    them on the same day and never fills transfer_kind, so it cannot tell a January
+    arrival from the opening squad load. The league's own listone can — it is
+    seeded in one burst, and a role row created well after that burst belongs to
+    someone who was not there before.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+        self.opened = timezone.now() - timedelta(days=90)
+
+    def _in_listone(self, name, value_eur, *, created_at, source=None):
+        p = Player.objects.create(full_name=name, short_name=name)
+        PlayerMarketValue.objects.create(player=p, provider="transfermarkt",
+                                         value_eur=value_eur,
+                                         as_of=date(2026, 7, 1))
+        row = LeaguePlayerRole.objects.create(
+            league=self.league, player=p, role="ATT",
+            source=source or LeaguePlayerRole.SOURCE_SEED)
+        # created_at has a default rather than auto_now_add, but the row is already
+        # written: set it explicitly so the test controls the timeline.
+        LeaguePlayerRole.objects.filter(pk=row.pk).update(created_at=created_at)
+        return p
+
+    def _opening_squad(self, at=None, n=25):
+        """A burst that draws the listone: nobody in it is news, whenever it lands."""
+        when = at or self.opened
+        for i in range(n):
+            self._in_listone(f"Titolare {when:%m%d}-{i}", 40_000_000, created_at=when)
+
+    def _feed(self):
+        return [i for i in self.client.get(
+            f"/api/v1/leagues/{self.league.id}/activity?limit=50").json()
+            if i["kind"] == "mercato_reale"]
+
+    def test_the_opening_squad_is_not_a_transfer_ticker(self):
+        """The bug this shape exists to avoid: 660 players seeded on day one, all
+        reported as signings, burying every other thing the league did."""
+        self._opening_squad()
+        self.assertEqual(self._feed(), [])
+
+    def test_a_later_arrival_is_news(self):
+        self._opening_squad()
+        self._in_listone("Colpo di gennaio", 25_000_000,
+                         created_at=timezone.now() - timedelta(days=2))
+        feed = self._feed()
+        self.assertEqual(len(feed), 1)
+        self.assertIn("Colpo di gennaio", feed[0]["text"])
+        self.assertEqual(feed[0]["detail"], "25 M€")
+
+    def test_a_cheap_later_arrival_is_not(self):
+        self._opening_squad()
+        self._in_listone("Riserva", 800_000,
+                         created_at=timezone.now() - timedelta(days=2))
+        self.assertEqual(self._feed(), [])
+
+    def test_the_floor_is_higher_than_the_one_that_raises_a_decision(self):
+        """€5M is 'worth deciding a role for'; it is not 'worth telling the league
+        about'. A player between the two reaches the admin's queue and stays off
+        everyone's home page."""
+        self._opening_squad()
+        self._in_listone("Fra le due soglie", 7_000_000,
+                         created_at=timezone.now() - timedelta(days=2))
+        self.assertEqual(self._feed(), [])
+
+    def test_an_admin_answer_is_not_reported_as_a_signing(self):
+        """Resolving a decision writes a role row too; it is the decision, and the
+        feed already carries those under their own kind."""
+        self._opening_squad()
+        self._in_listone("Deciso dall'admin", 30_000_000,
+                         created_at=timezone.now() - timedelta(days=2),
+                         source=LeaguePlayerRole.SOURCE_ADMIN)
+        self.assertEqual(self._feed(), [])
+
+    def test_a_null_market_value_does_not_crash_the_feed(self):
+        """Real data has them, and latest_market_values KEYS such a player with a
+        None rather than leaving him out — so a `.get(pid, 0)` default never fires
+        and the comparison blows up. Found by opening the page, not by a test."""
+        self._opening_squad()
+        self._in_listone("Senza quotazione", None,
+                         created_at=timezone.now() - timedelta(days=2))
+        self._in_listone("Colpo", 25_000_000,
+                         created_at=timezone.now() - timedelta(days=2))
+        feed = self._feed()
+        self.assertEqual(len(feed), 1)
+        self.assertIn("Colpo", feed[0]["text"])
+
+    def test_a_second_seeding_burst_is_not_a_wave_of_signings(self):
+        """A listone can be drawn more than once — a reference season set later, a
+        --reset, a demo re-seed. Keying on "the FIRST burst" reported every row of
+        the second one as a transfer; a real dev league seeded in two runs (250 rows,
+        then 287 six days later) filled its whole home page that way."""
+        self._opening_squad()
+        self._opening_squad(at=timezone.now() - timedelta(days=30))
+        self.assertEqual(self._feed(), [])
+
+    def test_a_handful_arriving_together_is_still_news(self):
+        """The rule is about the SHAPE of a seeding, not about arriving on the same
+        day: a poll that finds three signings at once must still report them."""
+        self._opening_squad()
+        when = timezone.now() - timedelta(days=2)
+        for i in range(3):
+            self._in_listone(f"Colpo {i}", 25_000_000, created_at=when)
+        self.assertEqual(len(self._feed()), 3)

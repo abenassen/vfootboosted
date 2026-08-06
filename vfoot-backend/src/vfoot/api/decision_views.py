@@ -19,7 +19,6 @@ from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
     resolve, set_consultation,
 )
-from vfoot.services.listone import snapshot_league_listone
 
 
 def _membership(league, user_id):
@@ -157,35 +156,17 @@ class LeagueDecisionAcceptAllView(APIView):
                          "blocked_reason": market_blocked_reason(league)})
 
 
-class LeagueDecisionRefreshView(APIView):
-    """Bring the listone up to date with the real market, and re-open whatever
-    that turns up.
-
-    A league's roles are frozen, but its ROSTER is not: a January signing, or
-    anyone who arrives after the auction, has no frozen role at all — and until
-    this runs, the pagella quietly falls back to the global seed for him and no
-    decision is ever raised. The snapshot is additive, so existing rows (admin
-    overrides included) are untouched; only the newcomers are seeded.
-    """
-
-    authentication_classes = [TokenAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, league_id: int):
-        league = get_object_or_404(FantasyLeague, id=league_id)
-        if not _is_admin(league, request.user.id):
-            return Response({"detail": "Solo l'amministratore."},
-                            status=status.HTTP_403_FORBIDDEN)
-        # The listone is a classic-mode object: seeding one into an aura league
-        # would fill it with per-role rows nothing there reads, and needs a
-        # reference season to mean anything at all.
-        if league.mode != FantasyLeague.MODE_CLASSIC or not league.reference_season_id:
-            return Response(
-                {"detail": "Il listone esiste solo nelle leghe classic legate a una "
-                           "stagione reale."},
-                status=status.HTTP_400_BAD_REQUEST)
-        summary = snapshot_league_listone(league)
-        return Response({"seeded": summary.get("created", 0),
-                         "opened": summary.get("decisions_opened", 0),
-                         "roster": summary.get("roster", 0),
-                         "blocked_reason": market_blocked_reason(league)})
+# There was a LeagueDecisionRefreshView here (POST decisions/refresh), an on-demand
+# re-run of snapshot_league_listone offered to the league admin. It was removed
+# because it could not do anything: every input the snapshot reads — the roster
+# stints, Player.classic_role_seed, CurrentPlayerRole — is written by
+# import_transfermarkt_squads and by nothing else, and that import already
+# snapshots every classic league on the season in the same run. Between two
+# imports the endpoint recomputed the same answer from unchanged data.
+#
+# The remaining entry points are the ones tied to a real change of state: league
+# creation, the Transfermarkt import, opening the market, opening an offer session.
+# The single input that CAN move without an import is compute_classic_roles, a
+# manual command with no timer — and whoever runs it also has
+# `manage.py freeze_league_listone --league N`, which is this view's exact
+# equivalent, on the same shell.

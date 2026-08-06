@@ -410,7 +410,9 @@ export async function updateMyTeam(
 }
 
 export interface LeagueActivityItem {
-  kind: 'acquisto' | 'decisione' | 'giornata' | 'competizione' | 'premio';
+  /** `acquisto` is the FANTASY market (a manager buying); `mercato_reale` is a
+   *  real Serie A transfer into the reference championship. */
+  kind: 'acquisto' | 'mercato_reale' | 'decisione' | 'giornata' | 'competizione' | 'premio';
   at: string | null;
   text: string;
   detail: string | null;
@@ -1237,15 +1239,6 @@ export async function acceptAllLeagueDecisions(
   leagueId: number,
 ): Promise<{ resolved: number; blocked_reason: string | null }> {
   const res = await authedPost(`/leagues/${leagueId}/decisions/accept-all`, {});
-  return parseJsonOrThrow(res);
-}
-
-/** Re-read the real roster and raise whatever it turns up (a January signing has
- *  no frozen role until this runs). Additive: nothing already decided moves. */
-export async function refreshLeagueDecisions(
-  leagueId: number,
-): Promise<{ seeded: number; opened: number; roster: number; blocked_reason: string | null }> {
-  const res = await authedPost(`/leagues/${leagueId}/decisions/refresh`, {});
   return parseJsonOrThrow(res);
 }
 

@@ -157,8 +157,10 @@ files as a midfielder is really a forward).
 
 1.  **`Player.classic_role_seed`** — the raw Transfermarkt seed. Wingers map to CEN by
     convention. This SEEDS the layers below; it must **never** be read to score.
-2.  **`CurrentPlayerRole`** (ONE row per player, no season dimension,
-    `manage.py compute_classic_roles`) — TM + a k-means style inference over 15
+2.  **`CurrentPlayerRole`** (ONE row per player, no season dimension; written by
+    `role_inference.store_roles`, whether from `manage.py compute_classic_roles`
+    at season start or from the Transfermarkt import's automatic
+    `refresh_current_roles` after every scrape) — TM + a k-means style inference over 15
     measures that resolves ambiguous positions. A player with too few minutes to
     cluster (< 600) but who lined up at all is disambiguated by his **coarse
     SofaScore lineup position** (F/M/D, stored in `MatchAppearance.raw_stats
@@ -180,8 +182,24 @@ proposal (no market value ⇒ obscure ⇒ auto-default). See `league_decisions.p
 
 When the queue is raised: `snapshot_league_listone` is the single entry point, and
 it runs at **league creation** (classic + reference season), on every **Transfermarkt
-import**, when the market or an offer session **opens**, and on the admin's explicit
-`decisions/refresh`. It is additive and idempotent — already-frozen roles never move.
+import**, and when the market or an offer session **opens** — each one a real change
+of state. There is deliberately no on-demand "refresh" action: every input the
+snapshot reads (roster stints, `Player.classic_role_seed`, `CurrentPlayerRole`) is
+written by `import_transfermarkt_squads`, which snapshots every affected league in
+the same run, so a manual re-run between two imports recomputes the same answer from
+unchanged data. It is additive and idempotent — already-frozen roles never move.
+
+The import runs the two passes IN ORDER, and the order is the whole point:
+`refresh_current_roles(cs)` first (layer 2, destructive — the global estimate may
+improve whenever new football has been played), then `snapshot_league_listone` per
+league (layer 3, additive — a role frozen inside a league never moves). Only that
+order gives a new signing a `CurrentPlayerRole` row before the leagues read it, so
+each league resolves him under its own `role_mode`; without it he falls through to
+`Player.classic_role_seed`, one raw provider value for every league, and the
+league's choice of role mode silently stops applying to its newest players.
+`refresh_current_roles` refuses to write when the data season measures nothing and
+the table already holds measured roles — an empty data season would otherwise trade
+every measured role for a provider default and report success.
 A player awaiting a decision is deliberately left WITHOUT a `LeaguePlayerRole` row,
 and that absence is the gate the auction and the offer market read; so the snapshot
 must exclude both `players_needing_decision` **and** `undecided_player_ids` (the

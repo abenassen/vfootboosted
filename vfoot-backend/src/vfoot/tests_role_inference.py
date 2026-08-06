@@ -1,14 +1,17 @@
 """Tests for the data-driven classic role inference."""
 from __future__ import annotations
 
+from django.contrib.auth.models import User
 from django.test import TestCase
 
 from realdata.models import (
     Competition, CompetitionSeason, Match, MatchAppearance, Player,
     PlayerTeamStint, PlayerZoneFeature, Season, Team, TeamSeason,
 )
+from vfoot.models import CurrentPlayerRole, FantasyLeague, LeaguePlayerRole
 from vfoot.services.role_inference import (
-    TM_AMBIGUOUS, TM_DEFAULT, TM_DETERMINISTIC, infer_roles, tm_positions,
+    TM_AMBIGUOUS, TM_DEFAULT, TM_DETERMINISTIC, infer_roles,
+    refresh_current_roles, tm_positions,
 )
 
 
@@ -119,3 +122,75 @@ class RoleInferenceTests(TestCase):
     def test_ambiguous_set_and_deterministic_set_do_not_overlap(self):
         self.assertFalse(TM_AMBIGUOUS & set(TM_DETERMINISTIC))
         self.assertEqual(set(TM_DEFAULT), TM_AMBIGUOUS)
+
+
+class CurrentRoleRefreshTests(RoleInferenceTests):
+    """The unattended half: what the Transfermarkt import runs after every scrape.
+
+    Destructive on the GLOBAL table by design — the estimate may improve whenever
+    new football has been played — and the guard that keeps it from destroying
+    anything of value when the data season turns out to be empty.
+    """
+
+    def test_a_newcomer_gets_a_row_so_each_league_can_resolve_him_its_own_way(self):
+        """The point of the whole exercise. Without a CurrentPlayerRole row a new
+        signing falls through to Player.classic_role_seed — one provider value for
+        every league — and the league's role_mode stops applying to him."""
+        self._population()
+        newcomer = self._player("Arrivato a gennaio", "left winger", col=4,
+                                seasons=("cur",))
+        out = refresh_current_roles(self.cur, data_cs=self.prev)
+        self.assertTrue(out["written"])
+
+        row = CurrentPlayerRole.objects.get(player_id=newcomer.id)
+        # Both variants present is what lets two leagues on the same season answer
+        # differently; a single seed value could not.
+        self.assertTrue(row.role_data)
+        self.assertTrue(row.role_mitigated)
+        self.assertEqual(row.tm_position, "left winger")
+
+    def test_the_refresh_never_touches_a_role_already_frozen_in_a_league(self):
+        """Destructive globally, additive per league — the invariant the whole
+        design rests on: a squad must not find itself holding a player who had a
+        different role when he was paid for."""
+        self._population()
+        p = Player.objects.get(full_name="MID0")
+        user = User.objects.create_user("owner", password="x")
+        league = FantasyLeague.objects.create(
+            name="L", owner=user, mode=FantasyLeague.MODE_CLASSIC,
+            reference_season=self.cur)
+        LeaguePlayerRole.objects.create(league=league, player=p, role="ATT",
+                                        source=LeaguePlayerRole.SOURCE_ADMIN)
+
+        refresh_current_roles(self.cur, data_cs=self.prev)
+
+        frozen = LeaguePlayerRole.objects.get(league=league, player=p)
+        self.assertEqual(frozen.role, "ATT")
+        self.assertEqual(frozen.source, LeaguePlayerRole.SOURCE_ADMIN)
+
+    def test_an_empty_data_season_does_not_wipe_measured_roles(self):
+        """A data season with no zone features is the ordinary way to get here (it
+        was never imported, or was pruned). ``infer_roles`` degrades gracefully to
+        provider positions, which is right for one player and catastrophic for a
+        table: it would trade every measured role for a default and report success.
+        So it changes nothing and says so."""
+        self._population()
+        self.assertTrue(refresh_current_roles(self.cur, data_cs=self.prev)["written"])
+        measured_before = CurrentPlayerRole.objects.filter(
+            method=CurrentPlayerRole.METHOD_CATEGORY).count()
+        self.assertGreater(measured_before, 0)
+
+        PlayerZoneFeature.objects.all().delete()
+        out = refresh_current_roles(self.cur, data_cs=self.prev)
+
+        self.assertFalse(out["written"])
+        self.assertEqual(out["reason"], "no_measurement")
+        self.assertEqual(
+            CurrentPlayerRole.objects.filter(
+                method=CurrentPlayerRole.METHOD_CATEGORY).count(),
+            measured_before)
+
+    def test_no_previous_season_is_reported_not_guessed(self):
+        out = refresh_current_roles(self.prev)   # nothing before it
+        self.assertFalse(out["written"])
+        self.assertEqual(out["reason"], "no_data_season")

@@ -247,13 +247,25 @@ def match_in_progress(match) -> bool:
     return match.status == Match.STATUS_LIVE and not match.data_ready
 
 
+def elapsed_minutes(apps) -> int:
+    """The clock of a match in progress, read off the appearances.
+
+    There is no minute on the ``Match`` row — the provider ships one only inside
+    the live payload, which we do not keep — but whoever has been on longest has
+    been on since kick-off, so his minutes ARE the elapsed time. Free: the number
+    was already being computed to decide who is on the pitch.
+
+    Stoppage time is included exactly as the provider counts it, so this can read
+    past 45 or 90. It is a floor, not a broadcast clock: nobody's minutes tick up
+    between two imports, so it steps forward at the import's pace.
+    """
+    return max((a.minutes_played or 0 for a in apps), default=0)
+
+
 def players_on_pitch(apps) -> set[int]:
     """Of a match IN PROGRESS, who is on the field right now.
 
-    There is no minute on the ``Match`` row — the provider ships one only inside
-    the live payload, which we do not keep — so the clock is read from the
-    appearances themselves: whoever has been on longest has been on since kick-off,
-    and his minutes ARE the elapsed time. Anyone below that has left the field
+    The clock comes from ``elapsed_minutes``; anyone below it has left the field
     (substituted, or sent off), and his performance IS complete even though the
     match is not.
 
@@ -261,7 +273,7 @@ def players_on_pitch(apps) -> set[int]:
     minute zero: at kick-off the whole XI reads 0', and calling them "not on the
     pitch" would be exactly the misreading this exists to remove.
     """
-    elapsed = max((a.minutes_played or 0 for a in apps), default=0)
+    elapsed = elapsed_minutes(apps)
     return {
         a.player_id
         for a in apps

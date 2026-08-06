@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+from datetime import timedelta
 from random import Random
 
 from django.contrib.auth.models import User
@@ -107,7 +108,9 @@ from vfoot.services.competition_stages import (
 from vfoot.services.competition_wizard import WizardError, create_competition, qualified_team_count
 from vfoot.services.league_competitions import main_competition
 from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic_lineup
-from vfoot.services.classic_pagella import get_reference, pagella_for_match
+from vfoot.services.classic_pagella import (
+    elapsed_minutes, get_reference, match_in_progress, pagella_for_match,
+)
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
     open_role_decisions, resolve as resolve_decision, unavailable_players,
@@ -332,6 +335,97 @@ _COMPETITION_END_DETAIL = {
     FantasyCompetition.FORMAT_GROUPS_KNOCKOUT: "gironi e finali conclusi",
 }
 
+# Above which a real transfer is NEWS to a fantasy league. Deliberately its own
+# number, and well above league_decisions.RELEVANCE_MIN_VALUE_EUR (€5M, "worth an
+# admin ruling on his role"): leagues are drawn up in August with the real market
+# still running, so signings keep landing for weeks, and a floor that admitted
+# every squad filler would turn the home page into a transfer ticker and bury the
+# league's own life underneath it. Only the genuine coups.
+NEWS_MIN_VALUE_EUR = 10_000_000
+
+
+def _eur_short(value: int) -> str:
+    """12_500_000 -> "12,5 M€". Italian decimal comma, and no decimals when round."""
+    m = value / 1_000_000
+    return (f"{m:.0f} M€" if abs(m - round(m)) < 0.05
+            else f"{m:.1f} M€".replace(".", ","))
+
+
+# More seed rows than this written in the same MINUTE is a listone being drawn, not
+# a market. The real market tops a league up one player at a time, hours apart; a
+# seeding writes hundreds at once. Keyed on the burst itself rather than on "the
+# first one", because a listone can be drawn more than once — a league whose
+# reference season is set later, a --reset, a demo re-seed — and every one of those
+# bursts is the league being built, never news.
+_SEEDING_BURST = 20
+
+
+def _real_signings(league, limit: int) -> list[dict]:
+    """Players who have JOINED THIS LEAGUE'S LISTONE since it was drawn.
+
+    Read from LeaguePlayerRole, not from the roster stint, and that is the whole
+    difficulty. A stint records when we first SAW a player in a squad, not when he
+    signed: the first import of a season opens one for all 660 players on the same
+    day and leaves ``transfer_kind`` empty, so "stint opened" cannot tell a January
+    arrival from the initial squad load. Deriving the feed from it turned the home
+    page into a list of 660 transfers dated at the season's first scrape.
+
+    A league's own listone can tell them apart, by SHAPE rather than by date: it is
+    written in bursts of hundreds at a stroke, while the market tops it up one
+    player at a time. So a role row is news when it was written more or less alone
+    — which is also the more useful question, since it is per league and answers
+    "who is new to MY listone" rather than "who moved somewhere in Serie A".
+
+    Seeded rows only: an admin row is a decision being answered, and the feed
+    already carries those under their own kind.
+    """
+    if not league.reference_season_id:
+        return []
+    rows = list(LeaguePlayerRole.objects
+                .filter(league=league, source=LeaguePlayerRole.SOURCE_SEED)
+                .select_related("player")
+                .order_by("-created_at")[:limit * 4])
+    if not rows:
+        return []
+
+    # Count each minute over the WHOLE listone, not just the page we fetched: a
+    # burst bigger than the page would otherwise look small enough to report.
+    per_minute: dict = {}
+    for at in (LeaguePlayerRole.objects
+               .filter(league=league, source=LeaguePlayerRole.SOURCE_SEED)
+               .values_list("created_at", flat=True)):
+        per_minute[at.replace(second=0, microsecond=0)] = (
+            per_minute.get(at.replace(second=0, microsecond=0), 0) + 1)
+
+    fresh = [r for r in rows
+             if per_minute.get(r.created_at.replace(second=0, microsecond=0), 0)
+             <= _SEEDING_BURST]
+    if not fresh:
+        return []
+    # Only the ones that are actually news. Leagues are usually drawn up in August
+    # with the real market still running, so signings keep landing for weeks; the
+    # floor is its own and well above the one that sends a player to the admin's
+    # queue, because "worth deciding a role for" and "worth telling the league
+    # about" are different questions and the second is much rarer.
+    values = latest_market_values([r.player_id for r in fresh])
+    out = []
+    for r in fresh:
+        # `or 0`, not a default: latest_market_values KEYS a player whose latest
+        # quote is NULL, so .get() returns None rather than missing.
+        value = values.get(r.player_id) or 0
+        if value < NEWS_MIN_VALUE_EUR:
+            continue
+        name = r.player.short_name or r.player.full_name
+        out.append({
+            "kind": "mercato_reale",
+            "at": r.created_at.isoformat(),
+            "text": f"{name} entra nel listone",
+            "detail": _eur_short(value),
+            "team_id": None,
+            "crest": None,
+        })
+    return out
+
 
 class LeagueActivityView(APIView):
     """What has happened in the league lately, newest first.
@@ -365,6 +459,8 @@ class LeagueActivityView(APIView):
                 "team_id": slot.team_id,
                 "crest": slot.team.crest,
             })
+
+        items.extend(_real_signings(league, limit))
 
         for d in (LeagueDecision.objects
                   .filter(league=league, status=LeagueDecision.STATUS_RESOLVED)
@@ -4751,7 +4847,13 @@ class LeagueRealFixturesView(APIView):
 
         groups: dict = {}
         for m in matches:
-            has_detail = (m.status == Match.STATUS_FINISHED and m._apps > 0)
+            # Appearances, not the final whistle: the pagella already rates a
+            # match in progress (whoever is on the pitch is judged on what he has
+            # done so far, see classic_pagella.match_in_progress), so requiring
+            # FINISHED here withheld the one detail worth opening while it is
+            # being played. The votes are provisional and say so; no votes at all
+            # is what a 404 would be.
+            has_detail = m._apps > 0
             item = {
                 "id": m.id,
                 "matchday": m.matchday,
@@ -4808,7 +4910,8 @@ class LeagueRealMatchDetailView(APIView):
             id=match_id)
         if cs is not None and match.competition_season_id != cs.id:
             raise Http404("Match is not in this league's reference season")
-        if not MatchAppearance.objects.filter(match=match).exists():
+        apps = list(MatchAppearance.objects.filter(match=match))
+        if not apps:
             return Response({"detail": "Nessun dato disponibile per questa partita."},
                             status=status.HTTP_404_NOT_FOUND)
 
@@ -4816,7 +4919,30 @@ class LeagueRealMatchDetailView(APIView):
                                 league=league)
         hg, ag = int(match.home_goals or 0), int(match.away_goals or 0)
         result = "home" if hg > ag else "away" if ag > hg else "draw"
+        # Two different kinds of "not settled", and collapsing them lies either way.
+        #
+        # IN PROGRESS: the ball is rolling. Every line can still move, and someone
+        # who has not played yet may still come on — so each line is marked too.
+        #
+        # OVER but not confirmed: nobody else is coming on and nobody's afternoon
+        # will be re-judged, but the provider can still move a number by a tenth
+        # until the +1h confirmation sets data_ready. The totals say so; the lines
+        # do not, because "may shift by a tenth" is not the same claim as "this
+        # player might still play".
+        live = match_in_progress(match)
+        provisional = (not match.data_ready
+                       and match.status in (Match.STATUS_LIVE, Match.STATUS_FINISHED))
+        for side in ("home", "away"):
+            pag[side]["provisional"] = provisional
+            if live:
+                for line in pag[side].get("starters", []) + pag[side].get("bench", []):
+                    line["provisional"] = True
         return Response({
+            "live": live,
+            "provisional": provisional,
+            # The clock, only while it is running: on a match that is over the
+            # number would be the final whistle dressed up as news.
+            "minute": elapsed_minutes(apps) if live else None,
             "mode": "classic",
             "fixture_id": match.id,
             "fantasy_round": match.matchday,

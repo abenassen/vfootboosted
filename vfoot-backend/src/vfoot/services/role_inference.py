@@ -45,6 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+from django.db import transaction
 from django.db.models import Sum
 
 from realdata.models import (
@@ -468,3 +469,75 @@ def infer_roles(roster_season_id: int, data_season_id: int, *,
             role_data=role, role_mitigated=mitigated, method=method,
             tm_position=pos, role_margin=round(margin, 3)))
     return report
+
+
+# --------------------------------------------------------------------------
+# persistence
+# --------------------------------------------------------------------------
+
+
+def store_roles(report: InferenceReport) -> int:
+    """Replace the whole ``CurrentPlayerRole`` table with this report.
+
+    Destructive by design, and that is the right shape: the model is "the current
+    role", one row per player with no season dimension, so a recompute overwrites
+    in place. It is only the GLOBAL estimate — a league's own ``LeaguePlayerRole``
+    is frozen and is never touched from here, which is what lets this run as often
+    as we like without a settled squad ever moving under its owner.
+    """
+    from vfoot.models import CurrentPlayerRole
+
+    with transaction.atomic():
+        CurrentPlayerRole.objects.all().delete()
+        CurrentPlayerRole.objects.bulk_create([
+            CurrentPlayerRole(
+                player_id=r.player_id,
+                category=r.category, confidence=r.confidence,
+                role_margin=r.role_margin,
+                role_data=r.role_data, role_mitigated=r.role_mitigated,
+                method=r.method, tm_position=r.tm_position)
+            for r in report.results], batch_size=500)
+    return len(report.results)
+
+
+def refresh_current_roles(roster_cs, *, data_cs=None, **kw) -> dict:
+    """Re-derive the global roles for a season's squads. The unattended entry point.
+
+    Called after every Transfermarkt import so that a player who signed today gets
+    the same treatment as everyone else — a measured role where there is play data,
+    the provider position where there is not, and BOTH variants stored, so each
+    league resolves him under its own ``role_mode``. Before this existed a newcomer
+    had no row at all and fell through to ``Player.classic_role_seed``: the raw
+    provider map, identical for every league, which quietly made a league's choice
+    of role mode not apply to precisely the players it was most likely to matter for.
+
+    Returns a summary dict; ``written`` says whether the table was replaced.
+    """
+    from vfoot.models import CurrentPlayerRole
+    from vfoot.services.player_ratings import previous_season_with_data
+
+    if data_cs is None:
+        data_cs = previous_season_with_data(roster_cs)
+    if data_cs is None:
+        return {"written": False, "reason": "no_data_season",
+                "detail": f"nessuna stagione precedente con dati per {roster_cs}"}
+
+    report = infer_roles(roster_cs.id, data_cs.id, **kw)
+
+    # The guard that matters in practice. ``infer_roles`` degrades gracefully — no
+    # play data means everyone falls back to the provider position — and that is
+    # right for one player, but catastrophic for a whole table: it would trade a
+    # set of MEASURED roles for provider defaults and report success. A data
+    # season without zone features (never imported, or wiped) is the ordinary way
+    # to arrive here, so it must fail loudly and change nothing.
+    if not report.n_measured and CurrentPlayerRole.objects.filter(
+            method=CurrentPlayerRole.METHOD_CATEGORY).exists():
+        return {"written": False, "reason": "no_measurement",
+                "detail": (f"{data_cs} non ha dati di gioco utilizzabili: la tabella "
+                           f"esistente contiene ruoli misurati e non viene toccata"),
+                "data_season": str(data_cs)}
+
+    return {"written": True, "reason": "ok", "data_season": str(data_cs),
+            "stored": store_roles(report),
+            "measured": report.n_measured, "sofa": report.n_sofa,
+            "default": report.n_default, "unknown": report.n_unknown}

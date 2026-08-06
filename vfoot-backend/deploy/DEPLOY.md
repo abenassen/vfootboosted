@@ -200,14 +200,24 @@ Additive migrations are low-risk; the pg_dump is the real safety net.
 
 ## Per-season data (not created by migrations)
 
-Classic roles need the season-level inference run once, BEFORE real leagues open their
-listone (reads the FINISHED prior season; see `listone.py` for the freeze model):
+Nothing to run by hand. The Transfermarkt import (`vfoot-tm-poll`, twice a day) does
+both halves in order: `refresh_current_roles` re-derives the global `CurrentPlayerRole`
+from the finished prior season, then each classic league's `LeaguePlayerRole` freeze is
+topped up additively. A league created before the first import of a season seeds its
+listone at creation and is caught up by the next poll.
+
+`compute_classic_roles` is NOT part of that pipeline — it is the tuning and inspection
+tool for the inference itself, and the only way to see what it found:
 ```sh
 # on the server, as vfoot; prod season ids: 1 = 25/26, 2 = 26/27
-manage.py compute_classic_roles --season 2 --data-season 1 --dry-run   # then without --dry-run
+manage.py compute_classic_roles --season 2 --data-season 1 --dry-run
 ```
-The per-league `LeaguePlayerRole` freeze then happens automatically when each real
-league is created (seeded from `SeasonPlayerRole`), and is additive thereafter.
+Use it with `--dry-run` to read the categories, the counts by method, and the
+"DA DECIDERE PRIMA DELL'ASTA" list before an auction; its `--min-minutes`,
+`--categories` and `--runs` knobs are for experiments. **A tuned run does not stick**:
+the automatic path always uses the module constants, so it will overwrite a hand-tuned
+table within twelve hours. Promote a finding by changing the constant in
+`role_inference.py`, not by running the command with different flags.
 
 ## Automated polling — ENABLE AT LAUNCH (kept OFF until then)
 
