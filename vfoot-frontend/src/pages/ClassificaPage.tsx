@@ -19,6 +19,7 @@ const VIEW_TITLE: Record<string, string> = { classifica: 'Classifica', tabellone
  *  più non compare: quello si legge dal tabellone. */
 const ADVANCED_REASON: Record<string, string> = {
   punteggio: 'passa ai punteggi',
+  rigori: 'passa ai rigori',
   'fattore campo': 'passa per il fattore campo',
 };
 
@@ -213,6 +214,26 @@ function BracketMatch({ f }: { f: LeagueFixtureItem }) {
       {f.advanced_reason ? (
         <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">
           {ADVANCED_REASON[f.advanced_reason] ?? `passa: ${f.advanced_reason}`}
+          {f.shootout ? ` ${f.shootout.home_goals}-${f.shootout.away_goals}` : ''}
+        </div>
+      ) : null}
+      {/* I tiri, in fila: verde chi ha segnato. Cinque pallini non appesantiscono
+          il tabellone e raccontano tutta la serie. */}
+      {f.shootout ? (
+        <div className="mt-1 space-y-0.5">
+          {(['home', 'away'] as const).map((side) => (
+            <div key={side} className="flex items-center gap-1" title={f.shootout![side].map((k) => k.name).join(' · ')}>
+              {f.shootout![side].map((k, i) => (
+                <span
+                  key={i}
+                  aria-label={`${k.name}: ${k.scored ? 'gol' : 'sbagliato'}`}
+                  className={
+                    'inline-block h-1.5 w-1.5 rounded-full ' + (k.scored ? 'bg-emerald-500' : 'bg-slate-300')
+                  }
+                />
+              ))}
+            </div>
+          ))}
         </div>
       ) : null}
     </Link>

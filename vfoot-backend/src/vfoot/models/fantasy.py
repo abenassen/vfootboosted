@@ -684,6 +684,13 @@ class FantasyFixture(models.Model):
     # Real match source used to score this fantasy fixture in simulation
     source_real_match = models.ForeignKey(Match, on_delete=models.SET_NULL, null=True, blank=True, related_name="mapped_fantasy_fixtures")
 
+    # La serie di rigori che ha deciso questa sfida, tiro per tiro. Sta sulla
+    # gara che l'ha chiusa (il ritorno, o la gara secca) ed e' scritta UNA volta,
+    # quando la sfida viene risolta. Non si ricalcola leggendo il tabellone: e'
+    # deterministica, quindi ricalcolarla darebbe sempre lo stesso risultato, e
+    # allora tanto vale non rifarla. Null = non ci sono stati rigori.
+    shootout = models.JSONField(null=True, blank=True)
+
     # Final fantasy score produced by zone duel engine
     home_total = models.FloatField(default=0.0)
     away_total = models.FloatField(default=0.0)

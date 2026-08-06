@@ -2679,6 +2679,11 @@ class LeagueMatchdayConcludeView(APIView):
             if not stage:
                 continue
             if _stage_is_done(stage):
+                # Le sfide rimaste in parita' si decidono ai rigori, QUI: prima che
+                # il turno successivo chieda chi e' passato, e una volta sola.
+                knockout.settle_shootouts(list(
+                    FantasyFixture.objects.filter(stage=stage)
+                    .select_related("detail", "fantasy_matchday")))
                 if stage.status != CompetitionStage.STATUS_DONE:
                     stage.status = CompetitionStage.STATUS_DONE
                     stage.save(update_fields=["status"])
@@ -4098,6 +4103,9 @@ def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, 
                     if winner is not None and passed[winner].reason != knockout.BY_GOALS
                     else None
                 )
+                # La serie, tiro per tiro. Solo dove c'e' stata: dire "rigori" e
+                # non mostrarli sarebbe la parte peggiore di entrambe le scelte.
+                row["shootout"] = f.shootout or None
                 rows.append(row)
             rounds.append({
                 "round_no": rno,

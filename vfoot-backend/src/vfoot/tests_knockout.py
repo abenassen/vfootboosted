@@ -25,7 +25,9 @@ from vfoot.models import (
 )
 from vfoot.services.competition_prizes import prize_winner_team_ids
 from vfoot.services.competition_stages import resolve_stage
-from vfoot.services.knockout import BY_GOALS, BY_HOME, BY_SCORE, tie_outcomes
+from vfoot.services.knockout import (
+    BY_GOALS, BY_HOME, BY_PENALTIES, BY_SCORE, tie_outcomes,
+)
 
 
 class KnockoutTieTests(TestCase):
@@ -122,6 +124,23 @@ class KnockoutTieTests(TestCase):
         self.assertEqual([t.winner_id for t in out], [a.id, b.id])
 
     # -- l'invariante ------------------------------------------------------- #
+
+    def test_i_rigori_battuti_decidono_prima_del_fattore_campo(self):
+        """Il criterio che Andrea voleva al posto del sorteggio travestito.
+
+        Si LEGGONO dalla partita, non si rigiocano: la serie è deterministica e
+        viene battuta una volta sola, quando la giornata viene conclusa.
+        """
+        a, b = self.teams[0], self.teams[1]
+        fx = self._leg(a, b, 1, 1, scores=(70.0, 70.0))
+        self.assertEqual(self._tie().reason, BY_HOME, "senza rigori decide il campo")
+
+        fx.shootout = {"home_goals": 3, "away_goals": 4, "winner": "away",
+                       "home": [], "away": []}
+        fx.save(update_fields=["shootout"])
+        t = self._tie()
+        self.assertEqual((t.winner_id, t.reason), (b.id, BY_PENALTIES),
+                         "passa chi ha vinto la serie, non chi giocava in casa")
 
     def test_il_tabellone_e_l_albo_doro_dicono_lo_stesso_nome(self):
         """Il motivo per cui la regola sta in un modulo solo.

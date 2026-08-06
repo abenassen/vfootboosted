@@ -594,6 +594,16 @@ export interface ActiveAuctionInfo {
   mode: 'aura' | 'classic';
 }
 
+/** Un rigore: chi l'ha tirato, quanto valeva, e com'è andata. */
+export interface ShootoutKick {
+  player_id: number;
+  name: string;
+  voto_puro: number;
+  p: number;
+  roll: number;
+  scored: boolean;
+}
+
 export interface LeagueFixtureItem {
   fixture_id: number;
   competition_id: number;
@@ -622,9 +632,18 @@ export interface LeagueFixtureItem {
    *  is settled by the aggregate score and then by home advantage (see the backend
    *  `knockout` service). */
   advanced_team_id?: number | null;
-  /** Why, when the result alone does not say it ('punteggio', 'fattore campo').
-   *  Null when they simply scored more. */
+  /** Why, when the result alone does not say it ('punteggio', 'rigori',
+   *  'fattore campo'). Null when they simply scored more. */
   advanced_reason?: string | null;
+  /** La serie di rigori, quando c'è stata. Battuta una volta alla conclusione e
+   *  salvata sulla partita: qui si legge, non si rigioca. */
+  shootout?: {
+    home_goals: number;
+    away_goals: number;
+    winner: 'home' | 'away' | null;
+    home: ShootoutKick[];
+    away: ShootoutKick[];
+  } | null;
   is_user_involved: boolean;
   /** Decided server-side: also depends on the roster, which the calendar does not
    *  load. False on an empty roster — there would be nothing to field. */
