@@ -1083,6 +1083,25 @@ export async function concludeLeagueMatchday(
 
 // Re-score a CONCLUDED classic matchday. use: 'current' = live rules (updates the
 // snapshot); 'snapshot' = the frozen rules (e.g. after a vote fix).
+/** Un premio che ha cambiato mano per effetto di un ricalcolo. */
+export interface PrizeChange {
+  prize_id: number;
+  name: string;
+  icon: string;
+  competition_name: string;
+  now: string[];
+  before: string[];
+}
+
+export interface RecomputeResult {
+  fantasy_matchday_id: number;
+  recomputed_with: 'current' | 'snapshot';
+  fixtures_scored: number;
+  fixtures_total: number;
+  /** Vuoto quasi sempre: una rettifica che sposta un trofeo e' rara e va detta. */
+  prizes_changed?: PrizeChange[];
+}
+
 export async function recomputeLeagueMatchday(
   leagueId: number,
   fantasyMatchdayId: number,

@@ -451,7 +451,17 @@ class CompetitionWizardTests(TestCase):
         self.assertEqual(detail["prizes"][0]["winner_team_ids"], [])
         self.assertEqual(detail["prizes"][0]["condition_label"], "1° in classifica finale")
 
+        # Giocare tutte le partite non basta: il premio si ASSEGNA quando la
+        # competizione viene chiusa, ed è quel gesto — non la lettura della
+        # pagina — a scriverlo. Prima di allora resta "da assegnare" anche se
+        # l'aritmetica lo ha già deciso.
         self._play_through(comp, 7)
+        self.assertEqual(self.client.get(f"/api/v1/competitions/{comp.id}")
+                         .json()["prizes"][0]["winner_team_ids"], [])
+
+        from vfoot.services import honours
+        honours.complete_competition(comp)
+
         detail = self.client.get(f"/api/v1/competitions/{comp.id}").json()
         self.assertEqual(len(detail["prizes"][0]["winner_team_ids"]), 1)
         self.assertEqual(detail["prizes"][0]["winner_team_names"][0], "Alpha")

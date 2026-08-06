@@ -1516,6 +1516,7 @@ def _serialize_competition(comp: FantasyCompetition) -> dict:
     participants = list(comp.participants.select_related("team", "team__manager__user"))
     rules = list(comp.qualification_rules.select_related("source_competition"))
     prizes = list(comp.prizes.select_related("source_stage"))
+    awarded = honours.prize_winners(comp)
     fixture_count = comp.fixtures.count()
     finished_count = comp.fixtures.filter(status=FantasyFixture.STATUS_FINISHED).count()
     calendar = {str(k): int(v) for k, v in (comp.round_calendar or {}).items() if str(k).isdigit()}
@@ -1576,7 +1577,7 @@ def _serialize_competition(comp: FantasyCompetition) -> dict:
             }
             for r in rules
         ],
-        "prizes": [_serialize_prize(p) for p in prizes],
+        "prizes": [_serialize_prize(p, awarded) for p in prizes],
         "fixtures": {"total": fixture_count, "finished": finished_count},
     }
 
@@ -1927,8 +1928,16 @@ class CompetitionStageResolveView(APIView):
         return Response(result)
 
 
-def _serialize_prize(prize: CompetitionPrize) -> dict:
-    winners = prize_winner_team_ids(prize)
+def _serialize_prize(prize: CompetitionPrize, winners_by_prize: dict | None = None) -> dict:
+    """Un premio come lo legge il browser: la regola, e chi l'ha vinta.
+
+    I vincitori sono quelli ASSEGNATI, non quelli che soddisferebbero la
+    condizione adesso: prima della fine della competizione un premio è "ancora da
+    assegnare" anche quando l'aritmetica lo ha già deciso. ``winners_by_prize``
+    evita una query per premio a chi ne serializza una lista intera.
+    """
+    winners = (winners_by_prize if winners_by_prize is not None
+               else honours.prize_winners(prize.competition)).get(prize.id, [])
     return {
         "prize_id": prize.id,
         "name": prize.name,
@@ -1953,7 +1962,8 @@ class CompetitionPrizeListCreateView(APIView):
         comp = get_object_or_404(FantasyCompetition, id=competition_id)
         _membership_or_404(comp.league, request.user.id)
         prizes = CompetitionPrize.objects.filter(competition=comp).select_related("source_stage")
-        return Response([_serialize_prize(p) for p in prizes])
+        awarded = honours.prize_winners(comp)
+        return Response([_serialize_prize(p, awarded) for p in prizes])
 
     @transaction.atomic
     def post(self, request, competition_id: int):
@@ -2677,32 +2687,46 @@ class LeagueMatchdayConcludeView(APIView):
         )
 
 
-def _competitions_that_just_ended(league) -> list[dict]:
-    """Competitions the league has finished but not yet marked as finished.
+def _describe_prize_changes(changes: list[dict]) -> list[dict]:
+    """Un trofeo che cambia mano, detto in modo che l'admin capisca cos'ha fatto."""
+    out = []
+    for c in changes:
+        prize = c["prize"]
+        out.append({
+            "prize_id": prize.id,
+            "name": prize.name,
+            "icon": prize.icon or "🏆",
+            "competition_name": c["competition"].name,
+            "now": _team_names(c["added"]),
+            "before": _team_names(c["removed"]),
+        })
+    return out
 
-    ``status`` is a cached flag, not the truth — ``honours.is_complete`` is, and it
-    is derived from the fixtures. Writing the flag here is what lets a competition
-    page say "conclusa" without recomputing, and returning only the ones that were
-    still ACTIVE is what makes this the announcement of an event rather than a
-    standing list: conclude another matchday and it does not fire again.
+
+def _competitions_that_just_ended(league) -> list[dict]:
+    """Le competizioni che QUESTA conclusione ha chiuso, coi premi che ha assegnato.
+
+    Solo quelle ancora aperte prima del clic: è ciò che rende questo l'annuncio di
+    un evento e non un elenco permanente. Concludi un'altra giornata e non si
+    ripete — i premi ormai sono scritti, e riassegnarli non cambierebbe nulla.
     """
     out = []
     for comp in FantasyCompetition.objects.filter(league=league).exclude(
             status=FantasyCompetition.STATUS_DONE):
-        if not honours.is_complete(comp):
+        result = honours.complete_competition(comp)
+        if result is None:
             continue
-        comp.status = FantasyCompetition.STATUS_DONE
-        comp.save(update_fields=["status"])
+        winners = honours.prize_winners(comp)
         out.append({
             "competition_id": comp.id,
             "name": comp.name,
             "format": comp.format,
-            "prizes": [{"name": a["prize"].name,
-                        "icon": a["prize"].icon or "🏆",
-                        "condition_label": describe_condition(a["prize"]),
-                        "winner_team_ids": a["team_ids"],
-                        "winner_team_names": _team_names(a["team_ids"])}
-                       for a in honours.prize_awards(comp)],
+            "prizes": [{"name": p.name,
+                        "icon": p.icon or "🏆",
+                        "condition_label": describe_condition(p),
+                        "winner_team_ids": winners.get(p.id, []),
+                        "winner_team_names": _team_names(winners.get(p.id, []))}
+                       for p in comp.prizes.all() if winners.get(p.id)],
         })
     return out
 
@@ -2920,11 +2944,16 @@ class LeagueMatchdayRecomputeView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # Un ricalcolo puo' spostare un trofeo gia' assegnato. Prima veniva
+        # riscritto in silenzio (l'albo era derivato, quindi cambiava da solo e
+        # nessuno lo vedeva accadere); ora si dice a chi ha premuto il pulsante.
+        moved = honours.review_league(league)
         return Response({
             "fantasy_matchday_id": md.id,
             "recomputed_with": "snapshot" if not update_snapshot else "current",
             "fixtures_scored": result["updated"],
             "fixtures_total": len(fixtures),
+            "prizes_changed": _describe_prize_changes(moved),
         })
 
 

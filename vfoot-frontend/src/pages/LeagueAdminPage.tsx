@@ -29,6 +29,7 @@ import {
   type OfficeVoteMatch,
 } from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
+import type { PrizeChange, RecomputeResult } from '../api/backend';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import CopyButton from '../components/CopyButton';
@@ -377,8 +378,11 @@ export default function LeagueAdminPage() {
     resolutions?: Record<number, 'forfait' | 'previous'>,
   ) {
     if (!selectedLeagueId) return;
+    let out: RecomputeResult;
     try {
-      await recomputeLeagueMatchday(selectedLeagueId, md.fantasy_matchday_id, use, false, resolutionsPayload(resolutions));
+      out = (await recomputeLeagueMatchday(
+        selectedLeagueId, md.fantasy_matchday_id, use, false, resolutionsPayload(resolutions),
+      )) as RecomputeResult;
     } catch (err) {
       if (openLineupPrompt(md, err, 'recompute', use)) return;
       throw err;
@@ -386,7 +390,18 @@ export default function LeagueAdminPage() {
     setLineupPrompt(null);
     await loadMatchdays(selectedLeagueId);
     await loadCompetitions(selectedLeagueId);
-    setMsg(`Giornata ${md.real_matchday} ricalcolata (${use === 'snapshot' ? 'regole congelate' : 'regole attuali'})`);
+    // Un ricalcolo puo' spostare un trofeo gia' assegnato. Dirlo qui e' il punto:
+    // e' l'unico momento in cui c'e' un essere umano che guarda, e sa di aver
+    // appena fatto qualcosa.
+    const moved = out?.prizes_changed ?? [];
+    const suffix = moved.length
+      ? ' · ' + moved
+          .map((p: PrizeChange) => `${p.icon} ${p.name}: ora ${p.now.join(', ') || 'nessuno'}${p.before.length ? ` (era ${p.before.join(', ')})` : ''}`)
+          .join(' · ')
+      : '';
+    setMsg(
+      `Giornata ${md.real_matchday} ricalcolata (${use === 'snapshot' ? 'regole congelate' : 'regole attuali'})${suffix}`,
+    );
   }
 
   return (

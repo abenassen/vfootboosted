@@ -2,6 +2,7 @@ from vfoot.models.identity import SocialAccount
 from vfoot.models.profile import UserProfile
 from vfoot.models.fantasy import (
     AuctionBid,
+    AwardedPrize,
     AuctionEvent,
     AuctionNomination,
     AuctionSession,
@@ -38,6 +39,7 @@ __all__ = [
     "SocialAccount",
     "UserProfile",
     "AuctionBid",
+    "AwardedPrize",
     "AuctionEvent",
     "AuctionNomination",
     "AuctionSession",

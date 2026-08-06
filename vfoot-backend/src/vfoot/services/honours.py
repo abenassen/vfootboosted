@@ -1,38 +1,38 @@
-"""L'albo d'oro: what has been won, by whom, and when.
+"""L'albo d'oro: cosa è stato vinto, da chi, e quando.
 
-A prize is a rule until the day it becomes a fact. ``competition_prizes`` owns the
-rule and says who currently meets it; this module is about the fact — the moment a
-competition ran out of football, the honours that were settled with it, and the
-list of them that follows a manager around.
+Un premio è una regola finché non diventa un fatto. ``competition_prizes`` possiede
+la regola e sa dire chi la sta soddisfacendo; qui si passa dall'una all'altro: si
+ASSEGNA, si salva, e da quel momento leggere l'albo d'oro è una query.
 
-THREE DECISIONS WORTH KNOWING
------------------------------
-**Nothing is written down.** No AwardedPrize table, no "won_at" column. Who won is
-derived from the results and the date from the ledger, exactly like the winner
-itself — so an admin who rectifies the last matchday changes the albo d'oro with
-it, instead of leaving a trophy behind in the name of somebody who no longer won
-anything. The cost is a handful of queries per league; the alternative is a second
-source of truth that can disagree with the first, which for an honours board is the
-worst possible failure.
+TRE DECISIONI CHE VALE LA PENA CONOSCERE
+----------------------------------------
+**Si assegna alla fine della competizione, e in un colpo solo.** Un premio
+appartiene alla competizione: è la sua conclusione ad assegnarlo, anche quando il
+vincitore era matematicamente già deciso — il primo di un girone si sa a metà
+torneo, ma lo vince quando il torneo finisce. Una regola sola e un momento solo,
+invece di "ogni premio quando la sua condizione si avvera", che sarebbe stato
+più preciso e molto più difficile da raccontare.
 
-**A competition is over when there is no football left in it**, not when someone
-declares it over: every fixture played AND every phase drawn. The second half is
-not decorative — a cup whose semi-finals have just been concluded has all of its
-fixtures finished and a final that does not exist yet, and without that test it
-would announce a champion at the semi-final stage, every time.
+**Si salva.** La versione precedente derivava il vincitore dai risultati a OGNI
+lettura, e costava 287 ms per aprire la home e 403 per un albo d'oro — in crescita
+con la carriera del fantallenatore, perché rileggeva i tabellini di ogni
+competizione di ogni lega in cui avesse mai giocato. Il ricalcolo perpetuo serviva
+a non andare mai stantii, ma quella è una cosa che va fatta QUANDO un risultato
+cambia, non a ogni apertura di pagina. Il rischio di un dato salvato non è che
+esista: è che nessuno lo aggiorni. Perciò esiste ``review_league``, e la rettifica
+DICE cosa ha cambiato invece di riscriverlo di nascosto.
 
-**The date is the ledger's, not the clock's.** A competition ends when the matchday
-that closed it was concluded, which is the same instant the results became
-official. Reading ``timezone.now()`` instead would date the whole honours board to
-whenever this code happened to run, and re-date it on every rebuild.
+**La data è quella del registro, non dell'orologio.** Un premio è del giorno in cui
+è stata conclusa la giornata che l'ha deciso. Leggere ``timezone.now()`` daterebbe
+a oggi anche i trofei di una stagione riempita a posteriori.
 """
 from __future__ import annotations
 
 from vfoot.models import (
+    AwardedPrize,
     CompetitionStage,
     FantasyCompetition,
     FantasyFixture,
-    FantasyTeam,
 )
 from vfoot.services.competition_prizes import (
     competition_fixtures,
@@ -42,12 +42,17 @@ from vfoot.services.competition_prizes import (
 )
 
 
+# --------------------------------------------------------------------------- #
+# Quando una competizione è finita, e quando lo è stata.                       #
+# --------------------------------------------------------------------------- #
 def _concluded_at(fixtures):
-    """When the last of these fixtures was counted, or None if any never was.
+    """Quando l'ultima di queste partite è stata conteggiata, o None se una non lo
+    è mai stata.
 
-    None is the honest answer for a competition whose results were written by
-    something other than a conclusion (a seed, a simulation): it has no date, and
-    a made-up one would sort it to the top of a feed it does not belong in.
+    None è la risposta onesta per una competizione i cui risultati sono stati
+    scritti da qualcosa che non è una conclusione (un seed, una simulazione): non
+    ha una data, e inventarne una la manderebbe in cima a un elenco cronologico
+    a cui non appartiene.
     """
     stamps = [fx.fantasy_matchday.concluded_at if fx.fantasy_matchday_id else None
               for fx in fixtures]
@@ -55,11 +60,11 @@ def _concluded_at(fixtures):
 
 
 def is_complete(competition: FantasyCompetition, fixtures=None) -> bool:
-    """Is there any football left in this competition?
+    """C'è ancora del calcio in questa competizione?
 
-    Two tests, and the second is the one that is easy to forget: a knockout draws
-    its next round only when the previous one is done, so "all the fixtures that
-    exist are finished" is true at every single round of a cup.
+    Due prove, e la seconda è quella che si dimentica: un tabellone sorteggia il
+    turno successivo solo quando il precedente è finito, quindi "tutte le partite
+    che esistono sono finite" è vero a ogni turno di una coppa.
     """
     fixtures = competition_fixtures(competition) if fixtures is None else fixtures
     if not fixtures:
@@ -72,99 +77,148 @@ def is_complete(competition: FantasyCompetition, fixtures=None) -> bool:
     return not (planned - drawn)
 
 
-def completed_at(competition: FantasyCompetition, fixtures=None):
-    """The instant this competition became history, or None if it has not."""
+# --------------------------------------------------------------------------- #
+# L'assegnazione: il momento in cui la regola diventa un fatto.                #
+# --------------------------------------------------------------------------- #
+def assign_for_competition(competition: FantasyCompetition, fixtures=None) -> list[dict]:
+    """Assegna i premi di una competizione FINITA. Idempotente.
+
+    Restituisce i cambiamenti: ``[{"prize", "added": [team_id], "removed": [...]}]``,
+    vuoto quando non c'era nulla da fare. È la stessa funzione che usa la
+    conclusione e che usa la rettifica — la seconda esiste solo perché la prima
+    possa essere ripetuta senza danno.
+    """
+    fixtures = competition_fixtures(competition) if fixtures is None else fixtures
+    if not is_complete(competition, fixtures):
+        return []
+
+    changes: list[dict] = []
+    for prize in competition.prizes.select_related("source_stage").all():
+        winners = set(prize_winner_team_ids(prize, fixtures))
+        current = set(AwardedPrize.objects.filter(prize=prize).values_list("team_id", flat=True))
+        if winners == current:
+            continue
+        # Datato da CIÒ CHE LO HA DECISO: la finale finisce prima della
+        # competizione (può seguirla una finale di consolazione), e un premio di
+        # classifica è deciso dall'ultimo turno della classifica che legge.
+        at = _concluded_at(prize_scope(prize, fixtures))
+        AwardedPrize.objects.filter(prize=prize).exclude(team_id__in=winners).delete()
+        for tid in sorted(winners - current):
+            AwardedPrize.objects.update_or_create(
+                prize=prize, team_id=tid, defaults={"awarded_at": at})
+        AwardedPrize.objects.filter(prize=prize).update(awarded_at=at)
+        changes.append({"prize": prize,
+                        "added": sorted(winners - current),
+                        "removed": sorted(current - winners)})
+    return changes
+
+
+def complete_competition(competition: FantasyCompetition, fixtures=None) -> dict | None:
+    """Chiude una competizione: bandiera, data e premi, in un gesto solo.
+
+    None se non è finita. Chiamata dalla conclusione della giornata; è ciò che
+    trasforma il trentottesimo clic in un evento diverso dagli altri trentasette.
+    """
     fixtures = competition_fixtures(competition) if fixtures is None else fixtures
     if not is_complete(competition, fixtures):
         return None
-    return _concluded_at(fixtures)
+
+    changes = assign_for_competition(competition, fixtures)
+    at = _concluded_at(fixtures)
+    fields = []
+    if competition.status != FantasyCompetition.STATUS_DONE:
+        competition.status = FantasyCompetition.STATUS_DONE
+        fields.append("status")
+    if competition.completed_at != at:
+        competition.completed_at = at
+        fields.append("completed_at")
+    if fields:
+        competition.save(update_fields=fields)
+    return {"competition": competition, "at": at, "changes": changes}
 
 
-def prize_awards(competition: FantasyCompetition, fixtures=None) -> list[dict]:
-    """Every prize of this competition that has been settled, with its date.
+def review_league(league) -> list[dict]:
+    """Ricontrolla i premi di ogni competizione finita della lega, e riferisce.
 
-    An undecided prize is simply absent — the honours board shows what has been
-    won, and "Scudetto: nessuno, ancora" belongs on the competition's own page,
-    where the rule is what is being read.
+    Il contrappeso al fatto di salvare: la si chiama dove un risultato può
+    cambiare dopo che è stato contato (un ricalcolo, un voto d'ufficio). Se un
+    trofeo cambia mano lo dice a chi ha appena premuto il pulsante, invece di
+    riscriverlo in silenzio — che era il difetto della versione derivata: la
+    rettifica funzionava, ma nessuno la vedeva accadere.
     """
-    fixtures = competition_fixtures(competition) if fixtures is None else fixtures
     out = []
-    for prize in competition.prizes.select_related("source_stage").all():
-        winners = prize_winner_team_ids(prize, fixtures)
-        if not winners:
-            continue
-        out.append({
-            "prize": prize,
-            "competition": competition,
-            "team_ids": winners,
-            # Dated by what decided it: the final is over before the competition is
-            # (a third-place play-off may follow), and a table prize is settled by
-            # the last round of the table it reads.
-            "at": _concluded_at(prize_scope(prize, fixtures)),
-        })
+    for comp in FantasyCompetition.objects.filter(league=league).prefetch_related("prizes"):
+        result = complete_competition(comp)
+        if result and result["changes"]:
+            out.extend({"competition": comp, **c} for c in result["changes"])
     return out
 
 
-def league_honours(league) -> dict:
-    """Everything a league has finished and everything it has awarded.
+# --------------------------------------------------------------------------- #
+# Le letture: adesso sono query.                                               #
+# --------------------------------------------------------------------------- #
+def _awards_qs():
+    return (AwardedPrize.objects
+            .select_related("prize", "prize__competition", "prize__competition__league",
+                            "prize__source_stage", "team")
+            .order_by("-awarded_at", "prize_id"))
 
-    One pass over the league's competitions, because both the news feed and the
-    honours board want the same two lists and asking twice doubles the queries on
-    a page that already has plenty.
-    """
-    finished, awards = [], []
-    for comp in FantasyCompetition.objects.filter(league=league).prefetch_related("prizes"):
-        fixtures = competition_fixtures(comp)
-        if not is_complete(comp, fixtures):
-            continue
-        finished.append({"competition": comp, "at": _concluded_at(fixtures)})
-        awards.extend(prize_awards(comp, fixtures))
-    return {"finished": finished, "awards": awards}
+
+def league_honours(league) -> dict:
+    """Le competizioni finite della lega e i premi che hanno assegnato."""
+    finished = [
+        {"competition": c, "at": c.completed_at}
+        for c in FantasyCompetition.objects.filter(
+            league=league, status=FantasyCompetition.STATUS_DONE).order_by("-completed_at", "id")
+    ]
+    awards: dict[int, dict] = {}
+    for a in _awards_qs().filter(prize__competition__league=league):
+        row = awards.setdefault(a.prize_id, {"prize": a.prize, "competition": a.prize.competition,
+                                             "team_ids": [], "at": a.awarded_at})
+        row["team_ids"].append(a.team_id)
+    return {"finished": finished, "awards": list(awards.values())}
 
 
 def manager_honours(user, *, leagues=None) -> list[dict]:
-    """The albo d'oro of one manager: every prize won by any team he fields.
+    """L'albo d'oro di un fantallenatore: ogni premio vinto da una sua squadra.
 
-    Across leagues on purpose. A league lasts a season, a manager does not, and a
-    palmarès that reset every August would be worth nothing — the point of the
-    thing is precisely that it accumulates. ``leagues`` narrows it to the ones the
-    viewer is allowed to see; without it, everything the manager has won.
-
-    Newest first, undated last: a competition whose results were seeded rather than
-    concluded has no date, and it should not sort as though it happened in year
-    zero.
+    Fra leghe diverse di proposito. Una lega dura una stagione e un fantallenatore
+    no: un palmarès che ricomincia ogni agosto non varrebbe niente, e il senso
+    della cosa è proprio che si accumuli. ``leagues`` lo restringe a quelle che chi
+    guarda può vedere.
     """
-    teams = FantasyTeam.objects.filter(manager__user=user).select_related("league")
+    qs = _awards_qs().filter(team__manager__user=user)
     if leagues is not None:
-        teams = teams.filter(league__in=leagues)
-    by_id = {t.id: t for t in teams}
-    if not by_id:
-        return []
+        qs = qs.filter(prize__competition__league__in=leagues)
+    rows = list(qs)
+    # Quanti hanno vinto lo STESSO premio: un primato a pari merito non deve
+    # leggersi come una vittoria netta. Una query sola per tutti.
+    shared = {}
+    for prize_id, team_id in (AwardedPrize.objects
+                              .filter(prize_id__in={a.prize_id for a in rows})
+                              .values_list("prize_id", "team_id")):
+        shared.setdefault(prize_id, set()).add(team_id)
+    return [{
+        "prize": a.prize,
+        "competition": a.prize.competition,
+        "team": a.team,
+        "at": a.awarded_at,
+        "shared_with": len(shared.get(a.prize_id, ())) - 1,
+    } for a in rows]
 
-    out = []
-    for comp in (FantasyCompetition.objects
-                 .filter(league__in={t.league_id for t in by_id.values()})
-                 .select_related("league")
-                 .prefetch_related("prizes")):
-        for award in prize_awards(comp):
-            mine = [tid for tid in award["team_ids"] if tid in by_id]
-            for tid in mine:
-                team = by_id[tid]
-                out.append({
-                    "prize": award["prize"],
-                    "competition": comp,
-                    "team": team,
-                    "at": award["at"],
-                    # Shared honours exist (two teams tie a record) and hiding it
-                    # would read as an outright win.
-                    "shared_with": len(award["team_ids"]) - 1,
-                })
-    out.sort(key=lambda a: (a["at"] is not None, a["at"] or ""), reverse=True)
+
+def prize_winners(competition: FantasyCompetition) -> dict[int, list[int]]:
+    """{prize_id: [team_id]} già assegnati, per la pagina della competizione."""
+    out: dict[int, list[int]] = {}
+    for prize_id, team_id in (AwardedPrize.objects
+                              .filter(prize__competition=competition)
+                              .values_list("prize_id", "team_id")):
+        out.setdefault(prize_id, []).append(team_id)
     return out
 
 
 def serialize_award(award: dict) -> dict:
-    """One line of an honours board, as the browser wants it."""
+    """Una riga di albo d'oro, come la vuole il browser."""
     prize = award["prize"]
     comp = award["competition"]
     team = award.get("team")

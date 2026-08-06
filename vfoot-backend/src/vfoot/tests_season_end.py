@@ -400,6 +400,7 @@ class SeasonEndTests(TestCase):
         first = FantasyFixture.objects.filter(competition=comp).order_by("id").first()
         first.home_total, first.away_total = 0.0, 0.0
         first.save(update_fields=["home_total", "away_total"])
+        honours.complete_competition(comp)
 
         winners = set(self.client.get(f"/api/v1/competitions/{comp.id}").json()
                       ["prizes"][0]["winner_team_ids"])
@@ -407,6 +408,25 @@ class SeasonEndTests(TestCase):
         self.assertEqual(winners, expected)
         self.assertEqual(len(winners), 2, "il primato e' condiviso, non assegnato a caso")
         self.assertEqual(prize.name, "Media")
+
+    def test_leggere_l_albo_non_ricalcola_niente(self):
+        """Il motivo per cui i premi si salvano.
+
+        Prima ogni apertura della home rileggeva i tabellini di ogni competizione
+        della lega, e ogni albo d'oro quelli di ogni lega in cui il
+        fantallenatore avesse mai giocato: 287 e 403 millisecondi, in crescita
+        con la carriera. Il numero di interrogazioni non deve dipendere da quante
+        partite ci sono dietro — se un giorno ricomincia a dipenderne, questo
+        test cade prima che se ne accorga un utente.
+        """
+        self._championship()
+        self._cup()
+        self._play_the_season()
+
+        with self.assertNumQueries(2):
+            honours.league_honours(self.league)
+        with self.assertNumQueries(2):
+            honours.manager_honours(self.admin)
 
     def test_the_league_reads_it_all_in_the_news(self):
         comp = self._championship()
@@ -477,15 +497,46 @@ class SeasonEndTests(TestCase):
         self.assertEqual(own.status_code, 200)
         self.assertEqual(own.json()["awards"], [])
 
-    def test_a_rectified_result_moves_the_trophy(self):
-        """Nothing is written down, and this is what that buys: an admin who
-        corrects the last matchday corrects the honours board with it."""
+    def test_a_trophy_once_assigned_does_not_move_on_its_own(self):
+        """Un premio assegnato è un fatto, non un calcolo da rifare.
+
+        È la differenza con la versione precedente, che rileggeva i risultati a
+        ogni apertura di pagina: cambiare i punteggi sotto i piedi dell'albo
+        d'oro non deve riscriverlo di nascosto. Si riscrive quando qualcuno
+        rettifica — e allora lo dice (vedi il test dopo).
+        """
         comp = self._championship()
         self._play_the_season()
         self.assertEqual(self._prize(comp, "Attacco spuntato")["winner_team_names"],
                          self._names([7]))
 
-        # The last team is awarded a hatful of goals it never scored.
+        self._give_goals_to_the_last_team(comp)
+        self.assertEqual(self._prize(comp, "Attacco spuntato")["winner_team_names"],
+                         self._names([7]), "nessuno ha rettificato: il trofeo resta dov'è")
+
+    def test_a_rectification_moves_the_trophy_and_says_so(self):
+        """Il contrappeso al fatto di salvare. Il pericolo di un dato scritto non
+        è che esista: è che nessuno lo aggiorni — e che, aggiornandosi, lo faccia
+        senza che nessuno se ne accorga."""
+        comp = self._championship()
+        self._play_the_season()
+        self._give_goals_to_the_last_team(comp)
+
+        moved = honours.review_league(self.league)
+        cambiati = {c["prize"].name for c in moved}
+        self.assertIn("Attacco spuntato", cambiati)
+        self.assertIn("Bomber", cambiati)
+
+        spuntato = next(c for c in moved if c["prize"].name == "Attacco spuntato")
+        self.assertEqual(spuntato["removed"], [self.team_ids[7]], "chi lo perde")
+        self.assertTrue(spuntato["added"], "e chi lo eredita")
+
+        self.assertNotIn(self._names([7])[0],
+                         self._prize(comp, "Attacco spuntato")["winner_team_names"])
+        self.assertEqual(self._prize(comp, "Bomber")["winner_team_names"], self._names([7]))
+
+    def _give_goals_to_the_last_team(self, comp):
+        """All'ultima squadra viene accreditata una valanga di gol mai segnati."""
         last = self.team_ids[7]
         for fx in FantasyFixture.objects.filter(competition=comp):
             if fx.home_team_id == last:
@@ -494,7 +545,3 @@ class SeasonEndTests(TestCase):
             elif fx.away_team_id == last:
                 fx.away_total = 9.0
                 fx.save(update_fields=["away_total"])
-
-        self.assertNotIn(self._names([7])[0],
-                         self._prize(comp, "Attacco spuntato")["winner_team_names"])
-        self.assertEqual(self._prize(comp, "Bomber")["winner_team_names"], self._names([7]))

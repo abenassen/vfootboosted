@@ -211,6 +211,12 @@ class FantasyCompetition(models.Model):
     # before there is a single fixture to hang a matchday on.
     round_calendar = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
+    # Quando la competizione e' finita davvero: la data della giornata che l'ha
+    # chiusa, non l'istante in cui il codice se n'e' accorto. Scritta una volta,
+    # dalla conclusione, insieme ai premi. E' anche la bandiera che evita di
+    # richiedersi "sara' finita?" a ogni apertura di pagina: `status` dice se,
+    # questa dice quando.
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = [("league", "name")]
@@ -605,6 +611,41 @@ class CompetitionPrize(models.Model):
 
     class Meta:
         ordering = ["id"]
+
+
+class AwardedPrize(models.Model):
+    """Un premio VINTO: il momento in cui una regola e' diventata un fatto.
+
+    ``CompetitionPrize`` e' la regola ("chi arriva primo"); questa riga e' la
+    conseguenza ("l'ha vinto la Juve, il 23 maggio"). Sono due cose diverse e
+    prima erano una sola: il vincitore veniva ricalcolato dai risultati a OGNI
+    lettura — 287 ms per l'apertura della home, 403 per un albo d'oro, e in
+    crescita con la carriera del fantallenatore, perche' rileggeva i tabellini di
+    ogni competizione di ogni lega in cui avesse mai giocato.
+
+    QUANDO SI SCRIVE. Alla conclusione della competizione, tutti insieme: un
+    premio appartiene alla competizione, quindi e' la sua fine ad assegnarlo,
+    anche quando il vincitore era matematicamente gia' deciso (il primo di un
+    girone). Una regola sola, un momento solo, facile da raccontare.
+
+    QUANDO SI RISCRIVE. Se una rettifica cambia i risultati a competizione
+    chiusa, i premi si ricontrollano e il cambiamento si DICE. Il rischio di un
+    dato salvato non e' che esista: e' che nessuno lo aggiorni.
+    """
+
+    prize = models.ForeignKey(CompetitionPrize, on_delete=models.CASCADE, related_name="awarded")
+    team = models.ForeignKey(FantasyTeam, on_delete=models.CASCADE, related_name="honours")
+    # La data del REGISTRO — la conclusione della giornata che ha deciso il premio
+    # — non l'istante in cui questa riga e' stata scritta. Cosi' un riempimento
+    # fatto oggi su una stagione dell'anno scorso non data i trofei a oggi.
+    awarded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        # Un premio puo' avere piu' vincitori (una fascia di posizioni, un primato
+        # a pari merito): la coppia e' unica, non il premio.
+        unique_together = [("prize", "team")]
+        indexes = [models.Index(fields=["team"])]
 
 
 class FantasyFixture(models.Model):
