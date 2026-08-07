@@ -402,6 +402,16 @@ export default function FormationPage() {
   const immutableReason = (id: number) =>
     closed ? closedReason : lockedIds.has(id) ? lockedReason : null;
 
+  // Copying one lineup onto every competition is a convenience that stops being
+  // safe the moment anybody is frozen. Each competition keeps its OWN lineup, so
+  // the frozen players sit in DIFFERENT places in each: the eleven that is legal
+  // for the championship can move a man who is already playing in the cup, and
+  // since the save is all-or-nothing the whole thing would be refused. The
+  // condition is "somebody of MINE has started", not "the round has started" — a
+  // manager whose players all play on Monday can still copy on Sunday.
+  const multiSendBlocked = closed || lockedIds.size > 0;
+  const sendAll = allComps && !multiSendBlocked;
+
   const chosen = starterIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
   const notChosen = ctx.roster.filter((p) => !starterIds.includes(p.player_id));
   const blockReasonFor = (p: TeamLineupPlayer) =>
@@ -509,8 +519,8 @@ export default function FormationPage() {
       const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
       const res = await saveTeamLineup(selectedLeagueId, {
         matchday,
-        competition: allComps ? null : competition,
-        all_competitions: allComps,
+        competition: sendAll ? null : competition,
+        all_competitions: sendAll,
         gk_player_id: gkId,
         // Sent in the order the page shows them; the server derives the stored one
         // anyway (P-D-C-A, frozen players kept inside their role), so this is about
@@ -518,7 +528,7 @@ export default function FormationPage() {
         starter_player_ids: starters.map((p) => p.player_id).filter((id) => id !== gkId),
         bench_player_ids: benchIds,
       });
-      setToast(allComps ? `Formazione salvata su ${res.saved_competitions} competizioni ✓` : 'Formazione salvata ✓');
+      setToast(sendAll ? `Formazione salvata su ${res.saved_competitions} competizioni ✓` : 'Formazione salvata ✓');
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Errore nel salvataggio');
     } finally {
@@ -576,10 +586,13 @@ export default function FormationPage() {
                     : `La formazione si blocca al primo calcio d'inizio della giornata: ${fmtDeadline(lock.closes_at)}.`}
               </div>
             ) : null}
-            {ctx.as_of_matchday != null ? (
-              <div className="mt-1 text-[11px] text-amber-600">
-                Giornata {ctx.as_of_matchday} · dati aggiornati alla giornata {ctx.as_of_matchday - 1} (
-                {ctx.prior_matches} partite) — nessuna informazione futura.
+            {/* Which round the numbers on this page describe. It used to add "nessuna
+                informazione futura" in warning amber — a note to ourselves from when
+                the season was a replay and the worry was leakage. To a manager it
+                answers a question nobody asked, in the colour of a problem. */}
+            {ctx.as_of_matchday != null && ctx.as_of_matchday > 1 ? (
+              <div className="mt-1 text-[11px] text-slate-400">
+                Medie e statistiche aggiornate alla giornata {ctx.as_of_matchday - 1}.
               </div>
             ) : null}
           </div>
@@ -631,10 +644,25 @@ export default function FormationPage() {
             </Button>
           </div>
         </div>
-        <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
-          <input type="checkbox" checked={allComps} onChange={(e) => setAllComps(e.target.checked)} />
+        <label
+          className={`mt-2 flex items-center gap-2 text-xs ${
+            multiSendBlocked ? 'cursor-not-allowed text-slate-400' : 'text-slate-600'}`}
+          title={multiSendBlocked ? 'Ogni competizione ha la sua formazione, e i giocatori già bloccati vi occupano posti diversi.' : undefined}
+        >
+          <input
+            type="checkbox"
+            checked={sendAll}
+            disabled={multiSendBlocked}
+            onChange={(e) => setAllComps(e.target.checked)}
+          />
           Invia questa formazione a tutte le competizioni della lega (stessa giornata)
         </label>
+        {multiSendBlocked && !closed ? (
+          <div className="mt-1 text-[11px] text-slate-400">
+            Non più disponibile: ogni competizione ha la sua formazione, e chi è già bloccato vi
+            occupa posti diversi. Vanno modificate una per una.
+          </div>
+        ) : null}
         {toast ? <div className="mt-2 text-sm font-semibold text-green-700">{toast}</div> : null}
       </Card>
 
