@@ -34,9 +34,14 @@ log = logging.getLogger(__name__)
 
 
 def _open_snapshots(league, team_id: int, now=None) -> list:
-    """This team's saved lineups whose matchday has NOT locked yet (R1)."""
-    locked = (matchday_state.locked_matchdays(league.reference_season_id, now)
-              if league.reference_season_id else set())
+    """This team's saved lineups whose matchday has NOT locked yet (R1).
+
+    "Locked" is the league's own deadline: under the per-player one a round stays
+    repairable while it is being played, for the players who have not kicked off.
+    Which of them may actually be touched is decided in ``swap_player`` — here the
+    question is only whether the matchday is over and done with.
+    """
+    locked = matchday_state.closed_matchdays(league, now)
     out = []
     for snap in SavedLineupSnapshot.objects.filter(
         league_id=str(league.id), lineup_id__startswith=f"team{team_id}"
@@ -66,6 +71,17 @@ def swap_player(league, team_id: int, out_pid: int, in_pid: int | None, now=None
     out_s, in_s = str(out_pid), (str(in_pid) if in_pid is not None else None)
 
     for snap in _open_snapshots(league, team_id, now):
+        # Under the per-player deadline an OPEN matchday can still hold a player who
+        # is on the pitch right now, and R1 protects him individually: a settlement
+        # cannot pull him out of a lineup that is already being scored, even though
+        # the round as a whole is still being edited.
+        try:
+            snap_md = int(snap.matchday_id)
+        except (TypeError, ValueError):
+            snap_md = None
+        if snap_md is not None and matchday_state.locked_players(
+                league, snap_md, [out_pid], now):
+            continue
         changed = False
 
         if snap.gk_player_id is not None and str(snap.gk_player_id) == out_s:

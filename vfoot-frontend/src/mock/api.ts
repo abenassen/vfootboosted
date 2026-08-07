@@ -259,6 +259,7 @@ export async function createLeague(req: CreateLeagueRequest) {
     keeper_clean_sheet_enabled: false,
     home_advantage_bonus: 0,
     enforce_lineup_deadline: true,
+    lineup_lock_mode: 'matchday' as const,
     invite_code: `MOCK${id}`,
     invite_link: `/join/MOCK${id}`,
     reference_season: null,

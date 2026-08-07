@@ -471,6 +471,9 @@ export interface LeagueSettingsPatch {
    *  partita ha un campo (`FantasyFixture.home_advantage`). */
   home_advantage_bonus?: number;
   enforce_lineup_deadline?: boolean;
+  /** Che cosa si blocca, quando la scadenza e' attiva: tutta la formazione al primo
+   *  calcio d'inizio, o ogni giocatore all'inizio della sua partita. */
+  lineup_lock_mode?: 'matchday' | 'player';
 }
 
 export async function updateLeagueSettings(leagueId: number, settings: LeagueSettingsPatch) {

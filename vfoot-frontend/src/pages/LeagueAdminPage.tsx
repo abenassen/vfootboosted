@@ -127,6 +127,7 @@ export default function LeagueAdminPage() {
       keeper_clean_sheet_enabled: d.keeper_clean_sheet_enabled,
       home_advantage_bonus: d.home_advantage_bonus,
       enforce_lineup_deadline: d.enforce_lineup_deadline,
+      lineup_lock_mode: d.lineup_lock_mode,
     };
   }
 
@@ -831,12 +832,48 @@ export default function LeagueAdminPage() {
                             checked={!!draft.enforce_lineup_deadline}
                             onChange={(e) => set({ enforce_lineup_deadline: e.target.checked })}
                           />
-                          <span>Blocca la formazione al primo calcio d'inizio</span>
+                          <span>Blocca la formazione</span>
                         </label>
                         <div className="mt-1 text-[11px] text-slate-500">
                           Attivo in una lega reale. <b>Disattivalo</b> per le leghe di test su una stagione già
                           conclusa (altrimenti ogni formazione risulterebbe bloccata).
                         </div>
+                        {draft.enforce_lineup_deadline ? (
+                          <div className="mt-2 space-y-2 border-l-2 border-slate-200 pl-3">
+                            <label className="flex items-start gap-2 text-sm">
+                              <input
+                                type="radio"
+                                className="mt-1"
+                                name="lineup_lock_mode"
+                                checked={(draft.lineup_lock_mode ?? 'matchday') === 'matchday'}
+                                onChange={() => set({ lineup_lock_mode: 'matchday' })}
+                              />
+                              <span>
+                                <b>Al primo calcio d'inizio della giornata</b>
+                                <span className="mt-0.5 block text-[11px] text-slate-500">
+                                  Tutta la formazione si chiude insieme, prima che si giochi la prima partita.
+                                  È la regola tradizionale del fantacalcio.
+                                </span>
+                              </span>
+                            </label>
+                            <label className="flex items-start gap-2 text-sm">
+                              <input
+                                type="radio"
+                                className="mt-1"
+                                name="lineup_lock_mode"
+                                checked={draft.lineup_lock_mode === 'player'}
+                                onChange={() => set({ lineup_lock_mode: 'player' })}
+                              />
+                              <span>
+                                <b>Ogni giocatore all'inizio della sua partita</b>
+                                <span className="mt-0.5 block text-[11px] text-slate-500">
+                                  Chi è già in campo resta dov'è; sul resto della formazione si decide fino
+                                  all'ultimo calcio d'inizio della giornata.
+                                </span>
+                              </span>
+                            </label>
+                          </div>
+                        ) : null}
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2 border-t pt-3">

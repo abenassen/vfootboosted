@@ -39,10 +39,30 @@ class FantasyLeague(models.Model):
     # effective goalkeeper played (has a vote) and conceded no goals. Off by default;
     # the defence modifier is the only one enabled out of the box.
     keeper_clean_sheet_enabled = models.BooleanField(default=False)
-    # When True (the real-league default), a lineup locks at the first confirmed
-    # kickoff of the real matchday. Turn OFF for test leagues played on an ALREADY
-    # FINISHED season, where every kickoff is in the past and would block editing.
+    # When True (the real-league default), a lineup locks. Turn OFF for test leagues
+    # played on an ALREADY FINISHED season, where every kickoff is in the past and
+    # would block editing.
     enforce_lineup_deadline = models.BooleanField(default=True)
+    # WHAT locks, once the deadline is enforced. Two leagues can play the same
+    # calendar under two different deadlines and neither is a variant of the other:
+    #
+    # * "matchday" — the whole lineup freezes at the round's FIRST confirmed
+    #   kickoff. One deadline for everybody, the fantacalcio tradition: you commit
+    #   to eleven names before a single ball is kicked.
+    # * "player" — each player freezes when HIS OWN club kicks off, and the rest of
+    #   the lineup stays editable until the round's LAST kickoff. A manager whose
+    #   striker plays on Monday can still decide about him on Sunday night. What it
+    #   must never allow is un-deciding someone whose match is under way, which is
+    #   why the check is "did this player's placement change", not "is the round
+    #   open".
+    LOCK_MATCHDAY = "matchday"
+    LOCK_PLAYER = "player"
+    LOCK_MODE_CHOICES = [
+        (LOCK_MATCHDAY, "Al primo calcio d'inizio della giornata"),
+        (LOCK_PLAYER, "Ogni giocatore all'inizio della sua partita"),
+    ]
+    lineup_lock_mode = models.CharField(
+        max_length=10, choices=LOCK_MODE_CHOICES, default=LOCK_MATCHDAY)
     # Fattore campo: quanto vale giocare in casa, in punti di fantavoto aggiunti
     # alla squadra di casa. 0 = spento (il default: e' un modificatore in piu', non
     # una regola del fantacalcio).

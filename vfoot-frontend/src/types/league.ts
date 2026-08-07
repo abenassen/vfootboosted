@@ -1,3 +1,5 @@
+import type { LineupLockMode } from './lineup';
+
 export interface LeagueSummary {
   league_id: number;
   name: string;
@@ -59,6 +61,7 @@ export interface LeagueDetail {
   keeper_clean_sheet_enabled: boolean;
   home_advantage_bonus: number;
   enforce_lineup_deadline: boolean;
+  lineup_lock_mode: LineupLockMode;
   invite_code: string;
   invite_link: string;
   reference_season: ReferenceSeason | null;

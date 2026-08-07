@@ -151,7 +151,12 @@ export default function LeagueHome({ competitions }: { competitions: Competition
         a.round_no - b.round_no,
     );
     for (const f of byDate) {
-      if (f.status !== 'finished' && !f.lineup_locked && !out.has(f.competition_id)) {
+      // A round that has kicked off is normally behind you — but not under the
+      // per-player deadline, where half of it is still to be decided. There the
+      // server says so (`can_set_lineup`), and dropping the fixture anyway would
+      // hide the shortcut to the very lineup the manager can still change.
+      const behind = f.lineup_locked && !f.can_set_lineup;
+      if (f.status !== 'finished' && !behind && !out.has(f.competition_id)) {
         out.set(f.competition_id, f);
       }
     }

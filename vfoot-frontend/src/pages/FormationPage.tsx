@@ -116,8 +116,47 @@ function orderBench(roster: TeamLineupPlayer[], starterIds: number[], seed: numb
   return [...out, ...rest.map((p) => p.player_id)];
 }
 
+/** Put the frozen players back on their own bench numbers.
+ *
+ *  Under the per-player deadline a bench slot BELONGS to the player whose match has
+ *  started: the third place stays his, at that number, because how many players sit
+ *  ahead of him is what decides whether he comes on. So every edit is normalised
+ *  through here — the free players fill the remaining slots in their own order, and
+ *  the frozen ones are put back where they were. Without this a promotion two rows
+ *  above would silently slide a frozen man down a place, and the save would refuse
+ *  an edit the manager had no way of seeing was illegal. */
+function pinFrozen(order: number[], slots: Map<number, number>): number[] {
+  if (!slots.size) return order;
+  const frozen = new Set(slots.values());
+  const free = order.filter((id) => !frozen.has(id));
+  const total = free.length + slots.size;
+  const out: number[] = [];
+  let f = 0;
+  for (let i = 0; i < total; i++) {
+    const pinned = slots.get(i);
+    if (pinned != null) out.push(pinned);
+    else if (f < free.length) out.push(free[f++]);
+  }
+  // A frozen slot past the end of a shortened bench would be dropped by the loop;
+  // append rather than lose the player, and let the save speak if it matters.
+  for (const id of frozen) if (!out.includes(id)) out.push(id);
+  return out;
+}
+
 // Kick-off of the real fixture; the provider ships a placeholder time until the
 // slot is actually assigned, so we say so rather than showing a made-up hour.
+/** The deadline, as a manager reads a date: "domenica 8 feb, 20:45". */
+function fmtDeadline(iso: string | null | undefined): string {
+  if (!iso) return 'orario da definire';
+  return new Date(iso).toLocaleString('it-IT', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function fmtKickoff(nm: { kickoff: string | null; kickoff_provisional: boolean }): string {
   if (!nm.kickoff || nm.kickoff_provisional) return 'orario da definire';
   return new Date(nm.kickoff).toLocaleString('it-IT', {
@@ -188,6 +227,12 @@ export default function FormationPage() {
   // Why the last attempted promotion was refused, pinned to the row that was
   // clicked — the explanation belongs where the finger is, not in the header.
   const [refused, setRefused] = useState<{ player_id: number; reason: string } | null>(null);
+  // Which numbers belong to a player whose match has started — in the XI and on the
+  // bench. Taken from the SAVED lineup, because that is what the server compares a
+  // submission against. The XI has slots for the same reason the bench does: the
+  // substitution budget is spent walking the starters in order.
+  const [frozenXi, setFrozenXi] = useState<Map<number, number>>(new Map());
+  const [frozenSlots, setFrozenSlots] = useState<Map<number, number>>(new Map());
   const [allComps, setAllComps] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -201,9 +246,26 @@ export default function FormationPage() {
 
   // Suggestion / default: a balanced 4-4-2 by inferred role, each slot the best
   // available by recent form (falls back across roles if a line is short).
-  const suggest = (roster: TeamLineupPlayer[], c: ClassicConstraints | null): number[] => {
+  //
+  // `frozen` is the per-player deadline reaching in here: those players are where
+  // they are and the save will refuse to move them, so the suggestion must start
+  // FROM them (`frozen.pinned`, kept in the XI) and never reach for the others
+  // (`frozen.locked`, already playing and not currently fielded). Proposing a
+  // lineup the save would then reject is the same mistake the role ceilings above
+  // were added to avoid, arriving by a different road.
+  const suggest = (
+    roster: TeamLineupPlayer[],
+    c: ClassicConstraints | null,
+    frozen?: { pinned: number[]; locked: Set<number> },
+  ): number[] => {
+    const pinned = frozen?.pinned ?? [];
+    const unavailable = frozen?.locked ?? new Set<number>();
+    const pool = roster.filter(
+      (p) => pinned.includes(p.player_id) || !unavailable.has(p.player_id),
+    );
     const byForm = (a: TeamLineupPlayer, b: TeamLineupPlayer) => b.form - a.form;
-    const gk = [...roster].filter((p) => p.role === 'GK').sort(byForm)[0];
+    const pinnedGk = pinned.map((id) => pool.find((p) => p.player_id === id)).find((p) => p?.role === 'GK');
+    const gk = pinnedGk ?? [...pool].filter((p) => p.role === 'GK').sort(byForm)[0];
     const chosen = new Set<number>();
     const cnt: Record<PlayerRole, number> = { GK: 0, DEF: 0, MID: 0, ATT: 0 };
     if (gk) {
@@ -212,11 +274,20 @@ export default function FormationPage() {
     }
     const targets: [PlayerRole, number][] = [['DEF', 4], ['MID', 4], ['ATT', 2]];
     const out: number[] = [];
+    // The frozen outfielders take their places first: they are not a preference,
+    // they are a fact.
+    for (const id of pinned) {
+      const p = pool.find((x) => x.player_id === id);
+      if (!p || chosen.has(id) || p.role === 'GK') continue;
+      chosen.add(id);
+      cnt[p.role] += 1;
+      out.push(id);
+    }
     for (const [role, n] of targets) {
-      roster
+      pool
         .filter((p) => p.role === role && !chosen.has(p.player_id))
         .sort(byForm)
-        .slice(0, n)
+        .slice(0, Math.max(0, n - cnt[role]))
         .forEach((p) => {
           chosen.add(p.player_id);
           cnt[role] += 1;
@@ -226,7 +297,7 @@ export default function FormationPage() {
     // Top up to 10 outfielders from whoever is left, by form — but never past a
     // role's ceiling: a short line used to be filled with a sixth midfielder, so
     // the suggestion itself proposed a lineup the save would then refuse.
-    roster
+    pool
       .filter((p) => p.role !== 'GK' && !chosen.has(p.player_id))
       .sort(byForm)
       .forEach((p) => {
@@ -260,10 +331,29 @@ export default function FormationPage() {
         if (saved && (saved.gk_player_id || saved.starter_player_ids.length)) {
           starters = [...(saved.gk_player_id ? [saved.gk_player_id] : []), ...saved.starter_player_ids].slice(0, XI);
         } else {
-          starters = suggest(d.roster, d.mode === 'classic' ? d.rules.classic_constraints : null);
+          // Nothing was ever submitted for this round. If it has already begun,
+          // whoever is on the pitch is out of reach: proposing him would build an
+          // XI the save can only refuse.
+          starters = suggest(d.roster, d.mode === 'classic' ? d.rules.classic_constraints : null, {
+            pinned: [],
+            locked: new Set(d.lineup_lock?.locked_player_ids ?? []),
+          });
         }
+        const frozen = new Set(d.lineup_lock?.locked_player_ids ?? []);
+        const slots = new Map<number, number>();
+        (saved?.bench_player_ids ?? []).forEach((id, i) => {
+          if (frozen.has(id)) slots.set(i, id);
+        });
+        const xi = new Map<number, number>();
+        // The wire list excludes the goalkeeper — he has his own field, hence no
+        // number — so these indices are the outfielders' and must stay that way.
+        (saved?.starter_player_ids ?? []).forEach((id, i) => {
+          if (frozen.has(id)) xi.set(i, id);
+        });
+        setFrozenSlots(slots);
+        setFrozenXi(xi);
         setStarterIds(starters);
-        setBenchOrder(orderBench(d.roster, starters, saved?.bench_player_ids ?? []));
+        setBenchOrder(pinFrozen(orderBench(d.roster, starters, saved?.bench_player_ids ?? []), slots));
         // A freshly loaded lineup has no vacated places: whatever it is short of
         // was never chosen, so there is no role to attribute the gap to.
         setVacancies([]);
@@ -286,10 +376,23 @@ export default function FormationPage() {
   const isClassic = ctx.mode === 'classic';
   const constraints = ctx.rules.classic_constraints;
 
+  // The deadline. Under the per-player lock a lineup is half decided and half not,
+  // so the page cannot simply be open or shut: it has to say WHICH players are gone
+  // and let the rest be edited. `closed` is the end of the argument — nothing left
+  // to decide either way.
+  const lock = ctx.lineup_lock;
+  const lockedIds = new Set(lock?.locked_player_ids ?? []);
+  const closed = !!lock?.closed;
+  const lockedReason = 'La sua partita è già iniziata.';
+
   const chosen = starterIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
   const notChosen = ctx.roster.filter((p) => !starterIds.includes(p.player_id));
   const blockReasonFor = (p: TeamLineupPlayer) =>
-    promotionBlock(p, chosen, notChosen, isClassic ? constraints : null);
+    closed
+      ? 'Giornata chiusa: la formazione non è più modificabile.'
+      : lockedIds.has(p.player_id)
+        ? lockedReason
+        : promotionBlock(p, chosen, notChosen, isClassic ? constraints : null);
 
   // Toggling a player keeps the ordered bench in sync: a demoted starter joins the
   // bench at the LOWEST priority (end); a promoted bench player leaves it.
@@ -298,12 +401,30 @@ export default function FormationPage() {
   // off the choices — so dropping a starter used to shrink his line and re-centre
   // the pitch, leaving nine or ten dots and no sign of what was missing. Instead
   // the vacated place stays, tagged with the role it came from.
+  // Same normalisation as the bench, on the outfield list the save actually sends:
+  // the goalkeeper travels in his own field, so he does not occupy a number.
+  const pinXi = (ids: number[]) => {
+    if (!frozenXi.size) return ids;
+    const keepers = ids.filter((x) => byId.get(x)?.role === 'GK');
+    return [...keepers, ...pinFrozen(ids.filter((x) => !keepers.includes(x)), frozenXi)];
+  };
+
   const toggleStarter = (id: number) => {
     const player = byId.get(id);
     const role = player?.role;
+    // Frozen players are refused in BOTH directions. Demotion is the one that
+    // matters: promotion already goes through blockReasonFor, but a striker who is
+    // playing right now must not be benchable either.
+    if (closed || lockedIds.has(id)) {
+      setRefused({
+        player_id: id,
+        reason: closed ? 'Giornata chiusa: la formazione non è più modificabile.' : lockedReason,
+      });
+      return;
+    }
     if (starterIds.includes(id)) {
-      setStarterIds((s) => s.filter((x) => x !== id));
-      setBenchOrder((b) => (b.includes(id) ? b : [...b, id]));
+      setStarterIds((s) => pinXi(s.filter((x) => x !== id)));
+      setBenchOrder((b) => pinFrozen(b.includes(id) ? b : [...b, id], frozenSlots));
       if (role) setVacancies((v) => [...v, role]);
       setRefused(null);
     } else {
@@ -315,8 +436,8 @@ export default function FormationPage() {
         return;
       }
       setRefused(null);
-      setStarterIds((s) => [...s, id]);
-      setBenchOrder((b) => b.filter((x) => x !== id));
+      setStarterIds((s) => pinXi([...s, id]));
+      setBenchOrder((b) => pinFrozen(b.filter((x) => x !== id), frozenSlots));
       setVacancies((v) => {
         // Same role => he takes the place that was left open and the module is
         // unchanged. A different role => that place becomes his, which IS a change
@@ -331,8 +452,24 @@ export default function FormationPage() {
   const moveBench = (id: number, dir: -1 | 1) => {
     setBenchOrder((b) => {
       const i = b.indexOf(id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= b.length) return b;
+      if (i < 0) return b;
+      if (closed || lockedIds.has(id)) {
+        setRefused({
+          player_id: id,
+          reason: closed
+            ? 'Giornata chiusa: la formazione non è più modificabile.'
+            : "Il suo posto in panchina è fissato: la sua partita è iniziata.",
+        });
+        return b;
+      }
+      // NOT a jump over the frozen row — nobody passes him, and his number never
+      // changes. What happens is that the two FREE players either side of him
+      // exchange places: with the 3rd frozen, the 2nd and the 4th swap and the 3rd
+      // is still the 3rd. So the search skips the frozen rows to find the free
+      // neighbour, which is the only reordering a half-played bench still allows.
+      let j = i + dir;
+      while (j >= 0 && j < b.length && lockedIds.has(b[j])) j += dir;
+      if (j < 0 || j >= b.length) return b;
       const next = [...b];
       [next[i], next[j]] = [next[j], next[i]];
       return next;
@@ -342,10 +479,12 @@ export default function FormationPage() {
   const starterRoles = starterIds.map((id) => byId.get(id)?.role).filter((r): r is PlayerRole => !!r);
   const classicErrors = isClassic && constraints ? validateClassic(starterRoles, constraints) : [];
   const gkOk = gkStarters.length === 1;
-  const canSave = starterIds.length === XI && gkOk && classicErrors.length === 0;
+  const canSave = starterIds.length === XI && gkOk && classicErrors.length === 0 && !closed;
   const saveBlock = canSave
     ? null
-    : classicErrors[0] ??
+    : closed
+      ? 'La giornata è chiusa: la formazione non è più modificabile.'
+      : classicErrors[0] ??
       (starterIds.length !== XI
         ? `Servono ${XI} titolari (ne hai ${starterIds.length}).`
         : gkStarters.length === 0
@@ -358,13 +497,13 @@ export default function FormationPage() {
     try {
       // Send the bench in PRIORITY order (substitution order); append any roster
       // player not yet placed so nobody is dropped from the payload.
-      const benchIds = orderBench(ctx.roster, starterIds, benchOrder);
+      const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
       const res = await saveTeamLineup(selectedLeagueId, {
         matchday,
         competition: allComps ? null : competition,
         all_competitions: allComps,
         gk_player_id: gkId,
-        starter_player_ids: starterIds.filter((id) => id !== gkId),
+        starter_player_ids: pinFrozen(starterIds.filter((id) => id !== gkId), frozenXi),
         bench_player_ids: benchIds,
       });
       setToast(allComps ? `Formazione salvata su ${res.saved_competitions} competizioni ✓` : 'Formazione salvata ✓');
@@ -378,7 +517,7 @@ export default function FormationPage() {
 
   const byRole = (a: TeamLineupPlayer, b: TeamLineupPlayer) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form;
   const starters = ctx.roster.filter((p) => starterIds.includes(p.player_id)).sort(byRole);
-  const benchIds = orderBench(ctx.roster, starterIds, benchOrder);
+  const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
   const bench = benchIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
   const compName = ctx.competitions.find((c) => c.competition_id === competition)?.name;
 
@@ -411,6 +550,19 @@ export default function FormationPage() {
                   <li key={e}>{e}</li>
                 ))}
               </ul>
+            ) : null}
+            {lock?.enforced ? (
+              <div
+                className={`mt-1 text-[11px] ${closed ? 'font-semibold text-rose-600' : 'text-slate-500'}`}
+              >
+                {closed
+                  ? 'Giornata chiusa: la formazione non è più modificabile.'
+                  : lock.mode === 'player'
+                    ? lockedIds.size
+                      ? `${lockedIds.size} giocatori sono già in campo e restano dove sono; sugli altri puoi decidere fino a ${fmtDeadline(lock.closes_at)}.`
+                      : `Ogni giocatore si blocca all'inizio della sua partita. Ultimo calcio d'inizio: ${fmtDeadline(lock.closes_at)}.`
+                    : `La formazione si blocca al primo calcio d'inizio della giornata: ${fmtDeadline(lock.closes_at)}.`}
+              </div>
             ) : null}
             {ctx.as_of_matchday != null ? (
               <div className="mt-1 text-[11px] text-amber-600">
@@ -448,7 +600,12 @@ export default function FormationPage() {
             <Button
               variant="secondary"
               onClick={() => {
-                setStarterIds(suggest(ctx.roster, isClassic ? constraints : null));
+                setStarterIds(
+                  suggest(ctx.roster, isClassic ? constraints : null, {
+                    pinned: starterIds.filter((id) => lockedIds.has(id)),
+                    locked: lockedIds,
+                  }),
+                );
                 setVacancies([]);
                 setRefused(null);
               }}
@@ -503,6 +660,8 @@ export default function FormationPage() {
                 selected={selected === p.player_id}
                 onSelect={() => setSelected((s) => (s === p.player_id ? null : p.player_id))}
                 onToggle={() => toggleStarter(p.player_id)}
+                locked={lockedIds.has(p.player_id)}
+                note={refused?.player_id === p.player_id ? refused.reason : null}
               />
             ))}
             {/* The same empty places, in the list: "9/11" is a number you have to
@@ -541,6 +700,7 @@ export default function FormationPage() {
                 onToggle={() => toggleStarter(p.player_id)}
                 blocked={blockReasonFor(p)}
                 note={refused?.player_id === p.player_id ? refused.reason : null}
+                locked={lockedIds.has(p.player_id)}
                 order={i + 1}
                 canUp={i > 0}
                 canDown={i < bench.length - 1}
@@ -564,6 +724,7 @@ function RosterRow({
   onToggle,
   blocked,
   note,
+  locked,
   order,
   canUp,
   canDown,
@@ -577,6 +738,8 @@ function RosterRow({
   onToggle: () => void;
   /** Why he cannot be promoted right now (null = he can). */
   blocked?: string | null;
+  /** His match has kicked off: he stays where he is, wherever that is. */
+  locked?: boolean;
   /** The refusal, shown after an attempt: the tooltip alone is invisible on touch. */
   note?: string | null;
   order?: number;
@@ -597,6 +760,14 @@ function RosterRow({
         <span className="min-w-0">
           <span className={`block truncate text-sm font-semibold ${selected ? 'text-slate-900 underline' : 'text-slate-800'}`}>
             {p.name}
+            {locked ? (
+              <span
+                className="ml-1.5 rounded bg-slate-200 px-1 py-0.5 align-middle text-[9px] font-bold uppercase tracking-wide text-slate-600"
+                title="La sua partita è iniziata: resta dov'è."
+              >
+                in campo
+              </span>
+            ) : null}
           </span>
           <span className="block text-[11px] text-slate-500">
             {typeof p.value === 'number' ? (

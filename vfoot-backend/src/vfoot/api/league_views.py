@@ -122,7 +122,9 @@ from vfoot.services.player_ratings import (
     latest_market_values, player_values, previous_season_with_data,
 )
 from vfoot.services.match_resolver import matchday_fixtures_by_team
-from vfoot.services import honours, knockout, lineup_repair, matchday_state
+from vfoot.services import (
+    honours, knockout, lineup_deadline, lineup_repair, matchday_state,
+)
 
 log = logging.getLogger(__name__)
 
@@ -279,6 +281,7 @@ class LeagueDetailView(APIView):
                 "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
                 "home_advantage_bonus": league.home_advantage_bonus,
                 "enforce_lineup_deadline": league.enforce_lineup_deadline,
+                "lineup_lock_mode": league.lineup_lock_mode,
                 "initial_budget": league.initial_budget,
                 "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
                                  "CEN": league.slots_mid, "ATT": league.slots_fwd},
@@ -790,6 +793,14 @@ class LeagueSettingsUpdateView(APIView):
             league.enforce_lineup_deadline = bool(request.data.get("enforce_lineup_deadline"))
             fields.append("enforce_lineup_deadline")
 
+        if "lineup_lock_mode" in request.data:
+            mode = str(request.data.get("lineup_lock_mode") or "")
+            if mode not in dict(FantasyLeague.LOCK_MODE_CHOICES):
+                return Response({"detail": "lineup_lock_mode non valido."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            league.lineup_lock_mode = mode
+            fields.append("lineup_lock_mode")
+
         # Auction economy (budget + roster slots). Frozen once an auction started:
         # a mid-auction change would rewrite the affordability of bids already made.
         econ_keys = {"initial_budget", "slots_gk", "slots_def", "slots_mid", "slots_fwd"}
@@ -822,6 +833,7 @@ class LeagueSettingsUpdateView(APIView):
             "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
             "home_advantage_bonus": league.home_advantage_bonus,
             "enforce_lineup_deadline": league.enforce_lineup_deadline,
+            "lineup_lock_mode": league.lineup_lock_mode,
             "initial_budget": league.initial_budget,
             "roster_slots": {"POR": league.slots_gk, "DIF": league.slots_def,
                              "CEN": league.slots_mid, "ATT": league.slots_fwd},
@@ -2308,11 +2320,18 @@ def _live_totals(league: FantasyLeague, fixtures, locked_mds: set[int]) -> dict:
 def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_real_md: int | None = None,
                            my_roster_ready: bool = False, awaiting_mds: set[int] | None = None,
                            locked_mds: set[int] | None = None,
-                           live_totals: dict | None = None) -> dict:
+                           live_totals: dict | None = None,
+                           closed_mds: set[int] | None = None) -> dict:
     mine = bool(my_team_id and (fx.home_team_id == my_team_id or fx.away_team_id == my_team_id))
     played = fx.status == FantasyFixture.STATUS_FINISHED
-    locked = bool(locked_mds is not None and fx.fantasy_matchday_id is not None
-                  and fx.fantasy_matchday.real_matchday in locked_mds)
+    real_md = fx.fantasy_matchday.real_matchday if fx.fantasy_matchday_id else None
+    locked = bool(locked_mds is not None and real_md is not None and real_md in locked_mds)
+    # Two different closures, and they coincide only under the matchday-wide
+    # deadline. `locked` = the round has begun, which is what makes a live tabellino
+    # exist. `closed` = the manager has nothing left to decide — under the per-player
+    # lock that is the LAST kickoff, and defaulting it to `locked` would take the
+    # Formazione button away from him on Saturday afternoon.
+    closed = locked if closed_mds is None else (real_md is not None and real_md in closed_mds)
     live = (live_totals or {}).get(fx.id)
     return {
         "fixture_id": fx.id,
@@ -2355,7 +2374,7 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         # earlier — a button the save endpoint could only answer with a 409.
         "can_set_lineup": bool(
             mine and my_roster_ready and not played and fx.fantasy_matchday_id is not None
-            and not locked
+            and not closed
         ),
         # Whether /fixtures/<id> has anything to show. A concluded fixture has its
         # frozen tabellino; a LOCKED one has the live computation, which is the whole
@@ -2388,13 +2407,14 @@ class LeagueFixturesView(APIView):
         awaiting_mds = {md.real_matchday for md in matchday_state.awaiting_matchdays(league)}
         locked_mds = (matchday_state.locked_matchdays(league.reference_season_id)
                       if league.reference_season_id else set())
+        closed_mds = matchday_state.closed_matchdays(league)
         # One query for the whole calendar, not one per fixture.
         my_roster_ready = bool(my_team_id) and FantasyRosterSlot.objects.filter(
             team_id=my_team_id, released_at__isnull=True).exists()
         rows = list(qs[:200])
         live_totals = _live_totals(league, rows, locked_mds)
         items = [_serialize_fixture_row(fx, my_team_id, current_real_md, my_roster_ready,
-                                        awaiting_mds, locked_mds, live_totals)
+                                        awaiting_mds, locked_mds, live_totals, closed_mds)
                  for fx in rows]
         return Response(items)
 
@@ -4613,6 +4633,26 @@ class LeagueTeamLineupView(APIView):
                          .values_list("player_id", "team_season__team__name")) \
             if stats_cs is not None else {}
 
+        # The deadline, as it applies to THIS matchday. Sent whole rather than left
+        # to be re-derived client-side from the kickoffs: the page has to grey out
+        # the right players, and "which ones are already playing" is a question only
+        # the league's own lock mode can answer.
+        locked_pids = matchday_state.locked_players(league, matchday, player_ids)
+        lock_closes_at = None
+        if league.enforce_lineup_deadline and league.reference_season_id is not None:
+            lock_closes_at = (
+                matchday_state.matchday_last_kickoffs(league.reference_season_id).get(matchday)
+                if league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER
+                else matchday_state.lineup_lock_at(league.reference_season_id, matchday)
+            )
+        lineup_lock = {
+            "mode": league.lineup_lock_mode,
+            "enforced": bool(league.enforce_lineup_deadline),
+            "closes_at": lock_closes_at.isoformat() if lock_closes_at else None,
+            "closed": bool(lock_closes_at is not None and lock_closes_at <= timezone.now()),
+            "locked_player_ids": sorted(locked_pids),
+        }
+
         roster = []
         for s in slots:
             p = profiles.get(s.player_id, {})
@@ -4639,6 +4679,10 @@ class LeagueTeamLineupView(APIView):
                     "next_match": next_match_by_player.get(s.player_id),
                     "value": (values_by_player.get(s.player_id) or {}).get("estimated_value"),
                     "value_basis": (values_by_player.get(s.player_id) or {}).get("basis"),
+                    # Frozen where he stands: his club is already playing. Always
+                    # False under the matchday-wide deadline, where the lineup locks
+                    # as a block and no single player is the reason.
+                    "locked": s.player_id in locked_pids,
                 }
             )
         roster.sort(key=lambda r: (r["avg_col"], -r["price"]))
@@ -4697,6 +4741,7 @@ class LeagueTeamLineupView(APIView):
                                            and ref_cs is not None
                                            and stats_cs.id == ref_cs.id),
                 "saved_lineup": saved_lineup if is_own else None,
+                "lineup_lock": lineup_lock,
             }
         )
 
@@ -4733,25 +4778,28 @@ class LeagueTeamLineupSaveView(APIView):
             return Response({"detail": "matchday richiesto."}, status=status.HTTP_400_BAD_REQUEST)
         gk = request.data.get("gk_player_id")
 
-        # Deadline (Modello 1): the lineup locks at the FIRST confirmed kickoff of the
-        # real matchday — after it nobody sets a lineup with results already in hand.
+        # The deadline. WHICH deadline is the league's own choice (see
+        # FantasyLeague.lineup_lock_mode): the whole XI at the round's first kickoff,
+        # or each player at his own. Both answers are checked here and not only in
+        # the UI, because a hand-crafted request is exactly the way one would set a
+        # lineup with the results already in hand.
         try:
             md_int = int(matchday)
         except (TypeError, ValueError):
             return Response({"detail": "matchday non valido."}, status=status.HTTP_400_BAD_REQUEST)
+        per_player = (league.enforce_lineup_deadline
+                      and league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER)
         if league.enforce_lineup_deadline and league.reference_season_id is not None:
-            first_kick = (
-                Match.objects.filter(
-                    competition_season_id=league.reference_season_id,
-                    matchday=md_int,
-                    kickoff_provisional=False,
-                    kickoff__isnull=False,
-                )
-                .order_by("kickoff")
-                .values_list("kickoff", flat=True)
-                .first()
-            )
-            if first_kick is not None and first_kick <= timezone.now():
+            if per_player:
+                # The round only closes when the LAST club has kicked off; until then
+                # it is partly open and the per-player check below does the work.
+                last_kick = matchday_state.matchday_last_kickoffs(
+                    league.reference_season_id).get(md_int)
+                closed = last_kick is not None and last_kick <= timezone.now()
+            else:
+                first_kick = matchday_state.lineup_lock_at(league.reference_season_id, md_int)
+                closed = first_kick is not None and first_kick <= timezone.now()
+            if closed:
                 return Response(
                     {"detail": f"Formazione bloccata: la giornata {md_int} è già iniziata."},
                     status=status.HTTP_409_CONFLICT,
@@ -4794,11 +4842,52 @@ class LeagueTeamLineupSaveView(APIView):
             "bench_player_ids": request.data.get("bench_player_ids", []),
             "starter_backups": request.data.get("starter_backups", []),
         }
-        for cid in target_comp_ids:
+        keys = [f"team{team.id}" + (f":comp{cid}" if cid is not None else "")
+                for cid in target_comp_ids]
+
+        if per_player:
+            # Each competition keeps its OWN lineup, so each is judged against its own
+            # previous one: the same submission can be legal for the cup, where the
+            # manager had never saved anything, and illegal for the league, where he
+            # is moving a player who is already playing.
+            previous = {
+                s.lineup_id: {"gk_player_id": s.gk_player_id,
+                              "starter_player_ids": s.starter_player_ids,
+                              "bench_player_ids": s.bench_player_ids}
+                for s in SavedLineupSnapshot.objects.filter(
+                    league_id=str(league_id), matchday_id=str(matchday), lineup_id__in=keys)
+            }
+            touched = set(lineup_deadline.placement(defaults))
+            for old in previous.values():
+                touched |= set(lineup_deadline.placement(old))
+            locked_ids = matchday_state.locked_players(league, md_int, touched)
+            if locked_ids:
+                # short_name is often empty in the provider's data — the same
+                # fallback the roster is serialised with, or the refusal names a
+                # database id at the manager.
+                names = {
+                    pid: (short or full or f"giocatore {pid}")
+                    for pid, short, full in Player.objects.filter(id__in=locked_ids)
+                    .values_list("id", "short_name", "full_name")
+                }
+                errors: list[str] = []
+                for key in keys:
+                    for msg in lineup_deadline.violations(
+                            previous.get(key), defaults, locked_ids, names):
+                        if msg not in errors:
+                            errors.append(msg)
+                if errors:
+                    return Response(
+                        {"detail": "Formazione bloccata per i giocatori già in campo.",
+                         "errors": errors},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+        for cid, key in zip(target_comp_ids, keys):
             SavedLineupSnapshot.objects.update_or_create(
                 league_id=str(league_id),
                 matchday_id=str(matchday),
-                lineup_id=f"team{team.id}" + (f":comp{cid}" if cid is not None else ""),
+                lineup_id=key,
                 defaults=defaults,
             )
         return Response({"ok": True, "saved_competitions": len([c for c in target_comp_ids if c is not None]) or 1})

@@ -1,6 +1,6 @@
 # Fantavoto live nelle partite di lega (classic) — piano
 
-Stato: **Fasi 1→4 fatte** (motore, snapshot, conclusione live, ricalcolo). Restano rifiniture (avviso deadline lato formazione; eventuale flag per disattivare il lock in leghe di test). Documento di riferimento.
+Stato: **Fasi 1→4 fatte** (motore, snapshot, conclusione live, ricalcolo), più il locking (Fase 3c) nei due modelli. Documento di riferimento.
 
 ## Il problema
 
@@ -54,12 +54,14 @@ NO auto-formazione ottimale: darebbe vantaggio a chi non schiera (otterrebbe l'X
 
 **"Previous" quando la rosa è cambiata** (mercato aperto nel frattempo): si riusa l'ultima formazione salvata **filtrata sui giocatori ancora in rosa**. I ceduti/svincolati → slot vuoti = **s.v.** → sostituzione automatica dai panchinari superstiti; slot scoperti = esclusi (nulla). I **nuovi acquisti non entrano automaticamente**. Il pre-check espone `previous_lineup_stale: N` (giocatori non più in rosa) così l'admin sceglie informato tra `previous` e `forfait`.
 
-**Termine ultimo per schierare + re-editing** — due modelli (scelta di lega):
-- **Modello 1** (semplice, **default ora**): la formazione si blocca all'inizio della **prima partita reale** della giornata; dopo non è più modificabile.
-- **Modello 2b** (futuro): si può continuare a editare, ma ogni giocatore **già entrato in campo (o che ha giocato)** è **congelato nel suo slot** (titolare/panchina); si possono muovere solo i giocatori non ancora scesi in campo. *Caveat*: con panchina = tutta la rosa, basta che un giocatore giochi per congelare quasi tutto → significativo solo con panchina ridotta.
+**Termine ultimo per schierare + re-editing** — due modelli, **entrambi implementati** e scelti dall'admin in Gestione lega (`FantasyLeague.lineup_lock_mode`, default `matchday`):
+- **Modello 1** (`matchday`, default): la formazione si blocca all'inizio della **prima partita reale** della giornata; dopo non è più modificabile.
+- **Modello 2b** (`player`): si può continuare a editare, ma ogni giocatore **la cui partita è iniziata** è **congelato dov'è** (portiere/titolare/panchina/fuori — il "fuori" conta: non lo si può nemmeno far entrare); si muovono solo i giocatori non ancora scesi in campo, e la giornata si chiude all'**ultimo** calcio d'inizio. Fra due panchinari già in campo non si cambia nemmeno l'ordine di priorità: sarebbe scegliere chi entra a risultati visti. *Caveat confermato sul campo*: con panchina = tutta la rosa, la domenica sera 18 giocatori su 25 sono già congelati — il modello è significativo solo con panchina ridotta.
 - Modello 2a (editabile finché nessuno schierato entra in campo) **scartato**.
 
-**Separazione importante**: il termine/locking è **enforcement sull'endpoint di salvataggio formazione**, ORTOGONALE al motore di scoring. La conclusione (Fase 3) usa comunque la **formazione finale salvata**; il locking (Modello 1) è un task a parte (**Fase 3c**).
+Dove vive la regola: `services/matchday_state` (chi è bloccato e quando chiude la giornata), `services/lineup_deadline` (che cosa conta come "spostare" un giocatore congelato), l'endpoint di salvataggio formazione e `services/lineup_repair` (R1 diventa per-giocatore: un assestamento di mercato non tira fuori dalla formazione chi è già in campo).
+
+**Separazione importante**: il termine/locking è **enforcement sull'endpoint di salvataggio formazione**, ORTOGONALE al motore di scoring. La conclusione (Fase 3) usa comunque la **formazione finale salvata**; il locking è un task a parte (**Fase 3c**).
 
 ## Contratto conclusione (Fase 3b) — da validare
 

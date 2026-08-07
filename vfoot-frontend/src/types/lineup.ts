@@ -2,6 +2,9 @@
 export type PlayerRole = 'GK' | 'DEF' | 'MID' | 'ATT';
 export type MinutesLabel = 'high' | 'medium' | 'low' | 'unknown';
 export type LeagueMode = 'aura' | 'classic';
+/** Which deadline the league plays under: the whole XI at the round's first kickoff,
+ *  or each player at his own club's. */
+export type LineupLockMode = 'matchday' | 'player';
 
 export interface ClassicConstraints {
   starters: number;
@@ -34,6 +37,9 @@ export interface TeamLineupPlayer {
     kickoff_provisional: boolean;
     status: string;
   } | null;
+  // Frozen where he stands: his club is already playing, and the league locks
+  // player by player. Always false under the matchday-wide deadline.
+  locked?: boolean;
 }
 
 export interface TeamLineupContext {
@@ -69,6 +75,16 @@ export interface TeamLineupContext {
     bench_player_ids: number[];
     starter_backups: unknown[];
   } | null;
+  // The deadline as it applies to THIS matchday. `closes_at` is the moment there is
+  // nothing left to decide: the first kickoff under the matchday-wide lock, the last
+  // one under the per-player lock.
+  lineup_lock?: {
+    mode: LineupLockMode;
+    enforced: boolean;
+    closes_at: string | null;
+    closed: boolean;
+    locked_player_ids: number[];
+  };
 }
 
 export interface SaveTeamLineupRequest {

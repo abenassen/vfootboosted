@@ -88,9 +88,116 @@ def matchday_locks(competition_season_id: int) -> dict[int, object]:
 
 
 def locked_matchdays(competition_season_id: int, now=None) -> set[int]:
-    """Every real matchday whose lineups have already locked."""
+    """Every real matchday that has KICKED OFF — its first confirmed kickoff is past.
+
+    This is the "the round has begun" fact: it is what makes a live tabellino exist
+    and what stops a competition from being planned onto that matchday. Whether a
+    manager may still touch his lineup is a different question, because under the
+    per-player deadline he may — see ``closed_matchdays``.
+    """
     now = now or timezone.now()
     return {md for md, first in matchday_locks(competition_season_id).items() if first <= now}
+
+
+def matchday_last_kickoffs(competition_season_id: int) -> dict[int, object]:
+    """{real_matchday: LAST confirmed kickoff}, the mirror of ``matchday_locks``.
+
+    Under the per-player deadline this is when a round finally closes: the moment
+    the last club takes the pitch there is nobody left to decide about.
+    """
+    from django.db.models import Max
+
+    rows = (
+        Match.objects.filter(
+            competition_season_id=competition_season_id,
+            kickoff_provisional=False,
+            kickoff__isnull=False,
+            matchday__isnull=False,
+        )
+        .exclude(status__in=[Match.STATUS_POSTPONED, Match.STATUS_CANCELLED])
+        .values("matchday")
+        .annotate(last=Max("kickoff"))
+        .values_list("matchday", "last")
+    )
+    return {int(md): last for md, last in rows}
+
+
+def closed_matchdays(league, now=None) -> set[int]:
+    """Real matchdays this league's managers can no longer touch AT ALL.
+
+    The one function every "can he still field a team" question should ask, because
+    it is the only one that knows the league's deadline:
+
+    * no deadline (a league replayed over a finished season) — nothing is ever closed;
+    * ``matchday`` — closed at the first kickoff, the whole XI at once;
+    * ``player`` — closed only at the LAST kickoff. In between the round is *partly*
+      locked, which is not the same thing and is exactly what used to have no way of
+      being said: ``locked_matchdays`` would have shut the page on a manager who
+      still had a Monday-night striker to decide about.
+    """
+    from vfoot.models import FantasyLeague
+
+    csid = league.reference_season_id
+    if csid is None or not league.enforce_lineup_deadline:
+        return set()
+    now = now or timezone.now()
+    if league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER:
+        return {md for md, last in matchday_last_kickoffs(csid).items() if last <= now}
+    return locked_matchdays(csid, now)
+
+
+def player_lock_times(competition_season_id: int, real_matchday: int) -> dict[int, object]:
+    """{team_season_id: confirmed kickoff of that club's match in this round}.
+
+    Keyed on the club and not on the player: a lineup holds twenty-five players from
+    ten clubs, and the deadline is a property of the club's fixture. A postponed
+    match does not lock anybody — ``matchday_fixtures_by_team`` already prefers the
+    replay row, so the club's deadline moves to the recovery, which is the right
+    answer for a manager who has to decide about a player nobody is going to play.
+    """
+    from vfoot.services.match_resolver import matchday_fixtures_by_team
+
+    out: dict[int, object] = {}
+    for ts_id, m in matchday_fixtures_by_team(competition_season_id, real_matchday).items():
+        if m.kickoff is None or m.kickoff_provisional:
+            continue
+        if m.status in (Match.STATUS_POSTPONED, Match.STATUS_CANCELLED):
+            continue
+        out[ts_id] = m.kickoff
+    return out
+
+
+def locked_players(league, real_matchday: int, player_ids, now=None) -> set[int]:
+    """Of these players, the ones already frozen for this matchday.
+
+    Empty under the matchday-wide deadline: there the lineup locks as a block and
+    naming individual players would be misleading. Under the per-player deadline it
+    is the set whose clubs have taken the pitch.
+    """
+    from vfoot.models import FantasyLeague
+    from realdata.models import PlayerTeamStint
+
+    csid = league.reference_season_id
+    if (csid is None
+            or not league.enforce_lineup_deadline
+            or league.lineup_lock_mode != FantasyLeague.LOCK_PLAYER):
+        return set()
+    player_ids = list(player_ids)
+    if not player_ids:
+        return set()
+    now = now or timezone.now()
+    kicked = {ts_id for ts_id, k in player_lock_times(csid, real_matchday).items() if k <= now}
+    if not kicked:
+        return set()
+    return {
+        pid
+        for pid, ts_id in PlayerTeamStint.objects.filter(
+            player_id__in=player_ids,
+            team_season__competition_season_id=csid,
+            end_date__isnull=True,
+        ).values_list("player_id", "team_season_id")
+        if ts_id in kicked
+    }
 
 
 def league_matchdays(league):
@@ -106,15 +213,25 @@ def next_fieldable_matchday(league, now=None) -> int | None:
     This — not the ledger pointer — is what the "Formazione" shortcut must follow.
     Reading it from the ledger is what used to send a manager to a matchday played
     weeks ago while hiding the one he could actually still field.
+
+    "Still" is the league's own deadline, not a universal one: under the per-player
+    lock a round that kicked off on Saturday is the round to field until the last
+    club takes the pitch on Monday, and sending the manager forward to the next one
+    would hide the eight players he could still move.
     """
+    from vfoot.models import FantasyLeague
+
     now = now or timezone.now()
+    per_player = (league.enforce_lineup_deadline
+                  and league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER)
     locks: dict[int, dict[int, object]] = {}
     for md in league_matchdays(league):
         csid = md.real_competition_season_id
         if csid not in locks:
-            locks[csid] = matchday_locks(csid)
-        first = locks[csid].get(md.real_matchday)
-        if first is None or first > now:
+            locks[csid] = (matchday_last_kickoffs(csid) if per_player
+                           else matchday_locks(csid))
+        deadline = locks[csid].get(md.real_matchday)
+        if deadline is None or deadline > now:
             return md.real_matchday
     return None
 
