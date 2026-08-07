@@ -31,6 +31,7 @@ import type {
   LeagueFixtureItem,
   LeagueMatchdayItem,
   LeagueSummary,
+  ManagerProfile,
   PlayerSearchItem,
   QualificationRuleCreateRequest,
   TeamRoster,
@@ -305,6 +306,27 @@ export async function getLeagueActivity(_leagueId: number, _limit = 12) {
 export async function getManagerHonours(userId: number) {
   await sleep(60);
   return { user_id: userId, username: 'demo', awards: [] };
+}
+
+export async function getManagerProfile(userId: number): Promise<ManagerProfile> {
+  await sleep(60);
+  return {
+    user_id: userId,
+    username: 'demo',
+    avatar: '',
+    joined_at: null,
+    is_self: true,
+    leagues: mockLeagues.map((l) => ({
+      league_id: l.league_id,
+      name: l.name,
+      mode: l.mode,
+      role: 'admin' as const,
+      joined_at: null,
+      team_id: l.teams[0]?.team_id ?? null,
+      team_name: l.teams[0]?.name ?? null,
+      team_crest: l.teams[0]?.crest ?? '',
+    })),
+  };
 }
 
 export async function getLeagueDetail(leagueId: number): Promise<LeagueDetail> {

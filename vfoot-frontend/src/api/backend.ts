@@ -40,6 +40,7 @@ import type {
   JoinLeagueRequest,
   LeagueDetail,
   ManagerHonours,
+  ManagerProfile,
   RealSeasonItem,
   ReferenceSeason,
   LeagueFixtureItem,
@@ -432,6 +433,15 @@ export async function getLeagueActivity(leagueId: number, limit = 12): Promise<L
  *  share with him. 404 when we share none: see ManagerHonoursView. */
 export async function getManagerHonours(userId: number): Promise<ManagerHonours> {
   const res = await fetch(`${baseUrl()}/managers/${userId}/honours`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** The public card of one manager: who he is and which of our leagues he plays
+ *  in. Same visibility rule as the albo d'oro — 404 when we share none. */
+export async function getManagerProfile(userId: number): Promise<ManagerProfile> {
+  const res = await fetch(`${baseUrl()}/managers/${userId}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);

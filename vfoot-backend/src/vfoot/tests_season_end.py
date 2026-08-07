@@ -545,3 +545,97 @@ class SeasonEndTests(TestCase):
             elif fx.away_team_id == last:
                 fx.away_total = 9.0
                 fx.save(update_fields=["away_total"])
+
+    # -- l'identità di chi ha vinto, com'era quel giorno --------------------
+    def test_the_albo_keeps_the_team_that_won_it_not_the_one_of_today(self):
+        """Ribattezzarsi non riscrive il passato.
+
+        Nome e stemma di una squadra si cambiano quando si vuole, dalla pagina
+        rose. Finché l'albo d'oro li leggeva dal vivo, un cambio di nome
+        riscriveva anche le coppe di tre stagioni fa — e siccome lo stemma
+        predefinito è generato dal nome, il trofeo si ritrovava addosso lo stemma
+        di adesso senza che nulla lo dicesse.
+        """
+        self._championship()
+        self._play_the_season()
+
+        mine = FantasyTeam.objects.get(id=self.team_ids[0])
+        self.assertEqual(mine.name, "Alpha")
+        mine.name = "Omega FC"
+        mine.crest = '{"shape":"round","primary":"ff0000"}'
+        mine.save(update_fields=["name", "crest"])
+
+        awards = self.client.get(f"/api/v1/managers/{self.admin.id}/honours").json()["awards"]
+        scudetto = next(a for a in awards if a["name"] == "Scudetto")
+        self.assertEqual(scudetto["team_name"], "Alpha", "l'ha vinto l'Alpha")
+        self.assertEqual(scudetto["crest"], "", "e con lo stemma che aveva allora")
+        # L'id invece è quello di sempre: serve a linkare la squadra di oggi.
+        self.assertEqual(scudetto["team_id"], mine.id)
+
+    def test_the_news_line_of_a_prize_also_keeps_it(self):
+        """La riga di news è datata al giorno in cui il premio fu vinto: mostrarla
+        con lo stemma di adesso sarebbe raccontare un fatto con l'aria di un altro
+        giorno."""
+        self._championship()
+        self._play_the_season()
+        mine = FantasyTeam.objects.get(id=self.team_ids[0])
+        mine.name = "Omega FC"
+        mine.save(update_fields=["name"])
+
+        feed = self.client.get(f"/api/v1/leagues/{self.league.id}/activity?limit=50").json()
+        scudetto = next(i for i in feed if i["kind"] == "premio" and "Scudetto" in i["text"])
+        self.assertIn("Alpha", scudetto["text"])
+        self.assertNotIn("Omega", scudetto["text"])
+
+
+    # -- la scheda pubblica del fantallenatore -----------------------------
+    # Qui e non in una classe a parte: una sottoclasse avrebbe rigiocato per
+    # intero la stagione di sopra a ogni test ereditato — venti test in piu' e
+    # tre minuti — per riusare un setUp.
+
+    def test_a_manager_sees_his_own_leagues_and_teams(self):
+        self._championship()
+        self._play_the_season()
+
+        r = self.client.get(f"/api/v1/managers/{self.admin.id}")
+        self.assertEqual(r.status_code, 200, r.content)
+        card = r.json()
+        self.assertEqual(card["username"], "admin")
+        self.assertTrue(card["is_self"])
+        mine = next(l for l in card["leagues"] if l["league_id"] == self.league.id)
+        self.assertEqual(mine["team_name"], "Alpha")
+        self.assertEqual(mine["role"], "admin")
+
+    def test_the_card_carries_no_contact_details(self):
+        """La può aprire chiunque condivida una lega: porta quello che uno mette in
+        campo, non come raggiungerlo."""
+        card = self.client.get(f"/api/v1/managers/{self.admin.id}").json()
+        self.assertNotIn("email", card)
+
+    def test_a_rival_sees_the_leagues_you_share_and_no_others(self):
+        rival = APIClient()
+        rival.force_authenticate(user=self.managers[3])
+        card = rival.get(f"/api/v1/managers/{self.admin.id}").json()
+        self.assertFalse(card["is_self"])
+        self.assertEqual([l["league_id"] for l in card["leagues"]], [self.league.id])
+
+        elsewhere = FantasyLeague.objects.create(name="Altrove", owner=self.admin)
+        LeagueMembership.objects.create(
+            league=elsewhere, user=self.admin, role=LeagueMembership.ROLE_ADMIN)
+        card = rival.get(f"/api/v1/managers/{self.admin.id}").json()
+        self.assertEqual([l["league_id"] for l in card["leagues"]], [self.league.id],
+                         "con chi altro gioca non sono affari suoi")
+        # ...ma il diretto interessato le vede tutte e due.
+        own = self.client.get(f"/api/v1/managers/{self.admin.id}").json()
+        self.assertEqual({l["league_id"] for l in own["leagues"]},
+                         {self.league.id, elsewhere.id})
+
+    def test_a_stranger_gets_a_404(self):
+        outsider = User.objects.create_user("nessuno", "n@x.it", "x")
+        stranger = APIClient()
+        stranger.force_authenticate(user=outsider)
+        self.assertEqual(
+            stranger.get(f"/api/v1/managers/{self.admin.id}").status_code, 404)
+        self.assertEqual(
+            stranger.get(f"/api/v1/managers/{outsider.id}").status_code, 200,
+            "la propria si apre sempre, anche vuota")

@@ -5,7 +5,6 @@ import { getTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import RosterView from '../components/RosterView';
 import Crest from '../components/Crest';
-import HonoursBoard from '../components/HonoursBoard';
 
 /** Another participant's roster, in the same structured view as one's own — the
  *  read-only counterpart of the Squad page, reached from the League page. The
@@ -39,7 +38,24 @@ export default function TeamRosterPage() {
               <div className="mt-0.5 text-xl font-black">{data.team.name}</div>
               <div className="text-sm text-slate-500">
                 {data.team.manager ? (
-                  <>Fantallenatore: <b className="text-slate-700">{data.team.manager}</b> · </>
+                  <>
+                    Fantallenatore:{' '}
+                    {/* Cliccabile: da qui si arriva alla SUA scheda, dove stanno
+                        l'albo d'oro e le altre squadre che schiera. Prima erano
+                        appesi a questa pagina, che è la proprietà di una squadra
+                        in una lega e non del fantallenatore. */}
+                    {data.team.manager_user_id ? (
+                      <Link
+                        to={`/fantallenatori/${data.team.manager_user_id}`}
+                        className="font-bold text-slate-700 hover:underline"
+                      >
+                        {data.team.manager}
+                      </Link>
+                    ) : (
+                      <b className="text-slate-700">{data.team.manager}</b>
+                    )}{' '}
+                    ·{' '}
+                  </>
                 ) : null}
                 {data.roster.length} giocatori
               </div>
@@ -52,15 +68,11 @@ export default function TeamRosterPage() {
           </Link>
         </div>
       </Card>
-      {/* Before the roster: what he has WON says more about a rival than which
-          twenty-five players he owns, and it is the reason to open his page. */}
-      {data.team.manager_user_id ? (
-        <HonoursBoard
-          userId={data.team.manager_user_id}
-          name={data.team.manager}
-          own={Boolean(data.is_own)}
-        />
-      ) : null}
+      {/* Niente albo d'oro qui. Una rosa è la proprietà di UNA squadra in UNA
+          lega e finisce con lei; i trofei di un fantallenatore no — si accumulano
+          attraverso i campionati — e messi su questa pagina sembravano una cosa
+          della lega corrente. Adesso stanno sulla sua scheda, linkata dal nome
+          qui sopra e dal blocco Partecipanti della home lega. */}
       <RosterView data={data} />
     </div>
   );

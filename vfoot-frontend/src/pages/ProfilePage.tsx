@@ -1,9 +1,9 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button, Card, SectionTitle } from '../components/ui';
 import Avatar from '../components/Avatar';
 import AvatarBuilder from '../components/AvatarBuilder';
 import NotificationsCard from '../components/NotificationsCard';
-import HonoursBoard from '../components/HonoursBoard';
 import { useAuth } from '../auth/AuthContext';
 import { changePassword, updateProfile } from '../api';
 import { ApiError } from '../api/backend';
@@ -35,6 +35,7 @@ export default function ProfilePage() {
 
   // Avatar
   const [avatar, setAvatar] = useState<AvatarOptions>(() => parseAvatar(user?.avatar) ?? DEFAULT_AVATAR);
+  const [editingAvatar, setEditingAvatar] = useState(false);
   const [avatarPending, setAvatarPending] = useState(false);
   const [avatarBanner, setAvatarBanner] = useState<Banner>(null);
   const avatarChanged = useMemo(() => serializeAvatar(avatar) !== (user?.avatar ?? ''), [avatar, user?.avatar]);
@@ -113,43 +114,82 @@ export default function ProfilePage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      {/* Identity header */}
-      <Card className="flex items-center gap-4 p-4">
-        <Avatar descriptor={user?.avatar} username={user?.username} size={64} />
-        <div className="min-w-0">
-          <div className="text-lg font-black leading-tight">{user?.username ?? 'Utente'}</div>
-          <div className="truncate text-sm text-slate-500">{user?.email || 'Email non impostata'}</div>
+      {/* Identity header. Da qui in poi questa pagina è SOLO impostazioni: chi
+          sei — faccia, albo d'oro, leghe — sta sulla scheda pubblica, che è la
+          stessa che vedono gli altri. Tenere l'albo d'oro anche qui voleva dire
+          due pagine che raccontano la stessa cosa e possono smettere di
+          concordare. */}
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-4">
+            <Avatar descriptor={user?.avatar} username={user?.username} size={64} />
+            <div className="min-w-0">
+              <div className="text-lg font-black leading-tight">{user?.username ?? 'Utente'}</div>
+              <div className="truncate text-sm text-slate-500">{user?.email || 'Email non impostata'}</div>
+            </div>
+          </div>
+          {user ? (
+            <Link to={`/fantallenatori/${user.id}`}>
+              <Button size="sm" variant="secondary">🏆 La tua scheda</Button>
+            </Link>
+          ) : null}
         </div>
       </Card>
-
-      {/* What you have won, in every league you play in — the one thing on this
-          page that is not a setting, and the reason to come back to it. */}
-      {user ? <HonoursBoard userId={user.id} own /> : null}
 
       {/* Notifications + install. High on the page on purpose: on iOS the
           install is a prerequisite for notifications and nothing else announces it. */}
       <NotificationsCard />
 
-      {/* Avatar builder */}
+      {/* Avatar builder, CHIUSO finché non lo si chiede — come "Nome e stemma"
+          nella pagina rose. È una tavolozza alta mezzo schermo (pelle, capelli,
+          occhi, vestiti…), e tenerla sempre aperta spingeva sotto la piega tutto
+          il resto della pagina per una cosa che si tocca una volta e poi mai più. */}
       <Card className="p-4">
-        <SectionTitle>Avatar</SectionTitle>
-        <div className="mt-3">
-          <AvatarBuilder value={avatar} onChange={setAvatar} />
-        </div>
-        <div className="mt-4 flex items-center gap-3">
-          <Button onClick={() => void onSaveAvatar()} disabled={!avatarChanged || avatarPending}>
-            {avatarPending ? 'Salvataggio…' : 'Salva avatar'}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Avatar descriptor={user?.avatar} username={user?.username} size={44} />
+            <div>
+              <SectionTitle>Avatar</SectionTitle>
+              <div className="text-sm text-slate-500">
+                Ti identifica in ogni lega: ce n'è uno solo per account.
+              </div>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              // Chiudere ANNULLA la bozza: lasciarla in giro significava
+              // riaprire il pannello su modifiche mai salvate, con il bottone
+              // "Salva" acceso per un cambiamento che non si ricorda di aver fatto.
+              if (editingAvatar) setAvatar(parseAvatar(user?.avatar) ?? DEFAULT_AVATAR);
+              setAvatarBanner(null);
+              setEditingAvatar((open) => !open);
+            }}
+          >
+            {editingAvatar ? 'Chiudi' : '✏️ Cambia avatar'}
           </Button>
-          {avatarChanged ? (
-            <button
-              type="button"
-              onClick={() => setAvatar(parseAvatar(user?.avatar) ?? DEFAULT_AVATAR)}
-              className="text-sm font-semibold text-slate-500 hover:text-slate-800"
-            >
-              Annulla
-            </button>
-          ) : null}
         </div>
+
+        {editingAvatar ? (
+          <div className="mt-4 border-t pt-4">
+            <AvatarBuilder value={avatar} onChange={setAvatar} />
+            <div className="mt-4 flex items-center gap-3">
+              <Button onClick={() => void onSaveAvatar()} disabled={!avatarChanged || avatarPending}>
+                {avatarPending ? 'Salvataggio…' : 'Salva avatar'}
+              </Button>
+              {avatarChanged ? (
+                <button
+                  type="button"
+                  onClick={() => setAvatar(parseAvatar(user?.avatar) ?? DEFAULT_AVATAR)}
+                  className="text-sm font-semibold text-slate-500 hover:text-slate-800"
+                >
+                  Annulla
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         <div className="mt-3">
           <BannerLine banner={avatarBanner} />
         </div>

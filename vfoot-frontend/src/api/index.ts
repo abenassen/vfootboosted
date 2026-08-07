@@ -75,6 +75,7 @@ type ApiImpl = {
   updateMyTeam: typeof backendApi.updateMyTeam;
   getLeagueActivity: typeof backendApi.getLeagueActivity;
   getManagerHonours: typeof backendApi.getManagerHonours;
+  getManagerProfile: typeof backendApi.getManagerProfile;
   updateMemberRole: typeof backendApi.updateMemberRole;
   setMarketStatus: typeof backendApi.setMarketStatus;
   updateLeagueSettings: typeof backendApi.updateLeagueSettings;
@@ -174,6 +175,7 @@ export const getLeagueDetail = typedImpl.getLeagueDetail;
 export const updateMyTeam = typedImpl.updateMyTeam;
 export const getLeagueActivity = typedImpl.getLeagueActivity;
 export const getManagerHonours = typedImpl.getManagerHonours;
+export const getManagerProfile = typedImpl.getManagerProfile;
 export const updateMemberRole = typedImpl.updateMemberRole;
 export const setMarketStatus = typedImpl.setMarketStatus;
 export const updateLeagueSettings = typedImpl.updateLeagueSettings;

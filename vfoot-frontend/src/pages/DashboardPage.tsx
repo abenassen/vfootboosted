@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Card, SectionTitle } from '../components/ui';
 import SetupBanner from '../components/SetupBanner';
+import Crest from '../components/Crest';
 import LeagueHome from '../components/LeagueHome';
 import { useCompetitionContext } from '../league/CompetitionContext';
 
@@ -60,24 +61,36 @@ export default function DashboardPage() {
       <SetupBanner />
       <Card className="p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <SectionTitle>{selectedLeague?.name}</SectionTitle>
-            <div className="mt-1 text-2xl font-black">{myName ?? 'Spettatore'}</div>
-            {/* WHO you are, and nothing else.
+          {/* Lo stemma, che qui mancava. È l'unica pagina della lega che diceva
+              il nome della squadra senza mostrarla: la rosa ce l'ha, il
+              calendario ce l'ha su ogni riga, i partecipanti pure — e proprio
+              l'intestazione, dove si legge chi sei in questa lega, no. */}
+          <div className="flex items-center gap-3">
+            <Crest
+              descriptor={selectedLeague?.team_crest}
+              teamName={myName}
+              size={52}
+              className={myName ? undefined : 'opacity-40'}
+            />
+            <div className="min-w-0">
+              <SectionTitle>{selectedLeague?.name}</SectionTitle>
+              <div className="mt-1 text-2xl font-black">{myName ?? 'Spettatore'}</div>
+              {/* WHO you are, and nothing else.
 
-                Rank, points, wins and average are COMPETITION-scoped. They were
-                shown here as if a league had exactly one table, and WHICH one was
-                decided server-side by "the oldest round-robin, by id" — so a league
-                with two championships got one of the two answers with nothing on
-                screen saying which. They now live in each competition's own block,
-                under its name.
+                  Rank, points, wins and average are COMPETITION-scoped. They were
+                  shown here as if a league had exactly one table, and WHICH one was
+                  decided server-side by "the oldest round-robin, by id" — so a league
+                  with two championships got one of the two answers with nothing on
+                  screen saying which. They now live in each competition's own block,
+                  under its name.
 
-                The matchday is gone too, for a different reason: LeagueHome, two
-                lines below, already states BOTH clocks ("si gioca la 22 · prossima
-                da schierare: la 23"). Saying it twice is how the two came to
-                disagree — this line used to read "giornata 1" while that one said
-                22. */}
-            {myName ? null : <div className="text-sm text-slate-500">Nessuna squadra associata</div>}
+                  The matchday is gone too, for a different reason: LeagueHome, two
+                  lines below, already states BOTH clocks ("si gioca la 22 · prossima
+                  da schierare: la 23"). Saying it twice is how the two came to
+                  disagree — this line used to read "giornata 1" while that one said
+                  22. */}
+              {myName ? null : <div className="text-sm text-slate-500">Nessuna squadra associata</div>}
+            </div>
           </div>
           {/* No "Formazione" button here any more: with a championship and a cup
               running together it could only guess which one you meant. The

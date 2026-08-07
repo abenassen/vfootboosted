@@ -26,6 +26,7 @@ import ListonePage from './pages/ListonePage';
 import DecisionsPage from './pages/DecisionsPage';
 import TeamRosterPage from './pages/TeamRosterPage';
 import ProfilePage from './pages/ProfilePage';
+import ManagerProfilePage from './pages/ManagerProfilePage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -52,6 +53,9 @@ export default function App() {
       >
         <Route path="home" element={<DashboardPage />} />
         <Route path="profilo" element={<ProfilePage />} />
+        {/* La scheda pubblica di un fantallenatore. Non sotto /leagues: un albo
+            d'oro attraversa i campionati, e la pagina con lui. */}
+        <Route path="fantallenatori/:userId" element={<ManagerProfilePage />} />
         {/* "Lega" was a hub of links to pages that already existed; what only it
             had — the round being played, the standings, who is in the league —
             now lives on the home page. Kept as a redirect for bookmarks. */}

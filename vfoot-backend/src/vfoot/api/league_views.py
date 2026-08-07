@@ -505,10 +505,14 @@ class LeagueActivityView(APIView):
                 "team_id": None,
                 "crest": None,
             })
-        crests = dict(FantasyTeam.objects.filter(league=league).values_list("id", "crest"))
         for award in board["awards"]:
-            names = _team_names(award["team_ids"])
+            # Nome e stemma di ALLORA, non di adesso: questa riga e' datata al
+            # giorno in cui il premio fu vinto, e mostrarla con lo stemma che la
+            # squadra porta oggi sarebbe raccontare un fatto con l'aria di un
+            # altro giorno. Chi non era ancora congelato ricade sulla squadra viva.
+            winners = award["winners"]
             prize = award["prize"]
+            names = [w["name"] for w in winners]
             items.append({
                 "kind": "premio",
                 "at": award["at"].isoformat() if award["at"] else None,
@@ -516,15 +520,37 @@ class LeagueActivityView(APIView):
                 "detail": f"{award['competition'].name} · {describe_condition(prize)}",
                 # One winner gets his crest next to the line; a shared record has
                 # no single face and gets none.
-                "team_id": award["team_ids"][0] if len(award["team_ids"]) == 1 else None,
-                "crest": (crests.get(award["team_ids"][0])
-                          if len(award["team_ids"]) == 1 else None),
+                "team_id": winners[0]["team_id"] if len(winners) == 1 else None,
+                "crest": winners[0]["crest"] if len(winners) == 1 else None,
             })
 
         # Undated rows (older data, or a field never filled) sink rather than
         # jumping to the top of a feed sorted by a missing value.
         items.sort(key=lambda i: i["at"] or "", reverse=True)
         return Response(items[:limit])
+
+
+def _visible_leagues(viewer, manager) -> list[int] | None:
+    """Le leghe di ``manager`` che ``viewer`` puo' vedere: quelle che condividono.
+
+    None vuol dire "tutte", e capita in un caso solo: stai guardando te stesso.
+
+    Non perche' un trofeo sia un segreto, ma perche' il nome di una lega in cui
+    uno gioca altrove sono affari suoi e non di tutto il sito — e perche' "con chi
+    altro gioca questa persona" e' esattamente il genere di cosa che non deve
+    uscire da un'app di fantacalcio. Nessuna lega in comune: 404, come se la
+    pagina non esistesse, che e' meno di quanto direbbe un rifiuto esplicito.
+    """
+    if manager.id == viewer.id:
+        return None
+    mine = set(LeagueMembership.objects.filter(user=viewer)
+               .values_list("league_id", flat=True))
+    theirs = set(LeagueMembership.objects.filter(user=manager)
+                 .values_list("league_id", flat=True))
+    shared = mine & theirs
+    if not shared:
+        raise Http404("No league in common")
+    return list(shared)
 
 
 class ManagerHonoursView(APIView):
@@ -534,12 +560,7 @@ class ManagerHonoursView(APIView):
     not: a palmarès that started again every August would be worth nothing, and
     what makes it worth looking at is precisely that the cups pile up.
 
-    What the VIEWER may see is another matter, and the answer is: the leagues you
-    share with him. Not because a trophy is a secret, but because the name of a
-    league he plays in elsewhere is his business and not the whole site's — and
-    because "who else is this person playing with" is exactly the sort of thing
-    that should not leak out of a fantasy football app. Looking at yourself is the
-    one case with no filter.
+    What the VIEWER may see is another matter: see ``_visible_leagues``.
     """
 
     authentication_classes = [TokenAuthentication]
@@ -547,23 +568,70 @@ class ManagerHonoursView(APIView):
 
     def get(self, request, user_id: int):
         manager = get_object_or_404(User, id=user_id)
-        if manager.id == request.user.id:
-            visible = None
-        else:
-            mine = set(LeagueMembership.objects.filter(user=request.user)
-                       .values_list("league_id", flat=True))
-            theirs = set(LeagueMembership.objects.filter(user=manager)
-                         .values_list("league_id", flat=True))
-            shared = mine & theirs
-            if not shared:
-                raise Http404("No league in common")
-            visible = list(shared)
-
+        visible = _visible_leagues(request.user, manager)
         awards = honours.manager_honours(manager, leagues=visible)
         return Response({
             "user_id": manager.id,
             "username": manager.username,
             "awards": [honours.serialize_award(a) for a in awards],
+        })
+
+
+class ManagerProfileView(APIView):
+    """La scheda pubblica di un fantallenatore: chi è, e dove gioca.
+
+    Esiste perché l'albo d'oro non appartiene a una lega. La rosa sì — è la
+    proprietà di UNA squadra in UNA lega, e finisce con quella; il fantallenatore
+    no, e i suoi trofei attraversano i campionati. Tenerli sulla pagina delle rose
+    li faceva sembrare una cosa della lega corrente, e per vedere quelli di un
+    avversario bisognava passare dalla sua rosa, che è tutt'altra domanda.
+
+    Cosa NON c'è qui, di proposito: l'email e ogni altro dato di contatto. Questa
+    pagina la può aprire chiunque condivida una lega, quindi porta solo quello che
+    uno mette in campo — nome, faccia, squadre, trofei.
+
+    Le leghe mostrate sono quelle in comune (vedi ``_visible_leagues``), con la
+    squadra che ci schiera: è il ponte verso la sua rosa, ed è anche il motivo per
+    cui la squadra e il fantallenatore ora si cliccano separatamente.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, user_id: int):
+        manager = get_object_or_404(User, id=user_id)
+        visible = _visible_leagues(request.user, manager)
+
+        memberships = (LeagueMembership.objects.filter(user=manager)
+                       .select_related("league", "team")
+                       .order_by("-joined_at", "-id"))
+        if visible is not None:
+            memberships = memberships.filter(league_id__in=visible)
+
+        leagues = []
+        for m in memberships:
+            team = getattr(m, "team", None)
+            leagues.append({
+                "league_id": m.league_id,
+                "name": m.league.name,
+                "mode": m.league.mode,
+                "role": m.role,
+                "joined_at": m.joined_at.isoformat() if m.joined_at else None,
+                # Nessuna squadra è uno stato normale, non un errore: si entra in
+                # una lega prima di averne una.
+                "team_id": team.id if team else None,
+                "team_name": team.name if team else None,
+                "team_crest": team.crest if team else "",
+            })
+
+        profile = getattr(manager, "profile", None)
+        return Response({
+            "user_id": manager.id,
+            "username": manager.username,
+            "avatar": profile.avatar if profile else "",
+            "joined_at": manager.date_joined.isoformat() if manager.date_joined else None,
+            "is_self": manager.id == request.user.id,
+            "leagues": leagues,
         })
 
 

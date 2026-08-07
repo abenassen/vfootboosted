@@ -33,6 +33,7 @@ from vfoot.models import (
     CompetitionStage,
     FantasyCompetition,
     FantasyFixture,
+    FantasyTeam,
 )
 from vfoot.services.competition_prizes import (
     competition_fixtures,
@@ -103,9 +104,20 @@ def assign_for_competition(competition: FantasyCompetition, fixtures=None) -> li
         # classifica è deciso dall'ultimo turno della classifica che legge.
         at = _concluded_at(prize_scope(prize, fixtures))
         AwardedPrize.objects.filter(prize=prize).exclude(team_id__in=winners).delete()
+        # Nome e stemma COPIATI qui e mai piu' riletti: una squadra si ribattezza
+        # quando vuole, e senza questa copia il ribattezzo riscriverebbe anche le
+        # coppe vinte tre stagioni fa. Solo per le righe nuove — un premio gia'
+        # assegnato tiene l'identita' del giorno in cui fu vinto, che e' il punto.
+        identities = {
+            tid: (name, crest)
+            for tid, name, crest in FantasyTeam.objects
+            .filter(id__in=winners - current).values_list("id", "name", "crest")
+        }
         for tid in sorted(winners - current):
+            name, crest = identities.get(tid, ("", ""))
             AwardedPrize.objects.update_or_create(
-                prize=prize, team_id=tid, defaults={"awarded_at": at})
+                prize=prize, team_id=tid,
+                defaults={"awarded_at": at, "team_name": name, "team_crest": crest})
         AwardedPrize.objects.filter(prize=prize).update(awarded_at=at)
         changes.append({"prize": prize,
                         "added": sorted(winners - current),
@@ -157,6 +169,22 @@ def review_league(league) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # Le letture: adesso sono query.                                               #
 # --------------------------------------------------------------------------- #
+def _frozen_identity(name, crest, team) -> tuple[str | None, str]:
+    """(nome, stemma) di chi ha vinto: quelli congelati, o la squadra viva.
+
+    IL NOME decide per tutti e due, e la ragione vale la riga in piu': lo stemma
+    congelato puo' benissimo essere VUOTO — nessuno aveva ancora aperto l'editor,
+    e la pagina disegna uno stemma a partire dal nome — mentre il nome di una
+    squadra non lo e' mai. Trattando ogni campo per conto suo con un ``or``, una
+    squadra senza stemma al momento della vittoria si ritrovava addosso quello
+    che si e' scelta dopo: il nome era quello giusto e lo stemma no, che e'
+    peggio di sbagliarli entrambi perche' sembra funzionare.
+    """
+    if name:
+        return name, crest or ""
+    return (team.name if team else None), (team.crest if team else "")
+
+
 def _awards_qs():
     return (AwardedPrize.objects
             .select_related("prize", "prize__competition", "prize__competition__league",
@@ -165,7 +193,12 @@ def _awards_qs():
 
 
 def league_honours(league) -> dict:
-    """Le competizioni finite della lega e i premi che hanno assegnato."""
+    """Le competizioni finite della lega e i premi che hanno assegnato.
+
+    ``winners`` porta l'identita' CONGELATA di chi ha vinto — com'era il giorno
+    dell'assegnazione, non com'e' adesso. ``team_ids`` resta accanto perche' un
+    id non invecchia e serve a chi deve linkare la squadra di oggi.
+    """
     finished = [
         {"competition": c, "at": c.completed_at}
         for c in FantasyCompetition.objects.filter(
@@ -174,8 +207,10 @@ def league_honours(league) -> dict:
     awards: dict[int, dict] = {}
     for a in _awards_qs().filter(prize__competition__league=league):
         row = awards.setdefault(a.prize_id, {"prize": a.prize, "competition": a.prize.competition,
-                                             "team_ids": [], "at": a.awarded_at})
+                                             "team_ids": [], "winners": [], "at": a.awarded_at})
         row["team_ids"].append(a.team_id)
+        name, crest = _frozen_identity(a.team_name, a.team_crest, a.team)
+        row["winners"].append({"team_id": a.team_id, "name": name, "crest": crest})
     return {"finished": finished, "awards": list(awards.values())}
 
 
@@ -202,6 +237,8 @@ def manager_honours(user, *, leagues=None) -> list[dict]:
         "prize": a.prize,
         "competition": a.prize.competition,
         "team": a.team,
+        "team_name": a.team_name,
+        "team_crest": a.team_crest,
         "at": a.awarded_at,
         "shared_with": len(shared.get(a.prize_id, ())) - 1,
     } for a in rows]
@@ -218,10 +255,18 @@ def prize_winners(competition: FantasyCompetition) -> dict[int, list[int]]:
 
 
 def serialize_award(award: dict) -> dict:
-    """Una riga di albo d'oro, come la vuole il browser."""
+    """Una riga di albo d'oro, come la vuole il browser.
+
+    Nome e stemma sono quelli CONGELATI all'assegnazione, non quelli che la
+    squadra porta oggi: un albo d'oro racconta com'erano le cose allora, e
+    leggerli dal vivo faceva comparire ogni trofeo con lo stemma di adesso. Sulle
+    righe piu' vecchie di questi campi si ricade sulla squadra viva, che e'
+    esattamente la risposta che si dava prima.
+    """
     prize = award["prize"]
     comp = award["competition"]
     team = award.get("team")
+    name, crest = _frozen_identity(award.get("team_name"), award.get("team_crest"), team)
     return {
         "prize_id": prize.id,
         "name": prize.name,
@@ -233,8 +278,8 @@ def serialize_award(award: dict) -> dict:
         "league_id": comp.league_id,
         "league_name": comp.league.name,
         "team_id": team.id if team else None,
-        "team_name": team.name if team else None,
-        "crest": team.crest if team else "",
+        "team_name": name,
+        "crest": crest,
         "shared_with": award.get("shared_with", 0),
         "at": award["at"].isoformat() if award["at"] else None,
     }

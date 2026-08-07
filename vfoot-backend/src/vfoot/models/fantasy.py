@@ -659,6 +659,19 @@ class AwardedPrize(models.Model):
     # — non l'istante in cui questa riga e' stata scritta. Cosi' un riempimento
     # fatto oggi su una stagione dell'anno scorso non data i trofei a oggi.
     awarded_at = models.DateTimeField(null=True, blank=True)
+    # CHI era, quel giorno. Nome e stemma copiati al momento dell'assegnazione,
+    # non letti dalla squadra quando qualcuno apre l'albo d'oro.
+    #
+    # Nome e stemma di una FantasyTeam si cambiano quando si vuole, dalla pagina
+    # rose; leggerli al volo vuol dire che ribattezzarsi riscrive il passato, e
+    # che la coppa vinta a maggio compare oggi con lo stemma di adesso. Un albo
+    # d'oro e' un registro storico: il resto della riga (la data, il premio) e'
+    # gia' congelato, e non c'era ragione perche' la squadra non lo fosse.
+    #
+    # Vuoti sulle righe scritte prima che questi campi esistessero; li' si
+    # ricade sulla squadra viva, che e' esattamente la risposta di prima.
+    team_name = models.CharField(max_length=120, blank=True, default="")
+    team_crest = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

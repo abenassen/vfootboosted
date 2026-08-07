@@ -8,9 +8,14 @@ import type { HonourItem } from '../types/league';
  *
  *  Reads the MANAGER's board and not the team's, deliberately: a team lasts one
  *  league and the person does not, so a cup won two seasons ago belongs on this
- *  card even though the team that won it no longer exists. The backend decides
- *  which leagues the viewer may see (the ones he shares); a 404 means none, and
- *  the card simply does not appear rather than announcing a refusal.
+ *  card even though the team that won it no longer exists. That is also why it
+ *  lives on his profile page and no longer on a roster: a roster is the property
+ *  of one team in one league and ends with it. The backend decides which leagues
+ *  the viewer may see (the ones he shares); a 404 means none, and the card simply
+ *  does not appear rather than announcing a refusal.
+ *
+ *  Nome e stemma di ogni riga sono quelli CONGELATI all'assegnazione (vedi
+ *  services/honours): ribattezzare la propria squadra non riscrive il passato.
  *
  *  Silent when empty for anyone but the owner — telling a visitor "questo
  *  fantallenatore non ha mai vinto niente" is a taunt, not information. On your
@@ -65,9 +70,14 @@ export default function HonoursBoard({
               <div className="min-w-0 flex-1">
                 <div className="truncate font-semibold text-amber-900">
                   {a.name}
+                  {/* `shared_with` is a COUNT of the OTHER teams that tied, so it
+                      needs "altri" or the line reads as a team number: a record
+                      shared with one rival printed "(a pari merito con 1)". */}
                   {a.shared_with ? (
                     <span className="ml-1 text-xs font-normal text-amber-700">
-                      (a pari merito con {a.shared_with})
+                      {a.shared_with === 1
+                        ? '(a pari merito con un’altra squadra)'
+                        : `(a pari merito con altre ${a.shared_with} squadre)`}
                     </span>
                   ) : null}
                 </div>

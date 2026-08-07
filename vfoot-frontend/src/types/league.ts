@@ -172,6 +172,31 @@ export interface ManagerHonours {
   awards: HonourItem[];
 }
 
+/** One league on a manager's public card, with the team he fields in it. */
+export interface ManagerLeagueItem {
+  league_id: number;
+  name: string;
+  mode: 'aura' | 'classic';
+  role: 'admin' | 'manager';
+  joined_at: string | null;
+  /** Null until he has a team: joining a league comes first. */
+  team_id: number | null;
+  team_name: string | null;
+  team_crest: string;
+}
+
+/** The public card of a fantallenatore: who he is and where he plays.
+ *  Carries no contact details — anyone sharing a league can open it. */
+export interface ManagerProfile {
+  user_id: number;
+  username: string;
+  avatar: string;
+  joined_at: string | null;
+  is_self: boolean;
+  /** Only the leagues the viewer shares with him (all of them, on one's own). */
+  leagues: ManagerLeagueItem[];
+}
+
 export type ResultView = 'classifica' | 'tabellone' | 'risultati';
 
 export interface CompetitionStructure {

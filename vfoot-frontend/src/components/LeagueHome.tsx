@@ -965,7 +965,15 @@ function MiniFixture({
   );
 }
 
-/** Who is in the league, with the crests that make them recognisable. */
+/** Who is in the league, with the crests that make them recognisable.
+ *
+ *  DUE destinazioni per riga, perché sono due cose diverse. La SQUADRA è una
+ *  proprietà di questa lega e finisce con lei: porta alla rosa. Il
+ *  FANTALLENATORE no — gioca altrove, e i suoi trofei si accumulano attraverso i
+ *  campionati — quindi porta alla sua scheda. Prima l'intera riga andava alla
+ *  rosa e il nome sotto era testo morto, che è esattamente il motivo per cui
+ *  l'albo d'oro era finito su una pagina che non è sua.
+ */
 function Participants({ detail, myTeamName }: { detail: LeagueDetail; myTeamName: string | null }) {
   return (
     <Card className="p-4">
@@ -974,24 +982,34 @@ function Participants({ detail, myTeamName }: { detail: LeagueDetail; myTeamName
         {detail.teams.map((t) => {
           const mine = t.name === myTeamName;
           return (
-            <Link
+            <div
               key={t.team_id}
-              to={mine ? '/squad' : `/teams/${t.team_id}`}
-              className={`flex items-center gap-2 rounded-xl border px-3 py-2 transition hover:bg-slate-50 ${
+              className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${
                 mine ? 'border-slate-300 bg-slate-50' : 'border-slate-100'
               }`}
             >
-              <Crest descriptor={t.crest} teamName={t.name} size={30} />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold text-slate-800">
+              {/* Lo stemma appartiene alla squadra, quindi segue il suo link. */}
+              <Link to={mine ? '/squad' : `/teams/${t.team_id}`} className="shrink-0">
+                <Crest descriptor={t.crest} teamName={t.name} size={30} />
+              </Link>
+              <span className="min-w-0 flex-1">
+                <Link
+                  to={mine ? '/squad' : `/teams/${t.team_id}`}
+                  className="block truncate text-sm font-semibold text-slate-800 hover:underline"
+                >
                   {t.name}
                   {mine ? (
                     <span className="ml-1.5 text-[10px] font-bold uppercase text-emerald-600">la tua</span>
                   ) : null}
-                </span>
-                <span className="block truncate text-xs text-slate-500">{t.manager_username}</span>
+                </Link>
+                <Link
+                  to={`/fantallenatori/${t.manager_user_id}`}
+                  className="block truncate text-xs text-slate-500 hover:text-slate-800 hover:underline"
+                >
+                  {t.manager_username}
+                </Link>
               </span>
-            </Link>
+            </div>
           );
         })}
       </div>
