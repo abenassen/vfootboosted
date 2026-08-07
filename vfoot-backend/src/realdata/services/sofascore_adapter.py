@@ -187,6 +187,10 @@ class SofaIngestResult:
     players_without_heatmap: int = 0
     skipped_not_finished: int = 0
     skipped_existing: int = 0
+    # Matches whose own /event/{id} did not answer with something usable, so the
+    # caller must fall back to resolving them from the schedule. See
+    # ``ingest_sofascore_matches``.
+    unresolved: int = 0
 
     def add(self, **kwargs: int) -> "SofaIngestResult":
         values = self.__dict__.copy()
@@ -424,6 +428,13 @@ def _upsert_match(event: dict[str, Any], competition_season: CompetitionSeason,
     if not created:
         changed = False
         for field, value in defaults.items():
+            # Never replace something we have with a None the payload did not
+            # carry. A round entry always ships roundInfo/startTimestamp; the
+            # per-match /event/{id} the live path resolves from is thinner, and
+            # an update from it must not erase the matchday the schedule
+            # established.
+            if value is None and getattr(match, field) is not None:
+                continue
             if getattr(match, field) != value:
                 setattr(match, field, value)
                 changed = True
@@ -727,6 +738,64 @@ def _upsert_zone_features(model, match, *, attnames: tuple[str, ...],
 # -- orchestrator --------------------------------------------------------
 
 
+def _event_by_id(scraper, match_id: int) -> dict[str, Any] | None:
+    """One match's event dict from its OWN address, ``/event/{id}``.
+
+    The season schedule is the way to find out WHICH matches exist; it is not the
+    only way to reach one we already know. A match being played has a static
+    address, and pulling seasons -> rounds -> every round's events to rediscover it
+    is the single most expensive part of a live import.
+
+    Returns None when the payload cannot stand in for a schedule entry — the teams
+    are what the import cannot invent — so the caller can fall back to the
+    calendar. That fallback is the safety net, not the main road: the address is
+    static, but it can still change.
+    """
+    try:
+        data = scraper.get(f"/api/v1/event/{match_id}")
+    except SofaScoreBlocked:
+        return None
+    event = data.get("event") if isinstance(data, dict) else None
+    if not isinstance(event, dict) or event.get("id") is None:
+        return None
+    for side in ("homeTeam", "awayTeam"):
+        if not isinstance(event.get(side), dict) or event[side].get("id") is None:
+            return None
+    return event
+
+
+def ingest_sofascore_matches(
+    *, scraper, year: str, match_ids: list[int], season_code: str | None = None,
+    only_finished: bool = True, skip_existing: bool = True,
+    zone_cols: int = 5, zone_rows: int = 4, flip_away: bool = False,
+    logger: Callable[[str], None] = print,
+) -> SofaIngestResult:
+    """Ingest specific matches resolved BY ID, without reading the schedule.
+
+    Same work as ``ingest_sofascore_season`` per match; only the way the fixture is
+    found differs. ``result.unresolved`` counts the ids whose event did not answer
+    usably — the caller decides whether to retry through the calendar.
+    """
+    log = logger
+    events: list[dict[str, Any]] = []
+    unresolved = 0
+    for mid in match_ids:
+        event = _event_by_id(scraper, int(mid))
+        if event is None:
+            log(f"  match {mid}: /event/{mid} did not resolve it")
+            unresolved += 1
+            continue
+        events.append(event)
+
+    result = _ingest_events(
+        scraper=scraper, events=events,
+        season_code=season_code or season_code_from_year(year),
+        only_finished=only_finished, skip_existing=skip_existing,
+        limit_matches=None, zone_cols=zone_cols, zone_rows=zone_rows,
+        flip_away=flip_away, log=log)
+    return result.add(unresolved=unresolved)
+
+
 def ingest_sofascore_season(
     *, scraper, year: str, season_code: str | None = None,
     only_finished: bool = True, skip_existing: bool = True,
@@ -741,10 +810,6 @@ def ingest_sofascore_season(
     finished matches are processed. Request throttling lives in the client.
     """
     log = logger
-    season_code = season_code or season_code_from_year(year)
-
-    with transaction.atomic():
-        competition_season = _get_or_create_competition_season(season_code)
 
     log(f"Fetching match list for Serie A {year} ...")
     events = scraper.get_match_dicts(year)
@@ -754,6 +819,25 @@ def ingest_sofascore_season(
         wanted = {int(m) for m in match_ids}
         events = [e for e in events if int(e.get("id")) in wanted]
         log(f"Pilot mode: {len(events)} of the requested matches found.")
+
+    return _ingest_events(
+        scraper=scraper, events=events,
+        season_code=season_code or season_code_from_year(year),
+        only_finished=only_finished, skip_existing=skip_existing,
+        limit_matches=limit_matches, zone_cols=zone_cols, zone_rows=zone_rows,
+        flip_away=flip_away, log=log)
+
+
+def _ingest_events(
+    *, scraper, events: list[dict[str, Any]], season_code: str,
+    only_finished: bool, skip_existing: bool, limit_matches: int | None,
+    zone_cols: int, zone_rows: int, flip_away: bool,
+    log: Callable[[str], None],
+) -> SofaIngestResult:
+    """Ingest a list of already-resolved event dicts. Shared by both entry points,
+    which differ only in HOW they got the list."""
+    with transaction.atomic():
+        competition_season = _get_or_create_competition_season(season_code)
 
     team_cache: dict[str, TeamSeason] = {}
     player_cache: dict[str, Player] = {

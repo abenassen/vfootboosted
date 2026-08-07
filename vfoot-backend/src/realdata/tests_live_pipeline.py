@@ -16,6 +16,10 @@ from realdata.models import (
     Competition, CompetitionSeason, Match, Season, Team, TeamSeason,
 )
 from realdata.services import live_ingest
+from realdata.services.sofascore_adapter import SofaIngestResult
+
+_RESOLVED = SofaIngestResult(matches=1)
+_UNRESOLVED = SofaIngestResult(unresolved=1)
 
 
 def _iso(dt: datetime) -> str:
@@ -65,36 +69,73 @@ class LiveIngestTests(_Base):
 
     def test_finalize_warms_then_imports_the_right_match(self):
         m = self._match(status=Match.STATUS_FINISHED)
-        with mock.patch.object(live_ingest.egress_client, "warm_schedule",
-                               return_value=True) as ws, \
-             mock.patch.object(live_ingest.egress_client, "warm_matches",
+        with mock.patch.object(live_ingest.egress_client, "warm_matches",
                                return_value=True) as wm, \
-             mock.patch.object(live_ingest, "ingest_sofascore_season") as ing:
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_RESOLVED) as ing:
             self.assertTrue(live_ingest.finalize(m))
-        ws.assert_called_once()
         wm.assert_called_once_with([m.external_id], "final")
         self.assertEqual(ing.call_args.kwargs["match_ids"], [111])
 
-    def test_finalize_bails_when_egress_blocked_and_never_imports(self):
+    def test_the_import_does_not_pull_the_calendar(self):
+        """The whole saving of step 1: a match we can already address by id costs
+        no seasons -> rounds -> events pass."""
         m = self._match(status=Match.STATUS_FINISHED)
         with mock.patch.object(live_ingest.egress_client, "warm_schedule",
-                               return_value=True), \
+                               return_value=True) as ws, \
              mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=True), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_RESOLVED), \
+             mock.patch.object(live_ingest, "ingest_sofascore_season") as season:
+            self.assertTrue(live_ingest.finalize(m))
+        ws.assert_not_called()
+        season.assert_not_called()
+
+    def test_an_unresolvable_id_falls_back_to_the_calendar(self):
+        """The address is static but not guaranteed: when it stops answering with a
+        usable fixture, the calendar is still there — the safety net, not the road."""
+        m = self._match(status=Match.STATUS_FINISHED)
+        with mock.patch.object(live_ingest.egress_client, "warm_schedule",
+                               return_value=True) as ws, \
+             mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=True), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_UNRESOLVED), \
+             mock.patch.object(live_ingest, "ingest_sofascore_season") as season:
+            self.assertTrue(live_ingest.finalize(m))
+        ws.assert_called_once()
+        self.assertEqual(season.call_args.kwargs["match_ids"], [111])
+
+    def test_a_blocked_calendar_fallback_reports_failure(self):
+        m = self._match(status=Match.STATUS_FINISHED)
+        with mock.patch.object(live_ingest.egress_client, "warm_schedule",
                                return_value=False), \
-             mock.patch.object(live_ingest, "ingest_sofascore_season") as ing:
+             mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=True), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_UNRESOLVED), \
+             mock.patch.object(live_ingest, "ingest_sofascore_season") as season:
+            self.assertFalse(live_ingest.finalize(m))
+        season.assert_not_called()
+
+    def test_finalize_bails_when_egress_blocked_and_never_imports(self):
+        m = self._match(status=Match.STATUS_FINISHED)
+        with mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=False), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches") as ing:
             self.assertFalse(live_ingest.finalize(m))
         ing.assert_not_called()
 
     def test_import_live_asks_the_importer_not_to_require_a_finished_match(self):
-        """The importer resolves the match from the SCHEDULE and skips whatever the
-        schedule does not call finished. Without only_finished=False the live import
-        would report success and import nothing at all."""
+        """The importer skips whatever the provider does not call finished. Without
+        only_finished=False the live import would report success and import nothing
+        at all."""
         m = self._match(status=Match.STATUS_LIVE)
-        with mock.patch.object(live_ingest.egress_client, "warm_schedule",
+        with mock.patch.object(live_ingest.egress_client, "warm_matches",
                                return_value=True), \
-             mock.patch.object(live_ingest.egress_client, "warm_matches",
-                               return_value=True), \
-             mock.patch.object(live_ingest, "ingest_sofascore_season") as ing:
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_RESOLVED) as ing:
             self.assertTrue(live_ingest.import_live(m))
         self.assertIs(ing.call_args.kwargs["only_finished"], False)
         # And it must not skip a match it has already written rows for: the whole
@@ -103,11 +144,10 @@ class LiveIngestTests(_Base):
 
     def test_import_live_does_not_promote_the_match(self):
         m = self._match(status=Match.STATUS_LIVE)
-        with mock.patch.object(live_ingest.egress_client, "warm_schedule",
+        with mock.patch.object(live_ingest.egress_client, "warm_matches",
                                return_value=True), \
-             mock.patch.object(live_ingest.egress_client, "warm_matches",
-                               return_value=True), \
-             mock.patch.object(live_ingest, "ingest_sofascore_season"):
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_RESOLVED):
             live_ingest.import_live(m)
         m.refresh_from_db()
         self.assertFalse(m.data_ready)

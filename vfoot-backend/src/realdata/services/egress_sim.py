@@ -144,7 +144,8 @@ def _matches(cache_dir: Path, external_ids: list[str], kind: str) -> bool:
     now = timezone.now()
     written = 0
     for match in (Match.objects.filter(external_id__in=external_ids)
-                  .select_related("competition_season", "home_team", "away_team")):
+                  .select_related("competition_season", "home_team__team",
+                                  "away_team__team")):
         state = _state_of(match, now)
         if state is None:
             continue
@@ -166,16 +167,33 @@ def _matches(cache_dir: Path, external_ids: list[str], kind: str) -> bool:
     return written > 0
 
 
+def _team_entry(team_season) -> dict:
+    team = team_season.team
+    return {"id": int(team.external_id), "name": team.name,
+            "shortName": team.short_name or team.name}
+
+
 def _write_event(cache_dir: Path, match: Match, status: str, played) -> None:
-    """The light ``/event/{id}`` the live poll reads: lifecycle and score, nothing
-    else. The score is the score AT THIS MINUTE, which is why the match is played
-    out and cut back rather than read off a stored final result."""
+    """The single-match ``/event/{id}``: lifecycle, score, and the fixture itself.
+
+    The score is the score AT THIS MINUTE, which is why the match is played out and
+    cut back rather than read off a stored final result.
+
+    The teams and the round are here because the real endpoint carries them, and
+    because the live import now resolves a match FROM THIS PAYLOAD instead of from
+    the calendar (see ``sofascore_adapter._event_by_id``). Serving the reduced dict
+    a live poll happens to be satisfied with would send the rig down the fallback
+    path at every import — measuring, silently, a route production does not take.
+    """
     payload = {"event": {
         "id": int(match.external_id),
         "status": {"type": status},
         "startTimestamp": int(match.kickoff.timestamp()) if match.kickoff else None,
         "homeScore": {"current": played.home_goals if played else None},
         "awayScore": {"current": played.away_goals if played else None},
+        "homeTeam": _team_entry(match.home_team),
+        "awayTeam": _team_entry(match.away_team),
+        "roundInfo": {"round": match.matchday},
     }}
     sim._write(cache_dir, f"/api/v1/event/{match.external_id}", payload)
 

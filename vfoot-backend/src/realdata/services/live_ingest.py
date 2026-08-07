@@ -19,7 +19,9 @@ from django.conf import settings
 
 from realdata.services import egress_client
 from realdata.services.calendar_sync import _kickoff, _map_status
-from realdata.services.sofascore_adapter import ingest_sofascore_season
+from realdata.services.sofascore_adapter import (
+    ingest_sofascore_matches, ingest_sofascore_season,
+)
 from realdata.services.sofascore_client import (
     SofaScoreBlocked, SofaScoreClient, SofaScoreError,
 )
@@ -87,30 +89,51 @@ def poll_live(match) -> bool:
     return True
 
 
+def _offline_client() -> SofaScoreClient:
+    """A client for READING the warm cache. It must never sit waiting on the
+    network: this side of the egress cannot reach SofaScore anyway, so a cache miss
+    is a fact to report at once, not something to retry with backoff for the length
+    of a half."""
+    return SofaScoreClient(cache_dir=_cache_dir(), max_retries=1,
+                           logger=lambda _m: None)
+
+
 def _warm_and_import(match, *, only_finished: bool) -> bool:
     """Warm the full match data and import it OFFLINE (lineups/shotmap/incidents/
-    heatmaps -> DB, incl. voto puro). The schedule is warmed too because the import
-    resolves the fixture FROM IT — and that is also why ``only_finished`` has to be
-    passed through: the importer skips anything the schedule does not call finished,
-    so a match still in progress would be silently passed over. True iff warmed AND
-    imported.
+    heatmaps -> DB, incl. voto puro). True iff warmed AND imported.
+
+    The fixture is resolved from its OWN address (``/event/{id}``), which the warm
+    has just refreshed anyway — not by pulling seasons -> rounds -> every round's
+    events to find a match whose id we already hold. The calendar remains the
+    safety net for when that address stops answering with something usable.
+
+    ``only_finished`` still has to be passed through: the importer skips anything
+    the provider does not call finished, so a match still in progress would be
+    silently passed over.
 
     ``skip_existing=False`` always: this is called repeatedly on the same match (the
     +15min check, the +1h confirmation, and now every live import), and the point of
     each call is to pick up what has changed since the last one.
     """
     year = year_for(match)
-    if not egress_client.warm_schedule(year):
-        return False
     # 'final' is the kind of FETCH, not a claim about the match: it means "everything
     # the importer reads", as opposed to the light event the live poll needs.
     if not egress_client.warm_matches([match.external_id], "final"):
         return False
-    client = SofaScoreClient(cache_dir=_cache_dir(), logger=lambda _m: None)
+    client = _offline_client()
     try:
-        ingest_sofascore_season(scraper=client, year=year,
-                                match_ids=[int(match.external_id)],
-                                only_finished=only_finished, skip_existing=False)
+        result = ingest_sofascore_matches(
+            scraper=client, year=year, match_ids=[int(match.external_id)],
+            only_finished=only_finished, skip_existing=False)
+        if result.unresolved:
+            # The address did not answer with a usable fixture. Pay for the whole
+            # calendar this once rather than skip the match.
+            if not egress_client.warm_schedule(year):
+                return False
+            ingest_sofascore_season(scraper=client, year=year,
+                                    match_ids=[int(match.external_id)],
+                                    only_finished=only_finished,
+                                    skip_existing=False)
     except (SofaScoreBlocked, SofaScoreError):
         # Something the import needed was not in the warm cache and it tried the
         # network (blocked from here). Bail; the next tick retries.
