@@ -44,7 +44,7 @@ class PlanTickTests(SimpleTestCase):
 
     def test_confirmed_kickoff_in_window_polls_live(self):
         m = _m(kickoff=self.now - timedelta(minutes=30))
-        self.assertIn(m, plan_tick(self.now, [m]).live_poll)
+        self.assertIn(m, plan_tick(self.now, [m]).live_round)
 
     def test_provisional_kickoff_never_polls(self):
         m = _m(kickoff=self.now - timedelta(minutes=30), kickoff_provisional=True)
@@ -61,7 +61,7 @@ class PlanTickTests(SimpleTestCase):
     def test_status_live_always_polls_even_outside_window(self):
         m = _m(status=Match.STATUS_LIVE,
                kickoff=self.now - LIVE_POLL_WINDOW - timedelta(hours=2))
-        self.assertIn(m, plan_tick(self.now, [m]).live_poll)
+        self.assertIn(m, plan_tick(self.now, [m]).live_round)
 
     def test_finished_without_stamp_gets_stamped(self):
         m = _m(status=Match.STATUS_FINISHED)
@@ -227,7 +227,7 @@ class TickCommandTests(TestCase):
         m = self._match(status=Match.STATUS_FINISHED, kickoff=ft - timedelta(hours=2))
 
         with mock.patch("realdata.services.live_ingest.finalize", return_value=True), \
-             mock.patch("realdata.services.live_ingest.poll_live", return_value=True):
+             mock.patch("realdata.services.live_ingest.live_round", return_value=True):
             # first tick at FT: stamps finished_at, not yet ready
             self._tick(ft.isoformat())
             m.refresh_from_db()
@@ -253,13 +253,9 @@ class TickCommandTests(TestCase):
         self.assertIsNone(m.finished_at)
 
 
-class LivePollCadenceTests(SimpleTestCase):
-    """The scrape interval is a knob: the tick may fire every minute, but a single
-    match must not be re-scraped more often than configured.
-
-    These assert on the ``live_poll`` bucket alone, not on the plan being empty: the
-    same window also feeds ``live_import``, on its own slower clock, and the two
-    cadences are deliberately independent."""
+class LiveRoundCadenceTests(SimpleTestCase):
+    """The TIME knob: the tick may fire every minute, but a single match gets a
+    round no more often than configured."""
 
     def setUp(self):
         self.now = datetime(2026, 8, 22, 15, 0, tzinfo=UTC)
@@ -272,58 +268,90 @@ class LivePollCadenceTests(SimpleTestCase):
     @override_settings(VFOOT_LIVE_POLL_MINUTES=2)
     def test_never_polled_is_due(self):
         m = self._live(None)
-        self.assertIn(m, plan_tick(self.now, [m]).live_poll)
+        self.assertIn(m, plan_tick(self.now, [m]).live_round)
 
     @override_settings(VFOOT_LIVE_POLL_MINUTES=2)
     def test_polled_recently_is_skipped(self):
         m = self._live(self.now - timedelta(seconds=30))
-        self.assertEqual(plan_tick(self.now, [m]).live_poll, [])
+        self.assertEqual(plan_tick(self.now, [m]).live_round, [])
 
     @override_settings(VFOOT_LIVE_POLL_MINUTES=2)
     def test_polled_longer_ago_than_the_interval_is_due(self):
         m = self._live(self.now - timedelta(minutes=3))
-        self.assertIn(m, plan_tick(self.now, [m]).live_poll)
+        self.assertIn(m, plan_tick(self.now, [m]).live_round)
 
     @override_settings(VFOOT_LIVE_POLL_MINUTES=5)
     def test_widening_the_interval_reduces_scraping(self):
         m = self._live(self.now - timedelta(minutes=3))
         # at 5 minutes the same match is NOT yet due (it was at 2)
-        self.assertEqual(plan_tick(self.now, [m]).live_poll, [])
+        self.assertEqual(plan_tick(self.now, [m]).live_round, [])
 
 
-class LiveImportCadenceTests(SimpleTestCase):
-    """The full import rides the live window on its OWN clock, and — the part worth
-    a test — on its own stamp. Sharing ``data_checked_at`` with the poll would let
-    the poll, firing five times as often, keep pushing the import's next due time
-    out for as long as the match lasted."""
+@override_settings(VFOOT_LIVE_POLL_MINUTES=2, VFOOT_LIVE_HEAVY_EVERY=4)
+class LiveHeavyCadenceTests(SimpleTestCase):
+    """The SHAPE knob: every k-th round also pulls the heatmaps.
+
+    The property that matters is that the heavy pass is a FLAG ON A ROUND and not a
+    second clock. Two clocks is what this used to be, and they competed: the light
+    one, firing five times as often, would have kept pushing the heavy one's due
+    time out for as long as the match lasted if they had shared a stamp — so they
+    had one each, and then failed independently without either knowing.
+    """
 
     def setUp(self):
         self.now = datetime(2026, 8, 22, 15, 0, tzinfo=UTC)
 
     def _live(self, last_imported, last_checked=None):
         return _m(kickoff=self.now - timedelta(minutes=30),
-                  data_checked_at=last_checked or self.now,
+                  data_checked_at=last_checked,
                   data_imported_at=last_imported)
 
-    @override_settings(VFOOT_LIVE_IMPORT_MINUTES=10)
-    def test_never_imported_is_due(self):
-        m = self._live(None)
-        self.assertIn(m, plan_tick(self.now, [m]).live_import)
-
-    @override_settings(VFOOT_LIVE_IMPORT_MINUTES=10)
-    def test_imported_recently_is_skipped(self):
-        m = self._live(self.now - timedelta(minutes=4))
-        self.assertEqual(plan_tick(self.now, [m]).live_import, [])
-
-    @override_settings(VFOOT_LIVE_IMPORT_MINUTES=10)
-    def test_a_poll_a_minute_ago_does_not_postpone_the_import(self):
-        m = self._live(self.now - timedelta(minutes=12),
-                       last_checked=self.now - timedelta(minutes=1))
+    def test_the_first_round_of_a_match_is_heavy(self):
+        """So the zones — and with them the defensive exposure — are there from the
+        first vote, instead of arriving k rounds late."""
+        m = self._live(None, last_checked=None)
         plan = plan_tick(self.now, [m])
-        self.assertIn(m, plan.live_import)
-        self.assertEqual(plan.live_poll, [])  # the poll itself is not yet due
+        self.assertIn(m, plan.live_round)
+        self.assertIn(m, plan.live_heavy)
 
-    @override_settings(VFOOT_LIVE_IMPORT_MINUTES=10)
-    def test_a_match_that_has_not_kicked_off_is_not_imported(self):
+    def test_a_round_before_k_have_passed_is_light(self):
+        m = self._live(self.now - timedelta(minutes=4),
+                       last_checked=self.now - timedelta(minutes=2))
+        plan = plan_tick(self.now, [m])
+        self.assertIn(m, plan.live_round)
+        self.assertEqual(plan.live_heavy, [])
+
+    def test_after_k_intervals_the_round_is_heavy(self):
+        m = self._live(self.now - timedelta(minutes=8),
+                       last_checked=self.now - timedelta(minutes=2))
+        plan = plan_tick(self.now, [m])
+        self.assertIn(m, plan.live_heavy)
+
+    def test_a_heavy_pass_never_happens_outside_a_round(self):
+        """The whole point of one clock: with the light round not yet due, there is
+        nothing for the heavy pass to ride on, however long ago it last ran."""
+        m = self._live(self.now - timedelta(hours=1),
+                       last_checked=self.now - timedelta(seconds=30))
+        plan = plan_tick(self.now, [m])
+        self.assertEqual(plan.live_round, [])
+        self.assertEqual(plan.live_heavy, [])
+
+    def test_the_heavy_bucket_is_a_subset_of_the_rounds(self):
+        m = self._live(None)
+        plan = plan_tick(self.now, [m])
+        for heavy in plan.live_heavy:
+            self.assertIn(heavy, plan.live_round)
+
+    @override_settings(VFOOT_LIVE_HEAVY_EVERY=1)
+    def test_k_of_one_makes_every_round_heavy(self):
+        """The rig's escape hatch, and the reason it is not the default: at k=1 the
+        distinction the cadence is built on does not exist."""
+        m = self._live(self.now - timedelta(minutes=2),
+                       last_checked=self.now - timedelta(minutes=2))
+        plan = plan_tick(self.now, [m])
+        self.assertIn(m, plan.live_heavy)
+
+    def test_a_match_that_has_not_kicked_off_gets_nothing(self):
         m = _m(kickoff=self.now + timedelta(minutes=30))
-        self.assertEqual(plan_tick(self.now, [m]).live_import, [])
+        plan = plan_tick(self.now, [m])
+        self.assertEqual((plan.live_round, plan.live_heavy), ([], []))

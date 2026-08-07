@@ -1,8 +1,15 @@
 # Ingestione live: un orologio solo, e un passaggio pesante ogni k
 
-Stato: **da fare**. Piano concordato il 07/08/2026, scritto per essere eseguito da
-contesto pulito. Tutti i fatti qui sotto sono stati verificati sul codice; i
-riferimenti sono `file:riga` alla revisione `e327d53`.
+Stato: **FATTO** il 07/08/2026. Piano concordato lo stesso giorno; i riferimenti
+`file:riga` qui sotto sono alla revisione `e327d53`, cioè a PRIMA del lavoro, e
+restano perché servono a capire da dove si partiva.
+
+Come è andata, in due righe: i numeri misurati sul banco sono quelli previsti
+(65 richieste → 26 per l'import, e 4 sul giro leggero), e i voti non si sono
+mossi di un millesimo. La verifica delle due cose che il passo 2 lasciava aperte
+ha però trovato un terzo fatto che il piano non aveva previsto, e che cambiava il
+comportamento in peggio: è scritto in fondo, sotto **Quello che la verifica ha
+aggiunto**.
 
 ## Il problema
 
@@ -233,16 +240,68 @@ movimento che i manager vedranno, e conviene deciderlo prima, non scoprirlo in
 campo. Se dà fastidio, l'alternativa è tenere il voto dei soli difensori sulla
 cadenza pesante.
 
+*(Aggiornato dopo la scrittura: il riporto della distribuzione — vedi in fondo —
+riduce questo caso a chi non ha ancora un passaggio pesante alle spalle, cioè al
+subentrato entrato da meno di otto minuti.)*
+
 ## Come si verifica
 
 Con **`./vfoot-sim`**, non con `./vfoot-dev` più variabili a mano: è l'unico che
 accende Redis (senza, la spinta WebSocket dopo un import muore nel processo del
-cron e alla pagina non arriva, senza errori) e che mette la cadenza del banco di
-prova. Vedi AGENTS.md, sezione Dev Notes.
+cron e alla pagina non arriva, senza errori). Vedi AGENTS.md, sezione Dev Notes.
 
     ./vfoot-sim build napoli-inter
     ./vfoot-sim napoli-inter
     tail -f $TMPDIR/vfoot-sim/tick.log
 
-Il conto delle richieste per giro si legge dal log dell'egress: è il numero che
-questo lavoro deve far scendere da ~30 a ~4 sul passaggio leggero.
+Il conto delle richieste NON si legge dal log dell'egress: con
+`VFOOT_EGRESS_SIMULATED` non esce niente in rete e nessuno lo scrive. Si conta
+dove le richieste esistono davvero, cioè agli endpoint che l'import tocca —
+`SofaScoreClient.get`, uno per endpoint, che a cache fredda è esattamente quello
+che il fetch worker chiederebbe. È quello che fa
+`realdata/tests_import_by_id.py`, che il conto lo fissa invece di guardarlo: un
+numero misurato a mano decade in silenzio appena il codice si sposta.
+
+Sul banco, un import di Napoli-Inter al 31/01/2027 21:15, partendo due volte
+dalla stessa istantanea e a orologio bloccato:
+
+| | prima | dopo |
+|---|---|---|
+| richieste per import | 65 | **26** |
+| di cui calendario | 40 | **0** |
+| giri di egress | 2 | **1** |
+| righe di zona scritte | 2306 | 2306 |
+| voti puri diversi | — | **0 su 22** |
+
+## Quello che la verifica ha aggiunto
+
+Le due cose che il passo 2 lasciava aperte sono state provate sui dati veri prima
+di scrivere, e la risposta alla seconda ne ha tirata fuori una terza.
+
+**Aura legge le righe degeneri?** Sì. `realdata_scoring` non filtrava niente:
+inserita una riga tutta ammassata in una casella, la presenza del giocatore
+passava da 3 zone a 4. E non era il solo lettore posizionale — anche
+l'esposizione difensiva (`classic_rating._zone_presence`) la leggeva, e collassava
+la presenza a `{(0,0): 1.0}`, cioè addebitava al giocatore il pericolo concesso in
+una zona scelta a caso. Il filtro è quindi su **quattro** lettori, non su uno:
+aura, l'esposizione, l'inferenza dei ruoli e l'impronta del giocatore.
+
+**Il passaggio pesante le sovrascrive?** Sì: `_upsert_zone_features` cancella le
+chiavi che smettono di arrivare, e dopo un giro completo di Z_NA non resta niente.
+
+**La cosa non prevista.** Quella cancellazione vale nei DUE sensi. Un giro leggero
+che scrivesse tutti come non collocati cancellerebbe le zone che il pesante aveva
+appena misurato: l'esposizione difensiva sparirebbe e tornerebbe ogni k giri, e
+il voto di ogni difensore oscillerebbe a dente di sega ogni due minuti — peggio
+del rischio che questo documento dichiarava di accettare, che era uno spostamento
+in una direzione sola.
+
+Rimedio, ed è la ragione per cui il passo 2 è un po' più di quanto scritto sopra:
+il giro leggero **riporta la distribuzione dell'ultimo giro pesante** invece di
+buttarla. La zona degenere resta, ma per il caso che è davvero degenere — il
+subentrato entrato dopo l'ultimo pesante, e il primo giro se il pesante era stato
+bloccato. Il primo giro di ogni partita è pesante per costruzione
+(`data_imported_at` è nullo), quindi in pratica quasi nessuno passa da lì.
+
+Il rischio dichiarato più sopra resta vero, ma vale per meno gente di quanto
+sembrasse: non "i difensori in live", ma "chi è entrato da meno di otto minuti".

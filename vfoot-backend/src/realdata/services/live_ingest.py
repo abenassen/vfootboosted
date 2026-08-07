@@ -2,9 +2,14 @@
 
 The tick (unprivileged, DB-aware) decides WHICH matches are due; this module warms
 their cache through the root egress tunnel, then reads that warm cache with the
-existing offline code — a light status/score update for an in-progress match, the
-full ``ingest_sofascore_season`` for finalization. It never touches the network
-itself (the egress does), so with the egress mocked it is fully testable.
+existing offline import. It never touches the network itself (the egress does), so
+with the egress mocked it is fully testable.
+
+Two entry points, and the difference between them is the match's lifecycle, not the
+amount of work: ``live_round`` for a match being played (never promotes it),
+``finalize`` after full time (the caller promotes it at the +1h confirmation). Both
+take the same road; ``live_round`` takes the cheap version of it on the rounds that
+are not the k-th.
 
 Each entry point returns True on success and False when the egress was blocked /
 unavailable — the caller then simply does NOT advance the match's state, so the
@@ -77,18 +82,6 @@ def _apply_status(match, event: dict) -> list[str]:
     return fields
 
 
-def poll_live(match) -> bool:
-    """Warm an in-progress match and update its status/score/kickoff (the tick's
-    'stato-prima' step: it also catches a status flip to finished and a last-second
-    postponement). True iff the egress warmed the cache."""
-    if not egress_client.warm_matches([match.external_id], "live"):
-        return False
-    event = _cached_event(match.external_id)
-    if event is not None:
-        _apply_status(match, event)
-    return True
-
-
 def _offline_client() -> SofaScoreClient:
     """A client for READING the warm cache. It must never sit waiting on the
     network: this side of the egress cannot reach SofaScore anyway, so a cache miss
@@ -98,9 +91,23 @@ def _offline_client() -> SofaScoreClient:
                            logger=lambda _m: None)
 
 
-def _warm_and_import(match, *, only_finished: bool) -> bool:
-    """Warm the full match data and import it OFFLINE (lineups/shotmap/incidents/
-    heatmaps -> DB, incl. voto puro). True iff warmed AND imported.
+def _warm(match, *, heavy: bool) -> bool:
+    """Ask the egress for this match's bytes. The kind is the kind of FETCH, not a
+    claim about the match: 'final' means "everything the importer can read", 'live'
+    the cheap half of it — the same four endpoints minus a heatmap per player."""
+    return egress_client.warm_matches([match.external_id],
+                                      "final" if heavy else "live")
+
+
+def _import_warm(match, *, only_finished: bool, heavy: bool) -> bool:
+    """Import the warm cache OFFLINE (lineups/shotmap/incidents -> DB, incl. voto
+    puro). True iff the import went through.
+
+    ``heavy`` is the whole difference in cost. A light round reads four endpoints; a
+    heavy one adds a heatmap per player — some twenty-two more — and with them the
+    positional half of the model. The light round still writes every player's
+    totals, because the scorer sums each feature over all zones and the sum of a
+    distributed stat is the stat itself (see ``sofascore_adapter``).
 
     The fixture is resolved from its OWN address (``/event/{id}``), which the warm
     has just refreshed anyway — not by pulling seasons -> rounds -> every round's
@@ -112,19 +119,15 @@ def _warm_and_import(match, *, only_finished: bool) -> bool:
     silently passed over.
 
     ``skip_existing=False`` always: this is called repeatedly on the same match (the
-    +15min check, the +1h confirmation, and now every live import), and the point of
-    each call is to pick up what has changed since the last one.
+    +15min check, the +1h confirmation, and every live round), and the point of each
+    call is to pick up what has changed since the last one.
     """
     year = year_for(match)
-    # 'final' is the kind of FETCH, not a claim about the match: it means "everything
-    # the importer reads", as opposed to the light event the live poll needs.
-    if not egress_client.warm_matches([match.external_id], "final"):
-        return False
     client = _offline_client()
     try:
         result = ingest_sofascore_matches(
             scraper=client, year=year, match_ids=[int(match.external_id)],
-            only_finished=only_finished, skip_existing=False)
+            only_finished=only_finished, skip_existing=False, with_heatmaps=heavy)
         if result.unresolved:
             # The address did not answer with a usable fixture. Pay for the whole
             # calendar this once rather than skip the match.
@@ -142,18 +145,32 @@ def _warm_and_import(match, *, only_finished: bool) -> bool:
 
 
 def finalize(match) -> bool:
-    """The post-full-time import: the match is over, so only a finished one counts."""
-    return _warm_and_import(match, only_finished=True)
+    """The post-full-time import: the match is over, so only a finished one counts,
+    and it is always heavy — the heatmaps are what full time was waited for."""
+    return (_warm(match, heavy=True)
+            and _import_warm(match, only_finished=True, heavy=True))
 
 
-def import_live(match) -> bool:
-    """Like ``finalize``, but for a match still being played — and the difference is
-    what it does NOT do: ``data_ready`` stays false.
+def live_round(match, *, heavy: bool) -> bool:
+    """One round of a match being played: its lifecycle and score, then its
+    per-player data. True iff the egress warmed the cache AND the import went
+    through.
 
-    That flag means "the provider has stopped changing this match", and it is the one
-    marker of instability in the whole system (a vote is provisional exactly when the
-    real match behind it is not data_ready). Importing the per-player data mid-match
-    gives the league a vote that moves; promoting the match would freeze a number the
-    next import is going to change.
+    The two used to be separate steps on separate clocks. They are one because the
+    light half is what sets the cadence: the votes move on every round, and the
+    status flip to finished (or a last-second postponement) is caught on the same
+    pass rather than by a second one racing it.
+
+    What it does NOT do, on any round, is touch ``data_ready``. That flag means "the
+    provider has stopped changing this match", and it is the one marker of
+    instability in the whole system (a vote is provisional exactly when the real
+    match behind it is not data_ready). Importing mid-match gives the league a vote
+    that moves; promoting the match would freeze a number the next round is going to
+    change.
     """
-    return _warm_and_import(match, only_finished=False)
+    if not _warm(match, heavy=heavy):
+        return False
+    event = _cached_event(match.external_id)
+    if event is not None:
+        _apply_status(match, event)
+    return _import_warm(match, only_finished=False, heavy=heavy)

@@ -210,20 +210,23 @@ if _SECURE:
         f"https://{h}" for h in ALLOWED_HOSTS if h not in {"localhost", "127.0.0.1"}
     ]
 
-# How often a LIVE match may be re-scraped, in minutes. The scheduler tick can run
-# every minute, but each match is polled at most this often — this is the knob that
-# adapts scraping intensity to the machine (a small VPS driving a headless browser
-# cannot sustain a per-minute poll across ten simultaneous matches). Override with
-# the VFOOT_LIVE_POLL_MINUTES env var; no code change needed to retune it.
+# The TIME half of the live cadence: how often a LIVE match gets a round, in
+# minutes. The scheduler tick can run every minute, but each match is scraped at
+# most this often — this is the knob that adapts scraping intensity to the machine.
+# A round costs four requests and moves the votes. Override with the
+# VFOOT_LIVE_POLL_MINUTES env var; no code change needed to retune it.
 VFOOT_LIVE_POLL_MINUTES = float(os.environ.get("VFOOT_LIVE_POLL_MINUTES", "2"))
 
-# How often the FULL per-player data of a live match is re-imported, in minutes.
-# Deliberately much slower than the poll above: the poll reads one small endpoint,
-# this one reads the squad sheet, the shot map and a heatmap per player, and writes
-# a few thousand zone-feature rows. Ten minutes is about the rate at which a
-# performance really changes, and it is what makes the votes move during a match
-# without turning the tick into a load generator.
-VFOOT_LIVE_IMPORT_MINUTES = float(os.environ.get("VFOOT_LIVE_IMPORT_MINUTES", "10"))
+# The SHAPE half: how many rounds go by per HEAVY one. A heavy round adds a heatmap
+# per player — some twenty-two more requests — and with them the positional half of
+# the model: the defensive exposure, and Aura's zone duel. Four reads as "the votes
+# every two minutes, the zones every eight".
+#
+# The two knobs are separate on purpose, and not only to retune them apart: it is
+# what lets the rig run at production's SHAPE while compressing its clock. At k=1
+# every round is heavy and the distinction this whole cadence is built on stops
+# existing — which is precisely what a rig must not hide. See vfoot-sim.
+VFOOT_LIVE_HEAVY_EVERY = int(os.environ.get("VFOOT_LIVE_HEAVY_EVERY", "4"))
 
 # Serve the egress from a generator instead of the network, so a simulated season
 # can be driven through the REAL live pipeline: the same scheduler, the same poll

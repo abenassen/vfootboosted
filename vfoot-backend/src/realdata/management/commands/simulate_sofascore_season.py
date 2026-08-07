@@ -189,11 +189,11 @@ class Command(BaseCommand):
         """Provider ids to ingest: the FINISHED ones, and only where needed.
 
         A match IN PROGRESS is deliberately not imported, and that is a fidelity
-        decision rather than an optimisation. The live pipeline does not import one
-        either: ``live_ingest.poll_live`` updates the lifecycle and the score and
-        nothing else, and the per-player data arrives at the +15min finalization.
-        Importing it here would hand the application a squad sheet and provisional
-        statistics that the real cron would not have produced yet — the simulated
+        decision rather than an optimisation. The per-player data of a live match
+        is the tick's to produce, round by round (``live_ingest.live_round``), and
+        that is what a rig is supposed to show happening. Laying it down here in
+        one go would hand the application a squad sheet and statistics complete at
+        an instant when the real cron would still be building them — the simulated
         season would look better than the product is, which is the one way a
         simulator can actively mislead.
 

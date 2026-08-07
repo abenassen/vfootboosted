@@ -6,6 +6,7 @@ from typing import Iterable
 from django.db.models import QuerySet
 
 from realdata.models import Match, PlayerZoneFeature
+from realdata.services.sofascore_adapter import METHOD_UNPLACED
 from vfoot.services.duel_engine import DUEL_BONUS_RATE
 from vfoot.services.zone_engine import make_zone_grid
 
@@ -107,8 +108,14 @@ def build_player_real_zone_profile(
     zone_ids = zone_ids or list(grid["zone_ids"])
     contract_zone_ids = set(zone_ids)
 
+    # The zone duel is a question about WHERE, so it reads only rows that answer it.
+    # A live match's light round writes a player's totals without a heatmap behind
+    # them (see sofascore_adapter.METHOD_UNPLACED); read as positions they would pile
+    # a whole squad into one cell and decide the duel there. Better no profile at
+    # all — the heavy pass restores him a few minutes later.
     rows = list(
         PlayerZoneFeature.objects.filter(match=match, player_id=player_id)
+        .exclude(source_method=METHOD_UNPLACED)
         .select_related("player")
         .values("player_id", "player__short_name", "player__full_name", "team_side", "zone_key", "feature_key", "value")
     )

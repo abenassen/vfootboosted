@@ -81,6 +81,19 @@ PROVIDER = PROVIDER_SOFASCORE
 _CARD_CLASS = {"yellow": CARD_YELLOW, "red": CARD_RED, "yellowRed": CARD_SECOND_YELLOW}
 LEAGUE_KEY = "Italy Serie A"  # ScraperFC comps.yaml key (SOFASCORE id 23)
 
+# Where a player's numbers go when nobody has measured WHERE he was — the light
+# round of a live match, which does not pull heatmaps. The totals are still true:
+# the scorer sums each feature over all zones, and the sum of a distributed stat is
+# the stat. Only the POSITION is missing, so it is declared twice over:
+#
+# * ``METHOD_UNPLACED`` is the declaration a reader filters on — "this row says
+#   nothing about where he was";
+# * ``ZONE_UNPLACED`` is deliberately not a cell of the grid, so a positional
+#   reader that forgot the filter breaks loudly instead of quietly standing the
+#   player in the corner of the pitch.
+ZONE_UNPLACED = "Z_NA"
+METHOD_UNPLACED = "totals_unplaced"
+
 # our feature_key -> SofaScore stat column(s); a tuple sums columns.
 # These totals are distributed across zones in proportion to heatmap presence.
 DISTRIBUTED_STAT_MAP: dict[str, Any] = {
@@ -184,7 +197,9 @@ class SofaIngestResult:
     cards: int = 0
     player_zone_features: int = 0
     team_zone_features: int = 0
-    players_without_heatmap: int = 0
+    # Players whose totals were written without a position: no heatmap this pass
+    # AND nothing to carry over from a previous one. See ZONE_UNPLACED.
+    players_unplaced: int = 0
     skipped_not_finished: int = 0
     skipped_existing: int = 0
     # Matches whose own /event/{id} did not answer with something usable, so the
@@ -476,13 +491,55 @@ def _ingest_cards(incidents_rows, match, home_ts, away_ts, player_cache) -> int:
     return len(rows)
 
 
+def _carried_presence(match) -> dict[int, tuple[dict[str, float], dict[str, float]]]:
+    """{player_id: (presence share per zone, box share per zone)} as the last pass
+    that DID have heatmaps measured them.
+
+    A light round has no heatmap of its own, and a player's distribution over the
+    pitch barely moves in the couple of minutes since the last heavy one. Reusing it
+    is not a nicety: ``_upsert_zone_features`` removes whatever stops arriving, so a
+    light round that dropped everyone into the unplaced zone would delete the
+    positions the heavy pass had just measured — and the defensive exposure, which
+    is built from them, would blink out and back every k rounds, sawing every
+    defender's vote up and down with it.
+
+    The shares are read against the touches TOTAL, which is exactly how the heavy
+    pass wrote both rows (``touches[zone] = zone_share * total``, ``touches_in_box
+    [zone] = box_share * total``), so multiplying them by this minute's total
+    reproduces the same arithmetic against fresher numbers.
+    """
+    out: dict[int, tuple[dict[str, float], dict[str, float]]] = {}
+    raw: dict[int, dict[str, dict[str, float]]] = defaultdict(
+        lambda: {"touches": {}, "touches_in_box": {}})
+    for pid, zone, key, value in (
+            PlayerZoneFeature.objects
+            .filter(match=match, provider=PROVIDER,
+                    feature_key__in=("touches", "touches_in_box"))
+            .exclude(source_method=METHOD_UNPLACED)
+            .values_list("player_id", "zone_key", "feature_key", "value")):
+        raw[pid][key][zone] = float(value or 0.0)
+    for pid, rows in raw.items():
+        total = sum(rows["touches"].values())
+        if total <= 0:
+            continue
+        out[pid] = ({z: v / total for z, v in rows["touches"].items()},
+                    {z: v / total for z, v in rows["touches_in_box"].items()})
+    return out
+
+
 def _ingest_match(
     *, scraper, event: dict[str, Any], competition_season: CompetitionSeason,
     team_cache: dict[str, TeamSeason], player_cache: dict[str, Player],
     zone_cols: int, zone_rows: int, flip_away: bool,
     feature_totals: dict[str, float], stat_keys_seen: set[str],
     diagnostics: dict[str, bool], log: Callable[[str], None],
+    with_heatmaps: bool = True,
 ) -> SofaIngestResult:
+    """Import one match. ``with_heatmaps=False`` is the LIGHT round of a live
+    match: it skips the request-per-player heatmaps and places each player's totals
+    where the last heavy round measured him, or in ``ZONE_UNPLACED`` if it never
+    did (a substitute who came on since). The shot map keeps its exact coordinates
+    either way — that one is a single request."""
     match_id = int(event["id"])
     home_team = event["homeTeam"]
     away_team = event["awayTeam"]
@@ -493,6 +550,8 @@ def _ingest_match(
     home_ts = _team_season(home_team, competition_season, team_cache)
     away_ts = _team_season(away_team, competition_season, team_cache)
     match = _upsert_match(event, competition_season, home_ts, away_ts)
+    # Read before anything is written for this match, and only when it is needed.
+    carried = _carried_presence(match) if not with_heatmaps else {}
 
     first_match = not diagnostics.get("logged")
     if first_match:
@@ -550,8 +609,11 @@ def _ingest_match(
         appearances += 1
 
         # Heatmap (one request per player) -> per-zone presence distribution.
-        # Skip players with no minutes (unused subs have no heatmap data).
-        points = scraper.heatmap(match_id, int(pid_raw)) if minutes > 0 else []
+        # Skip players with no minutes (unused subs have no heatmap data), and the
+        # whole lot on a light round: that request per player IS the cost the heavy
+        # pass exists to ration.
+        points = (scraper.heatmap(match_id, int(pid_raw))
+                  if with_heatmaps and minutes > 0 else [])
         if first_match and not diagnostics.get("hm_sample") and points:
             diagnostics["hm_sample"] = True
             log(f"  [diagnostics] heatmap sample: {str(points[:8])[:160]}")
@@ -578,17 +640,24 @@ def _ingest_match(
                 acc[0] += norm[0]
                 acc[1] += 1
 
-        if total == 0:
-            no_heatmap += 1
-            continue
+        if total:
+            presence = {z: c / total for z, c in zone_count.items()}
+            box_presence = {z: c / total for z, c in box_count.items()}
+        else:
+            # No heatmap for him this pass. His totals are still true — the scorer
+            # sums them over all zones — so they are written either where the last
+            # heavy round placed him or, failing that, unplaced and saying so.
+            presence, box_presence = carried.get(player.id, ({}, {}))
+            if not presence:
+                no_heatmap += 1
+                presence, box_presence = {ZONE_UNPLACED: 1.0}, {}
 
-        presence = {z: c / total for z, c in zone_count.items()}
         touches_total = _stat(row, "touches") or float(total)
 
         for zone, frac in presence.items():
             inc(player.id, side, zone, "touches", touches_total * frac)
-        for zone, c in box_count.items():
-            inc(player.id, side, zone, "touches_in_box", (c / total) * touches_total)
+        for zone, frac in box_presence.items():
+            inc(player.id, side, zone, "touches_in_box", frac * touches_total)
 
         bad_passes = max(0.0, _stat(row, "totalPass") - _stat(row, "accuratePass"))
         for feature_key, src in DISTRIBUTED_STAT_MAP.items():
@@ -659,7 +728,11 @@ def _ingest_match(
     MatchShot.objects.filter(match=match, provider=PROVIDER).delete()
     MatchShot.objects.bulk_create(shot_rows, batch_size=500, ignore_conflicts=True)
 
-    def method_for(key: str) -> str:
+    def method_for(zone: str, key: str) -> str:
+        # Read off the ZONE, so a player and his team's aggregate agree without
+        # threading per-player state down here: whatever landed unplaced says so.
+        if zone == ZONE_UNPLACED:
+            return METHOD_UNPLACED
         if key in ("shots", "xg_shots"):
             return "shotmap_exact"
         if key in ("touches", "touches_in_box"):
@@ -670,21 +743,22 @@ def _ingest_match(
         PlayerZoneFeature, match,
         attnames=("player_id", "team_side", "zone_key", "feature_key"),
         unique_names=("player", "team_side", "zone_key", "feature_key"),
-        rows={k: (v, method_for(k[3])) for k, v in player_zone.items()})
+        rows={k: (v, method_for(k[2], k[3])) for k, v in player_zone.items()})
     team_written, team_total = _upsert_zone_features(
         TeamZoneFeature, match,
         attnames=("team_side", "zone_key", "feature_key"),
         unique_names=("team_side", "zone_key", "feature_key"),
-        rows={k: (v, method_for(k[2])) for k, v in team_zone.items()})
+        rows={k: (v, method_for(k[1], k[2])) for k, v in team_zone.items()})
 
     log(f"  match {match_id} {home_team.get('name')} v {away_team.get('name')}: "
+        f"{'heavy' if with_heatmaps else 'light'} "
         f"appearances={appearances} cards={cards} "
-        f"player_rows={player_written}/{player_total} no_heatmap={no_heatmap}")
+        f"player_rows={player_written}/{player_total} unplaced={no_heatmap}")
 
     return SofaIngestResult(
         matches=1, appearances=appearances, cards=cards,
         player_zone_features=player_total, team_zone_features=team_total,
-        players_without_heatmap=no_heatmap,
+        players_unplaced=no_heatmap,
     )
 
 
@@ -768,13 +842,15 @@ def ingest_sofascore_matches(
     *, scraper, year: str, match_ids: list[int], season_code: str | None = None,
     only_finished: bool = True, skip_existing: bool = True,
     zone_cols: int = 5, zone_rows: int = 4, flip_away: bool = False,
-    logger: Callable[[str], None] = print,
+    with_heatmaps: bool = True, logger: Callable[[str], None] = print,
 ) -> SofaIngestResult:
     """Ingest specific matches resolved BY ID, without reading the schedule.
 
     Same work as ``ingest_sofascore_season`` per match; only the way the fixture is
     found differs. ``result.unresolved`` counts the ids whose event did not answer
     usably — the caller decides whether to retry through the calendar.
+
+    ``with_heatmaps=False`` is the light round of a live match: see ``_ingest_match``.
     """
     log = logger
     events: list[dict[str, Any]] = []
@@ -792,7 +868,7 @@ def ingest_sofascore_matches(
         season_code=season_code or season_code_from_year(year),
         only_finished=only_finished, skip_existing=skip_existing,
         limit_matches=None, zone_cols=zone_cols, zone_rows=zone_rows,
-        flip_away=flip_away, log=log)
+        flip_away=flip_away, with_heatmaps=with_heatmaps, log=log)
     return result.add(unresolved=unresolved)
 
 
@@ -825,13 +901,13 @@ def ingest_sofascore_season(
         season_code=season_code or season_code_from_year(year),
         only_finished=only_finished, skip_existing=skip_existing,
         limit_matches=limit_matches, zone_cols=zone_cols, zone_rows=zone_rows,
-        flip_away=flip_away, log=log)
+        flip_away=flip_away, with_heatmaps=True, log=log)
 
 
 def _ingest_events(
     *, scraper, events: list[dict[str, Any]], season_code: str,
     only_finished: bool, skip_existing: bool, limit_matches: int | None,
-    zone_cols: int, zone_rows: int, flip_away: bool,
+    zone_cols: int, zone_rows: int, flip_away: bool, with_heatmaps: bool,
     log: Callable[[str], None],
 ) -> SofaIngestResult:
     """Ingest a list of already-resolved event dicts. Shared by both entry points,
@@ -870,7 +946,7 @@ def _ingest_events(
                 team_cache=team_cache, player_cache=player_cache,
                 zone_cols=zone_cols, zone_rows=zone_rows, flip_away=flip_away,
                 feature_totals=feature_totals, stat_keys_seen=stat_keys_seen,
-                diagnostics=diagnostics, log=log,
+                diagnostics=diagnostics, log=log, with_heatmaps=with_heatmaps,
             ).__dict__)
         except SofaScoreBlocked as exc:
             log(f"  !! SofaScore is blocking ({exc}); stopping cleanly. "

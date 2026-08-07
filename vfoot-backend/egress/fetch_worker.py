@@ -32,14 +32,16 @@ def _minutes(row: dict) -> int:
 
 
 def fetch_match(client: SofaScoreClient, mid: int, kind: str) -> None:
-    # Live: the evolving, cheap endpoints (no heatmaps mid-match) + the event status
-    # itself, so the tick can read lifecycle/score without a heavy pull. Final: the
-    # full set incl. per-player heatmaps, which only make sense once the match is over.
-    client.get(f"/api/v1/event/{mid}")            # status + score (light)
+    # Four requests, and they are everything a vote needs: the event (status, score
+    # and the fixture the importer resolves from), the squad sheet, the incidents,
+    # and the shot map. What 'final' adds is the POSITIONAL half — a heatmap per
+    # player, some twenty-two more requests — which is the whole reason the two
+    # kinds exist and why the heavy one is rationed to every k-th round.
+    client.get(f"/api/v1/event/{mid}")
     stats = client.player_stats_records(mid)
     client.incidents_records(mid)
+    client.shots_records(mid)
     if kind == "final":
-        client.shots_records(mid)
         for row in stats:
             pid = row.get("id")
             if pid is not None and _minutes(row) > 0:

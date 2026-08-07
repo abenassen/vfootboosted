@@ -12,9 +12,9 @@ the product. The cost of polling grows with users x frequency, the cost of a
 socket with the number of real changes — and during a Serie A round the real
 changes are a handful per minute no matter how many people are watching.
 
-WHAT SENDS. The ``live_import`` step of the tick, after an import that changed
-something, and the two finalization steps. Not the light poll: it only moves the
-scoreline, which is not the information anyone is here for.
+WHAT SENDS. Every live ROUND of the tick, after an import that changed something,
+and the two finalization steps. A round is not a scoreline refresh: it rewrites the
+per-player data, which is the information people are here for.
 
 THE TRAP, IN DEVELOPMENT. With no ``REDIS_URL`` the channel layer is
 ``InMemoryChannelLayer``, which does not fan out ACROSS PROCESSES. The tick is a

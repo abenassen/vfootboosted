@@ -51,6 +51,7 @@ from django.db.models import Sum
 from realdata.models import (
     MatchAppearance, Player, PlayerTeamStint, PlayerZoneFeature, PROVIDER_SOFASCORE,
 )
+from realdata.services.sofascore_adapter import METHOD_UNPLACED
 
 PROVIDER_TM = "transfermarkt"
 
@@ -219,10 +220,14 @@ def player_profiles(competition_season_id: int, min_minutes: int = MIN_MINUTES):
     """(player_ids, feature matrix) for outfielders with enough football played."""
     totals: dict[int, dict[str, float]] = {}
     grid: dict[int, np.ndarray] = {}
+    # The unplaced rows of a match still being played carry no position, and the
+    # split below would raise on their key rather than misread it — which is the
+    # point of that key. Either way they have no business in a spatial cluster.
     for pid, zk, fk, v in (PlayerZoneFeature.objects
                            .filter(provider=PROVIDER_SOFASCORE,
                                    feature_key__in=_COUNTERS,
                                    match__competition_season_id=competition_season_id)
+                           .exclude(source_method=METHOD_UNPLACED)
                            .values_list("player_id", "zone_key", "feature_key")
                            .annotate(v=Sum("value"))
                            .values_list("player_id", "zone_key", "feature_key", "v")):

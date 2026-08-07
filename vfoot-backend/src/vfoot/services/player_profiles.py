@@ -13,6 +13,7 @@ import re
 from collections import defaultdict
 
 from realdata.models import MatchAppearance, PlayerZoneFeature
+from realdata.services.sofascore_adapter import METHOD_UNPLACED
 
 _ZONE_RE = re.compile(r"^Z_(\d+)_\d+$")
 
@@ -56,7 +57,10 @@ def player_footprints(player_ids: list[int], as_of_matchday: int | None = None) 
     """{player_id: {zone_key: presence_share}} from touches (sum=1). When
     as_of_matchday is given, only matches BEFORE it count (no leakage: you set a
     lineup for matchday N knowing only matchdays < N)."""
-    qs = PlayerZoneFeature.objects.filter(feature_key="touches", player_id__in=player_ids)
+    # A footprint is a claim about position, so the unplaced rows a live match's
+    # light round writes are not part of it (see sofascore_adapter.METHOD_UNPLACED).
+    qs = (PlayerZoneFeature.objects.filter(feature_key="touches", player_id__in=player_ids)
+          .exclude(source_method=METHOD_UNPLACED))
     if as_of_matchday is not None:
         qs = qs.filter(match__matchday__lt=as_of_matchday)
     raw: dict[int, dict[str, float]] = defaultdict(lambda: defaultdict(float))

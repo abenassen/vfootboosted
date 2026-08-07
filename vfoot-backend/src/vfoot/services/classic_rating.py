@@ -45,6 +45,7 @@ from realdata.models import (
     MatchAppearance, Match, MatchDisciplinaryEvent, MatchShot, Player,
     PlayerOnPitchInterval, PlayerZoneFeature, PROVIDER_SOFASCORE,
 )
+from realdata.services.sofascore_adapter import METHOD_UNPLACED
 
 log = logging.getLogger(__name__)
 
@@ -1352,11 +1353,18 @@ def _zone_presence(match_ids) -> dict:
     on the pitch he spent in each zone. It is a POSITIONAL measure, not a
     ball-contact one, which is what charging conceded danger requires (a defender
     beaten in his own box touches nothing at all).
+
+    Which is exactly why the UNPLACED rows are excluded rather than read as a
+    position. A live match's light round writes a player's totals without knowing
+    where he was; taken at face value they would stand him in one cell of the grid
+    and charge him for whatever the opposition did there. Nobody's exposure is
+    better than no exposure at all — see ``sofascore_adapter.METHOD_UNPLACED``.
     """
     zones: dict[tuple, dict] = defaultdict(dict)
     for mid, pid, zk, v in (PlayerZoneFeature.objects
                             .filter(match_id__in=match_ids, provider=PROVIDER_SOFASCORE,
                                     feature_key="touches")
+                            .exclude(source_method=METHOD_UNPLACED)
                             .values_list("match_id", "player_id", "zone_key")
                             .annotate(v=Sum("value"))
                             .values_list("match_id", "player_id", "zone_key", "v")):

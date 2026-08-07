@@ -2550,9 +2550,10 @@ provider whose ids we scrape → no cross-provider fixture mapping. Probe:
   react. Idempotent.
 
 **`realdata/services/match_scheduler.py`** — pure DB-driven policy (no I/O):
-`plan_tick(now, matches)` classifies each match into stamp_ft / live_poll (confirmed
-kickoff .. +135min, plus any status=live) / final_check (+15min) / final_confirm
-(+1h → data_ready). No cron-per-match; robust to postponements (fires at the new time).
+`plan_tick(now, matches)` classifies each match into stamp_ft / live_round (confirmed
+kickoff .. +135min, plus any status=live; every k-th also in live_heavy) / final_check
+(+15min) / final_confirm (+1h → data_ready). No cron-per-match; robust to
+postponements (fires at the new time).
 
 **Commands (portable; on Linode via systemd/cron):**
 - `python manage.py sync_calendar --year 26/27 --browser` (daily; `--rounds 1,2` for a

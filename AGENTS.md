@@ -413,23 +413,45 @@ Agents must NEVER:
         machine's IP, re-detected at every run (DHCP-proof)
     -   `./vfoot-dev status` — mode, IP, what's running; also warns
         when the running backend's env has drifted from `.env`
--   **Planned, not yet done: the live ingestion cadence.** Two clocks (light poll
-    every 2', full import every 10') are to become one, with a heavy pass every
-    k-th light one, and the live import is to stop pulling the whole schedule and
-    every player's heatmap. Written up with the measured costs and the exact
-    blocker in `vfoot-backend/docs/live_ingest_cadence.md` — read it before
-    touching `match_scheduler`, `live_ingest` or the live branch of the adapter.
+-   **The live ingestion cadence: ONE clock, and a heavy pass every k-th round.**
+    A live match gets a ROUND every `VFOOT_LIVE_POLL_MINUTES` (2) — status, score
+    and the per-player totals, so the votes move — and every
+    `VFOOT_LIVE_HEAVY_EVERY`-th round (4) also pulls a heatmap per player, and
+    with them the POSITIONAL half of the model: the defensive exposure, and
+    Aura's zone duel. Round: 4 requests. Heavy: ~26. It used to be two competing
+    clocks and ~65 requests every ten minutes, most of them the season schedule
+    being re-read to find a match whose id we already held. Two consequences
+    worth knowing before touching any of it:
+    -   **a live vote is not the final vote, and moves in a known direction.**
+        Between heavy rounds a player who has just come on has no measured
+        position, so no defensive exposure is charged to him — and exposure is
+        almost always a malus, so he reads a little generous until the next heavy
+        round places him. Declared, not accidental; the "provvisorio" badge is
+        what says so.
+    -   **rows that carry no position say so.** They sit in
+        `sofascore_adapter.ZONE_UNPLACED` with `source_method=METHOD_UNPLACED`.
+        Sum over zones and you must include them; read a zone as a PLACE and you
+        must not. The key is deliberately not a grid cell, so a reader that forgot
+        breaks instead of quietly standing a player in the corner of the pitch.
+    The reasoning, with the measured costs, is in
+    `vfoot-backend/docs/live_ingest_cadence.md`.
 -   **Watching the LIVE pipeline is the one case `./vfoot-dev` is not enough:
     use `./vfoot-sim`.** It is not a second way to run the app — it is a
     purpose-built rig for a match being played (the tick, the live import, the
     WebSocket push, the finalization). `./vfoot-dev` plus `VFOOT_FAKE_NOW` is
     perfectly fine for LOOKING at a rebuilt scenario, which is most of the time;
     what it cannot do is show the pipeline working, and it fails at it silently:
-    -   **cadence** — `vfoot-sim` exports `VFOOT_LIVE_IMPORT_MINUTES=2` against
-        production's 10, because a simulated evening lasts as long as a real one
-        and waiting ten minutes to see a vote move makes it impossible to tell
-        working from broken. Measure the cadence without it and you are measuring
-        production's, not the rig's;
+    -   **cadence** — the rig runs at production's cadence AND production's
+        shape, by default and on purpose: a rig that differs by default lies by
+        default, and whoever looks inside has no way to know. It costs nothing
+        here, because the votes move on the LIGHT round, i.e. already every two
+        minutes. Only the heavy round is slow (8'), and it is worth waiting for
+        only when it is what you are watching — the zones, Aura, the defensive
+        exposure coming back. For that, and only that, you ask:
+        `VFOOT_LIVE_POLL_MINUTES=1 ./vfoot-sim <scenario>` (the time) or
+        `VFOOT_LIVE_HEAVY_EVERY=2 ./vfoot-sim <scenario>` (the shape). Keep the
+        two apart: at k=1 every round is heavy and the rig can no longer show the
+        one behaviour that is new;
     -   **Redis** — without `REDIS_URL` the channel layer is the in-memory one,
         which does NOT fan out across processes. The tick runs in its own, so the
         nudge after a live import dies in the cron's memory and never reaches the

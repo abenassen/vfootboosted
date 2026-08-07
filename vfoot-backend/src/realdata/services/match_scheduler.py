@@ -8,12 +8,14 @@ which makes it robust to calendar changes (a postponed kickoff just fires later)
 
 Two windows:
 
-* LIVE — from a CONFIRMED kickoff until a generous upper bound, poll the live
-  match (provisional score/events). Provisional kickoffs are skipped (the slot
-  isn't real yet); a match already flagged ``live`` is always polled as a
-  fallback even outside the nominal window. Inside this same window, and on its
-  own slower clock, the FULL per-player data is imported so the votes move while
-  the match is being played — without ever promoting it to ``data_ready``.
+* LIVE — from a CONFIRMED kickoff until a generous upper bound, one ROUND every
+  ``VFOOT_LIVE_POLL_MINUTES``: status, score and the per-player data, so the votes
+  move while the match is being played — without ever promoting it to
+  ``data_ready``. Provisional kickoffs are skipped (the slot isn't real yet); a
+  match already flagged ``live`` always gets its round, even outside the nominal
+  window. Every ``VFOOT_LIVE_HEAVY_EVERY``-th round is also HEAVY: it pulls a
+  heatmap per player and with them the positional half of the model. One clock,
+  one flag — not two clocks competing to push each other's due time out.
 * FINALIZATION — measured from the observed full-time (``finished_at``): a first
   scrape at +15 min (data is usually settled by then) and a confirmation at
   +1 h that promotes the match to ``data_ready``. Between +15 and +1 h the tick
@@ -34,21 +36,33 @@ from realdata.models import Match
 LIVE_POLL_WINDOW = timedelta(minutes=135)
 
 def live_poll_interval() -> timedelta:
-    """Minimum gap between two scrapes of the SAME live match. Read at call time so
-    the cadence can be retuned (env var) without a code change — the knob that fits
-    the pipeline to the machine."""
+    """Minimum gap between two rounds of the SAME live match — the TIME of the
+    cadence. Read at call time so it can be retuned (env var) without a code
+    change: the knob that fits the pipeline to the machine."""
     return timedelta(minutes=float(getattr(settings, "VFOOT_LIVE_POLL_MINUTES", 2)))
 
 
-def live_import_interval() -> timedelta:
-    """Minimum gap between two FULL imports of the same live match — its own cadence,
-    slower than the light poll's on purpose.
+def live_heavy_every() -> int:
+    """How many light rounds go by per heavy one — the SHAPE of the cadence, as
+    opposed to ``live_poll_interval``'s time.
 
-    Ten minutes is the rhythm at which a performance actually changes, and it divides
-    the writing by five compared to polling's two. The two windows are the same; only
-    how often each fires inside it differs.
+    Two knobs of different natures, and keeping them apart is what lets the rig run
+    at production's shape while compressing its clock (see ``vfoot-sim``). At k=1
+    every round is heavy and the distinction disappears altogether, which is exactly
+    the behaviour a rig must not hide.
     """
-    return timedelta(minutes=float(getattr(settings, "VFOOT_LIVE_IMPORT_MINUTES", 10)))
+    return max(1, int(getattr(settings, "VFOOT_LIVE_HEAVY_EVERY", 4)))
+
+
+def live_heavy_interval() -> timedelta:
+    """Minimum gap between two HEAVY rounds of the same live match.
+
+    Expressed as k times the light interval rather than counted on the match, which
+    costs no column. The trade: a light round skipped because the egress was blocked
+    does not postpone the heavy one, so it follows the clock rather than the rounds
+    actually made. In practice the difference is a couple of minutes once.
+    """
+    return live_heavy_every() * live_poll_interval()
 
 
 # Finalization checkpoints, measured from observed full-time.
@@ -57,8 +71,8 @@ FINAL_CONFIRM_AFTER = timedelta(minutes=60)
 
 # Action kinds
 STAMP_FT = "stamp_ft"          # first time seen finished -> record finished_at
-LIVE_POLL = "live_poll"        # scrape the in-progress match
-LIVE_IMPORT = "live_import"    # full per-player import WITHOUT promoting the match
+LIVE_ROUND = "live_round"      # one live round: status, score and the votes
+LIVE_HEAVY = "live_heavy"      # the k-th round, which also pulls the heatmaps
 FINAL_CHECK = "final_check"    # +15min post-FT scrape (provisional-final)
 FINAL_CONFIRM = "final_confirm"  # +1h post-FT scrape -> data_ready
 
@@ -66,18 +80,20 @@ FINAL_CONFIRM = "final_confirm"  # +1h post-FT scrape -> data_ready
 @dataclass
 class TickPlan:
     stamp_ft: list[Match] = field(default_factory=list)
-    live_poll: list[Match] = field(default_factory=list)
-    live_import: list[Match] = field(default_factory=list)
+    live_round: list[Match] = field(default_factory=list)
+    # A SUBSET of live_round, never a separate list of work: the heavy pass is a
+    # flag on a round, which is what having one clock means.
+    live_heavy: list[Match] = field(default_factory=list)
     final_check: list[Match] = field(default_factory=list)
     final_confirm: list[Match] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return not (self.stamp_ft or self.live_poll or self.live_import
+        return not (self.stamp_ft or self.live_round
                     or self.final_check or self.final_confirm)
 
     def summary(self) -> str:
-        return (f"stamp_ft={len(self.stamp_ft)} live_poll={len(self.live_poll)} "
-                f"live_import={len(self.live_import)} "
+        return (f"stamp_ft={len(self.stamp_ft)} live_round={len(self.live_round)} "
+                f"(heavy={len(self.live_heavy)}) "
                 f"final_check={len(self.final_check)} "
                 f"final_confirm={len(self.final_confirm)}")
 
@@ -104,17 +120,16 @@ def plan_tick(now: datetime, matches) -> TickPlan:
 
         if _in_live_window(m, now):
             # Honour the per-match cadence: the tick may fire every minute, but a
-            # given match is re-scraped only every VFOOT_LIVE_POLL_MINUTES.
+            # given match gets a round only every VFOOT_LIVE_POLL_MINUTES.
             last = m.data_checked_at
             if last is None or now - last >= live_poll_interval():
-                plan.live_poll.append(m)
-            # The full import rides the same window on its own, slower clock. Its own
-            # stamp too: sharing data_checked_at with the poll above would mean the
-            # poll, firing five times as often, kept pushing the import's next due
-            # time out and it would never come round.
-            imported = m.data_imported_at
-            if imported is None or now - imported >= live_import_interval():
-                plan.live_import.append(m)
+                plan.live_round.append(m)
+                # ...and every k-th round carries the heavy pass with it. Its own
+                # stamp, but no longer its own clock: a heavy pass never happens
+                # outside a round, so the two cannot race each other any more.
+                imported = m.data_imported_at
+                if imported is None or now - imported >= live_heavy_interval():
+                    plan.live_heavy.append(m)
             continue
 
         if (m.status == Match.STATUS_FINISHED and not m.data_ready

@@ -1,8 +1,8 @@
 """SofaScore live pipeline wiring: egress warms the cache, the offline code reads it.
 
 The egress (root, netns, network) is mocked, so this exercises the DB-aware half —
-poll_live's status/score update, finalize's warm+import, and the tick advancing
-state only on success — with no root and no tunnel.
+a live round's status/score update and import, finalize's warm+import, and the tick
+advancing state only on success — with no root and no tunnel.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from realdata.models import (
     Competition, CompetitionSeason, Match, Season, Team, TeamSeason,
@@ -47,25 +47,65 @@ class LiveIngestTests(_Base):
     def test_year_for(self):
         self.assertEqual(live_ingest.year_for(self._match()), "26/27")
 
-    def test_poll_live_updates_status_and_score_from_warm_cache(self):
+    def test_a_round_updates_status_and_score_from_warm_cache(self):
         m = self._match(status=Match.STATUS_LIVE)
         event = {"id": 111, "status": {"type": "finished"},
                  "homeScore": {"current": 2}, "awayScore": {"current": 1}}
         with mock.patch.object(live_ingest.egress_client, "warm_matches",
                                return_value=True), \
-             mock.patch.object(live_ingest, "_cached_event", return_value=event):
-            self.assertTrue(live_ingest.poll_live(m))
+             mock.patch.object(live_ingest, "_cached_event", return_value=event), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_RESOLVED):
+            self.assertTrue(live_ingest.live_round(m, heavy=False))
         m.refresh_from_db()
         self.assertEqual(m.status, Match.STATUS_FINISHED)
         self.assertEqual((m.home_goals, m.away_goals), (2, 1))
 
-    def test_poll_live_blocked_egress_leaves_match_untouched(self):
+    def test_a_round_blocked_at_the_egress_leaves_the_match_untouched(self):
         m = self._match(status=Match.STATUS_LIVE)
         with mock.patch.object(live_ingest.egress_client, "warm_matches",
-                               return_value=False):
-            self.assertFalse(live_ingest.poll_live(m))
+                               return_value=False), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches") as ing:
+            self.assertFalse(live_ingest.live_round(m, heavy=False))
+        ing.assert_not_called()
         m.refresh_from_db()
         self.assertEqual(m.status, Match.STATUS_LIVE)
+
+    def test_a_light_round_asks_for_the_cheap_fetch_and_no_heatmaps(self):
+        """The two halves of the saving, in one place: what the egress is asked to
+        fetch, and what the importer is asked to read."""
+        m = self._match(status=Match.STATUS_LIVE)
+        with mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=True) as wm, \
+             mock.patch.object(live_ingest, "_cached_event", return_value=None), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_RESOLVED) as ing:
+            self.assertTrue(live_ingest.live_round(m, heavy=False))
+        wm.assert_called_once_with([m.external_id], "live")
+        self.assertIs(ing.call_args.kwargs["with_heatmaps"], False)
+
+    def test_a_heavy_round_asks_for_everything(self):
+        m = self._match(status=Match.STATUS_LIVE)
+        with mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=True) as wm, \
+             mock.patch.object(live_ingest, "_cached_event", return_value=None), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_RESOLVED) as ing:
+            self.assertTrue(live_ingest.live_round(m, heavy=True))
+        wm.assert_called_once_with([m.external_id], "final")
+        self.assertIs(ing.call_args.kwargs["with_heatmaps"], True)
+
+    def test_the_egress_is_warmed_once_per_round_not_twice(self):
+        """The status update and the import share the fetch: they are one round,
+        not a poll followed by an import that warms the same match again."""
+        m = self._match(status=Match.STATUS_LIVE)
+        with mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=True) as wm, \
+             mock.patch.object(live_ingest, "_cached_event", return_value=None), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_RESOLVED):
+            live_ingest.live_round(m, heavy=True)
+        self.assertEqual(wm.call_count, 1)
 
     def test_finalize_warms_then_imports_the_right_match(self):
         m = self._match(status=Match.STATUS_FINISHED)
@@ -127,30 +167,35 @@ class LiveIngestTests(_Base):
             self.assertFalse(live_ingest.finalize(m))
         ing.assert_not_called()
 
-    def test_import_live_asks_the_importer_not_to_require_a_finished_match(self):
+    def test_a_round_does_not_require_a_finished_match(self):
         """The importer skips whatever the provider does not call finished. Without
-        only_finished=False the live import would report success and import nothing
+        only_finished=False a live round would report success and import nothing
         at all."""
         m = self._match(status=Match.STATUS_LIVE)
         with mock.patch.object(live_ingest.egress_client, "warm_matches",
                                return_value=True), \
+             mock.patch.object(live_ingest, "_cached_event", return_value=None), \
              mock.patch.object(live_ingest, "ingest_sofascore_matches",
                                return_value=_RESOLVED) as ing:
-            self.assertTrue(live_ingest.import_live(m))
+            self.assertTrue(live_ingest.live_round(m, heavy=False))
         self.assertIs(ing.call_args.kwargs["only_finished"], False)
         # And it must not skip a match it has already written rows for: the whole
         # point of the second import is what changed since the first.
         self.assertIs(ing.call_args.kwargs["skip_existing"], False)
 
-    def test_import_live_does_not_promote_the_match(self):
+    def test_no_round_ever_promotes_the_match(self):
+        """Heavy or light: data_ready means "the provider has stopped changing this
+        match", and a match being played has not."""
         m = self._match(status=Match.STATUS_LIVE)
-        with mock.patch.object(live_ingest.egress_client, "warm_matches",
-                               return_value=True), \
-             mock.patch.object(live_ingest, "ingest_sofascore_matches",
-                               return_value=_RESOLVED):
-            live_ingest.import_live(m)
-        m.refresh_from_db()
-        self.assertFalse(m.data_ready)
+        for heavy in (False, True):
+            with mock.patch.object(live_ingest.egress_client, "warm_matches",
+                                   return_value=True), \
+                 mock.patch.object(live_ingest, "_cached_event", return_value=None), \
+                 mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                                   return_value=_RESOLVED):
+                live_ingest.live_round(m, heavy=heavy)
+            m.refresh_from_db()
+            self.assertFalse(m.data_ready)
 
 
 class TickWiringTests(_Base):
@@ -180,27 +225,46 @@ class TickWiringTests(_Base):
             call_command("tick", "--now", _iso(now), "--dry-run")
         fin.assert_not_called()
 
-    def test_live_import_stamps_its_own_clock_and_leaves_data_ready_alone(self):
+    def test_the_first_round_is_heavy_and_stamps_both_clocks(self):
         now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
         m = self._match(status=Match.STATUS_LIVE,
                         kickoff=now - timedelta(minutes=30))
-        with mock.patch.object(live_ingest, "poll_live", return_value=True), \
-             mock.patch.object(live_ingest, "import_live", return_value=True) as imp:
+        with mock.patch.object(live_ingest, "live_round", return_value=True) as rnd:
             call_command("tick", "--now", _iso(now))
-        imp.assert_called_once()
+        rnd.assert_called_once()
+        self.assertIs(rnd.call_args.kwargs["heavy"], True)
         m.refresh_from_db()
+        self.assertEqual(m.data_checked_at, now)
         self.assertEqual(m.data_imported_at, now)
         self.assertFalse(m.data_ready)
 
-    def test_a_blocked_live_import_does_not_stamp(self):
+    @override_settings(VFOOT_LIVE_POLL_MINUTES=2, VFOOT_LIVE_HEAVY_EVERY=4)
+    def test_a_light_round_stamps_only_the_round_clock(self):
+        """Otherwise the light round would keep pushing the heavy one's due time
+        out and it would never come round — the exact trap the two separate clocks
+        existed to avoid, which one clock has to avoid differently."""
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        imported = now - timedelta(minutes=4)
+        m = self._match(status=Match.STATUS_LIVE,
+                        kickoff=now - timedelta(minutes=30),
+                        data_checked_at=now - timedelta(minutes=2),
+                        data_imported_at=imported)
+        with mock.patch.object(live_ingest, "live_round", return_value=True) as rnd:
+            call_command("tick", "--now", _iso(now))
+        self.assertIs(rnd.call_args.kwargs["heavy"], False)
+        m.refresh_from_db()
+        self.assertEqual(m.data_checked_at, now)
+        self.assertEqual(m.data_imported_at, imported)   # untouched
+
+    def test_a_blocked_round_stamps_nothing(self):
         """So the next tick retries it instead of waiting out the whole interval."""
         now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
         m = self._match(status=Match.STATUS_LIVE,
                         kickoff=now - timedelta(minutes=30))
-        with mock.patch.object(live_ingest, "poll_live", return_value=True), \
-             mock.patch.object(live_ingest, "import_live", return_value=False):
+        with mock.patch.object(live_ingest, "live_round", return_value=False):
             call_command("tick", "--now", _iso(now))
         m.refresh_from_db()
+        self.assertIsNone(m.data_checked_at)
         self.assertIsNone(m.data_imported_at)
 
     def test_full_time_is_announced_at_the_stamp_and_not_again(self):

@@ -42,6 +42,23 @@
 #   L'istantanea e' per (scenario, istante): `reset` riporta esattamente al punto da
 #   cui quel `build` era partito, non a un generico "inizio".
 #
+#   ACCELERARE SI CHIEDE. Di default il banco e' IDENTICO alla produzione: stessa
+#   cadenza (un giro ogni due minuti) e stessa forma (il passaggio pesante, quello
+#   che scarica le heatmap, ogni quattro giri). Un banco che di default differisce
+#   dal prodotto mente di default, e chi ci guarda dentro non ha modo di saperlo.
+#   Non serve nemmeno: i voti si muovono sul giro LEGGERO, cioe' gia' ogni due
+#   minuti. Resta lungo solo il pesante (otto minuti), e lo si aspetta solo quando
+#   si sta guardando proprio quello -- le zone, aura, il rientro dell'esposizione
+#   difensiva. Per quel caso, e solo per quello, si chiede:
+#
+#       VFOOT_LIVE_POLL_MINUTES=1 ./vfoot-sim napoli-inter    # il TEMPO
+#       VFOOT_LIVE_HEAVY_EVERY=2 ./vfoot-sim napoli-inter     # la FORMA
+#
+#   Le due manopole sono di natura diversa e vanno tenute separate: il tempo dice
+#   quanto in fretta scorre, k dice com'e' fatto il comportamento. Un banco a k=1
+#   non potrebbe mostrare l'unico comportamento nuovo che interessa -- il voto
+#   provvisorio senza esposizione difensiva che si assesta al giro pesante.
+#
 #   IL .env NON VIENE MODIFICATO. Le variabili vengono ESPORTATE nell'ambiente dei
 #   processi che questo script avvia, e vincono su quelle del file: load_dotenv
 #   non sovrascrive l'ambiente. E' la stessa proprieta' che rende insidioso un
@@ -232,10 +249,9 @@ export_sim_env() {
   [ -n "$AT" ] || die "scenario '$SCENARIO' sconosciuto (prova: $PY $MANAGE simulate_scenario --list)"
   export VFOOT_FAKE_NOW="$AT"
   export VFOOT_EGRESS_SIMULATED=true
-  # Un import ogni due minuti invece che ogni dieci: una serata simulata dura
-  # quanto una vera, e aspettare dieci minuti per vedere muovere un voto rende
-  # impossibile capire se la cosa funziona o si e' rotta.
-  export VFOOT_LIVE_IMPORT_MINUTES="${VFOOT_LIVE_IMPORT_MINUTES:-2}"
+  # NESSUNA cadenza forzata qui: il banco gira con la stessa di produzione (un
+  # giro ogni due minuti, il passaggio pesante ogni quattro giri). Vedi la nota
+  # ACCELERARE in cima.
 }
 
 start_backend() {

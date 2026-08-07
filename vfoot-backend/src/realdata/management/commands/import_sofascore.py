@@ -114,7 +114,7 @@ class Command(BaseCommand):
             f"cards={result.cards}",
             f"player_zone_features={result.player_zone_features}",
             f"team_zone_features={result.team_zone_features}",
-            f"players_without_heatmap={result.players_without_heatmap}",
+            f"players_unplaced={result.players_unplaced}",
             f"skipped_not_finished={result.skipped_not_finished}",
             f"skipped_existing={result.skipped_existing}",
         ]))

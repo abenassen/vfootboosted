@@ -4,9 +4,10 @@ Runs frequently (e.g. every minute via cron/systemd on the server). Each run it
 asks the DB "what is due now?" and acts:
 
 * stamps observed full-time on freshly-finished matches;
-* polls in-progress matches (light: lifecycle and score);
-* imports the FULL per-player data of in-progress matches on a slower clock, so
-  the votes move while the match is being played — without promoting it;
+* gives each in-progress match a ROUND — lifecycle, score and the per-player data,
+  so the votes move while it is being played, without promoting it. Every k-th
+  round is HEAVY: it also pulls a heatmap per player, and with them the positional
+  half of the model;
 * runs the +15min / +1h post-FT finalization, promoting a match to
   ``data_ready`` at confirmation.
 
@@ -94,38 +95,33 @@ class Command(BaseCommand):
                 if sent:
                     self.stdout.write(f"    push fine partita: {sent}")
 
-        # 2) Live polling: warm + update status/score (honours the per-match
-        #    cadence via data_checked_at). Only stamp checked on a real warm, so a
-        #    blocked egress simply retries next tick.
-        for m in plan.live_poll:
+        # 2) The live round: status, score and the per-player data, on ONE clock.
+        #    Every k-th round is also heavy (a heatmap per player) and is the only
+        #    one that stamps data_imported_at, so the two stamps no longer race.
+        #    data_ready is never touched here — the votes a round produces are
+        #    provisional by construction, and that is what the league marks them as.
+        #    Nothing is stamped unless the round really went through, so a blocked
+        #    egress simply retries next tick.
+        for m in plan.live_round:
+            heavy = m in plan.live_heavy
+            label = "live-heavy" if heavy else "live-round"
             if dry:
-                self.stdout.write(f"  [live-poll] {m} — would warm+update")
-                continue
-            if live_ingest.poll_live(m):
-                m.data_checked_at = now
-                m.save(update_fields=["data_checked_at"])
-                self.stdout.write(
-                    f"  [live-poll] {m} — {m.status} {m.home_goals}-{m.away_goals}")
-            else:
-                self.stdout.write(f"  [live-poll] {m} — egress blocked; will retry")
-
-        # 3) Live import: the full per-player data of a match still being played.
-        #    data_ready is NOT touched — the votes this produces are provisional by
-        #    construction, and that is what the league marks them as.
-        for m in plan.live_import:
-            if dry:
-                self.stdout.write(f"  [live-import] {m} — would warm+import (live)")
+                self.stdout.write(f"  [{label}] {m} — would warm+import")
                 continue
             before = live_updates.snapshot_events(m)
-            if not live_ingest.import_live(m):
-                self.stdout.write(f"  [live-import] {m} — egress blocked; will retry")
+            if not live_ingest.live_round(m, heavy=heavy):
+                self.stdout.write(f"  [{label}] {m} — egress blocked; will retry")
                 continue
-            m.data_imported_at = now
-            m.save(update_fields=["data_imported_at"])
+            m.data_checked_at = now
+            fields = ["data_checked_at"]
+            if heavy:
+                m.data_imported_at = now
+                fields.append("data_imported_at")
+            m.save(update_fields=fields)
             events = live_updates.announce_events(m, before)
             nudge |= live_updates.leagues_to_nudge(m)
             self.stdout.write(
-                f"  [live-import] {m} — imported (provisional)"
+                f"  [{label}] {m} — {m.status} {m.home_goals}-{m.away_goals}"
                 + (f", push: {events}" if events else ""))
 
         # 5) Finalization: +15min provisional-final import.

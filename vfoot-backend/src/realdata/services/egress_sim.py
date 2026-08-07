@@ -136,10 +136,11 @@ def _refresh_round_entry(cache_dir: Path, match: Match, status: str, played) -> 
 def _matches(cache_dir: Path, external_ids: list[str], kind: str) -> bool:
     """Warm these matches AS THEY STAND NOW.
 
-    ``kind`` is the caller's intent, not a different match: 'live' only needs the
-    light event endpoint (status and score), 'final' needs everything the importer
-    reads. Generating the full payload either way would be correct and wasteful —
-    a live poll runs every couple of minutes.
+    ``kind`` is the caller's intent, not a different match, and it splits exactly
+    where the real fetch worker splits it: both kinds write the event, the squad
+    sheet, the incidents and the shot map — the four a vote is made of — and only
+    'final' adds the per-player heatmaps. Writing them on every round would be
+    correct and would quietly erase the difference the rig exists to show.
     """
     now = timezone.now()
     written = 0
@@ -161,8 +162,10 @@ def _matches(cache_dir: Path, external_ids: list[str], kind: str) -> bool:
                 random.Random(f"{_seed_of()}:{match.external_id}"), clock=clock)
         _write_event(cache_dir, match, status, played)
         _refresh_round_entry(cache_dir, match, status, played)
-        if played is not None and (kind == "final" or status == "finished"):
-            _write_full(cache_dir, match.external_id, played)
+        if played is not None:
+            _write_match_data(cache_dir, match.external_id, played)
+            if kind == "final" or status == "finished":
+                _write_heatmaps(cache_dir, match.external_id, played)
         written += 1
     return written > 0
 
@@ -198,12 +201,18 @@ def _write_event(cache_dir: Path, match: Match, status: str, played) -> None:
     sim._write(cache_dir, f"/api/v1/event/{match.external_id}", payload)
 
 
-def _write_full(cache_dir: Path, mid: str, played) -> None:
-    """Lineups, shot map, incidents and every heatmap — what the importer reads."""
+def _write_match_data(cache_dir: Path, mid: str, played) -> None:
+    """Lineups, shot map and incidents: three requests, and the totals a vote is
+    made of. Written on every round, light or heavy."""
     sim._write(cache_dir, f"/api/v1/event/{mid}/lineups", played.lineups)
     sim._write(cache_dir, f"/api/v1/event/{mid}/shotmap", {"shotmap": played.shotmap})
     sim._write(cache_dir, f"/api/v1/event/{mid}/incidents",
                {"incidents": played.incidents})
+
+
+def _write_heatmaps(cache_dir: Path, mid: str, played) -> None:
+    """One per player, and the expensive half of the fetch: WHERE each of them was.
+    Only a heavy round asks for these."""
     for pid, points in played.heatmaps.items():
         sim._write(cache_dir, f"/api/v1/event/{mid}/player/{pid}/heatmap",
                    {"heatmap": points})

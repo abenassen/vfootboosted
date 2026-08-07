@@ -260,11 +260,13 @@ class Match(models.Model):
     # match is not necessarily scoreable-as-final until SofaScore stabilises it;
     # this flag is what lets a fantasy matchday be computed as definitive.
     data_ready = models.BooleanField(default=False)
+    # Last live ROUND: status, score and the per-player totals, every couple of
+    # minutes (VFOOT_LIVE_POLL_MINUTES).
     data_checked_at = models.DateTimeField(null=True, blank=True)
-    # Last time the FULL per-player data was imported. Distinct from
-    # data_checked_at, which the light live poll stamps every couple of minutes:
-    # the two have their own cadences (see VFOOT_LIVE_IMPORT_MINUTES) and sharing
-    # one stamp would let the fast one keep the slow one from ever coming due.
+    # Last HEAVY round — the one that also pulled a heatmap per player, and with
+    # them the positional half of the model. Every k-th round carries it
+    # (VFOOT_LIVE_HEAVY_EVERY); the two stamps are not two clocks, since a heavy
+    # round never happens outside a round.
     data_imported_at = models.DateTimeField(null=True, blank=True)
     # When the match was FIRST observed as finished (full time). The scheduler
     # measures the +15min / +1h finalization windows from this, so it must be the
