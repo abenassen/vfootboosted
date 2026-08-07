@@ -213,10 +213,12 @@ def competition_round_rows(competition: FantasyCompetition) -> list[dict]:
         stage_label = " / ".join(row.pop("stage_names"))
         if row["stage_type"] == CompetitionStage.TYPE_KNOCKOUT and row["local_rounds"] == 2:
             # Due turni di una fase a eliminazione sono una sfida sola giocata due
-            # volte: "Semifinali · giornata 2" suonerebbe come un secondo turno.
+            # volte: "Semifinali · turno 2" suonerebbe come un secondo turno.
             row["label"] = f"{stage_label} · {'andata' if row['local_round'] == 1 else 'ritorno'}"
         elif row["local_rounds"] > 1:
-            row["label"] = f"{stage_label} · giornata {row['local_round']}"
+            # TURNO: è il conto interno della fase. "Giornata" è riservata a
+            # quella del campionato vero, che qui è un altro numero.
+            row["label"] = f"{stage_label} · turno {row['local_round']}"
         else:
             row["label"] = stage_label
         row["stage_name"] = stage_label

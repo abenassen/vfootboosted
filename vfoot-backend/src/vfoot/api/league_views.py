@@ -2339,7 +2339,13 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         "competition_name": fx.competition.name,
         "stage_id": fx.stage_id,
         "stage_name": fx.stage.name if fx.stage_id else None,
-        "round_label": fx.stage.name if fx.stage_id else f"Giornata {fx.round_no}",
+        # TURNO per l'unità dentro una competizione della lega, GIORNATA solo per
+        # quella del campionato vero. Sono due orologi e vogliono due parole: qui
+        # c'era scritto "Giornata", e una riga di risultato finiva per leggersi
+        # "Giornata 21 · giornata 21" — il conto interno della competizione
+        # chiamato col nome del calendario su cui è giocato. Il nome di una fase
+        # scelto dall'admin ("Semifinali") batte comunque il numero.
+        "round_label": fx.stage.name if fx.stage_id else f"Turno {fx.round_no}",
         "fantasy_matchday_id": fx.fantasy_matchday_id,
         "real_matchday": fx.fantasy_matchday.real_matchday if fx.fantasy_matchday_id else None,
         "round_no": fx.round_no,

@@ -84,12 +84,15 @@ export default function MatchesPage() {
 
   /** A round's name. When parallel groups share it there is no single stage to
    *  name it after — taking the first fixture's label made a whole round read as
-   *  "Girone B" while half of it was Girone A. */
+   *  "Girone B" while half of it was Girone A.
+   *
+   *  TURNO, non "Giornata": questo è il conto interno della competizione, e
+   *  "giornata" è riservata a quella del campionato vero. */
   const roundLabel = (r: number) => {
     const inRound = fixtures.filter((f) => f.round_no === r);
     const stages = new Set(inRound.map((f) => f.stage_name).filter(Boolean));
-    if (stages.size === 1) return inRound[0]?.round_label ?? `Giornata ${r}`;
-    return `Giornata ${r}`;
+    if (stages.size === 1) return inRound[0]?.round_label ?? `Turno ${r}`;
+    return `Turno ${r}`;
   };
 
   /** The rounds the competition PLANS, not the ones its fixtures happen to have.
@@ -224,8 +227,12 @@ export default function MatchesPage() {
             {selectedCompetition ? competitionFormatLabel(selectedCompetition) : ''}
           </Badge>
         </div>
+        {/* TURNI a prescindere dal formato: questo è il conto interno della
+            competizione, e "giornata" è riservata a quella del campionato vero —
+            che è un altro numero e viene detto sotto ogni turno ("si gioca sulla
+            giornata 22 di Serie A"). */}
         <div className="mt-1 text-sm text-slate-600">
-          {fixtures.length} partite · {plannedRounds} {isKnockout ? 'turni' : 'giornate'}
+          {fixtures.length} partite · {plannedRounds} {plannedRounds === 1 ? 'turno' : 'turni'}
         </div>
         <div className="mt-3 flex flex-wrap gap-1">
           {entries.map((e) => (

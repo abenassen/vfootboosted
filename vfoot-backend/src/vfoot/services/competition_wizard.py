@@ -124,8 +124,8 @@ def create_competition(
             if int(source_round) not in valid:
                 last = max(valid) if valid else 0
                 raise WizardError(
-                    f"«{source_stage.competition.name}» arriva alla giornata {last}: "
-                    f"la {source_round}ª non esiste."
+                    f"«{source_stage.competition.name}» arriva al turno {last}: "
+                    f"il {source_round}º non esiste."
                 )
         if fmt == FantasyCompetition.FORMAT_GROUPS_KNOCKOUT and groups > 1:
             raise WizardError(

@@ -183,7 +183,9 @@ def earliest_start_matchday(competition: FantasyCompetition) -> tuple[int | None
             continue
         candidate = int(md) + 1
         who = dep["source_competition_name"]
-        where = f"giornata {dep['source_round']}" if dep["source_round"] else "fine"
+        # TURNO, perché è il conto interno dell'altra competizione — e questa
+        # frase dice "giornata reale" due parole dopo, per un numero diverso.
+        where = f"turno {dep['source_round']}" if dep["source_round"] else "fine"
         reasons.append(
             f"i partecipanti si decidono a {where} di «{who}» (giornata reale {md}): "
             f"non può iniziare prima della {candidate}ª"
@@ -240,14 +242,14 @@ def normalise_mapping(
         want = proposed.get(rno)
         candidates = [md for md in allowed if last is None or md > last]
         if not candidates:
-            warnings.append(f"giornata {rno}: non restano giornate reali disponibili")
+            warnings.append(f"turno {rno}: non restano giornate reali disponibili")
             continue
         if want is None or want not in allowed:
             chosen = candidates[0]
         elif last is not None and want <= last:
             chosen = candidates[0]
             warnings.append(
-                f"giornata {rno}: spostata alla {chosen}ª — non può essere giocata prima della precedente"
+                f"turno {rno}: spostato alla {chosen}ª — non può essere giocato prima del precedente"
             )
         else:
             chosen = want

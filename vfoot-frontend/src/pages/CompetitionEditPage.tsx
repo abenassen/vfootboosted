@@ -190,8 +190,11 @@ export default function CompetitionEditPage() {
                     {s.participants.length || s.expected_participants} squadre
                     {s.participants.length ? '' : ' (attese)'}
                   </div>
+                  {/* TURNI: i propri della fase. La riga sotto dice su quali
+                      giornate REALI cadono, ed è l'unica delle due che ha
+                      diritto a quella parola. */}
                   <div>
-                    {s.planned_rounds} {s.planned_rounds === 1 ? 'giornata' : 'giornate'}
+                    {s.planned_rounds} {s.planned_rounds === 1 ? 'turno' : 'turni'}
                   </div>
                   {s.first_matchday ? (
                     <div>

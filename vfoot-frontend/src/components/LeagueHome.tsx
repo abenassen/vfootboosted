@@ -576,15 +576,10 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                   <span className="truncate">{f.away_team.name}</span>
                   <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
                 </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {/* TURNO for the unit inside a competition, GIORNATA for the real
-                      Serie A one — never the same word for both, which is what this
-                      line used to do two words apart ("Giornata 3 · giornata reale
-                      27"). `round_label` already carries the knockout's own name
-                      ("Semifinali"), which beats any number. */}
-                  {f.round_label ?? `Turno ${f.round_no}`}
-                  {typeof f.real_matchday === 'number' ? ` · giornata ${f.real_matchday}` : ''}
-                </div>
+                {/* Same wording as the results below, from the same function: the
+                    two blocks sit one above the other and had no business naming a
+                    round two different ways. */}
+                <div className="mt-1 text-xs text-slate-500">{roundLabel(f)}</div>
                 {f.can_set_lineup ? (
                   <Link
                     to={`/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`}
@@ -644,6 +639,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                   f={f}
                   competition={compName.get(f.competition_id)}
                   competitionClass={compColorById.get(f.competition_id)?.text700}
+                  when
                 />
               ))}
             </div>
@@ -887,23 +883,62 @@ function MyStanding({
   );
 }
 
+/** WHEN a fixture was played, in the two units the league is scheduled in.
+ *
+ *  TURNO is the competition's own count, GIORNATA the real Serie A one. Two
+ *  clocks, two words, never the same word for both — that is the league-wide
+ *  convention, and the backend's `round_label` obeys it (it also carries a
+ *  knockout's own name, "Semifinali", which beats any number).
+ *
+ *  ENTRAMBI, sempre, anche quando i numeri coincidono. In un campionato coincidono
+ *  per costruzione — un turno per giornata reale — e per un momento si era pensato
+ *  di stampare solo la giornata per non ripetersi; ma allora la stessa riga dice
+ *  due cose diverse a seconda della competizione, e chi legge "Giornata 21" non ha
+ *  modo di sapere se è il ventunesimo turno o no. In coppa i due numeri non
+ *  coincidono mai. Meglio ridondante che ambiguo.
+ */
+function roundLabel(f: LeagueFixtureItem): string {
+  const round = f.round_label ?? `Turno ${f.round_no}`;
+  return typeof f.real_matchday === 'number' ? `${round} · giornata ${f.real_matchday}` : round;
+}
+
 function MiniFixture({
   f,
   competition,
   competitionClass,
+  when,
 }: {
   f: LeagueFixtureItem;
   competition?: string;
   competitionClass?: string;
+  /** Show which round this was. Off inside a competition block, where every row
+   *  belongs to the round already named above them; ON in "Ultimi risultati",
+   *  which mixes competitions and where the name alone left no way to tell
+   *  whether a result was from yesterday or from November. */
+  when?: boolean;
 }) {
   const finished = f.status === 'finished' && f.score;
   const row = (
     <div
       className={`rounded-lg px-2 py-1 ${f.is_user_involved ? 'bg-slate-100 font-semibold' : ''}`}
     >
-      {competition ? (
-        <div className={clsx('text-[10px] font-bold uppercase tracking-wide', competitionClass ?? 'text-slate-400')}>
-          {competition}
+      {competition || when ? (
+        <div className="flex items-baseline justify-between gap-2">
+          {competition ? (
+            <span
+              className={clsx(
+                'truncate text-[10px] font-bold uppercase tracking-wide',
+                competitionClass ?? 'text-slate-400',
+              )}
+            >
+              {competition}
+            </span>
+          ) : (
+            <span />
+          )}
+          {when ? (
+            <span className="shrink-0 text-[10px] font-medium text-slate-400">{roundLabel(f)}</span>
+          ) : null}
         </div>
       ) : null}
       <div className="flex items-center gap-2 text-sm">
