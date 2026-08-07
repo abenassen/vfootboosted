@@ -115,6 +115,13 @@ class SofaScoreClient:
 
         Returns decoded JSON (or ``None`` for a 404). Raises ``SofaScoreBlocked``
         after exhausting retries so the batch can stop and resume later.
+
+        THE CACHE NEVER EXPIRES, and that is deliberate — but it means a path
+        already on disk is returned with NO request at all. For the season pull it
+        is what makes a 13k-request run resumable; for anything that has to observe
+        something CHANGING it is a trap, because the second call answers with the
+        first call's bytes and looks like a success. Whoever fetches live data drops
+        the entry first: see ``egress/fetch_worker.py``.
         """
         cache_path = self._cache_path(path)
         if cache_path.exists():

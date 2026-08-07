@@ -257,6 +257,12 @@ def _warm(worker_args: list[str], cache_dir: Path, max_rotations: int) -> int:
         refill(target=3, max_probes=15, delay=3.0)
         servers = load_pool()
 
+    # The worker drops what it is about to re-fetch, so a warm is a warm and not a
+    # replay of the last one (see fetch_worker's header). A ROTATION, though, is
+    # this same warm continuing on another IP: it must keep what it already got,
+    # or a block two thirds of the way through a match would cost the whole thing
+    # again on the fresh IP — the one place we can least afford to spend requests.
+    attempted = False
     tried: set[str] = set()
     for _ in range(max_rotations):
         good = [s for s in good_servers(servers) if s["endpoint_ip"] not in tried]
@@ -276,7 +282,9 @@ def _warm(worker_args: list[str], cache_dir: Path, max_rotations: int) -> int:
                 print("  no handshake; demoting + rotating.")
                 _demote(servers, ip); continue
             r = _run(["ip", "netns", "exec", NS, VENV_PY, str(WORKER),
-                      *worker_args, "--cache-dir", str(cache_dir)])
+                      *worker_args, "--cache-dir", str(cache_dir),
+                      *(["--resume"] if attempted else [])])
+            attempted = True
             sys.stdout.write(r.stdout)
             if r.returncode == 0:
                 srv["last_ok"] = _now(); srv["fail_count"] = 0

@@ -130,13 +130,16 @@ def _import_warm(match, *, only_finished: bool, heavy: bool) -> bool:
             only_finished=only_finished, skip_existing=False, with_heatmaps=heavy)
         if result.unresolved:
             # The address did not answer with a usable fixture. Pay for the whole
-            # calendar this once rather than skip the match.
+            # calendar this once rather than skip the match. Still the round's own
+            # weight, though: a light warm dropped the heatmaps and did not fetch
+            # them back, so asking for them here would send this side of the egress
+            # to the network — which from here is a block.
             if not egress_client.warm_schedule(year):
                 return False
             ingest_sofascore_season(scraper=client, year=year,
                                     match_ids=[int(match.external_id)],
                                     only_finished=only_finished,
-                                    skip_existing=False)
+                                    skip_existing=False, with_heatmaps=heavy)
     except (SofaScoreBlocked, SofaScoreError):
         # Something the import needed was not in the warm cache and it tried the
         # network (blocked from here). Bail; the next tick retries.

@@ -2,8 +2,21 @@
 pinned Surfshark IP). It is handed a list of match ids (the DB-aware caller
 decided which; this worker never touches the DB) and warms their cache.
 
+A WARM DROPS WHAT IT IS ABOUT TO REWRITE, FIRST. That is the whole difference
+between this side and the reading side, and it is not an optimisation — it is the
+only thing that makes a live match live. ``SofaScoreClient`` caches on disk with no
+expiry: a path already on disk is returned WITHOUT a request. That is exactly right
+for the app, which reads what this worker just left there, and exactly wrong here,
+where a second warm of the same match would return the first warm's bytes for the
+rest of the evening. The score would freeze at the minute of the first fetch, the
+votes with it, and every tick would go on reporting success — no error anywhere.
+
+``--resume`` turns the purge off, and has ONE caller: the orchestrator, when it
+rotates to another IP after a block. That retry is the same warm continuing, so it
+must not re-pay for the twenty heatmaps it already got.
+
 Exit codes let the root orchestrator react:
-  0  = all requested matches fetched (or already cached)
+  0  = all requested matches fetched
   3  = SofaScore blocked this IP  -> orchestrator should rotate to another IP
   1  = other error
 
@@ -48,10 +61,49 @@ def fetch_match(client: SofaScoreClient, mid: int, kind: str) -> None:
                 client.heatmap(mid, int(pid))
 
 
-def warm_schedule(client: SofaScoreClient, year: str) -> None:
-    # Warms seasons -> rounds -> every round's events: the whole fixture list the
-    # calendar sync then reads OFFLINE. One cheap pass; no per-match data.
+def warm_schedule(client: SofaScoreClient, year: str, cache_dir: Path, *,
+                  resume: bool = False) -> None:
+    """Warm seasons -> rounds -> every round's events: the whole fixture list the
+    calendar sync then reads OFFLINE. One cheap pass; no per-match data.
+
+    Dropped in two steps rather than by one wide glob, and the reason is a hazard
+    rather than tidiness: this cache also holds the SEASONS ALREADY SCRAPED (a
+    13k-request pull on a dev machine), and they live under the same
+    ``unique-tournament`` prefix. Wiping the prefix to refresh one season would
+    take the others with it. So: drop the seasons index, re-read it, and only then
+    drop the rounds and events OF THE SEASON BEING WARMED.
+    """
+    if not resume:
+        purge(cache_dir.glob("api_v1_unique-tournament_*_seasons.json"))
+    season_id = client.get_valid_seasons().get(year)
+    if not resume and season_id:
+        # The fixture list moves — postponements, kickoff changes — so a warm has
+        # to actually re-read it, or the calendar sync never sees them.
+        purge(cache_dir.glob(f"api_v1_unique-tournament_*_season_{season_id}_*.json"))
     client.get_match_dicts(year)
+
+
+def match_entries(cache_dir: Path, match_ids: list[int]):
+    """The cache files a match warm is about to rewrite.
+
+    Matched by name rather than by asking the client, because the heatmap paths are
+    not knowable until the squad sheet has been fetched — and by then the stale copy
+    would already have been served. ``api_v1_event_{mid}`` and
+    ``api_v1_event_{mid}_...`` are exactly this match's entries: a longer id that
+    starts with the same digits does not match either pattern.
+    """
+    for mid in match_ids:
+        yield from cache_dir.glob(f"api_v1_event_{mid}.json")
+        yield from cache_dir.glob(f"api_v1_event_{mid}_*.json")
+
+
+def purge(paths) -> int:
+    """Drop those entries, so the fetch that follows is a fetch. Returns how many."""
+    dropped = 0
+    for path in paths:
+        path.unlink(missing_ok=True)
+        dropped += 1
+    return dropped
 
 
 def main() -> int:
@@ -61,16 +113,27 @@ def main() -> int:
     ap.add_argument("--kind", choices=["live", "final"], default="final")
     ap.add_argument("--cache-dir", required=True)
     ap.add_argument("--delay", type=float, default=1.5)
+    ap.add_argument("--resume", action="store_true",
+                    help="keep what is already cached instead of re-fetching it. "
+                         "For a retry on another IP after a block — the same warm "
+                         "continuing, which must not pay twice.")
     args = ap.parse_args()
 
-    client = SofaScoreClient(Path(args.cache_dir), min_delay=args.delay,
+    cache_dir = Path(args.cache_dir)
+    ids = [int(x) for x in (args.match_ids or "").split(",") if x.strip()]
+    client = SofaScoreClient(cache_dir, min_delay=args.delay,
                              max_retries=1, logger=print)
     try:
         if args.schedule_year:
-            warm_schedule(client, args.schedule_year)
+            # Drops as it goes: which files belong to this season is not knowable
+            # before the seasons index has been re-read. See warm_schedule.
+            warm_schedule(client, args.schedule_year, cache_dir,
+                          resume=args.resume)
             print(f"warmed schedule {args.schedule_year}")
-        elif args.match_ids:
-            for mid in (int(x) for x in args.match_ids.split(",") if x.strip()):
+        elif ids:
+            if not args.resume:
+                print(f"purged {purge(match_entries(cache_dir, ids))} stale entries")
+            for mid in ids:
                 fetch_match(client, mid, args.kind)
                 print(f"fetched {mid} ({args.kind})")
         else:

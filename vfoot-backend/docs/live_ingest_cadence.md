@@ -334,3 +334,33 @@ La guardia è `_not_imported_since`, cioè "il pieno non è stato tirato dopo il
 traguardo dei +15". Che vuol dire una volta **riuscita**, non un tentativo: il
 tick timbra `data_imported_at` solo su un import andato a buon fine, quindi un
 egress bloccato lascia il traguardo non raggiunto e il tick dopo riprova.
+
+## E una che il banco non poteva trovare: la cache non scadeva mai
+
+`SofaScoreClient.get` restituisce il file già su disco **senza fare nessuna
+richiesta**, e nessuno nel percorso di produzione cancellava mai una voce. Il
+simulatore invece riscrive sempre (`sim._write` → `tmp.replace`).
+
+Quindi sul banco ogni giro rilegge byte freschi, e in produzione il **secondo**
+scaldamento della stessa partita non faceva niente: punteggio e voti congelati al
+minuto del primo fetch, con il tick che continuava a scrivere `imported
+(provisional)` a ogni giro. La pipeline live non ha mai potuto funzionare contro
+il provider vero — è stata provata solo contro il simulatore, che sovrascrive.
+
+Misurato togliendo la correzione: il secondo scaldamento fa **zero** richieste
+invece di quattro.
+
+Lo stesso valeva per il calendario: i file dei turni, una volta scritti, non si
+aggiornavano più, quindi `sync_calendar --egress` non avrebbe mai visto un rinvio.
+
+La regola che ne esce, e che vale oltre questo caso: **la cache su disco è il
+passaggio di consegne fra l'egress e l'applicazione, non la cache di chi
+scarica.** Chi scarica butta via ciò che sta per riscrivere
+(`fetch_worker.purge`); chi legge legge quello che ha appena trovato. L'unica
+eccezione è `--resume`, e ha un chiamante solo: l'orchestratore che ruota IP dopo
+un blocco, perché quello è lo stesso scaldamento che continua e non deve
+ripagare le venti heatmap che aveva già preso.
+
+Il pezzo che scarica non aveva **nessun test** — il banco lo sostituisce in
+blocco, quindi tutto il resto era esercitato e lui no. Ora ce l'ha:
+`realdata/tests_egress_worker.py`, che è il client vero col solo filo staccato.

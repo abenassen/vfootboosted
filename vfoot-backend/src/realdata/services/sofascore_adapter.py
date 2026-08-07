@@ -881,7 +881,7 @@ def ingest_sofascore_season(
     only_finished: bool = True, skip_existing: bool = True,
     limit_matches: int | None = None, match_ids: list[int] | None = None,
     zone_cols: int = 5, zone_rows: int = 4, flip_away: bool = False,
-    logger: Callable[[str], None] = print,
+    with_heatmaps: bool = True, logger: Callable[[str], None] = print,
 ) -> SofaIngestResult:
     """Ingest a SofaScore Serie A season via a ``SofaScoreClient`` instance.
 
@@ -905,7 +905,7 @@ def ingest_sofascore_season(
         season_code=season_code or season_code_from_year(year),
         only_finished=only_finished, skip_existing=skip_existing,
         limit_matches=limit_matches, zone_cols=zone_cols, zone_rows=zone_rows,
-        flip_away=flip_away, with_heatmaps=True, log=log)
+        flip_away=flip_away, with_heatmaps=with_heatmaps, log=log)
 
 
 def _ingest_events(

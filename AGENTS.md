@@ -433,6 +433,16 @@ Agents must NEVER:
         Sum over zones and you must include them; read a zone as a PLACE and you
         must not. The key is deliberately not a grid cell, so a reader that forgot
         breaks instead of quietly standing a player in the corner of the pitch.
+    -   **the on-disk cache is a HANDOFF BUFFER, not a cache for whoever
+        fetches.** `SofaScoreClient.get` returns an entry already on disk with no
+        request and no expiry — right for the app, which reads what the egress
+        just left there, and fatal on the fetching side: the second warm of a
+        live match answered with the first warm's bytes, so the score froze at
+        the minute of the first fetch while every tick reported success. The
+        worker therefore DROPS what it is about to rewrite (`fetch_worker.purge`);
+        `--resume` keeps it, and has one caller — the orchestrator rotating to
+        another IP after a block, which is the same warm continuing. Nothing on
+        the rig can show this: `egress_sim` overwrites its files every time.
     -   **finalization is TWO scrapes, +15min and +1h, and exactly two.** It used
         to be one a minute for the whole three quarters of an hour — 46 full
         imports per match, 1.650 requests, nine times the live match they were

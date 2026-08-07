@@ -147,6 +147,23 @@ class LiveIngestTests(_Base):
         ws.assert_called_once()
         self.assertEqual(season.call_args.kwargs["match_ids"], [111])
 
+    def test_the_fallback_keeps_the_ROUND_s_weight(self):
+        """A light warm dropped the heatmaps and did not fetch them back. Asking the
+        fallback import for them would send the reading side to the network, which
+        from there is a block — so a light round would fail outright instead of
+        merely taking the long way round."""
+        m = self._match(status=Match.STATUS_LIVE)
+        with mock.patch.object(live_ingest.egress_client, "warm_schedule",
+                               return_value=True), \
+             mock.patch.object(live_ingest.egress_client, "warm_matches",
+                               return_value=True), \
+             mock.patch.object(live_ingest, "_cached_event", return_value=None), \
+             mock.patch.object(live_ingest, "ingest_sofascore_matches",
+                               return_value=_UNRESOLVED), \
+             mock.patch.object(live_ingest, "ingest_sofascore_season") as season:
+            self.assertTrue(live_ingest.live_round(m, heavy=False))
+        self.assertIs(season.call_args.kwargs["with_heatmaps"], False)
+
     def test_a_blocked_calendar_fallback_reports_failure(self):
         m = self._match(status=Match.STATUS_FINISHED)
         with mock.patch.object(live_ingest.egress_client, "warm_schedule",
