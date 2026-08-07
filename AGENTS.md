@@ -413,6 +413,12 @@ Agents must NEVER:
         machine's IP, re-detected at every run (DHCP-proof)
     -   `./vfoot-dev status` — mode, IP, what's running; also warns
         when the running backend's env has drifted from `.env`
+-   **Planned, not yet done: the live ingestion cadence.** Two clocks (light poll
+    every 2', full import every 10') are to become one, with a heavy pass every
+    k-th light one, and the live import is to stop pulling the whole schedule and
+    every player's heatmap. Written up with the measured costs and the exact
+    blocker in `vfoot-backend/docs/live_ingest_cadence.md` — read it before
+    touching `match_scheduler`, `live_ingest` or the live branch of the adapter.
 -   **Watching the LIVE pipeline is the one case `./vfoot-dev` is not enough:
     use `./vfoot-sim`.** It is not a second way to run the app — it is a
     purpose-built rig for a match being played (the tick, the live import, the
