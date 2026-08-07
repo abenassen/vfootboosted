@@ -409,8 +409,16 @@ export default function FormationPage() {
   // since the save is all-or-nothing the whole thing would be refused. The
   // condition is "somebody of MINE has started", not "the round has started" — a
   // manager whose players all play on Monday can still copy on Sunday.
+  //
+  // "Somebody of mine" is the WHOLE roster and not just the eleven, because in
+  // classic the bench is everyone else: 11 + 14 = 25, so every player owns a
+  // numbered place in every competition's lineup and any frozen one can sit 3rd
+  // here and 9th there.
   const multiSendBlocked = closed || lockedIds.size > 0;
-  const sendAll = allComps && !multiSendBlocked;
+  // With a single competition the offer means "send this to itself": noise, and
+  // noise that reads as if there were somewhere else it could go.
+  const manyCompetitions = ctx.competitions.length > 1;
+  const sendAll = allComps && manyCompetitions && !multiSendBlocked;
 
   const chosen = starterIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
   const notChosen = ctx.roster.filter((p) => !starterIds.includes(p.player_id));
@@ -644,6 +652,8 @@ export default function FormationPage() {
             </Button>
           </div>
         </div>
+        {manyCompetitions ? (
+          <>
         <label
           className={`mt-2 flex items-center gap-2 text-xs ${
             multiSendBlocked ? 'cursor-not-allowed text-slate-400' : 'text-slate-600'}`}
@@ -662,6 +672,8 @@ export default function FormationPage() {
             Non più disponibile: ogni competizione ha la sua formazione, e chi è già bloccato vi
             occupa posti diversi. Vanno modificate una per una.
           </div>
+        ) : null}
+          </>
         ) : null}
         {toast ? <div className="mt-2 text-sm font-semibold text-green-700">{toast}</div> : null}
       </Card>
