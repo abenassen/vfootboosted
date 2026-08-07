@@ -867,8 +867,8 @@ export default function LeagueAdminPage() {
                               <span>
                                 <b>Ogni giocatore all'inizio della sua partita</b>
                                 <span className="mt-0.5 block text-[11px] text-slate-500">
-                                  Chi è già in campo resta dov'è; sul resto della formazione si decide fino
-                                  all'ultimo calcio d'inizio della giornata.
+                                  Chi ha la partita iniziata resta dov'è; sul resto della formazione si
+                                  decide fino all'ultimo calcio d'inizio della giornata.
                                 </span>
                               </span>
                             </label>

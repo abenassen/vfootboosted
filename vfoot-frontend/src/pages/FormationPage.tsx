@@ -174,6 +174,27 @@ function fixtureLabel(nm: { team: string; opponent: string; home: boolean }): st
   return nm.home ? `${nm.team} - ${nm.opponent}` : `${nm.opponent} - ${nm.team}`;
 }
 
+/** What to call a frozen player, which is a statement about his MATCH and not
+ *  about him. He is frozen because his club has kicked off — he may be on the
+ *  pitch, may have finished, and may never have come on at all, so "in campo" is
+ *  true for only some of them and "ha giocato" for none of them for certain. */
+function frozenLabel(nm?: { status: string } | null): string {
+  if (nm?.status === 'live') return 'in campo';
+  if (nm?.status === 'finished') return 'finita';
+  return 'iniziata';
+}
+
+/** The same thing said in full, for the tooltip — there is room there. */
+function frozenTitle(nm?: { status: string } | null): string {
+  const what =
+    nm?.status === 'live'
+      ? 'La sua partita è in corso'
+      : nm?.status === 'finished'
+        ? 'La sua partita è finita'
+        : 'La sua partita è iniziata';
+  return `${what}: resta dov'è.`;
+}
+
 function PlayerDetails({ p }: { p: TeamLineupPlayer }) {
   const nm = p.next_match;
   return (
@@ -550,7 +571,7 @@ export default function FormationPage() {
                   ? 'Giornata chiusa: la formazione non è più modificabile.'
                   : lock.mode === 'player'
                     ? lockedIds.size
-                      ? `${lockedIds.size} giocatori sono già in campo e restano dove sono; sugli altri puoi decidere fino a ${fmtDeadline(lock.closes_at)}.`
+                      ? `${lockedIds.size} giocatori hanno la partita iniziata e restano dove sono; sugli altri puoi decidere fino a ${fmtDeadline(lock.closes_at)}.`
                       : `Ogni giocatore si blocca all'inizio della sua partita. Ultimo calcio d'inizio: ${fmtDeadline(lock.closes_at)}.`
                     : `La formazione si blocca al primo calcio d'inizio della giornata: ${fmtDeadline(lock.closes_at)}.`}
               </div>
@@ -760,14 +781,19 @@ function RosterRow({
           {ROLE_LABEL[p.role]}
         </span>
         <span className="min-w-0">
-          <span className={`block truncate text-sm font-semibold ${selected ? 'text-slate-900 underline' : 'text-slate-800'}`}>
-            {p.name}
+          {/* The chip sits OUTSIDE the truncating name: inside it, a long name ate
+              it a letter at a time ("PARTITA FINI…"). The name gives way, the state
+              does not. */}
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className={`truncate text-sm font-semibold ${selected ? 'text-slate-900 underline' : 'text-slate-800'}`}>
+              {p.name}
+            </span>
             {locked ? (
               <span
-                className="ml-1.5 rounded bg-slate-200 px-1 py-0.5 align-middle text-[9px] font-bold uppercase tracking-wide text-slate-600"
-                title="La sua partita è iniziata: resta dov'è."
+                className="shrink-0 rounded bg-slate-200 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600"
+                title={frozenTitle(p.next_match)}
               >
-                in campo
+                {frozenLabel(p.next_match)}
               </span>
             ) : null}
           </span>

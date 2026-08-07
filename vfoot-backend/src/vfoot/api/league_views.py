@@ -4881,7 +4881,7 @@ class LeagueTeamLineupSaveView(APIView):
                             errors.append(msg)
                 if errors:
                     return Response(
-                        {"detail": "Formazione bloccata per i giocatori già in campo.",
+                        {"detail": "Formazione bloccata per i giocatori la cui partita è iniziata.",
                          "errors": errors},
                         status=status.HTTP_409_CONFLICT,
                     )
