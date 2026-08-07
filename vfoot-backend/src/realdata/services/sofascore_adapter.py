@@ -574,7 +574,7 @@ def _ingest_match(
         feature_totals[key] = feature_totals.get(key, 0.0) + value
 
     appearances = 0
-    no_heatmap = 0
+    unplaced = 0
 
     for row in stats_rows:
         stat_keys_seen.update(row.keys())
@@ -649,8 +649,12 @@ def _ingest_match(
             # heavy round placed him or, failing that, unplaced and saying so.
             presence, box_presence = carried.get(player.id, ({}, {}))
             if not presence:
-                no_heatmap += 1
                 presence, box_presence = {ZONE_UNPLACED: 1.0}, {}
+                # Counted only for someone who actually played: an unused sub has
+                # no heatmap either, and no numbers to place — every value of his
+                # is zero, so not one row comes out of this branch for him.
+                if minutes > 0:
+                    unplaced += 1
 
         touches_total = _stat(row, "touches") or float(total)
 
@@ -753,12 +757,12 @@ def _ingest_match(
     log(f"  match {match_id} {home_team.get('name')} v {away_team.get('name')}: "
         f"{'heavy' if with_heatmaps else 'light'} "
         f"appearances={appearances} cards={cards} "
-        f"player_rows={player_written}/{player_total} unplaced={no_heatmap}")
+        f"player_rows={player_written}/{player_total} unplaced={unplaced}")
 
     return SofaIngestResult(
         matches=1, appearances=appearances, cards=cards,
         player_zone_features=player_total, team_zone_features=team_total,
-        players_unplaced=no_heatmap,
+        players_unplaced=unplaced,
     )
 
 
