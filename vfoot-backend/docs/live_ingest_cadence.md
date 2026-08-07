@@ -162,7 +162,8 @@ Lo script esporta oggi `VFOOT_LIVE_IMPORT_MINUTES=2` (`vfoot-sim:238`). Due
 ragioni per cui non è una riga da aggiornare con calma:
 
 * **Se la variabile sparisce da `settings.py` e resta nello script, l'export
-  diventa un no-op silenzioso.** Il banco girerebbe alla cadenza di produzione
+  diventa un no-op silenzioso.** (Motivo in più per toglierla del tutto: vedi la
+  regola qui sotto.) Il banco girerebbe alla cadenza di produzione
   mentre il commento sopra la riga continua a promettere due minuti: esattamente la
   classe di guaio che questo documento esiste per non ripetere (un ambiente che
   sembra giusto e non lo è, senza un errore da nessuna parte).
@@ -173,24 +174,32 @@ ragioni per cui non è una riga da aggiornare con calma:
   senza esposizione difensiva che si assesta al giro pesante: nasconderebbe
   proprio il rischio che abbiamo deciso di accettare.
 
-**La regola: il banco tocca solo il TEMPO; k è quello di produzione, sempre.**
-Non "k>1 scegliendo un valore comodo" — esattamente lo stesso k. Così il banco è
-il prodotto mandato in fretta, e non un prodotto diverso: qualunque comportamento
-si veda lì è quello che si vedrà in campo, solo prima.
+**La regola: di default il banco è IDENTICO alla produzione — stesso k e stesso
+tempo. L'accelerazione resta possibile, ma va chiesta.**
 
-Esempio con produzione a poll 2' e k=4 (pesante ogni 8'):
+Non è pignoleria: un banco che di default differisce dal prodotto mente di
+default, e chi ci guarda dentro non ha modo di sapere che sta misurando un'altra
+cosa. È esattamente il guaio che è costato un'ora il 07/08/2026, e sparisce solo
+se i due coincidono finché qualcuno non dice il contrario. Chiedere di accelerare
+è una riga sulla riga di comando — e in quel momento si SA di guardare qualcosa
+di più veloce del vero:
 
-| | poll | k | pesante ogni |
-|---|---|---|---|
-| produzione | 2' | 4 | 8' |
-| banco | 1' | **4** | 4' |
+    VFOOT_LIVE_POLL_MINUTES=1 ./vfoot-sim napoli-inter
 
-E l'override serve anche meno di prima. La ragione per cui esiste è scritta sopra
-la riga: *"aspettare dieci minuti per vedere muovere un voto rende impossibile
-capire se la cosa funziona o si è rotta"* — ma con lo schema nuovo **i voti si
-muovono sul giro leggero**, cioè già ogni due minuti in produzione. Quel motivo
-evapora; resta solo il giro pesante da rendere osservabile, e per quello basta
-comprimere il tempo.
+(lo script usa già il costrutto `${VAR:-default}`, quindi un valore esportato da
+fuori vince; basta che lo script non ne imponga uno suo.)
+
+Il default è sostenibile perché **con lo schema nuovo non c'è più niente di lento
+da aspettare**. La ragione per cui l'override esiste è scritta sopra quella riga —
+*"aspettare dieci minuti per vedere muovere un voto rende impossibile capire se la
+cosa funziona o si è rotta"* — e riguarda i voti, che ora si muovono sul giro
+**leggero**: già ogni due minuti in produzione. Per un test del WebSocket, dei
+voti live, delle notifiche, due minuti bastano e avanzano. Resta lungo solo il
+giro pesante (8' con k=4), e serve aspettarlo solo quando si sta guardando
+proprio quello: le zone, aura, il rientro dell'esposizione difensiva. Per quel
+caso — e solo per quello — si accelera a mano.
+
+Quindi al passo 3 la riga `vfoot-sim:238` non va aggiornata: va **tolta**.
 
 Il pavimento del banco non è la cortesia verso SofaScore (con
 `VFOOT_EGRESS_SIMULATED` non esce nulla in rete) ma due cose interne: la cadenza
