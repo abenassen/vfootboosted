@@ -36,6 +36,54 @@ Regole fisse (standard fantacalcio, versionate nel codice, tag `rules_version`):
 2. **Riaprire una partita conclusa = lettura del congelato, zero ricalcolo**: il dettaglio H2H è servito da `FixtureDetailView` che restituisce `fixture.detail.payload` verbatim (`league_views.py:3085‑3088`). Risultato e voti frozen insieme → nessun disallineamento anche se le regole/la calibrazione cambiano dopo. La ricomputazione live resta **solo** per la pagella della partita reale di Serie A (`LeagueRealMatchDetailView`), che è un'altra pagina.
 3. **Il ricalcolo riscrive risultato + payload + snapshot INSIEME** (mai un pezzo solo), sotto il regolamento scelto (attuale o snapshot).
 
+## L'indice di giornata sta in cache (e perché non è un'eccezione all'invariante 2)
+
+`build_matchday_index` è **il conto più caro che l'applicazione faccia in risposta a un
+clic**: le dieci pagelle del turno reale — voto puro, esposizione difensiva e
+spiegazione per ~460 giocatori. Misurato: **1,0–1,5 s**.
+
+Lo pagavano due pagine, ogni volta:
+
+* il **calendario** (`_live_totals`, che alimenta "Si gioca", "La tua prossima
+  partita" e "Ultimi risultati" della home lega), per stampare **due numeri per
+  partita** — 1.527 ms a ogni apertura della home, e di nuovo a ogni colpo del
+  socket live;
+* il **tabellino live** (`FixtureDetailView`), 2.091 ms.
+
+Adesso l'indice è in cache, e i due call site scendono a **~115 ms** e **~58 ms**.
+
+**Non intacca l'invariante 2**, perché non è la partita conclusa a essere messa in
+cache: quella resta lettura verbatim di `FantasyFixtureDetail.payload` e non passa
+di qui. In cache va l'INPUT del calcolo live, cioè le pagelle delle partite reali —
+la stessa cosa che il punto 2 chiama già "ricomputazione live".
+
+**La chiave è tutto** (`_index_cache_key`). Si muove su tre fronti, e servono tutti:
+
+1. **i dati del turno** (`classic_pagella.matchday_data_version`) — stato,
+   punteggio, `data_ready` e i due timbri di ogni partita, più quattro somme sulle
+   presenze. Il tick timbra **dopo** aver importato, quindi una lettura che
+   capitasse in mezzo salverebbe i dati nuovi sotto la chiave vecchia e il timbro
+   che segue la manderebbe subito in soffitta — mai il contrario. Due minuti di
+   partita e la chiave è un'altra: è la cadenza del giro live, cioè la freschezza
+   che si vuole;
+2. **i ruoli congelati della lega**, che l'import di Transfermarkt può aggiungere a
+   lega in corso;
+3. **`scoring_fingerprint()`**, perché ritoccare i pesi cambia ogni voto senza
+   toccare una riga di database. Senza, il listone ha già servito per settimane
+   voti calcolati prima di una ritaratura.
+
+Perciò **non c'è niente da invalidare a mano**: chi importa continua a non sapere
+che questa cache esista.
+
+**Una voce viva per (lega, giornata).** La cache su file tiene 500 voci e ogni
+indice pesa ~200 KB; un turno in diretta ne genererebbe una nuova ogni due minuti.
+Arrivato al tetto, il culling di Django non butta le più vecchie — ne butta un
+terzo a caso, e fra quelle la taratura del voto, che costa molto più di quel che
+queste avevano risparmiato. Quindi scrivendo la nuova si cancella la precedente
+(`_index_pointer_key`), che è spazzatura dall'istante in cui i dati si sono mossi.
+
+Test: `tests_matchday_index_cache.py`.
+
 ## Fasi
 
 - **Fase 1 — motore condiviso** ✅ `services/classic_scoring.py` + `tests_classic_scoring.py` (8 test verdi). `Ruleset` (from_league/to_snapshot/from_snapshot), registro `MODIFIERS`, `score_team`, `resolve_fixture`.

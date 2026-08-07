@@ -17,10 +17,11 @@ default to 0. Goals, assists (MatchAppearance) and cards (MatchDisciplinaryEvent
 """
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 
 from django.core.cache import cache
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Sum
 
 from realdata.models import (
     CARD_RED,
@@ -63,6 +64,36 @@ def data_version(competition_season_id: int) -> str:
            .aggregate(n=Count("id"), last=Max("data_checked_at")))
     last = agg["last"].isoformat() if agg["last"] else "-"
     return f"{agg['n'] or 0}:{last}"
+
+
+def matchday_data_version(competition_season_id: int, real_matchday: int) -> str:
+    """Impronta dei dati di UN turno — quella che si muove mentre il turno si gioca.
+
+    ``data_version`` qui non servirebbe a niente, e la differenza è il motivo per
+    cui questa esiste: quella conta le partite FINITE della stagione, quindi
+    durante un turno in corso non si sposta di un millimetro — cioè esattamente
+    quando i voti cambiano ogni due minuti.
+
+    Legge due cose. Della partita, i campi che il tick scrive DOPO aver importato
+    (stato, punteggio, ``data_ready`` e i due timbri): l'ordine conta, perché una
+    lettura che capitasse in mezzo salverebbe i dati nuovi sotto la chiave
+    vecchia, e il timbro che segue la manda subito in soffitta — mai il contrario.
+    Delle presenze, quattro somme: nessuna riga porta una data di modifica, e un
+    reimport a mano dei tabellini non tocca la partita, quindi senza queste
+    passerebbe inosservato.
+    """
+    rows = list(
+        Match.objects.filter(competition_season_id=competition_season_id,
+                             matchday=real_matchday)
+        .order_by("id")
+        .values_list("id", "status", "data_ready", "home_goals", "away_goals",
+                     "data_checked_at", "data_imported_at")
+    )
+    apps = MatchAppearance.objects.filter(match_id__in=[r[0] for r in rows]).aggregate(
+        n=Count("id"), mins=Sum("minutes_played"),
+        goals=Sum("goals"), assists=Sum("assists"))
+    blob = repr((rows, sorted(apps.items()))).encode()
+    return hashlib.sha1(blob).hexdigest()[:16]
 
 
 def get_reference(competition_season_id: int) -> dict:

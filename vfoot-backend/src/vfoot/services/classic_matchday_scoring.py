@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import logging
 
+from django.core.cache import cache
+from django.db.models import Count, Max
+
 from realdata.models import Match, Player, PlayerTeamStint
 from vfoot.models import (
     FantasyFixture,
@@ -30,6 +33,7 @@ from vfoot.models import (
 from vfoot.services.classic_pagella import (
     get_reference,
     get_role_averages,
+    matchday_data_version,
     pagella_for_match,
 )
 from vfoot.services.classic_scoring import Ruleset, resolve_fixture, score_team
@@ -38,6 +42,7 @@ from vfoot.services.match_resolver import (
     pending_matches,
     pending_player_ids,
 )
+from vfoot.services.vote_reference import scoring_fingerprint
 
 CLASSIC_ROLE_TO_LINEUP = {"POR": "GK", "DIF": "DEF", "CEN": "MID", "ATT": "ATT"}
 
@@ -47,12 +52,73 @@ log = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 # Database lookups (thin).                                                     #
 # --------------------------------------------------------------------------- #
+# Quanto vive in cache una pagella di giornata. NON è la scadenza della
+# freschezza — quella la fa la chiave, che cambia appena i dati si muovono — ma il
+# tetto massimo di ciò che resta in giro se qualcosa va storto nella pulizia qui
+# sotto.
+INDEX_CACHE_TTL = 6 * 3600
+
+
+def _index_pointer_key(competition_season_id: int, real_matchday: int, league_id: int) -> str:
+    """Dove è scritta l'ULTIMA chiave usata per questa giornata in questa lega.
+
+    Serve a buttare via la voce precedente quando se ne scrive una nuova, e la
+    ragione è la cache su file: tiene 500 voci in tutto, e un turno in diretta ne
+    genererebbe una nuova ogni due minuti — trenta all'ora, duecento in una serata
+    di campionato, duecento MB di pagelle che nessuno rileggerà mai. Arrivato al
+    tetto, il culling non butta le più vecchie: ne butta un terzo a caso, e fra
+    quelle la taratura del voto, che costa molto più di quel che ha risparmiato.
+    Una voce viva per (lega, giornata), e il problema non si pone.
+    """
+    return f"vfoot:mdindex:last:{competition_season_id}:{real_matchday}:{league_id}"
+
+
+def _index_cache_key(competition_season_id: int, real_matchday: int, league) -> str:
+    """La chiave sotto cui vive l'indice di una giornata.
+
+    Tre cose la muovono, e servono tutte e tre:
+
+    * i DATI del turno (``matchday_data_version``) — due minuti di partita e la
+      chiave è un'altra, che è esattamente la freschezza voluta;
+    * i RUOLI CONGELATI della lega, che l'import di Transfermarkt può aggiungere a
+      lega in corso e che decidono il ruolo — e quindi il malus — di ogni riga;
+    * l'IMPRONTA DEL MODELLO, perché ritoccare i pesi cambia ogni voto senza
+      toccare una riga di database. Senza, il listone ha già servito per settimane
+      voti calcolati prima di una ritaratura, e nessuna chiave si era mossa.
+    """
+    roles = (LeaguePlayerRole.objects.filter(league=league)
+             .aggregate(n=Count("id"), last=Max("updated_at")))
+    stamp = roles["last"].isoformat() if roles["last"] else "-"
+    return (f"vfoot:mdindex:{competition_season_id}:{real_matchday}:{league.id}"
+            f":{roles['n'] or 0}:{stamp}"
+            f":{matchday_data_version(competition_season_id, real_matchday)}"
+            f":{scoring_fingerprint()}")
+
+
 def build_matchday_index(competition_season_id: int, real_matchday: int, league) -> dict:
     """player_id -> pagella line, for every player who appeared in the real matchday.
 
     A player plays in exactly one real match per matchday, so keys never collide.
     ``league`` is passed so the FROZEN classic roles win (a league's match detail must
-    agree with its own listone)."""
+    agree with its own listone).
+
+    IN CACHE, e non per fare economia su un conto raro: questo è il conto più caro
+    che l'applicazione faccia in risposta a un clic. Sono le dieci pagelle del
+    turno — voto puro, esposizione difensiva e spiegazione per quattrocentosessanta
+    giocatori, un secondo pieno — e il calendario le rifaceva TUTTE per stampare
+    due numeri per partita, a ogni apertura della home e a ogni colpo del socket
+    live. La chiave cambia appena i dati si muovono, quindi non c'è niente da
+    invalidare a mano: chi importa continua a non sapere che questa cache esista.
+
+    Le righe che escono di qui non vanno modificate sul posto — ``compose_team_lines``
+    ne fa una copia prima di toccarle, ed è quella copia che il tabellino marca come
+    provvisoria.
+    """
+    key = _index_cache_key(competition_season_id, real_matchday, league)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+
     matches = Match.objects.filter(
         competition_season_id=competition_season_id, matchday=real_matchday
     )
@@ -64,6 +130,16 @@ def build_matchday_index(competition_season_id: int, real_matchday: int, league)
         for side in ("home", "away"):
             for line in detail[side]["starters"] + detail[side]["bench"]:
                 index[line["player_id"]] = line
+
+    # UNA voce viva per (lega, giornata): la precedente è spazzatura dall'istante
+    # in cui i dati si sono mossi, e lasciarla lì riempirebbe la cache di pagelle
+    # che nessuno rileggerà (vedi _index_pointer_key).
+    pointer = _index_pointer_key(competition_season_id, real_matchday, league.id)
+    previous = cache.get(pointer)
+    if previous and previous != key:
+        cache.delete(previous)
+    cache.set(key, index, INDEX_CACHE_TTL)
+    cache.set(pointer, key, INDEX_CACHE_TTL)
     return index
 
 
