@@ -376,7 +376,8 @@ Agents must NEVER:
         a fifth of the pagella's own grid step, and worth remembering before
         reading anything into a simulated listone.
 -   **Driving the REAL live pipeline off a simulated season:
-    `VFOOT_EGRESS_SIMULATED`.** `egress_client` is the one place the system
+    `VFOOT_EGRESS_SIMULATED`.** (What the flag does; to watch the pipeline run,
+    `./vfoot-sim` sets this and the rest — see below.) `egress_client` is the one place the system
     crosses to the outside world — it warms the request cache, and everything
     else reads that cache offline. With the flag on, `run_egress` is served by a
     generator (`realdata/services/egress_sim.py`) that writes the payload
@@ -412,6 +413,27 @@ Agents must NEVER:
         machine's IP, re-detected at every run (DHCP-proof)
     -   `./vfoot-dev status` — mode, IP, what's running; also warns
         when the running backend's env has drifted from `.env`
+-   **Watching the LIVE pipeline is the one case `./vfoot-dev` is not enough:
+    use `./vfoot-sim`.** It is not a second way to run the app — it is a
+    purpose-built rig for a match being played (the tick, the live import, the
+    WebSocket push, the finalization). `./vfoot-dev` plus `VFOOT_FAKE_NOW` is
+    perfectly fine for LOOKING at a rebuilt scenario, which is most of the time;
+    what it cannot do is show the pipeline working, and it fails at it silently:
+    -   **cadence** — `vfoot-sim` exports `VFOOT_LIVE_IMPORT_MINUTES=2` against
+        production's 10, because a simulated evening lasts as long as a real one
+        and waiting ten minutes to see a vote move makes it impossible to tell
+        working from broken. Measure the cadence without it and you are measuring
+        production's, not the rig's;
+    -   **Redis** — without `REDIS_URL` the channel layer is the in-memory one,
+        which does NOT fan out across processes. The tick runs in its own, so the
+        nudge after a live import dies in the cron's memory and never reaches the
+        open page, with no error anywhere;
+    -   plus the tick itself and the VAPID keys for the push.
+    `./vfoot-sim build <scenario>` the first time on a machine, `./vfoot-sim
+    <scenario>` after that; `status` / `stop` / `reset`. The script's own header
+    explains each choice where it makes it. Not knowing it existed once cost an
+    hour of measuring production's cadence and reporting it as the rig's, on an
+    environment that could not have shown a WebSocket update at all.
 -   Manual equivalents, if you need them:
     -   `cd vfoot-backend/src && ../.venv/bin/python manage.py runserver localhost:8000 --noreload`
     -   `cd vfoot-frontend && npm run dev -- --host localhost --port 5173`
