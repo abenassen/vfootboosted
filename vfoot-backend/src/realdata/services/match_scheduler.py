@@ -16,10 +16,13 @@ Two windows:
   window. Every ``VFOOT_LIVE_HEAVY_EVERY``-th round is also HEAVY: it pulls a
   heatmap per player and with them the positional half of the model. One clock,
   one flag — not two clocks competing to push each other's due time out.
-* FINALIZATION — measured from the observed full-time (``finished_at``): a first
-  scrape at +15 min (data is usually settled by then) and a confirmation at
-  +1 h that promotes the match to ``data_ready``. Between +15 and +1 h the tick
-  keeps re-scraping so any late revision is caught before confirmation.
+* FINALIZATION — measured from the observed full-time (``finished_at``): TWO
+  scrapes, and exactly two. One at +15 min, by which time the data is usually
+  settled, and a confirmation at +1 h that promotes the match to ``data_ready``.
+  A late revision is caught by the confirmation, which re-imports everything and
+  is the authority on the final numbers — so sitting in the window re-scraping
+  every minute buys nothing. It used to: 45 full imports per match, ~1.650
+  requests, and not one of them ever moved a vote.
 """
 from __future__ import annotations
 
@@ -134,12 +137,27 @@ def plan_tick(now: datetime, matches) -> TickPlan:
 
         if (m.status == Match.STATUS_FINISHED and not m.data_ready
                 and m.finished_at is not None):
+            # TWO scrapes, not a window to sit inside. The confirmation is
+            # self-limiting (it sets data_ready, which drops the match out of
+            # candidate_matches); the +15min check needs the guard, or it comes
+            # due on every tick for the whole three quarters of an hour.
             if now >= m.finished_at + FINAL_CONFIRM_AFTER:
                 plan.final_confirm.append(m)
-            elif now >= m.finished_at + FINAL_CHECK_AFTER:
+            elif (now >= m.finished_at + FINAL_CHECK_AFTER
+                  and _not_imported_since(m, m.finished_at + FINAL_CHECK_AFTER)):
                 plan.final_check.append(m)
 
     return plan
+
+
+def _not_imported_since(match: Match, moment: datetime) -> bool:
+    """Has the full data NOT been pulled since ``moment``?
+
+    Which makes "once" mean once SUCCESSFULLY: the tick stamps
+    ``data_imported_at`` only on an import that went through, so an egress that
+    was blocked leaves the checkpoint unmet and the next tick tries again.
+    """
+    return match.data_imported_at is None or match.data_imported_at < moment
 
 
 def candidate_matches():

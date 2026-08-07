@@ -90,6 +90,62 @@ class PlanTickTests(SimpleTestCase):
         self.assertTrue(plan_tick(self.now, [m]).is_empty())
 
 
+class FinalCheckHappensOnceTests(SimpleTestCase):
+    """The +15min scrape is ONE scrape, not a window to sit inside.
+
+    Without the guard it came due on every tick from +15 to +1h: 45 full imports
+    of the same finished match, ~1.650 requests, and — measured on the rig over a
+    whole simulated evening — not one of them ever changed a vote. Nine times the
+    cost of the live match it was finalizing.
+    """
+
+    def setUp(self):
+        self.now = datetime(2026, 8, 22, 18, 0, tzinfo=UTC)
+        self.ft = self.now - FINAL_CHECK_AFTER
+
+    def _finished(self, **kw):
+        return _m(status=Match.STATUS_FINISHED, finished_at=self.ft, **kw)
+
+    def test_the_first_tick_after_15_min_is_due(self):
+        m = self._finished(data_imported_at=self.ft - timedelta(minutes=1))
+        self.assertIn(m, plan_tick(self.now, [m]).final_check)
+
+    def test_the_next_tick_is_not(self):
+        m = self._finished(data_imported_at=self.now)
+        later = self.now + timedelta(minutes=1)
+        self.assertTrue(plan_tick(later, [m]).is_empty())
+
+    def test_nor_is_any_tick_up_to_the_confirmation(self):
+        m = self._finished(data_imported_at=self.now)
+        for minutes in (2, 10, 30, 44):
+            later = self.now + timedelta(minutes=minutes)
+            self.assertTrue(plan_tick(later, [m]).is_empty(),
+                            f"ridotto a scansione unica, ma +{minutes}' è dovuto")
+
+    def test_a_blocked_check_is_retried(self):
+        """"Once" means once SUCCESSFULLY. The tick stamps data_imported_at only
+        on an import that went through, so a blocked egress leaves the checkpoint
+        unmet and the match comes due again."""
+        m = self._finished(data_imported_at=self.ft - timedelta(minutes=1))
+        later = self.now + timedelta(minutes=1)
+        self.assertIn(m, plan_tick(later, [m]).final_check)
+
+    def test_the_confirmation_still_comes(self):
+        """The guard must not swallow the scrape that matters: the +1h one is the
+        authority on the final numbers, and the only one that promotes."""
+        m = self._finished(data_imported_at=self.now)
+        at_confirm = self.ft + FINAL_CONFIRM_AFTER
+        plan = plan_tick(at_confirm, [m])
+        self.assertIn(m, plan.final_confirm)
+        self.assertEqual(plan.final_check, [])
+
+    def test_a_tick_that_slept_through_the_window_still_checks(self):
+        """Nothing is measured from "the last tick": if the machine was down from
+        +15 to +40, the check is simply late, not skipped."""
+        m = self._finished(data_imported_at=self.ft - timedelta(minutes=1))
+        self.assertIn(m, plan_tick(self.ft + timedelta(minutes=40), [m]).final_check)
+
+
 class FakeClient:
     """Minimal stand-in for SofaScoreClient returning canned calendar JSON."""
 

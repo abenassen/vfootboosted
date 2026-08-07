@@ -8,8 +8,8 @@ asks the DB "what is due now?" and acts:
   so the votes move while it is being played, without promoting it. Every k-th
   round is HEAVY: it also pulls a heatmap per player, and with them the positional
   half of the model;
-* runs the +15min / +1h post-FT finalization, promoting a match to
-  ``data_ready`` at confirmation.
+* runs the post-FT finalization — one scrape at +15min and one at +1h, and no
+  more than that — promoting a match to ``data_ready`` at the confirmation.
 
 It is also where the two ways of telling somebody are triggered, and they are not
 interchangeable. The WebSocket nudge goes to pages that are OPEN, after any import

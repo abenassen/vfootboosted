@@ -305,3 +305,32 @@ bloccato. Il primo giro di ogni partita è pesante per costruzione
 
 Il rischio dichiarato più sopra resta vero, ma vale per meno gente di quanto
 sembrasse: non "i difensori in live", ma "chi è entrato da meno di otto minuti".
+
+## E la cosa che il banco ha trovato dopo, che era la più grossa di tutte
+
+Camminando una serata intera fino al `data_ready` è saltato fuori che **la
+finestra di finalizzazione re-importava a ogni tick**, cioè ogni minuto dai +15
+all'ora. `plan_tick` per `final_check` guardava solo la finestra e mai se la
+scansione l'avesse già fatta.
+
+Il piano era, ed è sempre stato, **due scansioni**: una a +15 e una a +1h. Ne
+faceva quarantasei.
+
+| per partita | prima | dopo |
+|---|---|---|
+| tutta la fase live (16 giri, 105' di gioco) | 184 | 184 |
+| la finalizzazione | **1.656** (46 import) | **72** (2 import) |
+
+Nessuno dei 46 import cambiava un voto: erano tutti identici al primo. La
+finalizzazione costava **nove volte la partita che stava finalizzando**, e il
+lavoro sulla cadenza live, da solo, avrebbe spostato il 10% del traffico
+lasciando intatto il 90%.
+
+Una revisione tardiva del provider non si perde comunque: la conferma a +1h
+re-importa tutto ed è l'autorità sui numeri finali. Stare nella finestra a
+ri-scansionare non comprava niente.
+
+La guardia è `_not_imported_since`, cioè "il pieno non è stato tirato dopo il
+traguardo dei +15". Che vuol dire una volta **riuscita**, non un tentativo: il
+tick timbra `data_imported_at` solo su un import andato a buon fine, quindi un
+egress bloccato lascia il traguardo non raggiunto e il tick dopo riprova.

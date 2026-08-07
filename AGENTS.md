@@ -433,6 +433,14 @@ Agents must NEVER:
         Sum over zones and you must include them; read a zone as a PLACE and you
         must not. The key is deliberately not a grid cell, so a reader that forgot
         breaks instead of quietly standing a player in the corner of the pitch.
+    -   **finalization is TWO scrapes, +15min and +1h, and exactly two.** It used
+        to be one a minute for the whole three quarters of an hour — 46 full
+        imports per match, 1.650 requests, nine times the live match they were
+        finalizing, and not one of them ever moved a vote. The +1h confirmation
+        re-imports everything and is the authority on the final numbers, so a
+        late provider revision is caught there. Whoever touches `plan_tick`:
+        `final_check` needs its guard (`_not_imported_since`) or it silently
+        becomes a window again.
     The reasoning, with the measured costs, is in
     `vfoot-backend/docs/live_ingest_cadence.md`.
 -   **Watching the LIVE pipeline is the one case `./vfoot-dev` is not enough:
