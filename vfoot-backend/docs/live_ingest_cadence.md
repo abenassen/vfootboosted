@@ -96,6 +96,21 @@ regola diventa leggibile: "ogni 2 minuti i voti, ogni 8 anche le zone".
 Il contatore avanza sul passaggio **leggero**; quello pesante è un flag: se
 l'egress lo blocca, si ritenta al giro dopo senza perdere il leggero.
 
+**Due manopole, di natura diversa, e la distinzione conta.**
+
+* il **tempo** — ogni quanto scatta il giro leggero (`VFOOT_LIVE_POLL_MINUTES`);
+* la **forma** — k, quanti giri leggeri per un pesante.
+
+Il tempo dice quanto in fretta scorre; k dice com'è fatto il comportamento. Serve
+a tenerle separate soprattutto per il banco di prova: vedi 3-bis.
+
+k si può esprimere come multiplo dell'intervallo del poll (`k *
+live_poll_interval()` confrontato con `data_imported_at`) senza aggiungere una
+colonna contatore. Il compromesso: se un giro leggero salta perché l'egress è
+bloccato, il pesante scatta lo stesso a tempo invece di seguire i giri
+effettivamente fatti. Con un contatore vero su `Match` seguirebbe i giri; da
+decidere in fase di scrittura, l'effetto pratico è piccolo.
+
 ## I passi, nell'ordine
 
 ### 1. Import live per id, senza `warm_schedule`
@@ -151,17 +166,37 @@ ragioni per cui non è una riga da aggiornare con calma:
   mentre il commento sopra la riga continua a promettere due minuti: esattamente la
   classe di guaio che questo documento esiste per non ripetere (un ambiente che
   sembra giusto e non lo è, senza un errore da nessuna parte).
-* **Il banco deve conservare il RAPPORTO, non appiattirlo.** Oggi import = poll =
-  2 minuti, cioè k=1: nel banco *ogni* giro leggero è anche pesante, e la
-  distinzione fra i due semplicemente non esiste. Con lo schema nuovo, un banco a
-  k=1 non potrebbe mostrare l'unico comportamento nuovo che ci interessa — il voto
-  provvisorio senza esposizione difensiva che si assesta al giro pesante. Il banco
-  nasconderebbe proprio il rischio che abbiamo deciso di accettare.
+* **Il banco deve conservare la FORMA, non appiattirla.** Oggi import = poll = 2
+  minuti, cioè k=1: nel banco *ogni* giro leggero è anche pesante, e la
+  distinzione fra i due semplicemente non esiste. Un banco a k=1 non potrebbe
+  mostrare l'unico comportamento nuovo che ci interessa — il voto provvisorio
+  senza esposizione difensiva che si assesta al giro pesante: nasconderebbe
+  proprio il rischio che abbiamo deciso di accettare.
 
-Quindi: il banco accorcia la **cadenza** (una serata simulata dura quanto una vera,
-ed è la ragione per cui l'override esiste) ma tiene **k > 1**. Per esempio poll a
-1 minuto e k=3, che dà un giro pesante ogni tre minuti conservando il rapporto di
-produzione. Il valore esatto si sceglie insieme a quello di produzione.
+**La regola: il banco tocca solo il TEMPO; k è quello di produzione, sempre.**
+Non "k>1 scegliendo un valore comodo" — esattamente lo stesso k. Così il banco è
+il prodotto mandato in fretta, e non un prodotto diverso: qualunque comportamento
+si veda lì è quello che si vedrà in campo, solo prima.
+
+Esempio con produzione a poll 2' e k=4 (pesante ogni 8'):
+
+| | poll | k | pesante ogni |
+|---|---|---|---|
+| produzione | 2' | 4 | 8' |
+| banco | 1' | **4** | 4' |
+
+E l'override serve anche meno di prima. La ragione per cui esiste è scritta sopra
+la riga: *"aspettare dieci minuti per vedere muovere un voto rende impossibile
+capire se la cosa funziona o si è rotta"* — ma con lo schema nuovo **i voti si
+muovono sul giro leggero**, cioè già ogni due minuti in produzione. Quel motivo
+evapora; resta solo il giro pesante da rendere osservabile, e per quello basta
+comprimere il tempo.
+
+Il pavimento del banco non è la cortesia verso SofaScore (con
+`VFOOT_EGRESS_SIMULATED` non esce nulla in rete) ma due cose interne: la cadenza
+del tick (`VFOOT_TICK_EVERY`, 60s nello script) e la risoluzione al minuto del
+generatore (`season_simulator.status_at`) — sotto il minuto due giri consecutivi
+leggono lo stesso identico stato.
 
 Regola generale che ne discende, e che vale oltre questo caso: **quando una
 manopola cambia nome o sparisce, l'override del banco va cambiato nello stesso
