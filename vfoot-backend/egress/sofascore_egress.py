@@ -305,8 +305,15 @@ def fetch(match_ids: str, kind: str, cache_dir: Path, max_rotations: int) -> int
     return _warm(["--match-ids", match_ids, "--kind", kind], cache_dir, max_rotations)
 
 
-def schedule(year: str, cache_dir: Path, max_rotations: int) -> int:
-    return _warm(["--schedule-year", year], cache_dir, max_rotations)
+def schedule(year: str, cache_dir: Path, max_rotations: int,
+             rounds: str | None = None) -> int:
+    # ``rounds`` narrows the warm to those matchdays: one request each instead of
+    # all thirty-eight, which is what lets the calendar sync run hourly on a match
+    # day. Absent = the whole season, as before.
+    args = ["--schedule-year", year]
+    if rounds:
+        args += ["--rounds", rounds]
+    return _warm(args, cache_dir, max_rotations)
 
 
 def status() -> None:
@@ -348,6 +355,7 @@ def main() -> None:
     f.add_argument("--max-rotations", type=int, default=6)
     sc = sub.add_parser("schedule", help="warm a season's fixture list (for calendar sync)")
     sc.add_argument("--year", required=True, help="season year, e.g. 26/27")
+    sc.add_argument("--rounds", help="comma-separated rounds; default = whole season")
     sc.add_argument("--cache-dir", default=str(CACHE_DIR))
     sc.add_argument("--max-rotations", type=int, default=6)
     args = ap.parse_args()
@@ -363,7 +371,8 @@ def main() -> None:
     elif args.cmd == "fetch":
         sys.exit(fetch(args.match_ids, args.kind, Path(args.cache_dir), args.max_rotations))
     elif args.cmd == "schedule":
-        sys.exit(schedule(args.year, Path(args.cache_dir), args.max_rotations))
+        sys.exit(schedule(args.year, Path(args.cache_dir), args.max_rotations,
+                          args.rounds))
 
 
 if __name__ == "__main__":

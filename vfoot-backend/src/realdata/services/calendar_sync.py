@@ -20,14 +20,22 @@ Two responsibilities:
    sharing one placeholder timestamp), and returning a diff report of what
    changed since the last run (new fixtures, kickoff moves, status flips,
    postponements) so the scheduler can react.
+
+3. ``rounds_to_sync`` / ``sync_is_due`` — HOW MUCH and HOW OFTEN, both answered
+   from the calendar we already hold rather than from a hardcoded day of the week.
+   Serie A has not played only on Saturday and Sunday for years, and the only
+   thing that knows when a round is played is the calendar itself; see each
+   function for what that self-reference costs and how it is bounded.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
+from django.conf import settings
 from django.db import transaction
+from django.utils import timezone as djtz
 
 from realdata.models import CompetitionSeason, Match
 from realdata.services.sofascore_adapter import (
@@ -39,6 +47,26 @@ from realdata.services.sofascore_adapter import (
 )
 
 SERIE_A_TID = 23
+
+# How far ahead of a kickoff the sync goes dense. Deliberately generous — most of
+# a day — and the reason is the one weakness of deciding density from the calendar
+# we are trying to refresh: if a kickoff moves EARLIER than the one we hold, a
+# window anchored on the hour we know would go dense after the fact, which is the
+# dangerous direction (the lineup lock reads Match.kickoff, so it would let someone
+# field a side with the ball already rolling). Eighteen hours covers any move
+# within the day, which is the realistic case; a match appearing on a day we
+# thought empty is caught by the floor instead.
+DENSE_BEFORE_KICKOFF = timedelta(hours=18)
+
+# ...and how long AFTER a kickoff we keep watching a match that has not started.
+# A fixture we believe should be under way and that nothing reports as under way is
+# the strongest evidence there is that the calendar we hold is wrong: a weather
+# postponement announced at 20:05 for a 20:00 kickoff moves it to 22:00, and a rule
+# that only looked forward would go quiet at 21:00 — exactly then — because the
+# kickoff it believes in is in the past. Bounded, so that a fixture the provider
+# abandons without ever resolving cannot keep us dense for ever; past this the
+# floor picks it up, which is the right cadence for something now days away.
+DENSE_AFTER_MISSED_KICKOFF = timedelta(hours=6)
 
 # SofaScore ``status.type`` -> our Match lifecycle status.
 STATUS_MAP = {
@@ -253,3 +281,117 @@ def sync_calendar(
                f"{' [provisional kickoffs]' if provisional else ''}")
 
     return report
+
+
+# -- how much, and how often ---------------------------------------------------
+
+
+def _pending(competition_season: CompetitionSeason) -> list[tuple[int | None, Any]]:
+    """(matchday, kickoff) of every fixture still owed: not played, not called off."""
+    return list(Match.objects
+                .filter(competition_season=competition_season)
+                .exclude(status__in=(Match.STATUS_FINISHED, Match.STATUS_CANCELLED))
+                .values_list("matchday", "kickoff"))
+
+
+def rounds_to_sync(competition_season: CompetitionSeason, now=None,
+                   ahead: int | None = None) -> list[int]:
+    """The matchdays worth re-reading: the next one and the few after it, PLUS any
+    earlier round that still owes a match. Empty once nothing is owed.
+
+    Re-reading all thirty-eight is mostly waste — a round already played does not
+    move again — but the obvious narrowing (everything from here on) loses a case
+    that really happens: a POSTPONED fixture keeps its round number and takes a new
+    date, sometimes months later. Round 20 can still be moving while the league
+    plays round 31, and a window anchored on the present would never look at it
+    again. So the window is joined with the stragglers, which the database can name
+    exactly and which are normally none.
+    """
+    now = now or djtz.now()
+    ahead = rounds_ahead() if ahead is None else ahead
+    pending = [(md, ko) for md, ko in _pending(competition_season) if md is not None]
+    if not pending:
+        return []
+    future = [md for md, ko in pending if ko is not None and ko >= now]
+    # No future kickoff at all (a season whose remaining fixtures are all undated,
+    # or all in the past pending a re-scrape): fall back to the earliest owed round.
+    nxt = min(future) if future else min(md for md, _ in pending)
+    last = competition_season.num_rounds or max(md for md, _ in pending)
+    window = {r for r in range(nxt, nxt + ahead + 1) if r <= last}
+    stragglers = {md for md, _ in pending if md < nxt}
+    return sorted(window | stragglers)
+
+
+def _kickoff_in_sight(competition_season: CompetitionSeason, now) -> bool:
+    """Is a kickoff close enough that the calendar has to be kept fresh?
+
+    Two ways, and the second is the one that is easy to leave out:
+
+    * one is COMING — inside ``DENSE_BEFORE_KICKOFF``;
+    * one should already have HAPPENED and nothing says it did. A fixture we
+      believe kicked off at 20:00 and that is still 'scheduled' at 21:00 is either
+      starting right now (the tick will say so within a couple of minutes) or our
+      calendar is wrong — and the second is precisely the moment to look, not to
+      go quiet. Without this branch a postponement announced just after the last
+      pass is invisible until the floor comes round, six hours later.
+
+    Provisional kickoffs count. A placeholder that turns out to be wrong makes us
+    fetch a few times for nothing; ignoring one that has just been confirmed makes
+    us miss the hours that matter. The costs are not comparable.
+    """
+    mine = Match.objects.filter(competition_season=competition_season)
+    coming = mine.filter(
+        status__in=(Match.STATUS_SCHEDULED, Match.STATUS_LIVE),
+        kickoff__gte=now, kickoff__lte=now + DENSE_BEFORE_KICKOFF)
+    missed = mine.filter(
+        status__in=(Match.STATUS_SCHEDULED, Match.STATUS_POSTPONED),
+        kickoff__lt=now, kickoff__gte=now - DENSE_AFTER_MISSED_KICKOFF)
+    return coming.exists() or missed.exists()
+
+
+def floor_interval() -> timedelta:
+    """Longest the calendar may go unread, whatever else is happening. This is the
+    net under the density rule below: it is what catches a fixture appearing on a
+    day the calendar we hold says is empty."""
+    return timedelta(minutes=float(
+        getattr(settings, "VFOOT_CALENDAR_SYNC_MINUTES", 360)))
+
+
+def dense_interval() -> timedelta:
+    """Gap between two syncs while a kickoff is approaching."""
+    return timedelta(minutes=float(
+        getattr(settings, "VFOOT_CALENDAR_MATCHDAY_MINUTES", 60)))
+
+
+def rounds_ahead() -> int:
+    return int(getattr(settings, "VFOOT_CALENDAR_ROUNDS_AHEAD", 4))
+
+
+def sync_is_due(competition_season: CompetitionSeason, now=None) -> tuple[bool, str]:
+    """Should the calendar be re-read right now? With the reason, for the log.
+
+    The timer fires on a fixed cadence and this decides — the same shape as the
+    match scheduler, and for the same reason: there is no fixed set of match days
+    to put in a systemd unit (Serie A plays Friday to Monday plus midweek), and the
+    only thing that knows when a round is played is the calendar itself. A unit
+    with the dense days written into it would be true for a week and then quietly
+    false. Asking each run means a moved fixture simply changes the answer.
+
+    Measured from the last SUCCESSFUL sync, so a blocked egress is retried at the
+    next tick instead of waiting out the whole interval.
+    """
+    now = now or djtz.now()
+    last = competition_season.calendar_synced_at
+    if last is None:
+        return True, "mai sincronizzato"
+    age = now - last
+    if age >= floor_interval():
+        return True, f"ultima {_ago(age)} fa (pavimento)"
+    if age >= dense_interval() and _kickoff_in_sight(competition_season, now):
+        return True, f"ultima {_ago(age)} fa, calcio d'inizio in vista"
+    return False, f"ultima {_ago(age)} fa, niente in vista"
+
+
+def _ago(delta: timedelta) -> str:
+    minutes = int(delta.total_seconds() // 60)
+    return f"{minutes // 60}h{minutes % 60:02d}m" if minutes >= 60 else f"{minutes}m"

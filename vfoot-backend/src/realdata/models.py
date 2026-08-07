@@ -102,6 +102,13 @@ class CompetitionSeason(models.Model):
     external_source = models.CharField(max_length=50, blank=True, default="")
     external_id = models.CharField(max_length=100, blank=True, default="")
 
+    # Last time the provider's fixture list was read for this edition, and only on
+    # a read that WENT THROUGH. It is what lets the sync decide "am I due?" instead
+    # of running on a fixed clock — see calendar_sync.sync_is_due — and stamping it
+    # only on success is what makes a blocked egress retry at the next tick rather
+    # than wait out the whole interval.
+    calendar_synced_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         unique_together = [("competition", "season")]
         indexes = [models.Index(fields=["external_source", "external_id"])]

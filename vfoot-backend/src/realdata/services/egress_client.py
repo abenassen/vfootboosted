@@ -55,7 +55,16 @@ def warm_matches(event_ids: Iterable[int], kind: str) -> bool:
                        "--cache-dir", str(settings.VFOOT_SOFASCORE_CACHE)])
 
 
-def warm_schedule(year: str) -> bool:
-    """Warm the cache for a season's whole fixture list (e.g. year='26/27')."""
-    return run_egress(["schedule", "--year", year,
-                       "--cache-dir", str(settings.VFOOT_SOFASCORE_CACHE)])
+def warm_schedule(year: str, rounds: Iterable[int] | None = None) -> bool:
+    """Warm the cache for a season's fixture list (e.g. year='26/27').
+
+    ``rounds`` narrows it to those matchdays — one request each instead of all
+    thirty-eight. The narrowing has to reach the FETCHING side to be worth
+    anything: limiting only what the offline reader then reads saves database
+    work and not a single request.
+    """
+    args = ["schedule", "--year", year,
+            "--cache-dir", str(settings.VFOOT_SOFASCORE_CACHE)]
+    if rounds:
+        args += ["--rounds", ",".join(str(r) for r in rounds)]
+    return run_egress(args)

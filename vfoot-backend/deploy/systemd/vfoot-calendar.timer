@@ -1,8 +1,18 @@
 [Unit]
-Description=Sync calendario alcune volte al giorno (piu' denso i giorni di gara, da tarare)
+Description=Sync calendario: scatta ogni ora, decide da se' se serve davvero
 [Timer]
-OnCalendar=*-*-* 00,06,12,18:00:00
-RandomizedDelaySec=15m
+# Cadenza FISSA, densita' VARIABILE. Non c'e' un insieme di "giorni di gara" da
+# scrivere qui: la Serie A gioca dal venerdi' al lunedi' piu' gli infrasettimanali,
+# e l'unica cosa che sa quando si gioca e' il calendario stesso -- cioe' proprio
+# cio' che questo job aggiorna. Un OnCalendar con dentro i giorni sarebbe vero per
+# una settimana e poi falso in silenzio.
+#
+# Quindi il timer scatta e basta, e `--if-due` risponde: pavimento a 6 ore, un'ora
+# quando c'e' un calcio d'inizio in arrivo. Le due soglie sono in settings
+# (VFOOT_CALENDAR_SYNC_MINUTES / _MATCHDAY_MINUTES): tararle non tocca questo file.
+# Stessa forma di vfoot-tick, e per la stessa ragione.
+OnCalendar=hourly
+RandomizedDelaySec=5m
 Persistent=true
 [Install]
 WantedBy=timers.target

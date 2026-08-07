@@ -228,6 +228,28 @@ VFOOT_LIVE_POLL_MINUTES = float(os.environ.get("VFOOT_LIVE_POLL_MINUTES", "2"))
 # existing — which is precisely what a rig must not hide. See vfoot-sim.
 VFOOT_LIVE_HEAVY_EVERY = int(os.environ.get("VFOOT_LIVE_HEAVY_EVERY", "4"))
 
+# --- calendar sync ---------------------------------------------------------
+# The fixture list is not a fixed thing: Serie A moves kickoffs for television and
+# postpones matches, and the LINEUP DEADLINE anchors on Match.kickoff. Reading it
+# too rarely is not a stale-data annoyance, it is a lineup that locks at the wrong
+# time — and a kickoff moved EARLIER than the one we hold would let someone field
+# a side with the ball already rolling.
+#
+# So the timer fires hourly and the command decides (calendar_sync.sync_is_due):
+#
+#   floor    — longest the calendar may go unread whatever else happens. Catches
+#              a fixture appearing on a day we thought was empty.
+#   dense    — the gap while a kickoff is approaching.
+#   ahead    — how many rounds past the next one to re-read; earlier rounds that
+#              still owe a match are added on top (a postponed fixture keeps its
+#              round number and takes a new date, sometimes months later).
+VFOOT_CALENDAR_SYNC_MINUTES = float(
+    os.environ.get("VFOOT_CALENDAR_SYNC_MINUTES", "360"))
+VFOOT_CALENDAR_MATCHDAY_MINUTES = float(
+    os.environ.get("VFOOT_CALENDAR_MATCHDAY_MINUTES", "60"))
+VFOOT_CALENDAR_ROUNDS_AHEAD = int(
+    os.environ.get("VFOOT_CALENDAR_ROUNDS_AHEAD", "4"))
+
 # Serve the egress from a generator instead of the network, so a simulated season
 # can be driven through the REAL live pipeline: the same scheduler, the same poll
 # cadence, the same finalization windows, the same import — only the provider is

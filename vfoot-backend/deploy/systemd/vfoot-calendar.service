@@ -4,5 +4,16 @@ Description=Vfoot sync calendario campionato reale (Loop A, via egress)
 Type=oneshot
 User=vfoot
 WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
-# --year/--season-id vanno aggiornati al rollover di stagione (26/27 = id 95836).
-ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py sync_calendar --egress --year 26/27 --season-id 95836
+# --year/--season-id vanno aggiornati al rollover di stagione (26/27 = id 95836),
+# e servono anche a --if-due/--auto-rounds: entrambi devono poter rispondere PRIMA
+# dello scaldamento (altrimenti non possono annullarlo, che e' tutto il risparmio),
+# quindi l'edizione va risolta senza uscire in rete.
+#
+# --if-due       il timer scatta ogni ora, questo decide se serve (vedi il .timer)
+# --auto-rounds  i turni li sceglie il calendario: il prossimo e i successivi
+#                quattro, piu' i turni passati che hanno ancora una partita da
+#                giocare (un rinvio conserva il numero di turno e prende una data
+#                nuova, anche mesi dopo). Una passata costa ~6 richieste invece di
+#                ~40, ed e' cio' che rende sostenibile l'ora nei giorni di gara.
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py sync_calendar \
+  --egress --year 26/27 --season-id 95836 --if-due --auto-rounds

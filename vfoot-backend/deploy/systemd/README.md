@@ -22,7 +22,7 @@ questi file ne sono la copia versionata. L'ambiente (DB, SMTP, VAPID) arriva da
 | unità | cadenza | comando | cosa si rompe se non gira |
 |---|---|---|---|
 | `vfoot-tick` | ogni minuto | `tick` | i risultati reali non entrano mai: niente live, niente `data_ready`, quindi nessuna giornata concludibile |
-| `vfoot-calendar` | 00/06/12/18 | `sync_calendar --egress` | orari e rinvii restano quelli vecchi: le formazioni si bloccano all'ora sbagliata |
+| `vfoot-calendar` | ogni ora, ma decide da sé | `sync_calendar --egress --if-due --auto-rounds` | orari e rinvii restano quelli vecchi: le formazioni si bloccano all'ora sbagliata |
 | `vfoot-tm-poll` | 06 e 18 | `poll_transfermarkt` | il listone invecchia: i trasferimenti non compaiono |
 | `vfoot-egress-refill` | 03/09/15/21 | `sofascore_egress.py refill` | il pool di IP si esaurisce e SofaScore torna a bloccarci (**root**) |
 | `vfoot-market` | ogni 90 s | `market_tick` | il mercato resta corretto ma **muto**: nessuno viene avvisato di una chiusura o di un sorpasso |
@@ -41,6 +41,56 @@ male, una cancellazione, un deploy da rifare — e non protegge per niente dal c
 in cui si perde il Linode. Perché sia un backup vero manca una copia fuori dal
 server (S3/Backblaze, o anche solo un `rsync` notturno verso casa). È una
 decisione aperta, non una dimenticanza.
+
+### Perché il calendario ha una cadenza che non si legge nel timer
+
+È l'unico job la cui frequenza **non** sta nel suo `.timer`: quello scatta ogni
+ora e basta, e a decidere è `--if-due`. Il motivo è che non esiste un insieme di
+"giorni di gara" da scrivere in un `OnCalendar` — la Serie A gioca dal venerdì al
+lunedì più gli infrasettimanali, e l'unica cosa che sa quando si gioca è il
+calendario stesso, cioè proprio ciò che il job aggiorna. Un'unità con dentro i
+giorni sarebbe vera per una settimana e poi falsa senza dirlo.
+
+Le due cadenze stanno in `settings.py` (tararle non tocca le unità):
+
+* **pavimento** `VFOOT_CALENDAR_SYNC_MINUTES` (6h) — il massimo che il calendario
+  può restare non letto, comunque vadano le cose. È la rete che prende una
+  partita comparsa in un giorno che il calendario che abbiamo dice vuoto;
+* **denso** `VFOOT_CALENDAR_MATCHDAY_MINUTES` (1h) — quando c'è un calcio
+  d'inizio *in vista*.
+
+«In vista» sono due cose, e la seconda è quella che si dimentica (costanti in
+`calendar_sync.py`):
+
+1. **uno sta arrivando**, entro `DENSE_BEFORE_KICKOFF` — **diciotto ore**, cioè
+   una durata, non le 18:00. Sembra tanto ed è voluto: la densità la decide il
+   calendario che stiamo aggiornando, quindi una finestra stretta ancorata
+   all'orario che *crediamo* sarebbe fitta nel momento sbagliato se quell'orario
+   si fosse spostato **prima**. E quella è la direzione pericolosa, perché il
+   blocco delle formazioni legge `Match.kickoff` e lascerebbe schierare a palla
+   che rotola. Diciotto ore non è una finestra sull'orologio: è un margine di
+   sfiducia sul dato che possediamo;
+2. **uno sarebbe dovuto cominciare e non risulta cominciato**, entro
+   `DENSE_AFTER_MISSED_KICKOFF` (6h). Una partita che alle 21 crediamo iniziata
+   alle 20 ed è ancora `scheduled` o `postponed` o sta partendo adesso (e il tick
+   lo dirà entro un paio di minuti) o il nostro calendario è sbagliato — ed è il
+   momento di guardare, non di tacere. Senza questo ramo, un rinvio per maltempo
+   annunciato **subito dopo** una passata resta invisibile fino al pavimento, sei
+   ore dopo: la partita ricomincia alle 22 e noi non lo sappiamo.
+
+Costo: **6 richieste a passata invece di ~40**, perché `--auto-rounds` guarda solo
+il turno prossimo e i successivi quattro (più i turni arretrati che devono ancora
+una partita), e il restringimento arriva fino al lato che *scarica* — limitare solo
+la lettura offline non toglierebbe una singola richiesta.
+
+| | passate | richieste |
+|---|---|---|
+| giorno vuoto (solo pavimento) | 4 | 24 |
+| giorno di gara (ogni ora) | ~20 | ~120 |
+| **prima**, tutti i giorni uguali | 4 | 160 |
+
+Cioè costa **meno di prima anche nel giorno di gara**, e sull'anno gira intorno a
+~60 richieste al giorno contro 160. Il denso non è stato comprato: è avanzato.
 
 ### Le due dipendenze da conoscere
 

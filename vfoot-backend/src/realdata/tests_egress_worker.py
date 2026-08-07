@@ -156,6 +156,35 @@ class AWarmDoesNotServeTheLastWarmTests(_Base):
             json.dumps({"seasons": []}))            # una stagione che non c'e'
         self.assertEqual(self._run("--schedule-year", "26/27"), 0)
 
+    def test_warming_some_rounds_costs_one_request_each(self):
+        """Il risparmio vero, e va misurato QUI: limitare solo la lettura offline
+        non toglie una singola richiesta, perche' lo scaldamento le scarica tutte
+        lo stesso. Deve arrivare al lato che scarica."""
+        self.assertEqual(self._run("--schedule-year", "26/27",
+                                   "--rounds", "22,23"), 0)
+        chieste = self._last_requests()
+        turni = [p for p in chieste if "/events/round/" in p]
+        self.assertEqual(len(turni), 2)
+        self.assertEqual([p for p in chieste if p.endswith("/rounds")], [],
+                         "con i turni gia' noti l'indice dei turni non serve")
+
+    def test_warming_some_rounds_does_not_drop_the_others(self):
+        """Buttare i trentaquattro turni non riscaricati lascerebbe il lato offline
+        senza risposta per loro fino a una passata completa: una cache peggiore di
+        nessun restringimento."""
+        altro = (self.cache
+                 / "api_v1_unique-tournament_23_season_95836_events_round_9.json")
+        altro.parent.mkdir(parents=True, exist_ok=True)
+        altro.write_text(json.dumps({"events": []}))
+        self._run("--schedule-year", "26/27", "--rounds", "22,23")
+        self.assertTrue(altro.exists())
+
+    def test_the_rounds_being_warmed_ARE_dropped(self):
+        self._run("--schedule-year", "26/27", "--rounds", "22")
+        self._run("--schedule-year", "26/27", "--rounds", "22")
+        self.assertEqual(
+            len([p for p in self._last_requests() if "/events/round/22" in p]), 1)
+
     def test_a_schedule_warm_leaves_the_OTHER_seasons_alone(self):
         """The hazard in the obvious implementation: this cache also holds the
         seasons already scraped — a 13k-request pull on a dev machine — under the

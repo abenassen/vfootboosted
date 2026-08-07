@@ -161,6 +161,19 @@ class SofaScoreClient:
             raise SofaScoreError(f"Year {year!r} not in valid seasons: {sorted(seasons)}")
         return seasons[year]
 
+    def get_round_events(self, year: str, rnd: int) -> list[dict[str, Any]]:
+        """One round's event dicts — the narrow half of ``get_match_dicts``.
+
+        A calendar sync usually only cares about the rounds still to be played, and
+        one request per round beats thirty-eight by enough to change how often the
+        sync can run.
+        """
+        season_id = self._season_id_for_year(year)
+        data = self.get(
+            f"/api/v1/unique-tournament/{self._tid}/season/{season_id}"
+            f"/events/round/{rnd}")
+        return (data or {}).get("events", [])
+
     def get_match_dicts(self, year: str) -> list[dict[str, Any]]:
         """All event dicts for the season (raw SofaScore shape), via rounds."""
         season_id = self._season_id_for_year(year)
@@ -170,10 +183,7 @@ class SofaScoreClient:
                          if r.get("round") is not None})
         events: list[dict[str, Any]] = []
         for rnd in rounds:
-            data = self.get(
-                f"/api/v1/unique-tournament/{self._tid}/season/{season_id}"
-                f"/events/round/{rnd}")
-            events.extend(data.get("events", []))
+            events.extend(self.get_round_events(year, rnd))
         return events
 
     # -- per-match data --------------------------------------------------

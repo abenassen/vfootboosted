@@ -370,6 +370,13 @@ cmd_reset() {
   rm -f "$db-wal" "$db-shm"
   cp "$snap" "$db" || die "ripristino fallito"
   say "banca dati ripristinata dall istantanea"
+  # L'istantanea e' di quando e' stata presa, quindi ha lo SCHEMA di allora: una
+  # migrazione arrivata dopo la renderebbe incompatibile col codice di adesso, e il
+  # sintomo (`no such column: ...`) arriverebbe non al ripristino ma alla prima
+  # pagina aperta, che e' il momento peggiore per scoprirlo. Migrare qui costa un
+  # secondo quando non c'e' niente da fare.
+  ( cd "$REPO/vfoot-backend/src" && "$PY" manage.py migrate --noinput >/dev/null ) \
+    || die "migrazione dell istantanea fallita"
   cmd_start
 }
 

@@ -25,10 +25,15 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from django.utils import timezone as djtz
+
+from realdata.services import egress_client
 from realdata.services.calendar_sync import (
     SERIE_A_TID,
     resolve_competition_season,
+    rounds_to_sync,
     sync_calendar,
+    sync_is_due,
 )
 
 
@@ -71,6 +76,15 @@ class Command(BaseCommand):
                                  "on the server).")
         parser.add_argument("--headful", action="store_true",
                             help="Run the browser headful (with --browser).")
+        parser.add_argument("--if-due", action="store_true",
+                            help="Sync only if one is due — the floor interval has "
+                                 "passed, or a kickoff is approaching. Lets the "
+                                 "timer fire on a fixed cadence while the density "
+                                 "follows the calendar. Needs --season-id.")
+        parser.add_argument("--auto-rounds", action="store_true",
+                            help="Pick the rounds from the calendar instead of "
+                                 "--rounds: the next few, plus any earlier round "
+                                 "that still owes a match. Needs --season-id.")
 
     def _build_client(self, options):
         cache_dir = Path(options["cache_dir"]) if options["cache_dir"] \
@@ -104,24 +118,51 @@ class Command(BaseCommand):
             except ValueError as exc:
                 raise CommandError(f"Invalid --rounds: {exc}") from exc
 
+        deciding = options["if_due"] or options["auto_rounds"]
+        if deciding and options["season_id"] is None:
+            # Both questions are about the calendar we ALREADY hold, and both have
+            # to be asked before the warm — otherwise they cannot cancel it, which
+            # is the entire saving. Answering them needs the edition without a
+            # network round trip, and --season-id is what gives us that.
+            raise CommandError("--if-due / --auto-rounds need --season-id.")
+
         if options["offline"] and options["season_id"] is None:
             self.stdout.write(self.style.WARNING(
                 "--offline without --season-id: relying on a cached seasons list."))
 
         if options["egress"]:
-            # Warm the whole fixture list through the tunnel, then read it offline.
-            from realdata.services import egress_client
-            self.stdout.write(f"Warming schedule {options['year']} via egress…")
-            if not egress_client.warm_schedule(options["year"]):
-                raise CommandError("egress could not warm the schedule (blocked / "
-                                   "no good exit IP). Nothing synced.")
-            options["browser"] = False   # read the warm cache with the plain client
+            options["browser"] = False   # the egress fetches; here we only read
 
         client = self._build_client(options)
         try:
-            cs, season_id = resolve_competition_season(
-                client, options["year"], season_id=options["season_id"],
-                logger=self.stdout.write)
+            cs = season_id = None
+            if deciding:
+                cs, season_id = resolve_competition_season(
+                    client, options["year"], season_id=options["season_id"],
+                    logger=self.stdout.write)
+                if options["if_due"]:
+                    due, why = sync_is_due(cs)
+                    self.stdout.write(f"Due? {'yes' if due else 'no'} — {why}")
+                    if not due:
+                        return
+                if options["auto_rounds"]:
+                    rounds = rounds_to_sync(cs)
+                    if not rounds:
+                        self.stdout.write("Nothing owed: no round left to sync.")
+                        return
+
+            if options["egress"]:
+                self.stdout.write(
+                    f"Warming schedule {options['year']} via egress"
+                    + (f" (rounds {rounds})…" if rounds else " (whole season)…"))
+                if not egress_client.warm_schedule(options["year"], rounds):
+                    raise CommandError("egress could not warm the schedule (blocked / "
+                                       "no good exit IP). Nothing synced.")
+
+            if cs is None:
+                cs, season_id = resolve_competition_season(
+                    client, options["year"], season_id=options["season_id"],
+                    logger=self.stdout.write)
 
             self.stdout.write(self.style.NOTICE(
                 f"Syncing calendar for {cs} (season_id={season_id})"
@@ -129,6 +170,12 @@ class Command(BaseCommand):
 
             report = sync_calendar(client, cs, season_id, rounds=rounds,
                                    logger=self.stdout.write)
+            if not options["offline"]:
+                # Only after a read that really went out: the stamp is what the
+                # next run measures "am I due?" from, so stamping an offline pass
+                # would tell it the provider had been checked when it had not.
+                cs.calendar_synced_at = djtz.now()
+                cs.save(update_fields=["calendar_synced_at"])
         finally:
             close = getattr(client, "close", None)
             if callable(close):

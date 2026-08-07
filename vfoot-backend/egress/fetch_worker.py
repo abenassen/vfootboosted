@@ -62,16 +62,23 @@ def fetch_match(client: SofaScoreClient, mid: int, kind: str) -> None:
 
 
 def warm_schedule(client: SofaScoreClient, year: str, cache_dir: Path, *,
-                  resume: bool = False) -> None:
-    """Warm seasons -> rounds -> every round's events: the whole fixture list the
-    calendar sync then reads OFFLINE. One cheap pass; no per-match data.
+                  rounds: list[int] | None = None, resume: bool = False) -> None:
+    """Warm a season's fixture list: the schedule the calendar sync reads OFFLINE.
+    No per-match data.
+
+    ``rounds`` limits it to those matchdays — one request each instead of all
+    thirty-eight, which is what lets the sync run every hour on a match day
+    instead of four times a day. ``None`` warms the whole season.
 
     Dropped in two steps rather than by one wide glob, and the reason is a hazard
     rather than tidiness: this cache also holds the SEASONS ALREADY SCRAPED (a
     13k-request pull on a dev machine), and they live under the same
     ``unique-tournament`` prefix. Wiping the prefix to refresh one season would
     take the others with it. So: drop the seasons index, re-read it, and only then
-    drop the rounds and events OF THE SEASON BEING WARMED.
+    drop what is about to be re-read OF THE SEASON BEING WARMED — and, with
+    ``rounds``, only the rounds actually being re-read. Dropping the other
+    thirty-four would leave the offline side unable to answer for them until some
+    later full pass, which is a worse cache than no narrowing at all.
     """
     if not resume:
         purge(cache_dir.glob("api_v1_unique-tournament_*_seasons.json"))
@@ -79,8 +86,17 @@ def warm_schedule(client: SofaScoreClient, year: str, cache_dir: Path, *,
     if not resume and season_id:
         # The fixture list moves — postponements, kickoff changes — so a warm has
         # to actually re-read it, or the calendar sync never sees them.
-        purge(cache_dir.glob(f"api_v1_unique-tournament_*_season_{season_id}_*.json"))
-    client.get_match_dicts(year)
+        base = f"api_v1_unique-tournament_*_season_{season_id}"
+        if rounds is None:
+            purge(cache_dir.glob(f"{base}_*.json"))
+        else:
+            for rnd in rounds:
+                purge(cache_dir.glob(f"{base}_events_round_{rnd}.json"))
+    if rounds is None:
+        client.get_match_dicts(year)
+    else:
+        for rnd in rounds:
+            client.get_round_events(year, rnd)
 
 
 def match_entries(cache_dir: Path, match_ids: list[int]):
@@ -110,6 +126,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--match-ids", help="comma-separated match ids (fetch mode)")
     ap.add_argument("--schedule-year", help="season year e.g. 26/27 (schedule mode)")
+    ap.add_argument("--rounds", help="comma-separated rounds to warm (schedule "
+                                     "mode); default = the whole season")
     ap.add_argument("--kind", choices=["live", "final"], default="final")
     ap.add_argument("--cache-dir", required=True)
     ap.add_argument("--delay", type=float, default=1.5)
@@ -121,6 +139,8 @@ def main() -> int:
 
     cache_dir = Path(args.cache_dir)
     ids = [int(x) for x in (args.match_ids or "").split(",") if x.strip()]
+    rounds = ([int(x) for x in args.rounds.split(",") if x.strip()]
+              if args.rounds else None)
     client = SofaScoreClient(cache_dir, min_delay=args.delay,
                              max_retries=1, logger=print)
     try:
@@ -128,8 +148,9 @@ def main() -> int:
             # Drops as it goes: which files belong to this season is not knowable
             # before the seasons index has been re-read. See warm_schedule.
             warm_schedule(client, args.schedule_year, cache_dir,
-                          resume=args.resume)
-            print(f"warmed schedule {args.schedule_year}")
+                          rounds=rounds, resume=args.resume)
+            print(f"warmed schedule {args.schedule_year}"
+                  + (f" rounds={rounds}" if rounds else " (whole season)"))
         elif ids:
             if not args.resume:
                 print(f"purged {purge(match_entries(cache_dir, ids))} stale entries")
