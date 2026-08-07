@@ -227,11 +227,10 @@ export default function FormationPage() {
   // Why the last attempted promotion was refused, pinned to the row that was
   // clicked — the explanation belongs where the finger is, not in the header.
   const [refused, setRefused] = useState<{ player_id: number; reason: string } | null>(null);
-  // Which numbers belong to a player whose match has started — in the XI and on the
-  // bench. Taken from the SAVED lineup, because that is what the server compares a
-  // submission against. The XI has slots for the same reason the bench does: the
-  // substitution budget is spent walking the starters in order.
-  const [frozenXi, setFrozenXi] = useState<Map<number, number>>(new Map());
+  // Which bench numbers belong to a player whose match has started. Taken from the
+  // SAVED lineup, because that is what the server compares a submission against.
+  // The XI has no equivalent: its order is derived server-side (P-D-C-A, frozen
+  // players kept inside their own role), so the page has nothing to preserve there.
   const [frozenSlots, setFrozenSlots] = useState<Map<number, number>>(new Map());
   const [allComps, setAllComps] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -344,14 +343,7 @@ export default function FormationPage() {
         (saved?.bench_player_ids ?? []).forEach((id, i) => {
           if (frozen.has(id)) slots.set(i, id);
         });
-        const xi = new Map<number, number>();
-        // The wire list excludes the goalkeeper — he has his own field, hence no
-        // number — so these indices are the outfielders' and must stay that way.
-        (saved?.starter_player_ids ?? []).forEach((id, i) => {
-          if (frozen.has(id)) xi.set(i, id);
-        });
         setFrozenSlots(slots);
-        setFrozenXi(xi);
         setStarterIds(starters);
         setBenchOrder(pinFrozen(orderBench(d.roster, starters, saved?.bench_player_ids ?? []), slots));
         // A freshly loaded lineup has no vacated places: whatever it is short of
@@ -384,6 +376,10 @@ export default function FormationPage() {
   const lockedIds = new Set(lock?.locked_player_ids ?? []);
   const closed = !!lock?.closed;
   const lockedReason = 'La sua partita è già iniziata.';
+  const closedReason = 'Giornata chiusa: la formazione non è più modificabile.';
+  /** Why this row cannot be moved at all — null when it can. */
+  const immutableReason = (id: number) =>
+    closed ? closedReason : lockedIds.has(id) ? lockedReason : null;
 
   const chosen = starterIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
   const notChosen = ctx.roster.filter((p) => !starterIds.includes(p.player_id));
@@ -401,14 +397,6 @@ export default function FormationPage() {
   // off the choices — so dropping a starter used to shrink his line and re-centre
   // the pitch, leaving nine or ten dots and no sign of what was missing. Instead
   // the vacated place stays, tagged with the role it came from.
-  // Same normalisation as the bench, on the outfield list the save actually sends:
-  // the goalkeeper travels in his own field, so he does not occupy a number.
-  const pinXi = (ids: number[]) => {
-    if (!frozenXi.size) return ids;
-    const keepers = ids.filter((x) => byId.get(x)?.role === 'GK');
-    return [...keepers, ...pinFrozen(ids.filter((x) => !keepers.includes(x)), frozenXi)];
-  };
-
   const toggleStarter = (id: number) => {
     const player = byId.get(id);
     const role = player?.role;
@@ -423,7 +411,7 @@ export default function FormationPage() {
       return;
     }
     if (starterIds.includes(id)) {
-      setStarterIds((s) => pinXi(s.filter((x) => x !== id)));
+      setStarterIds((s) => s.filter((x) => x !== id));
       setBenchOrder((b) => pinFrozen(b.includes(id) ? b : [...b, id], frozenSlots));
       if (role) setVacancies((v) => [...v, role]);
       setRefused(null);
@@ -436,7 +424,7 @@ export default function FormationPage() {
         return;
       }
       setRefused(null);
-      setStarterIds((s) => pinXi([...s, id]));
+      setStarterIds((s) => [...s, id]);
       setBenchOrder((b) => pinFrozen(b.filter((x) => x !== id), frozenSlots));
       setVacancies((v) => {
         // Same role => he takes the place that was left open and the module is
@@ -503,7 +491,10 @@ export default function FormationPage() {
         competition: allComps ? null : competition,
         all_competitions: allComps,
         gk_player_id: gkId,
-        starter_player_ids: pinFrozen(starterIds.filter((id) => id !== gkId), frozenXi),
+        // Sent in the order the page shows them; the server derives the stored one
+        // anyway (P-D-C-A, frozen players kept inside their role), so this is about
+        // the payload reading like the screen, not about deciding anything.
+        starter_player_ids: starters.map((p) => p.player_id).filter((id) => id !== gkId),
         bench_player_ids: benchIds,
       });
       setToast(allComps ? `Formazione salvata su ${res.saved_competitions} competizioni ✓` : 'Formazione salvata ✓');
@@ -661,6 +652,8 @@ export default function FormationPage() {
                 onSelect={() => setSelected((s) => (s === p.player_id ? null : p.player_id))}
                 onToggle={() => toggleStarter(p.player_id)}
                 locked={lockedIds.has(p.player_id)}
+                immutable={!!immutableReason(p.player_id)}
+                immutableReason={immutableReason(p.player_id)}
                 note={refused?.player_id === p.player_id ? refused.reason : null}
               />
             ))}
@@ -701,6 +694,8 @@ export default function FormationPage() {
                 blocked={blockReasonFor(p)}
                 note={refused?.player_id === p.player_id ? refused.reason : null}
                 locked={lockedIds.has(p.player_id)}
+                immutable={!!immutableReason(p.player_id)}
+                immutableReason={immutableReason(p.player_id)}
                 order={i + 1}
                 canUp={i > 0}
                 canDown={i < bench.length - 1}
@@ -725,6 +720,8 @@ function RosterRow({
   blocked,
   note,
   locked,
+  immutable,
+  immutableReason,
   order,
   canUp,
   canDown,
@@ -740,6 +737,11 @@ function RosterRow({
   blocked?: string | null;
   /** His match has kicked off: he stays where he is, wherever that is. */
   locked?: boolean;
+  /** His placement cannot change at all — he is playing, or the round is over.
+   *  Both buttons then READ as unavailable, which is the thing a refusal after the
+   *  click cannot do: you should be able to see it before pressing. */
+  immutable?: boolean;
+  immutableReason?: string | null;
   /** The refusal, shown after an attempt: the tooltip alone is invisible on touch. */
   note?: string | null;
   order?: number;
@@ -789,17 +791,21 @@ function RosterRow({
           <div className="flex flex-col overflow-hidden rounded border border-slate-200 text-slate-500">
             <button
               onClick={onMoveUp}
-              disabled={!canUp}
-              className="px-1.5 text-[9px] leading-tight hover:bg-slate-100 disabled:opacity-30"
-              title="Alza priorità"
+              disabled={!immutable && !canUp}
+              aria-disabled={immutable ? true : undefined}
+              className={`px-1.5 text-[9px] leading-tight disabled:opacity-30 ${
+                immutable ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-100'}`}
+              title={immutableReason ?? 'Alza priorità'}
             >
               ▲
             </button>
             <button
               onClick={onMoveDown}
-              disabled={!canDown}
-              className="px-1.5 text-[9px] leading-tight hover:bg-slate-100 disabled:opacity-30"
-              title="Abbassa priorità"
+              disabled={!immutable && !canDown}
+              aria-disabled={immutable ? true : undefined}
+              className={`px-1.5 text-[9px] leading-tight disabled:opacity-30 ${
+                immutable ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-100'}`}
+              title={immutableReason ?? 'Abbassa priorità'}
             >
               ▼
             </button>
@@ -808,24 +814,42 @@ function RosterRow({
         <div className="flex overflow-hidden rounded-lg border border-slate-200 text-[11px] font-semibold">
           {/* Deliberately not `disabled`: a disabled button swallows the click AND
               its own tooltip, so it would refuse without ever saying why. It looks
-              unavailable and, if pressed, explains itself on the row. */}
+              unavailable and, if pressed, explains itself on the row.
+              When the row is immutable BOTH sides go grey — the side he is on stays
+              filled, so you can still read where he is, but muted rather than black:
+              a live-looking switch you are not allowed to flip is worse than one
+              that says so before you touch it. */}
           <button
             onClick={onToggle}
-            title={blocked ?? undefined}
-            aria-disabled={blocked ? true : undefined}
+            title={immutableReason ?? blocked ?? undefined}
+            aria-disabled={immutable || blocked ? true : undefined}
             className={
-              isStarter
-                ? 'bg-slate-900 px-3 py-1 text-white'
-                : blocked
-                  ? 'cursor-not-allowed bg-slate-50 px-3 py-1 text-slate-300'
-                  : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'
+              immutable
+                ? isStarter
+                  ? 'cursor-not-allowed bg-slate-400 px-3 py-1 text-white'
+                  : 'cursor-not-allowed bg-slate-50 px-3 py-1 text-slate-300'
+                : isStarter
+                  ? 'bg-slate-900 px-3 py-1 text-white'
+                  : blocked
+                    ? 'cursor-not-allowed bg-slate-50 px-3 py-1 text-slate-300'
+                    : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'
             }
           >
             Titolare
           </button>
           <button
             onClick={onToggle}
-            className={!isStarter ? 'bg-slate-500 px-3 py-1 text-white' : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'}
+            title={immutableReason ?? undefined}
+            aria-disabled={immutable ? true : undefined}
+            className={
+              immutable
+                ? !isStarter
+                  ? 'cursor-not-allowed bg-slate-400 px-3 py-1 text-white'
+                  : 'cursor-not-allowed bg-slate-50 px-3 py-1 text-slate-300'
+                : !isStarter
+                  ? 'bg-slate-500 px-3 py-1 text-white'
+                  : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'
+            }
           >
             Panca
           </button>

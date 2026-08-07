@@ -212,22 +212,63 @@ class ViolationRulesTests(TestCase):
         new = self._lineup(1, [2], [7, 9, 4, 8])
         self.assertEqual(lineup_deadline.violations(old, new, {4}), [])
 
-    def test_a_locked_starter_keeps_his_number_too(self):
-        """Not cosmetic: `max_substitutions` is spent walking the XI in order, so
-        reshuffling it chooses which unplayed starter is left uncovered."""
-        old = self._lineup(1, [2, 3, 4], [])
-        new = self._lineup(1, [3, 2, 4], [])
-        self.assertIn("fra i titolari", lineup_deadline.violations(old, new, {2})[0])
-
-    def test_the_free_starters_swap_around_a_frozen_one(self):
-        old = self._lineup(1, [2, 3, 4], [])
-        new = self._lineup(1, [4, 3, 2], [])
-        self.assertEqual(lineup_deadline.violations(old, new, {3}), [])
-
     def test_the_goalkeeper_is_his_own_place(self):
         old = self._lineup(1, [2, 3], [])
         new = self._lineup(2, [1, 3], [])
         self.assertTrue(lineup_deadline.violations(old, new, {1}))
+
+    def test_the_xi_order_is_not_policed_here(self):
+        """It is DERIVED instead — see NormaliseXiTests. Nothing a manager chose,
+        so nothing to refuse him for."""
+        old = self._lineup(1, [2, 3, 4], [])
+        new = self._lineup(1, [4, 3, 2], [])
+        self.assertEqual(lineup_deadline.violations(old, new, {2, 3, 4}), [])
+
+
+class NormaliseXiTests(TestCase):
+    """The stored XI: always P-D-C-A, frozen players kept inside their own role."""
+
+    ROLES = {1: "DEF", 2: "DEF", 3: "DEF", 4: "DEF", 20: "DEF",
+             5: "MID", 6: "MID", 7: "MID",
+             8: "ATT", 9: "ATT", 10: "ATT"}
+    PREV = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    def _norm(self, ids, prev=None, locked=None):
+        return lineup_deadline.normalise_xi(ids, self.ROLES, prev, locked)
+
+    def test_a_promoted_substitute_no_longer_lands_at_the_end(self):
+        """The bug this exists for: he appeared among his own on screen and sat
+        last in the list the substitutions actually read."""
+        self.assertEqual(self._norm([1, 2, 3, 4, 6, 7, 8, 9, 10, 5]),
+                         [1, 2, 3, 4, 6, 7, 5, 8, 9, 10])
+
+    def test_a_frozen_starter_keeps_his_number_inside_his_role(self):
+        # The 6th (a midfielder) is replaced by a defender; the frozen 5th is still
+        # the FIRST midfielder, even though the deeper defence pushes him down one.
+        out = self._norm([1, 2, 3, 4, 20, 5, 7, 8, 9, 10], self.PREV, {5})
+        self.assertEqual(out, [1, 2, 3, 4, 20, 5, 7, 8, 9, 10])
+        self.assertEqual(out.index(5) - out.index(20), 1)
+
+    def test_two_frozen_starters_cannot_be_swapped(self):
+        """Undone rather than refused: the order is the server's to decide."""
+        self.assertEqual(self._norm([1, 2, 3, 4, 6, 5, 7, 8, 9, 10], self.PREV, {5, 6}),
+                         self.PREV)
+
+    def test_a_role_that_shrinks_under_him_gives_the_last_place_it_has(self):
+        prev = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        # 4th defender frozen, and the module drops to three at the back.
+        out = self._norm([1, 2, 4, 5, 6, 7, 20, 8, 9, 10], prev, {4})
+        self.assertEqual(out[:4], [1, 2, 20, 4])
+
+    def test_it_is_idempotent(self):
+        once = self._norm([1, 2, 3, 4, 6, 7, 8, 9, 10, 5], self.PREV, {5})
+        self.assertEqual(self._norm(once, self.PREV, {5}), once)
+
+    def test_an_unknown_role_keeps_the_tail_instead_of_vanishing(self):
+        out = self._norm([1, 5, 8, 999], {**self.ROLES})
+        self.assertEqual(len(out), 4)
+        self.assertIn(999, out)
+
 
 
 class SaveEndpointTests(_Season):

@@ -4807,8 +4807,9 @@ class LeagueTeamLineupSaveView(APIView):
 
         # Classic mode: enforce the role constraints server-side using the FROZEN
         # listone roles, so a hand-crafted request can't bypass the client validator.
+        outfield_ids = [int(x) for x in request.data.get("starter_player_ids", []) if x is not None]
+        role_of: dict[int, str] = {}
         if league.mode == FantasyLeague.MODE_CLASSIC:
-            outfield_ids = [int(x) for x in request.data.get("starter_player_ids", []) if x is not None]
             starter_ids = ([int(gk)] if gk else []) + outfield_ids
             frozen = {
                 lpr.player_id: _CLASSIC_ROLE_TO_LINEUP.get(lpr.role, "MID")
@@ -4817,11 +4818,11 @@ class LeagueTeamLineupSaveView(APIView):
             seed = dict(
                 Player.objects.filter(id__in=starter_ids).exclude(classic_role_seed="").values_list("id", "classic_role_seed")
             )
-            starter_roles = [
-                frozen.get(pid) or _CLASSIC_ROLE_TO_LINEUP.get(seed.get(pid, ""), "MID")
+            role_of = {
+                pid: frozen.get(pid) or _CLASSIC_ROLE_TO_LINEUP.get(seed.get(pid, ""), "MID")
                 for pid in starter_ids
-            ]
-            errors = validate_classic_lineup(starter_roles)
+            }
+            errors = validate_classic_lineup([role_of[pid] for pid in starter_ids])
             if errors:
                 return Response(
                     {"detail": "Formazione non valida (classic).", "errors": errors},
@@ -4845,21 +4846,23 @@ class LeagueTeamLineupSaveView(APIView):
         keys = [f"team{team.id}" + (f":comp{cid}" if cid is not None else "")
                 for cid in target_comp_ids]
 
+        # Each competition keeps its OWN lineup, so each is judged — and normalised —
+        # against its own previous one: the same submission can be legal for the cup,
+        # where the manager had never saved anything, and illegal for the league,
+        # where he is moving a player who is already playing.
+        previous = {
+            s.lineup_id: {"gk_player_id": s.gk_player_id,
+                          "starter_player_ids": s.starter_player_ids,
+                          "bench_player_ids": s.bench_player_ids}
+            for s in SavedLineupSnapshot.objects.filter(
+                league_id=str(league_id), matchday_id=str(matchday), lineup_id__in=keys)
+        }
+        locked_ids: set[int] = set()
+
         if per_player:
-            # Each competition keeps its OWN lineup, so each is judged against its own
-            # previous one: the same submission can be legal for the cup, where the
-            # manager had never saved anything, and illegal for the league, where he
-            # is moving a player who is already playing.
-            previous = {
-                s.lineup_id: {"gk_player_id": s.gk_player_id,
-                              "starter_player_ids": s.starter_player_ids,
-                              "bench_player_ids": s.bench_player_ids}
-                for s in SavedLineupSnapshot.objects.filter(
-                    league_id=str(league_id), matchday_id=str(matchday), lineup_id__in=keys)
-            }
             touched = set(lineup_deadline.placement(defaults))
-            for old in previous.values():
-                touched |= set(lineup_deadline.placement(old))
+            for prev in previous.values():
+                touched |= set(lineup_deadline.placement(prev))
             locked_ids = matchday_state.locked_players(league, md_int, touched)
             if locked_ids:
                 # short_name is often empty in the provider's data — the same
@@ -4884,11 +4887,24 @@ class LeagueTeamLineupSaveView(APIView):
                     )
 
         for cid, key in zip(target_comp_ids, keys):
+            payload = dict(defaults)
+            if role_of:
+                # The XI order is not the manager's — the page groups the eleven by
+                # role and never offers a way to reorder them — so it is DERIVED
+                # here rather than taken on trust: P-D-C-A, with anyone already
+                # playing kept at his number inside his own role. Storing what the
+                # clicks happened to produce is what put a promoted substitute at
+                # the end of the list while the page showed him among his own.
+                payload["starter_player_ids"] = lineup_deadline.normalise_xi(
+                    outfield_ids, role_of,
+                    (previous.get(key) or {}).get("starter_player_ids"),
+                    locked_ids,
+                )
             SavedLineupSnapshot.objects.update_or_create(
                 league_id=str(league_id),
                 matchday_id=str(matchday),
                 lineup_id=key,
-                defaults=defaults,
+                defaults=payload,
             )
         return Response({"ok": True, "saved_competitions": len([c for c in target_comp_ids if c is not None]) or 1})
 
