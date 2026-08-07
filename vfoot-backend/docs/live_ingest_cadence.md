@@ -134,12 +134,39 @@ Sparisce `VFOOT_LIVE_IMPORT_MINUTES`; resta la cadenza del poll più un
 avere due rami dentro `_in_live_window` e ne ha uno con un flag.
 
 *Tocca*: `match_scheduler.py:36-51` e `105-118`, `tick.py:100-128`,
-`config/settings.py:218,226`, `vfoot-sim:238` (che oggi esporta
-`VFOOT_LIVE_IMPORT_MINUTES=2`).
+`config/settings.py:218,226`, e `vfoot-sim:238` — vedi 3-bis, che non è una
+rifinitura successiva.
 
 *Test da aggiornare*: `realdata/tests_calendar_scheduler.py` (13 riferimenti,
 inclusi quattro `@override_settings(VFOOT_LIVE_IMPORT_MINUTES=10)` alle righe
 308-326) e `realdata/tests_live_pipeline.py` (2).
+
+### 3-bis. `vfoot-sim` va cambiato nello stesso passo, non dopo
+
+Lo script esporta oggi `VFOOT_LIVE_IMPORT_MINUTES=2` (`vfoot-sim:238`). Due
+ragioni per cui non è una riga da aggiornare con calma:
+
+* **Se la variabile sparisce da `settings.py` e resta nello script, l'export
+  diventa un no-op silenzioso.** Il banco girerebbe alla cadenza di produzione
+  mentre il commento sopra la riga continua a promettere due minuti: esattamente la
+  classe di guaio che questo documento esiste per non ripetere (un ambiente che
+  sembra giusto e non lo è, senza un errore da nessuna parte).
+* **Il banco deve conservare il RAPPORTO, non appiattirlo.** Oggi import = poll =
+  2 minuti, cioè k=1: nel banco *ogni* giro leggero è anche pesante, e la
+  distinzione fra i due semplicemente non esiste. Con lo schema nuovo, un banco a
+  k=1 non potrebbe mostrare l'unico comportamento nuovo che ci interessa — il voto
+  provvisorio senza esposizione difensiva che si assesta al giro pesante. Il banco
+  nasconderebbe proprio il rischio che abbiamo deciso di accettare.
+
+Quindi: il banco accorcia la **cadenza** (una serata simulata dura quanto una vera,
+ed è la ragione per cui l'override esiste) ma tiene **k > 1**. Per esempio poll a
+1 minuto e k=3, che dà un giro pesante ogni tre minuti conservando il rapporto di
+produzione. Il valore esatto si sceglie insieme a quello di produzione.
+
+Regola generale che ne discende, e che vale oltre questo caso: **quando una
+manopola cambia nome o sparisce, l'override del banco va cambiato nello stesso
+commit.** Un banco che diverge dal prodotto non è un banco più comodo, è un banco
+che mente.
 
 ## Deciso di NON fare
 
