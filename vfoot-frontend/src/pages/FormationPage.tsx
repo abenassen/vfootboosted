@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import clsx from 'clsx';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import { getTeamLineup, saveTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
@@ -241,6 +242,12 @@ export default function FormationPage() {
   // Explicit, ordered bench = substitution priority. Always stored (even in Aura,
   // where the substitute is the best available and order only breaks ties).
   const [benchOrder, setBenchOrder] = useState<number[]>([]);
+
+  const [dragId, setDragId] = useState<number | null>(null);
+  // L'ordine COME SI VEDRÀ, mentre il dito è ancora giù: senza, si trascina al
+  // buio e si scopre dove è finito solo lasciando la presa.
+  const [dragPreview, setDragPreview] = useState<number[] | null>(null);
+  const benchRowEls = useRef(new Map<number, HTMLElement>());
   // Places left open by a demoted starter, in the order they were vacated. They
   // are what keeps the pitch at eleven while the module is still being decided.
   const [vacancies, setVacancies] = useState<PlayerRole[]>([]);
@@ -476,6 +483,70 @@ export default function FormationPage() {
     }
   };
 
+  // -- trascinare la panchina ---------------------------------------------
+  //
+  // Il pollice al posto dei due pulsantini: su un telefono «terzo, no quarto,
+  // no sesto» sono cinque tocchi su bersagli da sedici pixel, mentre l'ordine
+  // della panchina è una cosa che si pensa guardandola tutta insieme.
+  //
+  // Pointer events e non l'HTML5 drag-and-drop, che sul touch semplicemente non
+  // esiste: `dragstart` non parte da un dito. Questi eventi sono gli stessi per
+  // mouse, dito e pennino, quindi il comportamento è uno solo e non due scritti
+  // due volte.
+
+  /** Sposta `id` alla riga `visibleIndex`, LASCIANDO FERMI I CONGELATI.
+   *
+   *  Il posto di chi ha la partita in corso è suo e non si tocca: non scende di
+   *  una perché qualcuno gli è passato davanti, e nessuno lo scavalca. Quindi il
+   *  riordino avviene fra i soli liberi, che poi riempiono le caselle rimaste
+   *  libere nell'ordine nuovo.
+   *
+   *  Le posizioni dei congelati si rileggono DALL'ORDINE CORRENTE e non da
+   *  `frozenSlots`, che è la memoria di una formazione già inviata: chi apre la
+   *  pagina a giornata cominciata e non aveva ancora schierato ha una panchina
+   *  piena di posti fissati e quella mappa vuota. Fidandosi di lei, il riordino
+   *  perdeva per strada tutti i congelati — quindici righe diventavano due. */
+  const reorderBench = (order: number[], id: number, visibleIndex: number): number[] => {
+    const free = order.filter((x) => !lockedIds.has(x));
+    const from = free.indexOf(id);
+    if (from < 0) return order;
+    // L'indice VISIBILE conta anche i congelati; quello che serve è quanti liberi
+    // stanno sopra la riga puntata.
+    const freeAbove = order.slice(0, Math.max(0, visibleIndex)).filter((x) => !lockedIds.has(x)).length;
+    const to = Math.max(0, Math.min(free.length - 1, freeAbove > from ? freeAbove - 1 : freeAbove));
+    if (to === from) return order;
+    const moved = [...free];
+    moved.splice(from, 1);
+    moved.splice(to, 0, id);
+    let f = 0;
+    return order.map((x) => (lockedIds.has(x) ? x : moved[f++]));
+  };
+
+  const dragMoveTo = (clientY: number) => {
+    if (dragId == null) return;
+    const current = dragPreview ?? benchIds;
+    // La riga sotto il dito: si confronta col CENTRO di ognuna, che è il punto in
+    // cui l'occhio decide che il giocatore sta «lì».
+    let target = current.length - 1;
+    for (let i = 0; i < current.length; i++) {
+      const el = benchRowEls.current.get(current[i]);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) {
+        target = i;
+        break;
+      }
+    }
+    const next = reorderBench(current, dragId, target);
+    if (next !== current) setDragPreview(next);
+  };
+
+  const dragEnd = () => {
+    if (dragPreview) setBenchOrder(dragPreview);
+    setDragId(null);
+    setDragPreview(null);
+  };
+
   const moveBench = (id: number, dir: -1 | 1) => {
     setBenchOrder((b) => {
       const i = b.indexOf(id);
@@ -549,6 +620,11 @@ export default function FormationPage() {
   const starters = ctx.roster.filter((p) => starterIds.includes(p.player_id)).sort(byRole);
   const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
   const bench = benchIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
+  // Mentre il dito è giù si mostra l'anteprima, non l'ordine salvato: è il senso
+  // stesso del trascinare, vedere dove sta andando prima di lasciare.
+  const shownBench = (dragPreview ?? benchIds)
+    .map((id) => byId.get(id))
+    .filter((p): p is TeamLineupPlayer => !!p);
   const compName = ctx.competitions.find((c) => c.competition_id === competition)?.name;
 
   return (
@@ -743,8 +819,16 @@ export default function FormationPage() {
               ? 'Entra il primo panchinaro in lista che ha un voto e mantiene la formazione valida.'
               : 'In Aura il sostituto è il migliore disponibile; l’ordine conta solo a parità.'}
           </div>
-          <div className="divide-y">
-            {bench.map((p, i) => (
+          <div
+            className="divide-y"
+            // Il gesto si segue sul CONTENITORE, non sulla riga: mentre la lista si
+            // riordina sotto il dito la riga di partenza cambia posto, e gli eventi
+            // agganciati a lei arriverebbero a singhiozzo.
+            onPointerMove={(e) => dragMoveTo(e.clientY)}
+            onPointerUp={dragEnd}
+            onPointerCancel={dragEnd}
+          >
+            {shownBench.map((p, i) => (
               <RosterRow
                 key={p.player_id}
                 p={p}
@@ -759,9 +843,34 @@ export default function FormationPage() {
                 immutableReason={immutableReason(p.player_id)}
                 order={i + 1}
                 canUp={i > 0}
-                canDown={i < bench.length - 1}
+                canDown={i < shownBench.length - 1}
                 onMoveUp={() => moveBench(p.player_id, -1)}
                 onMoveDown={() => moveBench(p.player_id, 1)}
+                rowRef={(el) => {
+                  if (el) benchRowEls.current.set(p.player_id, el);
+                  else benchRowEls.current.delete(p.player_id);
+                }}
+                dragHandle={{
+                  dragging: dragId === p.player_id,
+                  disabled: !!immutableReason(p.player_id),
+                  reason: immutableReason(p.player_id),
+                  onPointerDown: (e) => {
+                    if (immutableReason(p.player_id)) {
+                      setRefused({
+                        player_id: p.player_id,
+                        reason: closed
+                          ? closedReason
+                          : 'Il suo posto in panchina è fissato: la sua partita è iniziata.',
+                      });
+                      return;
+                    }
+                    // La presa resta a questo elemento anche se il dito esce dai
+                    // suoi confini, che durante un trascinamento è la norma.
+                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                    setDragId(p.player_id);
+                    setDragPreview(benchIds);
+                  },
+                }}
               />
             ))}
             {bench.length === 0 ? <div className="py-2 text-sm text-slate-400">Panchina vuota.</div> : null}
@@ -788,6 +897,8 @@ function RosterRow({
   canDown,
   onMoveUp,
   onMoveDown,
+  dragHandle,
+  rowRef,
 }: {
   p: TeamLineupPlayer;
   isStarter: boolean;
@@ -810,9 +921,45 @@ function RosterRow({
   canDown?: boolean;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  /** La presa per trascinare la riga. Assente = riga non trascinabile (un
+   *  titolare, o un panchinaro il cui posto è fissato). */
+  dragHandle?: {
+    onPointerDown: (e: React.PointerEvent) => void;
+    dragging: boolean;
+    disabled: boolean;
+    reason?: string | null;
+  };
+  rowRef?: (el: HTMLElement | null) => void;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-2 py-2 ${selected ? 'bg-slate-50' : ''}`}>
+    <div
+      ref={rowRef}
+      className={clsx(
+        'flex items-center justify-between gap-2 py-2',
+        selected && 'bg-slate-50',
+        // La riga che sta sotto il dito: alzata dal foglio, così si vede che è in
+        // mano e non semplicemente selezionata.
+        dragHandle?.dragging && 'rounded-lg bg-white shadow-md ring-1 ring-slate-300',
+      )}
+    >
+      {dragHandle ? (
+        <button
+          type="button"
+          aria-label={dragHandle.disabled ? 'Posto fissato' : 'Trascina per cambiare ordine'}
+          title={dragHandle.disabled ? dragHandle.reason ?? 'Posto fissato' : 'Trascina per cambiare ordine'}
+          disabled={dragHandle.disabled}
+          onPointerDown={dragHandle.onPointerDown}
+          // `touch-none`: senza, il dito che scende trascina la PAGINA e la riga
+          // resta ferma — il gesto viene mangiato dallo scroll prima di arrivare
+          // qui.
+          className={clsx(
+            'shrink-0 touch-none select-none px-1 text-base leading-none',
+            dragHandle.disabled ? 'cursor-not-allowed text-slate-300' : 'cursor-grab text-slate-400 active:cursor-grabbing',
+          )}
+        >
+          ⠿
+        </button>
+      ) : null}
       <button onClick={onSelect} className="flex min-w-0 items-center gap-2 text-left">
         {order != null ? (
           <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-400">{order}</span>
@@ -1077,6 +1224,33 @@ function PitchLineup({
   );
 }
 
+/** Il campo si gira in verticale quando lo schermo è stretto.
+ *
+ *  Un campo orizzontale dentro un telefono è largo 360 pixel e alto 260: le linee
+ *  si schiacciano, undici pallini col nome sotto si accavallano, e la profondità
+ *  — che è l'asse che conta, dalla propria porta all'altra — è quello che rimane
+ *  senza spazio. In verticale lo spazio va dove serve, ed è anche il verso in cui
+ *  ogni fantacalcio disegna una formazione.
+ *
+ *  640px è la soglia `sm` di Tailwind, la stessa che il resto della pagina usa
+ *  per decidere cosa è un telefono: due soglie diverse sarebbero due idee diverse
+ *  di piccolo, e si vedrebbe nel punto in cui una cambia e l'altra no. */
+function useVerticalPitch(): boolean {
+  const query = '(max-width: 639px)';
+  const [vertical, setVertical] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(query);
+    const onChange = (e: MediaQueryListEvent) => setVertical(e.matches);
+    setVertical(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return vertical;
+}
+
 // The pitch itself: markings, the selected player's influence zones, and the dots.
 // Shared by the spatial (aura) and the regular-formation (classic) layouts.
 function PitchCanvas({
@@ -1094,14 +1268,53 @@ function PitchCanvas({
   footprint: Record<string, number> | null;
 }) {
   const selMax = footprint ? Math.max(0.0001, ...Object.values(footprint)) : 1;
+  const vertical = useVerticalPitch();
+
+  /** Una posizione del campo ORIZZONTALE, messa dove va.
+   *
+   *  Tutto il resto della pagina ragiona in orizzontale — `left` è la profondità
+   *  dalla propria porta, `top` è l'ampiezza — e continua a farlo: le linee di
+   *  reparto, lo scostamento per zona, la spinta che separa i pallini vicini sono
+   *  già scritti e provati così. Girare il campo è una faccenda di DISEGNO, e
+   *  vive tutta qui dentro: gli assi si scambiano, e la profondità si inverte
+   *  perché in verticale la propria porta sta in basso, come su ogni schema di
+   *  formazione mai stampato. */
+  const place = (left: number, top: number) =>
+    vertical ? { left: `${top}%`, top: `${100 - left}%` } : { left: `${left}%`, top: `${top}%` };
+
   return (
-    <div className="relative mt-3 aspect-[7/5] w-full overflow-hidden rounded-xl border border-green-700/40 bg-gradient-to-r from-green-600 to-green-500 shadow-inner">
+    <div
+      className={clsx(
+        'relative mt-3 w-full overflow-hidden rounded-xl border border-green-700/40 shadow-inner',
+        vertical
+          ? 'aspect-[5/7] bg-gradient-to-t from-green-600 to-green-500'
+          : 'aspect-[7/5] bg-gradient-to-r from-green-600 to-green-500',
+      )}
+    >
       {/* pitch markings */}
       <div className="pointer-events-none absolute inset-2 rounded border border-white/40" />
-      <div className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-white/40" />
+      {/* La linea di metà campo taglia la LUNGHEZZA, quindi gira col campo. */}
+      <div
+        className={clsx(
+          'pointer-events-none absolute bg-white/40',
+          vertical ? 'inset-x-2 top-1/2 h-px -translate-y-1/2' : 'inset-y-2 left-1/2 w-px -translate-x-1/2',
+        )}
+      />
       <div className="pointer-events-none absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/40" />
-      <div className="pointer-events-none absolute left-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/40" />
-      <div className="pointer-events-none absolute right-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/40" />
+      {/* Le due aree stanno ai capi della lunghezza: ai lati da orizzontale, sopra
+          e sotto da verticale. */}
+      <div
+        className={clsx(
+          'pointer-events-none absolute border border-white/40',
+          vertical ? 'bottom-2 left-1/2 h-12 w-24 -translate-x-1/2' : 'left-2 top-1/2 h-24 w-12 -translate-y-1/2',
+        )}
+      />
+      <div
+        className={clsx(
+          'pointer-events-none absolute border border-white/40',
+          vertical ? 'left-1/2 top-2 h-12 w-24 -translate-x-1/2' : 'right-2 top-1/2 h-24 w-12 -translate-y-1/2',
+        )}
+      />
       {/* predicted influence zones of the selected player */}
       {footprint
         ? Object.entries(footprint).map(([z, share]) => {
@@ -1110,15 +1323,18 @@ function PitchCanvas({
             const c = Number(m[1]);
             const r = Number(m[2]);
             const intensity = share / selMax;
+            // La cella occupa un quinto della lunghezza e un quarto della
+            // larghezza: girando il campo si scambiano anche quelle, e la colonna
+            // si conta dall'altro capo (`4 - c`) perché la profondità si inverte.
+            const box = vertical
+              ? { left: `${(r / 4) * 100}%`, top: `${((4 - c) / 5) * 100}%`, width: '25%', height: '20%' }
+              : { left: `${(c / 5) * 100}%`, top: `${(r / 4) * 100}%`, width: '20%', height: '25%' };
             return (
               <div
                 key={z}
                 className="pointer-events-none absolute border border-yellow-100/30"
                 style={{
-                  left: `${(c / 5) * 100}%`,
-                  top: `${(r / 4) * 100}%`,
-                  width: '20%',
-                  height: '25%',
+                  ...box,
                   // high-contrast yellow on the green pitch (role colours like the
                   // midfielders' green would vanish into the turf)
                   backgroundColor: `rgba(250,204,21,${(0.25 + 0.6 * intensity).toFixed(3)})`,
@@ -1135,7 +1351,7 @@ function PitchCanvas({
           <div
             key={`hole-${d.role}-${d.top}`}
             className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
-            style={{ left: `${d.left}%`, top: `${d.top}%` }}
+            style={place(d.left, d.top)}
             title={`Manca un ${ROLE_WORD[d.role]}`}
           >
             <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-dashed border-white/80 bg-white/15 text-[9px] font-bold text-white">
@@ -1158,7 +1374,7 @@ function PitchCanvas({
           key={p.player_id}
           onClick={() => onSelect(p.player_id)}
           className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
-          style={{ left: `${left}%`, top: `${top}%` }}
+          style={place(left, top)}
           title={p.name}
         >
           <span
