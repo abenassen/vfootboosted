@@ -30,7 +30,9 @@ from django.utils import timezone as djtz
 
 from realdata.models import Match
 from realdata.services import live_ingest
-from realdata.services.match_scheduler import candidate_matches, plan_tick
+from realdata.services.match_scheduler import (
+    candidate_matches, clock_drift, human_gap, plan_tick,
+)
 
 
 class Command(BaseCommand):
@@ -67,6 +69,18 @@ class Command(BaseCommand):
         self.stdout.write(self.style.NOTICE(
             f"tick @ {now.isoformat()} [{mode}] — "
             f"{len(matches)} candidate matches — {plan.summary()}"))
+
+        # Said BEFORE the plan is acted on and whatever the plan turns out to be:
+        # a clock behind its data usually empties the plan, but a half-drifted
+        # database still acts on the part that is due, and that is worth flagging
+        # too. See ``clock_drift`` for why the symptom is otherwise unreadable.
+        drift = clock_drift(now)
+        if drift is not None:
+            self.stdout.write(self.style.WARNING(
+                f"  la banca dati e' AVANTI all'orologio di {human_gap(drift)}: "
+                f"porta timbri da un istante che deve ancora venire, e finche' "
+                f"l'orologio non li avra' raggiunti nessun round sara' dovuto. "
+                f"Se e' una simulazione: ./vfoot-sim reset|build <scenario>."))
 
         if plan.is_empty():
             self.stdout.write("  nothing due")

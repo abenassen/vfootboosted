@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from django.conf import settings
+from django.db.models import Max
 
 from realdata.models import Match
 
@@ -170,3 +171,53 @@ def candidate_matches():
             .exclude(competition_season__external_id="")
             .select_related("competition_season", "home_team__team",
                             "away_team__team"))
+
+
+# How far a stamp may sit ahead of the clock before it means something. Nothing
+# legitimate produces even a second of it — the tick reads its ``now`` once and
+# writes that same value — so the tolerance exists only to keep an NTP correction
+# from crying wolf, and the real thing (hours) is never inside it.
+CLOCK_DRIFT_TOLERANCE = timedelta(minutes=2)
+
+
+def clock_drift(now: datetime) -> timedelta | None:
+    """How far the DATA sits ahead of ``now``, or None when it does not.
+
+    Every stamp on a match records something OBSERVED — a round made, an import
+    done, a full-time seen — and nothing is observed in the future. So a stamp
+    later than ``now`` never means the data ran ahead; it means the CLOCK went
+    back, which off a rig takes a system clock jumping and on one takes a plain
+    ``./vfoot-sim <scenario>`` started over a database that a previous run had
+    already played further on.
+
+    It earns a guard because the failure wears the face of health. A live match
+    keeps its place in the live window — ``_in_live_window`` lets any LIVE match
+    through, window or no window — but the cadence gate under it compares
+    ``now - data_checked_at`` against the interval, and a negative gap clears no
+    interval. So the tick reports "nothing due" over a full slate of matches, in
+    the very words it uses on a Tuesday morning when it is right, and goes on
+    reporting it for as many hours as the clock was moved back. Nothing else in
+    the log differs: candidates are counted, the round is scheduled, the loop
+    runs. The only readable trace is the one this function makes.
+
+    Reported, never corrected. Ignoring a future stamp would let a rewound clock
+    re-play a match over data it already wrote, which is the same wrong state
+    arrived at quietly — and the fix (``reset``, ``build``, or a clock put back)
+    is a decision about which of the two is the real one to keep.
+    """
+    stamps = Match.objects.aggregate(
+        checked=Max("data_checked_at"),
+        imported=Max("data_imported_at"),
+        finished=Max("finished_at"))
+    latest = max((v for v in stamps.values() if v is not None), default=None)
+    if latest is None or latest - now <= CLOCK_DRIFT_TOLERANCE:
+        return None
+    return latest - now
+
+
+def human_gap(gap: timedelta) -> str:
+    """Hours and minutes, for a gap a person has to read. One wording, shared by
+    the tick's log and the rig's start-up: the two report the same condition and
+    should not describe it in two different units."""
+    hours, minutes = divmod(int(gap.total_seconds()) // 60, 60)
+    return f"{hours}h{minutes:02d}m" if hours else f"{minutes}m"

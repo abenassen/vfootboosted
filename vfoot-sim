@@ -237,6 +237,38 @@ save_snapshot() {
   say "istantanea $(du -h "$snap" 2>/dev/null | cut -f1)  ($snap)"
 }
 
+# --- l'orologio e i dati possono non parlare della stessa serata -----------
+# Un avvio semplice rimette l'OROLOGIO all'istante dello scenario e non tocca i
+# DATI: basta cambiare scenario, o riprendere la serata di ieri lasciata a meta',
+# perche' i due finiscano a ore diverse. Nel verso "dati indietro" non succede
+# niente di male -- il tick recupera. Nel verso opposto il sintomo e' MUTO: il cron
+# gira, riferisce "nothing due" e la pagina non si muove, perche' la cadenza
+# confronta `now - data_checked_at` con l'intervallo e quella differenza e'
+# NEGATIVA. Sono le stesse parole che il tick usa quando ha ragione, e da fuori non
+# si distinguono: e' costato mezz'ora passata a guardare una pagina ferma con tutto
+# acceso e in ordine. Quindi lo si dice qui, all'avvio, prima che si guardi.
+#
+# L'istante si passa dentro come VFOOT_FAKE_NOW, cioe' con la stessa manopola che
+# sposta l'orologio di tutto il resto: il processo che controlla guarda esattamente
+# da dove guarda il server, e non c'e' un secondo modo di dire "adesso" che possa
+# divergere dal primo.
+check_drift() { # [istante ISO; vuoto = quello gia' esportato] [scenario da suggerire]
+  local gap what="${2:-$SCENARIO}"
+  gap=$(VFOOT_FAKE_NOW="${1:-${VFOOT_FAKE_NOW:-}}" "$PY" "$MANAGE" shell -c \
+    "from django.utils import timezone
+from realdata.services.match_scheduler import clock_drift, human_gap
+d = clock_drift(timezone.now())
+print(human_gap(d) if d else '')" 2>/dev/null | tail -1)
+  [ -n "$gap" ] || return 0
+  printf "\n%sATTENZIONE: la banca dati e' AVANTI all'orologio di %s.%s\n" "$ERR" "$gap" "$X"
+  printf "  Un timbro registra qualcosa di OSSERVATO, e nel futuro non si osserva\n"
+  printf "  niente: questo scenario e' ripartito su dati che una simulazione\n"
+  printf "  precedente aveva gia' portato piu' avanti. Il tick dira' \"nothing due\"\n"
+  printf "  e la pagina restera' ferma per tutte le %s che mancano.\n" "$gap"
+  printf "%s      ./vfoot-sim reset %s   ripristina l'istantanea (secondi)%s\n" "$DIM" "$what" "$X"
+  printf "%s      ./vfoot-sim build %s   ricostruisce da zero (minuti)%s\n" "$DIM" "$what" "$X"
+}
+
 # --- avvio ----------------------------------------------------------------
 export_sim_env() {
   # L'istante: quello passato con --at, altrimenti quello dello scenario, letto
@@ -332,6 +364,11 @@ cmd_start() {
   start_frontend
   printf '\n%sl orologio CAMMINA: da qui in poi il tempo passa come quello vero.%s\n' "$DIM" "$X"
   printf '%sper fermare tutto: ./vfoot-sim stop%s\n' "$DIM" "$X"
+  # Per ULTIMO, e non prima del backend: e' l'unica riga che chiede di fare
+  # qualcosa, e sopra a mezza pagina di avvii sarebbe la prima a scorrere via.
+  # Dopo un `build` o un `reset` non trova mai niente, e i due secondi che costa
+  # sono il prezzo di non avere due strade diverse per accendere.
+  check_drift
 }
 
 cmd_build() {
@@ -402,6 +439,13 @@ except Exception as exc:
 EOF
 )
     if [ -n "$now" ]; then say "SIMULATO  $now"; else say "reale     (nessuna intestazione X-Vfoot-Now)"; fi
+    # Guardato dall'istante del SERVER, non da quello che questo processo si
+    # esporterebbe: `status` puo' essere chiamato senza argomenti mentre gira un
+    # altro scenario, e il confronto va fatto con l'orologio vero della cosa
+    # accesa. Solo se e' simulato: su un orologio reale una stagione del 2027 e'
+    # tutta nel futuro, e il controllo suonerebbe l'allarme su ogni riga.
+    # Lo scenario non si sa quale sia -- lo si lascia da riempire.
+    [ -n "$now" ] && check_drift "$now" "<scenario>"
   else
     say "n/d       backend fermo"
   fi

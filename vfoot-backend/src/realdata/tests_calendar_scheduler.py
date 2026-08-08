@@ -24,6 +24,9 @@ from realdata.services.match_scheduler import (
     FINAL_CHECK_AFTER,
     FINAL_CONFIRM_AFTER,
     LIVE_POLL_WINDOW,
+    _in_live_window,
+    clock_drift,
+    human_gap,
     plan_tick,
 )
 
@@ -250,8 +253,11 @@ class SyncCalendarTests(TestCase):
                          Match.STATUS_POSTPONED)
 
 
-class TickCommandTests(TestCase):
-    """End-to-end: the tick command applies the state machine it owns."""
+class _TickDBTests(TestCase):
+    """The fixtures a DB-backed tick test needs: one season, two teams, a match
+    factory and a one-line tick. Kept apart from the tests that use them so a second
+    class can inherit the fixtures without also inheriting — and re-running — the
+    assertions."""
 
     def setUp(self):
         comp = Competition.objects.create(
@@ -275,6 +281,10 @@ class TickCommandTests(TestCase):
 
     def _tick(self, iso):
         call_command("tick", "--now", iso, stdout=StringIO())
+
+
+class TickCommandTests(_TickDBTests):
+    """End-to-end: the tick command applies the state machine it owns."""
 
     def test_full_finalization_lifecycle(self):
         # This asserts the tick's STATE MACHINE (stamp FT, +15m/+1h), so the ingest
@@ -307,6 +317,71 @@ class TickCommandTests(TestCase):
                      stdout=StringIO())
         m.refresh_from_db()
         self.assertIsNone(m.finished_at)
+
+
+class ClockBehindTheDataTests(_TickDBTests):
+    """A clock moved BACK under data already written — a rig started on one scenario
+    over the database of another, which is the only way to produce it here and was
+    the way it actually happened.
+
+    Everything about the tick keeps working: the matches are candidates, they are in
+    the live window, the loop runs. Only the cadence gate quietly never opens, and
+    the log says the two words it says when there is honestly nothing to do."""
+
+    LIVE_AT = datetime(2026, 8, 22, 20, 45, tzinfo=UTC)
+
+    def _stranded(self):
+        """Live, and stamped three hours after the clock we will tick at."""
+        return self._match(status=Match.STATUS_LIVE, kickoff=self.LIVE_AT,
+                           data_checked_at=self.LIVE_AT + timedelta(minutes=44))
+
+    def test_a_future_stamp_gates_the_round_out_without_leaving_the_window(self):
+        m = self._stranded()
+        now = self.LIVE_AT - timedelta(hours=3)
+        plan = plan_tick(now, [m])
+        self.assertTrue(_in_live_window(m, now))   # still live by every other test
+        self.assertEqual(plan.live_round, [])      # ...and yet nothing is due
+
+    def test_the_drift_is_reported_as_the_gap_to_the_furthest_stamp(self):
+        self._stranded()
+        now = self.LIVE_AT - timedelta(hours=3)
+        self.assertEqual(clock_drift(now), timedelta(hours=3, minutes=44))
+
+    def test_the_tick_says_so_instead_of_only_nothing_due(self):
+        self._stranded()
+        out = StringIO()
+        call_command("tick", "--now",
+                     (self.LIVE_AT - timedelta(hours=3)).isoformat(),
+                     "--dry-run", stdout=out)
+        written = out.getvalue()
+        self.assertIn("AVANTI all'orologio di 3h44m", written)
+        self.assertIn("nothing due", written)      # the old words are still there
+
+    def test_a_clock_merely_ahead_of_its_data_is_not_drift(self):
+        """The ordinary case, and the one a guard must not cry over: data behind the
+        clock is every match ever played."""
+        self._match(status=Match.STATUS_FINISHED, kickoff=self.LIVE_AT,
+                    data_checked_at=self.LIVE_AT)
+        self.assertIsNone(clock_drift(self.LIVE_AT + timedelta(hours=3)))
+
+    def test_a_stamp_a_few_seconds_ahead_is_not_worth_saying(self):
+        """The tick writes the ``now`` it read, so a stamp equal to the clock is
+        normal and one a hair past it is a corrected clock, not a rewound one."""
+        self._match(status=Match.STATUS_LIVE, kickoff=self.LIVE_AT,
+                    data_checked_at=self.LIVE_AT + timedelta(seconds=30))
+        self.assertIsNone(clock_drift(self.LIVE_AT))
+
+    def test_an_empty_database_has_no_opinion(self):
+        self.assertIsNone(clock_drift(self.LIVE_AT))
+
+
+class HumanGapTests(SimpleTestCase):
+    def test_reads_as_hours_and_minutes(self):
+        self.assertEqual(human_gap(timedelta(hours=2, minutes=51, seconds=18)),
+                         "2h51m")
+
+    def test_under_an_hour_drops_the_hours(self):
+        self.assertEqual(human_gap(timedelta(minutes=7)), "7m")
 
 
 class LiveRoundCadenceTests(SimpleTestCase):

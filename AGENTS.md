@@ -480,6 +480,21 @@ Agents must NEVER:
     explains each choice where it makes it. Not knowing it existed once cost an
     hour of measuring production's cadence and reporting it as the rig's, on an
     environment that could not have shown a WebSocket update at all.
+-   **A plain start moves the CLOCK and not the DATA, and only one of the two
+    directions is safe.** Data behind the clock the tick simply catches up on.
+    Data AHEAD of it — a `./vfoot-sim <scenario>` over a database a previous run
+    had already played further, e.g. the default `g22-live` on top of last
+    night's `napoli-inter` — strands the whole slate: a live match stays in the
+    live window (`_in_live_window` lets any LIVE match through) but the cadence
+    gate compares `now - data_checked_at` against the interval and a negative gap
+    never clears it, so the tick reports `nothing due` in the same words it uses
+    when it is right, for as many hours as the clock went back. Nothing else in
+    the log differs. `match_scheduler.clock_drift` is the guard: the tick prints
+    it, and `./vfoot-sim` checks it at start-up and in `status` (observing from
+    the SERVER's instant, so `status` on a rig it did not launch still compares
+    the right two clocks). It reports and never corrects — quietly ignoring a
+    future stamp would let a rewound clock re-play a match over data it already
+    wrote. The fix is `reset` (seconds, from the snapshot) or `build` (minutes).
 -   Manual equivalents, if you need them:
     -   `cd vfoot-backend/src && ../.venv/bin/python manage.py runserver localhost:8000 --noreload`
     -   `cd vfoot-frontend && npm run dev -- --host localhost --port 5173`
