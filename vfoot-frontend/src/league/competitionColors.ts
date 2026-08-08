@@ -3,6 +3,28 @@
 // (Partite, Risultati), the accent strip and the switcher all share the SAME colour
 // as the current competition — and it differs from the other competitions.
 //
+// DUE VOCABOLARI DI COLORE, E NON DEVONO TOCCARSI
+// -----------------------------------------------
+// Nell'app il colore dice due cose diverse. Qui dice IDENTITÀ — quale
+// competizione — e non ha significato: è un'etichetta, e potrebbe essere
+// qualunque tinta. Altrove dice STATO, e allora il significato è tutto:
+//
+//     ambra    attenzione, e ciò che è in evidenza (un avviso, un trofeo)
+//     emerald  fatto, riuscito, da concludere adesso
+//     violet   si sta giocando: un numero che si muove ancora
+//     rose     è andato storto, o non si sbloccherà
+//
+// Questa palette conteneva ambra, emerald, violet e rose, e quindi la terza
+// competizione di una lega si presentava col colore degli avvisi e la seconda con
+// quello delle cose fatte. Non è un dettaglio estetico: chi guarda impara che
+// l'ambra vuol dire "guarda qui", e poi la ritrova addosso a un torneo che non
+// sta chiedendo niente. È già successo con un banner d'avviso e con l'albo d'oro.
+//
+// Le tinte qui sotto sono scelte per NON appartenere a quel vocabolario, e le
+// prime tre — quelle che una lega usa davvero — sono anche le più distinte fra
+// loro: blu, magenta, verde-azzurro. Aggiungendone una, la prova è doppia: che si
+// distingua dalle altre competizioni, e che non somigli a uno dei quattro stati.
+//
 // Tailwind purges unseen class names, so every class string is written out literally
 // here (this file is scanned by the content globs).
 export interface CompColor {
@@ -27,22 +49,16 @@ export const COMP_COLORS: CompColor[] = [
     dot: 'bg-indigo-500',
   },
   {
-    bg700: 'bg-emerald-700', text700: 'text-emerald-700', text400: 'text-emerald-400',
-    hover50: 'hover:bg-emerald-50', border600: 'border-emerald-600', border300: 'border-emerald-300',
-    bg50: 'bg-emerald-50', text900: 'text-emerald-900', text800: 'text-emerald-800', text500: 'text-emerald-500',
-    dot: 'bg-emerald-500',
+    bg700: 'bg-fuchsia-700', text700: 'text-fuchsia-700', text400: 'text-fuchsia-400',
+    hover50: 'hover:bg-fuchsia-50', border600: 'border-fuchsia-600', border300: 'border-fuchsia-300',
+    bg50: 'bg-fuchsia-50', text900: 'text-fuchsia-900', text800: 'text-fuchsia-800', text500: 'text-fuchsia-500',
+    dot: 'bg-fuchsia-500',
   },
   {
-    bg700: 'bg-amber-600', text700: 'text-amber-700', text400: 'text-amber-400',
-    hover50: 'hover:bg-amber-50', border600: 'border-amber-500', border300: 'border-amber-300',
-    bg50: 'bg-amber-50', text900: 'text-amber-900', text800: 'text-amber-800', text500: 'text-amber-500',
-    dot: 'bg-amber-500',
-  },
-  {
-    bg700: 'bg-rose-700', text700: 'text-rose-700', text400: 'text-rose-400',
-    hover50: 'hover:bg-rose-50', border600: 'border-rose-600', border300: 'border-rose-300',
-    bg50: 'bg-rose-50', text900: 'text-rose-900', text800: 'text-rose-800', text500: 'text-rose-500',
-    dot: 'bg-rose-500',
+    bg700: 'bg-teal-700', text700: 'text-teal-700', text400: 'text-teal-400',
+    hover50: 'hover:bg-teal-50', border600: 'border-teal-600', border300: 'border-teal-300',
+    bg50: 'bg-teal-50', text900: 'text-teal-900', text800: 'text-teal-800', text500: 'text-teal-500',
+    dot: 'bg-teal-500',
   },
   {
     bg700: 'bg-sky-700', text700: 'text-sky-700', text400: 'text-sky-400',
@@ -51,10 +67,19 @@ export const COMP_COLORS: CompColor[] = [
     dot: 'bg-sky-500',
   },
   {
-    bg700: 'bg-violet-700', text700: 'text-violet-700', text400: 'text-violet-400',
-    hover50: 'hover:bg-violet-50', border600: 'border-violet-600', border300: 'border-violet-300',
-    bg50: 'bg-violet-50', text900: 'text-violet-900', text800: 'text-violet-800', text500: 'text-violet-500',
-    dot: 'bg-violet-500',
+    bg700: 'bg-cyan-700', text700: 'text-cyan-700', text400: 'text-cyan-400',
+    hover50: 'hover:bg-cyan-50', border600: 'border-cyan-600', border300: 'border-cyan-300',
+    bg50: 'bg-cyan-50', text900: 'text-cyan-900', text800: 'text-cyan-800', text500: 'text-cyan-500',
+    dot: 'bg-cyan-500',
+  },
+  {
+    // Il grigio caldo chiude il giro: non è una tinta identitaria forte, ma una
+    // sesta competizione è rara e un colore neutro è meglio di uno che finge di
+    // dire qualcosa.
+    bg700: 'bg-stone-700', text700: 'text-stone-700', text400: 'text-stone-400',
+    hover50: 'hover:bg-stone-50', border600: 'border-stone-600', border300: 'border-stone-300',
+    bg50: 'bg-stone-50', text900: 'text-stone-900', text800: 'text-stone-800', text500: 'text-stone-500',
+    dot: 'bg-stone-500',
   },
 ];
 
