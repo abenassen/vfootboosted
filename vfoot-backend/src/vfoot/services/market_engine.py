@@ -41,7 +41,7 @@ from vfoot.models import (
     MarketSession,
 )
 from vfoot.services.auction_engine import ROLES, league_role_map, team_budgets
-from vfoot.services import league_notifications, lineup_repair, matchday_state
+from vfoot.services import currency, league_notifications, lineup_repair, matchday_state
 
 # How long a leading offer stands before it is promoted to "accepted" absent a
 # higher rebid. A rebid mints a fresh leading offer, restarting the clock.
@@ -252,7 +252,7 @@ def check_offer(
     max_amount = st.max_amount_releasing(recovery)
 
     if amount < 1:
-        return OfferCheck(False, "Un'offerta vale almeno 1 credito.",
+        return OfferCheck(False, f"Un'offerta vale almeno {currency.amount(1)}.",
                           max_amount=max_amount, recovery=recovery, role=target_role)
 
     leading = leading_offer_for(session, target_player_id)
@@ -266,8 +266,8 @@ def check_offer(
     if amount > max_amount:
         return OfferCheck(
             False,
-            f"Crediti insufficienti: al massimo {max_amount} "
-            f"({st.available()} disponibili + {recovery} di recupero dallo svincolo).",
+            f"Non hai abbastanza {currency.NAME_PLURAL}: al massimo {currency.price(max_amount)} "
+            f"({currency.price(st.available())} disponibili + {currency.price(recovery)} di recupero dallo svincolo).",
             max_amount=max_amount, recovery=recovery, role=target_role)
 
     return OfferCheck(True, "", max_amount=max_amount, recovery=recovery, role=target_role)
@@ -437,8 +437,8 @@ def apply_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
     recovery = recovery_for(session, release_slot.purchase_price)
     if st is not None and offer.amount > st.max_amount_releasing(recovery):
         raise OfferApplyError(
-            f"Crediti insufficienti al momento della validazione "
-            f"(max {st.max_amount_releasing(recovery)}).")
+            f"{currency.NAME_PLURAL.capitalize()} insufficienti al momento della validazione "
+            f"(max {currency.price(st.max_amount_releasing(recovery))}).")
 
     release_slot.released_at = now
     release_slot.save(update_fields=["released_at"])

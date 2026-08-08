@@ -1,6 +1,7 @@
 // Shared presentation helpers for the repair market, used by the manager-facing
 // Mercato page and the admin Mercato panel in Gestione lega.
 import type { MarketRecoveryMode } from '../types/market';
+import { amount } from './currency';
 
 export const ROLE_LABEL: Record<string, string> = {
   POR: 'Portieri', DIF: 'Difensori', CEN: 'Centrocampisti', ATT: 'Attaccanti',
@@ -8,14 +9,14 @@ export const ROLE_LABEL: Record<string, string> = {
 export const ROLE_ORDER = ['POR', 'DIF', 'CEN', 'ATT'];
 
 const RECOVERY_LABEL: Record<MarketRecoveryMode, string> = {
-  fixed: 'credito fisso',
+  fixed: 'cifra fissa',
   frac30: '30% del prezzo pagato',
   frac50: '50% del prezzo pagato',
   frac75: '75% del prezzo pagato',
 };
 
 export function recoveryText(mode: MarketRecoveryMode, fixed: number): string {
-  return mode === 'fixed' ? `${fixed} credito${fixed === 1 ? '' : 'i'} fisso` : RECOVERY_LABEL[mode];
+  return mode === 'fixed' ? `${amount(fixed)} fissi` : RECOVERY_LABEL[mode];
 }
 
 // Sempre fino ai secondi: il tick e' di 1s, e senza il campo che scorre un

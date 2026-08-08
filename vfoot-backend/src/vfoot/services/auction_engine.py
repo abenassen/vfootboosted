@@ -27,6 +27,7 @@ from dataclasses import dataclass
 
 from realdata.models import Player
 from vfoot.models import FantasyLeague, FantasyRosterSlot, FantasyTeam, LeaguePlayerRole
+from vfoot.services import currency
 
 ROLES = ("POR", "DIF", "CEN", "ATT")
 
@@ -136,7 +137,7 @@ def check_purchase(
     if role not in ROLES:
         return LegalityResult(False, f"Ruolo sconosciuto: {role}.")
     if amount < 1:
-        return LegalityResult(False, "Un giocatore va pagato almeno 1 credito.")
+        return LegalityResult(False, f"Un giocatore va pagato almeno {currency.amount(1)}.")
 
     budgets = budgets if budgets is not None else team_budgets(league)
     tb = budgets.get(team_id)
@@ -152,7 +153,7 @@ def check_purchase(
     if amount > max_bid:
         return LegalityResult(
             False,
-            f"Offerta troppo alta: al massimo {max_bid} crediti "
+            f"Offerta troppo alta: al massimo {currency.price(max_bid)} "
             f"(devi lasciarne almeno 1 per ciascuno degli altri "
             f"{tb.slots_remaining_total - 1} slot da riempire).",
             max_bid,

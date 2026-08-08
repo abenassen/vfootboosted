@@ -9,6 +9,7 @@ import {
 } from '../api/backend';
 import { Badge, Button, Card, SectionTitle } from './ui';
 import { OfferDeadline } from './OfferDeadline';
+import { CURRENCY_NAME_PLURAL } from '../utils/currency';
 import {
   SESSION_LABEL,
   SESSION_TONE,
@@ -245,9 +246,9 @@ function CreateSessionCard({
           <input className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="block text-sm">
-          <span className="text-slate-600">Recupero crediti dallo svincolo</span>
+          <span className="text-slate-600">Recupero {CURRENCY_NAME_PLURAL} dallo svincolo</span>
           <select className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" value={mode} onChange={(e) => setMode(e.target.value as MarketRecoveryMode)}>
-            <option value="fixed">Credito fisso</option>
+            <option value="fixed">Cifra fissa</option>
             <option value="frac30">30% del prezzo pagato (arrotondato per eccesso)</option>
             <option value="frac50">50% del prezzo pagato (arrotondato per eccesso)</option>
             <option value="frac75">75% del prezzo pagato (arrotondato per eccesso)</option>
@@ -255,7 +256,7 @@ function CreateSessionCard({
         </label>
         {mode === 'fixed' && (
           <label className="block text-sm">
-            <span className="text-slate-600">Crediti fissi recuperati</span>
+            <span className="text-slate-600">Quanti {CURRENCY_NAME_PLURAL} si recuperano</span>
             <input type="number" min={0} className="mt-1 w-32 rounded-xl border border-slate-200 px-3 py-2 text-sm" value={fixed} onChange={(e) => setFixed(Math.max(0, Number(e.target.value)))} />
           </label>
         )}

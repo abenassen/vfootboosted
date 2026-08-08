@@ -56,6 +56,8 @@ export default function LeagueAdminPage() {
   const isAdmin = selectedLeague?.role === 'admin';
 
   const [activeTab, setActiveTab] = useState<AdminTab>('user');
+  // L'id da portare in vista appena esiste: vedi l'effetto poco sotto.
+  const [pendingReveal, setPendingReveal] = useState<string | null>(null);
   const [leagueTab, setLeagueTab] = useState<LeagueTab>('competitions');
 
   const [league, setLeague] = useState<LeagueDetail | null>(null);
@@ -135,6 +137,36 @@ export default function LeagueAdminPage() {
    *  Switching a sub-tab and scrolling in the same handler scrolls to something
    *  that is not in the DOM yet; two frames is what it takes for React to commit
    *  and lay out the new panel. */
+  /** Come sopra, ma per un elemento che ANCORA NON C'È: si aspetta che nasca.
+   *
+   *  È il caso del link che arriva da un'altra pagina. Il pannello sta dietro ai
+   *  dati della lega, cioè a una chiamata di rete, e chiedere lo scroll subito
+   *  significa cercare un id che nel DOM non esiste: nessun errore, nessuno
+   *  scroll, e da fuori sembra che il link non faccia niente. Si guarda a ogni
+   *  frame finché non compare, con un tetto di un paio di secondi perché un
+   *  elemento che non arriverà mai (lega senza permessi, chiamata fallita) non
+   *  lasci un ciclo acceso per sempre. */
+  useEffect(() => {
+    if (!pendingReveal) return;
+    let alive = true;
+    let tries = 0;
+    const look = () => {
+      if (!alive) return;
+      const el = document.getElementById(pendingReveal);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setPendingReveal(null);
+        return;
+      }
+      if (tries++ < 120) requestAnimationFrame(look);
+      else setPendingReveal(null);
+    };
+    requestAnimationFrame(look);
+    return () => {
+      alive = false;
+    };
+  }, [pendingReveal]);
+
   function revealAfterRender(elementId: string) {
     requestAnimationFrame(() =>
       requestAnimationFrame(() =>
@@ -180,6 +212,14 @@ export default function LeagueAdminPage() {
         .includes(tab as LeagueTab)) {
       setActiveTab('league');
       setLeagueTab(tab as LeagueTab);
+      // …E CI SI PORTA DAVANTI. La scheda giusta si apre in fondo a una pagina
+      // lunga, quindi «Gestisci sessione» atterrava in cima e la sessione da
+      // gestire restava fuori schermo: sembrava che il link avesse solo cambiato
+      // pagina. Non basta `revealAfterRender`, che aspetta due frame: arrivando
+      // da un altro indirizzo la scheda non esiste ancora — sta dietro a
+      // `league`, che è una chiamata di rete — e due frame dopo non è ancora
+      // nata. Qui si chiede lo scroll e ci pensa l'effetto sotto, quando compare.
+      setPendingReveal('vfoot-league-tabs');
     }
   }, [searchParams]);
 

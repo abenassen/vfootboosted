@@ -10,6 +10,14 @@ import {
 import { getActiveAuction } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { foldedMatch } from '../utils/text';
+// `amount` sotto alias: in questa pagina `amount` e' gia' lo stato del campo
+// offerta, e un import con lo stesso nome sarebbe ombreggiato a meta' file.
+import {
+  CURRENCY_NAME_PLURAL,
+  CURRENCY_SYMBOL,
+  amount as inWords,
+  price,
+} from '../utils/currency';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import { OfferDeadline } from '../components/OfferDeadline';
 import {
@@ -177,7 +185,7 @@ function NoSessionCard({ isAdmin, auction }: { isAdmin: boolean; auction: Active
       </div>
       <div className="mt-2 text-sm text-slate-500">
         {isAdmin
-          ? <>Apri una sessione dalla scheda <b>Mercato</b> in <Link to="/league-admin?tab=league" className="underline">Gestione lega</Link>.</>
+          ? <>Apri una sessione dalla scheda <b>Mercato</b> in <Link to="/league-admin?tab=market" className="underline">Gestione lega</Link>.</>
           : 'Quando l’admin apre una sessione potrai fare offerte sugli svincolati.'}
       </div>
     </Card>
@@ -217,15 +225,31 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
             </div>
           )}
           {data.my_budget && (
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-700">
-              <span>Crediti: <b>{data.my_budget.remaining}</b></span>
-              <span className="text-slate-500">impegnati offerte: {data.my_budget.reserved}</span>
-              <span>disponibili: <b>{data.my_budget.available}</b></span>
-            </div>
+            <>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-700">
+                <span>Hai <b>{inWords(data.my_budget.remaining)}</b></span>
+                <span className="text-slate-500">
+                  impegnati in offerte: {price(data.my_budget.reserved)}
+                </span>
+                <span>disponibili: <b>{price(data.my_budget.available)}</b></span>
+              </div>
+              {/* Dove si spende è l'unico posto in cui vale la pena presentare la
+                  moneta: qui la si vede per la prima volta, e da qui in poi il
+                  simbolo accanto ai numeri si spiega da sé. */}
+              <div className="mt-1 text-xs text-slate-500">
+                I crediti della lega si chiamano <b>{CURRENCY_NAME_PLURAL}</b> e si scrivono{' '}
+                <b className="font-mono">{CURRENCY_SYMBOL}</b> — <b className="font-mono">{price(25)}</b>{' '}
+                sono venticinque {CURRENCY_NAME_PLURAL}.
+              </div>
+            </>
           )}
         </div>
+        {/* Alla scheda MERCATO, non alla pagina: `tab=market` apre quella scheda e
+            la porta davanti agli occhi (vedi LeagueAdminPage). Prima portava a
+            `tab=league`, cioè in cima alle impostazioni della lega, con la
+            sessione da gestire due schermate più in basso. */}
         {isAdmin && (
-          <Link to="/league-admin?tab=league" className="text-xs text-slate-500 underline">Gestisci sessione →</Link>
+          <Link to="/league-admin?tab=market" className="text-xs text-slate-500 underline">Gestisci sessione →</Link>
         )}
       </div>
       {s.status === 'suspended' && (
@@ -307,7 +331,7 @@ function OfferPanel({
               <option value="">— scegli —</option>
               {releaseOptions.map((p) => (
                 <option key={p.player_id} value={p.player_id}>
-                  {p.name} (pagato {p.price} → recuperi {p.recovery})
+                  {p.name} (pagato {price(p.price)} → recuperi {price(p.recovery)})
                 </option>
               ))}
             </select>
@@ -317,7 +341,7 @@ function OfferPanel({
           </label>
           <div className="flex flex-wrap items-end gap-3">
             <label className="block text-sm">
-              <span className="text-slate-600">Offerta (crediti)</span>
+              <span className="text-slate-600">Offerta (in {CURRENCY_NAME_PLURAL})</span>
               <input type="number" min={minAmount} max={maxAmount}
                 className="mt-1 w-32 rounded-xl border border-slate-200 px-3 py-2 text-sm"
                 value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
