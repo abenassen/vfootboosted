@@ -5,6 +5,7 @@ import { getLeagueDetail } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { useLeagueContext } from '../league/LeagueContext';
 import type { LeagueTeam } from '../types/league';
+import { CURRENCY_NAME_PLURAL, amount, price } from '../utils/currency';
 import type { PlayerRole, MinutesLabel, TeamLineupContext, TeamLineupPlayer } from '../types/lineup';
 
 // The structured roster: grouped by role, a spending summary, and a clickable
@@ -49,7 +50,7 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
             {ROLES.filter((r) => budget.by_role[r]).map((r) => (
               <span key={r}>
-                {ROLE_NAME[r]}: <b className="text-slate-700">{budget.by_role[r]}</b>
+                {ROLE_NAME[r]}: <b className="text-slate-700">{price(budget.by_role[r])}</b>
               </span>
             ))}
           </div>
@@ -64,10 +65,22 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
             <div className="flex items-baseline justify-between">
               <SectionTitle>{ROLE_NAME[role]}</SectionTitle>
               <span className="text-xs text-slate-400">
-                {group.length} · {group.reduce((s, p) => s + p.price, 0)} crediti
+                {group.length} · {amount(group.reduce((s, p) => s + p.price, 0))}
               </span>
             </div>
-            <div className="mt-2 divide-y">
+            {/* L'intestazione delle colonne. Mancava, e il prezzo era una cifra
+                senza nome in mezzo alla riga: qui la colonna dice di che moneta
+                si parla una volta sola, in cima, invece di ripetere la parola
+                venticinque volte. Stesse larghezze della riga (w-20 / w-28), o
+                le etichette non starebbero sopra la loro colonna. */}
+            <div className="mt-2 flex items-center justify-between gap-3 border-b pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <span className="min-w-0">Giocatore</span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="w-20 text-right normal-case tracking-normal">{CURRENCY_NAME_PLURAL}</span>
+                <span className="hidden w-28 text-right sm:block">Impiego</span>
+              </span>
+            </div>
+            <div className="divide-y">
               {group.map((p) => (
                 <PlayerRow
                   key={p.player_id}
@@ -149,7 +162,10 @@ function Stat({ label, value, tone = 'slate' }: { label: string; value: number; 
   return (
     <div className="rounded-xl bg-slate-50 px-3 py-2 text-center">
       <div className="text-[10px] uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={`text-lg font-bold ${color}`}>{value}</div>
+      {/* Anche qui la moneta: erano tre numeri nudi sopra una colonna che
+          adesso dice «vfooties», e la domanda «vfooties anche questi?» non deve
+          nascere. */}
+      <div className={`text-lg font-bold tabular-nums ${color}`}>{price(value)}</div>
     </div>
   );
 }
@@ -170,7 +186,7 @@ function PlayerRow({ p, open, onToggle }: { p: TeamLineupPlayer; open: boolean; 
         {/* Fixed columns: the price sits in its own right-aligned slot so a missing
             usage badge (a newcomer with no history) never shifts it out of line. */}
         <div className="flex shrink-0 items-center gap-2">
-          <span className="w-12 text-right font-mono text-sm font-bold text-slate-700">€{p.price}</span>
+          <span className="w-20 text-right font-mono text-sm font-bold tabular-nums text-slate-700">{price(p.price)}</span>
           <span className="hidden w-28 text-right sm:block">
             <MinutesBadge label={p.minutes_label} />
           </span>
@@ -204,6 +220,18 @@ function PlayerDetail({ p }: { p: TeamLineupPlayer }) {
           <b className="text-slate-700">{p.next_match.opponent}</b>
         </div>
       ) : null}
+      {/* Che cosa vuol dire l'etichetta di QUESTO giocatore, per esteso. Sul
+          badge sta come titolo, ma un titolo lo vede solo chi ha un mouse e chi
+          sa che c'è: su un telefono non esiste. Qui la frase sta accanto ai
+          numeri da cui è ricavata — presenze e minuti medi — e si legge come la
+          loro conclusione. */}
+      {p.minutes_label !== 'unknown' ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-slate-200 pt-1.5 text-[11px] text-slate-500">
+          <MinutesBadge label={p.minutes_label} />
+          <span className="font-semibold text-slate-700">{MINUTES_MEANING[p.minutes_label]}</span>
+          <span>{recentUsage(p)}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -220,11 +248,44 @@ function Field({ label, value, hint }: { label: string; value: string; hint?: st
   );
 }
 
+/** Che cosa promette ciascun tag. Una frase, al presente, su cosa aspettarsi.
+ *
+ *  Non una regola: la regola («almeno il 60% delle giornate e 60 minuti medi»)
+ *  spiega come il numero è stato calcolato, e chi guarda una rosa non sta
+ *  chiedendo quello — sta chiedendo se schierarlo. I numeri veri li mostra la
+ *  riga sotto, che è la prova; questa è la conclusione. */
+const MINUTES_MEANING: Record<Exclude<MinutesLabel, 'unknown'>, string> = {
+  high: 'Gioca quasi sempre, e gioca tutta la partita.',
+  medium: 'Gioca spesso, ma non è detto che parta titolare.',
+  low: 'Gioca poco: rischio alto di ritrovarlo senza voto.',
+};
+
+/** La prova, coi numeri di QUESTO giocatore: «4 volte su 6, 71′ di media».
+ *
+ *  È il motivo per cui il tag ha cambiato base. Prima leggeva l'intera stagione e
+ *  a marzo un titolare fermo da due mesi restava «titolare abituale», perché le
+ *  ventidue partite di prima pesavano più delle ultime otto. Ora guarda le ultime
+ *  giornate, e siccome è una finestra breve conviene dire quale: senza, «gioca
+ *  quasi sempre» su un giocatore che quest'anno ha saltato mezzo campionato
+ *  sembra un errore. */
+function recentUsage(p: TeamLineupPlayer): string | null {
+  if (!p.recent_window) return null;
+  const giornate = p.recent_window === 1 ? 'giornata' : 'giornate';
+  // Mai in campo si dice così e non «in campo 0 volte»: è la frase più
+  // importante che questa riga possa contenere e non deve suonare come un conto.
+  if (!p.recent_appearances) return `Ultime ${p.recent_window} ${giornate}: mai in campo.`;
+  const volte = p.recent_appearances === 1 ? 'una volta' : `${p.recent_appearances} volte`;
+  return `Ultime ${p.recent_window} ${giornate}: in campo ${volte}, ${Math.round(
+    p.recent_avg_minutes,
+  )}′ di media.`;
+}
+
 function MinutesBadge({ label }: { label: MinutesLabel }) {
-  // 'unknown' = no games to judge from (pre-season): say nothing rather than
-  // labelling everybody as rarely used.
+  // 'unknown' = niente da cui giudicare (preseason, o mai convocato nella
+  // finestra): tacere, invece di dare del panchinaro a chi non si conosce.
   if (label === 'unknown') return null;
-  if (label === 'high') return <Badge tone="green">titolare abituale</Badge>;
-  if (label === 'medium') return <Badge tone="slate">spesso impiegato</Badge>;
-  return <Badge tone="amber">poco impiegato</Badge>;
+  const meaning = MINUTES_MEANING[label];
+  if (label === 'high') return <Badge tone="green" title={meaning}>titolare abituale</Badge>;
+  if (label === 'medium') return <Badge tone="slate" title={meaning}>spesso in campo</Badge>;
+  return <Badge tone="amber" title={meaning}>poco impiegato</Badge>;
 }

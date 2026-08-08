@@ -47,7 +47,14 @@ export function Button({
   );
 }
 
-export function Badge({ children, tone = 'slate' }: PropsWithChildren<{ tone?: 'slate' | 'green' | 'red' | 'amber' | 'blue' }>) {
+export function Badge({
+  children,
+  tone = 'slate',
+  // Una parola sola su un'etichetta a volte non basta a dire che cosa afferma.
+  // Il titolo è il posto giusto per la frase intera: appare a chi si ferma
+  // sopra, e non allunga la riga per tutti gli altri.
+  title,
+}: PropsWithChildren<{ tone?: 'slate' | 'green' | 'red' | 'amber' | 'blue'; title?: string }>) {
   const tones: Record<string, string> = {
     slate: 'bg-slate-100 text-slate-700',
     green: 'bg-green-100 text-green-800',
@@ -55,5 +62,5 @@ export function Badge({ children, tone = 'slate' }: PropsWithChildren<{ tone?: '
     amber: 'bg-amber-100 text-amber-800',
     blue: 'bg-blue-100 text-blue-800'
   };
-  return <span className={clsx('inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold', tones[tone])}>{children}</span>;
+  return <span title={title} className={clsx('inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold', tones[tone])}>{children}</span>;
 }

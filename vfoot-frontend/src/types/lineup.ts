@@ -22,6 +22,12 @@ export interface TeamLineupPlayer {
   starts: number;        // presenze da titolare
   avg_minutes: number;
   minutes_label: MinutesLabel;
+  /** Le ultime giornate, che sono la base di `minutes_label`: quante volte è
+   *  sceso in campo su `recent_window` giornate, e quanti minuti in media.
+   *  L'etichetta si spiega mostrando questi, non ripetendo una regola. */
+  recent_appearances: number;
+  recent_avg_minutes: number;
+  recent_window: number;
   real_team?: string | null;  // il club reale del giocatore
   form: number; // expected per-match contribution from recent form
   // Season the playing-time stats describe (the previous one before kick-off).
