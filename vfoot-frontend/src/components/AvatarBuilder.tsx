@@ -35,7 +35,7 @@ function ColorRow({
 }) {
   return (
     <div>
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">{label}</div>
       <div className="flex flex-wrap gap-2">
         {colors.map((c) => {
           const active = c === value;
@@ -49,7 +49,7 @@ function ColorRow({
               aria-pressed={active}
               className={clsx(
                 'h-9 w-9 rounded-full border transition',
-                active ? 'ring-2 ring-slate-900 ring-offset-2' : 'border-slate-200 hover:scale-105',
+                active ? 'ring-2 ring-line ring-offset-2' : 'border-line hover:scale-105',
               )}
               style={
                 transparent
@@ -89,7 +89,7 @@ function ChoiceRow({
   );
   return (
     <div>
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">{label}</div>
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
         {tiles.map(({ opt, uri, active }) => (
           <button
@@ -100,7 +100,7 @@ function ChoiceRow({
             aria-pressed={active}
             className={clsx(
               'shrink-0 overflow-hidden rounded-xl border transition',
-              active ? 'border-slate-900 ring-2 ring-slate-900' : 'border-slate-200 hover:border-slate-400',
+              active ? 'border-line ring-2 ring-line' : 'border-line hover:border-line',
             )}
           >
             <img src={uri} width={MINI} height={MINI} alt="" style={{ width: MINI, height: MINI, display: 'block' }} />
@@ -129,16 +129,16 @@ export default function AvatarBuilder({
           width={104}
           height={104}
           alt="Anteprima avatar"
-          className="rounded-2xl bg-white shadow-card"
+          className="rounded-2xl bg-surface shadow-card"
           style={{ width: 104, height: 104 }}
         />
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-slate-700">Il tuo avatar</div>
-          <div className="text-xs text-slate-500">Combina i tratti come vuoi: migliaia di combinazioni.</div>
+          <div className="text-sm font-semibold text-ink-soft">Il tuo avatar</div>
+          <div className="text-xs text-ink-faint">Combina i tratti come vuoi: migliaia di combinazioni.</div>
           <button
             type="button"
             onClick={() => onChange(randomAvatar())}
-            className="mt-2 rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700"
+            className="mt-2 rounded-xl bg-ink px-3 py-1.5 text-xs font-semibold text-paper hover:opacity-90"
           >
             🎲 Casuale
           </button>

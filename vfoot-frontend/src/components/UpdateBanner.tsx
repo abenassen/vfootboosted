@@ -14,12 +14,12 @@ export default function UpdateBanner() {
   if (!ready) return null;
   return (
     <div className="fixed inset-x-0 bottom-16 z-50 mx-auto w-fit max-w-[95vw] md:bottom-4">
-      <div className="flex items-center gap-3 rounded-2xl bg-slate-900 px-4 py-2.5 text-white shadow-card">
+      <div className="flex items-center gap-3 rounded-2xl bg-ink px-4 py-2.5 text-paper shadow-card">
         <span className="text-sm font-semibold">È disponibile una nuova versione.</span>
         <button
           type="button"
           onClick={applyUpdate}
-          className="rounded-xl bg-white px-3 py-1 text-sm font-bold text-slate-900"
+          className="rounded-xl bg-surface px-3 py-1 text-sm font-bold text-ink"
         >
           Aggiorna
         </button>

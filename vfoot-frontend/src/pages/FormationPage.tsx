@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import { getTeamLineup, saveTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
+import { useCompetitionContext } from '../league/CompetitionContext';
 import type {
   ClassicConstraints,
   PlayerRole,
@@ -30,9 +31,9 @@ const ROLE_WORD_PLURAL: Record<PlayerRole, string> = {
 };
 const ROLE_LABEL_SHORT = ROLE_LABEL;
 const ROLE_CHIP: Record<PlayerRole, string> = {
-  GK: 'bg-amber-500',
+  GK: 'bg-warn',
   DEF: 'bg-blue-500',
-  MID: 'bg-emerald-500',
+  MID: 'bg-good',
   ATT: 'bg-orange-500',
 };
 const ROLE_ORDER: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 }; // P, D, C, A
@@ -199,23 +200,23 @@ function frozenTitle(nm?: { status: string } | null): string {
 function PlayerDetails({ p }: { p: TeamLineupPlayer }) {
   const nm = p.next_match;
   return (
-    <span className="mt-1 block rounded-lg bg-slate-50 px-2 py-1 text-[11px] text-slate-600">
+    <span className="mt-1 block rounded-lg bg-surface-2 px-2 py-1 text-[11px] text-ink-soft">
       {nm ? (
         <span className="block">
           {nm.home ? (
             <>
-              <b className="text-slate-800">{nm.team}</b> - {nm.opponent}
+              <b className="text-ink">{nm.team}</b> - {nm.opponent}
             </>
           ) : (
             <>
-              {nm.opponent} - <b className="text-slate-800">{nm.team}</b>
+              {nm.opponent} - <b className="text-ink">{nm.team}</b>
             </>
           )}
-          <span className="text-slate-400"> · {fmtKickoff(nm)}</span>
+          <span className="text-ink-faint"> · {fmtKickoff(nm)}</span>
         </span>
       ) : null}
       {p.minutes_label === 'unknown' ? (
-        <span className="block text-slate-400">nessuno storico di impiego</span>
+        <span className="block text-ink-faint">nessuno storico di impiego</span>
       ) : (
         <span className="block">
           {p.appearances} pres · {p.avg_minutes}′ medi
@@ -223,16 +224,37 @@ function PlayerDetails({ p }: { p: TeamLineupPlayer }) {
           {p.minutes_label === 'high' ? <Badge tone="green"> titolare abituale</Badge> : null}
         </span>
       )}
-      {p.stats_season ? <span className="block text-slate-400">dati: {p.stats_season}</span> : null}
+      {p.stats_season ? <span className="block text-ink-faint">dati: {p.stats_season}</span> : null}
     </span>
   );
 }
 
 export default function FormationPage() {
   const { selectedLeagueId } = useLeagueContext();
+  const { selectedCompetitionId, setSelectedCompetitionId, competitions } = useCompetitionContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const competition = searchParams.get('competition') ? Number(searchParams.get('competition')) : null;
   const matchday = searchParams.get('matchday') ? Number(searchParams.get('matchday')) : null;
+
+  /** LA PAGINA E IL MENU IN ALTO PARLANO DELLA STESSA COMPETIZIONE.
+   *
+   *  Dalla home si clicca «Formazione · champ» e si arriva qui sulla formazione
+   *  di champ — ma il selettore in cima continuava a mostrare quella di prima, e
+   *  da lì in poi il menu di sinistra («Partite», «Classifica») portava a
+   *  un'altra competizione ancora. Il contesto non era sbagliato: nessuno gliela
+   *  diceva.
+   *
+   *  Nei due versi, perché il disallineamento nasceva da entrambi:
+   *  · c'è un `?competition=` nell'indirizzo (si è arrivati da una scorciatoia,
+   *    o si è usato il menu a tendina qui dentro) → è quella la competizione, e
+   *    il selettore in alto la adotta;
+   *  · non c'è (si è aperta la pagina dal menu) → si parte da quella scelta in
+   *    alto, invece di lasciar decidere al server. */
+  useEffect(() => {
+    if (competition == null) return;
+    if (!competitions.some((c) => c.competition_id === competition)) return;
+    if (competition !== selectedCompetitionId) setSelectedCompetitionId(competition);
+  }, [competition, competitions, selectedCompetitionId, setSelectedCompetitionId]);
 
   const [ctx, setCtx] = useState<TeamLineupContext | null>(null);
   const [loading, setLoading] = useState(false);
@@ -348,7 +370,9 @@ export default function FormationPage() {
         // re-fetches as-of (no-leakage) profiles for that competition.
         if (competition == null || matchday == null) {
           setParams({
-            competition: competition ?? d.competition ?? undefined,
+            // La competizione del menu in alto vince su quella che il server
+            // sceglierebbe da sé: è ciò che l'utente sta guardando.
+            competition: competition ?? selectedCompetitionId ?? d.competition ?? undefined,
             matchday: matchday ?? d.matchdays[Math.floor(d.matchdays.length / 2)] ?? d.matchday,
           });
           return;
@@ -389,9 +413,9 @@ export default function FormationPage() {
   );
   const gkId = gkStarters[0] ?? null;
 
-  if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per impostare la formazione.</div>;
-  if (loading && !ctx) return <div className="text-sm text-slate-500">Caricamento formazione…</div>;
-  if (error || !ctx) return <div className="text-sm text-red-600">Errore: {error ?? '…'}</div>;
+  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega per impostare la formazione.</div>;
+  if (loading && !ctx) return <div className="text-sm text-ink-faint">Caricamento formazione…</div>;
+  if (error || !ctx) return <div className="text-sm text-bad">Errore: {error ?? '…'}</div>;
 
   const isClassic = ctx.mode === 'classic';
   const constraints = ctx.rules.classic_constraints;
@@ -636,22 +660,22 @@ export default function FormationPage() {
               <SectionTitle>Formazione · {ctx.team.name}</SectionTitle>
               <Badge tone={isClassic ? 'blue' : 'green'}>{isClassic ? 'Classic' : 'Aura'}</Badge>
             </div>
-            <div className="mt-1 text-sm text-slate-600">
+            <div className="mt-1 text-sm text-ink-soft">
               {compName ? <>Competizione <b>{compName}</b> · </> : null}
               titolari {starterIds.length}/{XI}
               {!isClassic && gkStarters.length !== 1 ? (
-                <span className="ml-2 font-semibold text-rose-600">
+                <span className="ml-2 font-semibold text-bad">
                   {gkStarters.length === 0 ? '· manca il portiere' : '· un solo portiere consentito'}
                 </span>
               ) : null}
             </div>
             {isClassic ? (
-              <div className="mt-1 text-[11px] text-slate-500">
+              <div className="mt-1 text-[11px] text-ink-faint">
                 Vincoli: 1 portiere · almeno 3 difensori · 1–3 attaccanti · meno di 6 per reparto · 11 totali.
               </div>
             ) : null}
             {isClassic && classicErrors.length ? (
-              <ul className="mt-1 list-disc pl-4 text-[11px] font-semibold text-rose-600">
+              <ul className="mt-1 list-disc pl-4 text-[11px] font-semibold text-bad">
                 {classicErrors.map((e) => (
                   <li key={e}>{e}</li>
                 ))}
@@ -659,7 +683,7 @@ export default function FormationPage() {
             ) : null}
             {lock?.enforced ? (
               <div
-                className={`mt-1 text-[11px] ${closed ? 'font-semibold text-rose-600' : 'text-slate-500'}`}
+                className={`mt-1 text-[11px] ${closed ? 'font-semibold text-bad' : 'text-ink-faint'}`}
               >
                 {closed
                   ? 'Giornata chiusa: la formazione non è più modificabile.'
@@ -675,7 +699,7 @@ export default function FormationPage() {
                 the season was a replay and the worry was leakage. To a manager it
                 answers a question nobody asked, in the colour of a problem. */}
             {ctx.as_of_matchday != null && ctx.as_of_matchday > 1 ? (
-              <div className="mt-1 text-[11px] text-slate-400">
+              <div className="mt-1 text-[11px] text-ink-faint">
                 Medie e statistiche aggiornate alla giornata {ctx.as_of_matchday - 1}.
               </div>
             ) : null}
@@ -685,7 +709,7 @@ export default function FormationPage() {
               <select
                 value={competition ?? ''}
                 onChange={(e) => setParams({ competition: Number(e.target.value) })}
-                className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
+                className="rounded-lg border border-line px-2 py-1 text-sm"
               >
                 {ctx.competitions.map((c) => (
                   <option key={c.competition_id} value={c.competition_id}>
@@ -694,11 +718,11 @@ export default function FormationPage() {
                 ))}
               </select>
             ) : null}
-            <label className="text-xs text-slate-500">Giornata</label>
+            <label className="text-xs text-ink-faint">Giornata</label>
             <select
               value={matchday ?? ''}
               onChange={(e) => setParams({ matchday: Number(e.target.value) })}
-              className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
+              className="rounded-lg border border-line px-2 py-1 text-sm"
             >
               {ctx.matchdays.map((m) => (
                 <option key={m} value={m}>
@@ -732,7 +756,7 @@ export default function FormationPage() {
           <>
         <label
           className={`mt-2 flex items-center gap-2 text-xs ${
-            multiSendBlocked ? 'cursor-not-allowed text-slate-400' : 'text-slate-600'}`}
+            multiSendBlocked ? 'cursor-not-allowed text-ink-faint' : 'text-ink-soft'}`}
           title={multiSendBlocked ? 'Ogni competizione ha la sua formazione, e i giocatori già bloccati vi occupano posti diversi.' : undefined}
         >
           <input
@@ -744,20 +768,20 @@ export default function FormationPage() {
           Invia questa formazione a tutte le competizioni della lega (stessa giornata)
         </label>
         {multiSendBlocked && !closed ? (
-          <div className="mt-1 text-[11px] text-slate-400">
+          <div className="mt-1 text-[11px] text-ink-faint">
             Non più disponibile: ogni competizione ha la sua formazione, e chi è già bloccato vi
             occupa posti diversi. Vanno modificate una per una.
           </div>
         ) : null}
           </>
         ) : null}
-        {toast ? <div className="mt-2 text-sm font-semibold text-green-700">{toast}</div> : null}
+        {toast ? <div className="mt-2 text-sm font-semibold text-good">{toast}</div> : null}
       </Card>
 
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
         <Card className="self-start p-4 lg:sticky lg:top-4">
           <SectionTitle>La squadra in campo</SectionTitle>
-          <div className="mt-1 text-[11px] text-slate-400">
+          <div className="mt-1 text-[11px] text-ink-faint">
             {isClassic ? 'Schieramento per ruolo.' : 'Posizione attesa di ogni titolare (dai dati storici).'} Il portiere ha il bordo ambra. Clicca un giocatore per
             vederne le zone d'influenza (in giallo).
           </div>
@@ -774,9 +798,9 @@ export default function FormationPage() {
 
         <Card className="p-4">
           <SectionTitle>Rosa · titolari e panchina (un solo portiere fra i titolari)</SectionTitle>
-          <div className="mt-1 text-[11px] text-slate-400">Clicca il nome per vederne le zone sulla mappa.</div>
+          <div className="mt-1 text-[11px] text-ink-faint">Clicca il nome per vederne le zone sulla mappa.</div>
 
-          <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
             Titolari {starterIds.length}/{XI}
           </div>
           <div className="divide-y">
@@ -798,23 +822,23 @@ export default function FormationPage() {
                 read, a row that says "manca un difensore" is not. */}
             {Array.from({ length: Math.max(0, XI - starters.length) }, (_, i) => (
               <div key={`slot-${i}`} className="flex items-center gap-2 py-2.5 text-sm">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-dashed border-slate-300 text-[10px] font-bold text-slate-400">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-dashed border-line text-[10px] font-bold text-ink-faint">
                   +
                 </span>
-                <span className="italic text-slate-400">
+                <span className="italic text-ink-faint">
                   {vacancies[i] ? `Manca un ${ROLE_WORD[vacancies[i]]}` : 'Posto libero'}
                 </span>
               </div>
             ))}
             {starters.length === 0 && !vacancies.length ? (
-              <div className="py-2 text-sm text-slate-400">Nessun titolare selezionato.</div>
+              <div className="py-2 text-sm text-ink-faint">Nessun titolare selezionato.</div>
             ) : null}
           </div>
 
-          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
             Panchina · ordine = priorità sostituzioni
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
+          <div className="mt-0.5 text-[11px] text-ink-faint">
             {isClassic
               ? 'Entra il primo panchinaro in lista che ha un voto e mantiene la formazione valida.'
               : 'In Aura il sostituto è il migliore disponibile; l’ordine conta solo a parità.'}
@@ -873,7 +897,7 @@ export default function FormationPage() {
                 }}
               />
             ))}
-            {bench.length === 0 ? <div className="py-2 text-sm text-slate-400">Panchina vuota.</div> : null}
+            {bench.length === 0 ? <div className="py-2 text-sm text-ink-faint">Panchina vuota.</div> : null}
           </div>
         </Card>
       </div>
@@ -936,10 +960,10 @@ function RosterRow({
       ref={rowRef}
       className={clsx(
         'flex items-center justify-between gap-2 py-2',
-        selected && 'bg-slate-50',
+        selected && 'bg-surface-2',
         // La riga che sta sotto il dito: alzata dal foglio, così si vede che è in
         // mano e non semplicemente selezionata.
-        dragHandle?.dragging && 'rounded-lg bg-white shadow-md ring-1 ring-slate-300',
+        dragHandle?.dragging && 'rounded-lg bg-surface shadow-md ring-1 ring-line',
       )}
     >
       {dragHandle ? (
@@ -954,7 +978,7 @@ function RosterRow({
           // qui.
           className={clsx(
             'shrink-0 touch-none select-none px-1 text-base leading-none',
-            dragHandle.disabled ? 'cursor-not-allowed text-slate-300' : 'cursor-grab text-slate-400 active:cursor-grabbing',
+            dragHandle.disabled ? 'cursor-not-allowed text-ink-faint' : 'cursor-grab text-ink-faint active:cursor-grabbing',
           )}
         >
           ⠿
@@ -962,7 +986,7 @@ function RosterRow({
       ) : null}
       <button onClick={onSelect} className="flex min-w-0 items-center gap-2 text-left">
         {order != null ? (
-          <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-400">{order}</span>
+          <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-ink-faint">{order}</span>
         ) : null}
         <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[p.role]}`}>
           {ROLE_LABEL[p.role]}
@@ -972,42 +996,42 @@ function RosterRow({
               it a letter at a time ("PARTITA FINI…"). The name gives way, the state
               does not. */}
           <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className={`truncate text-sm font-semibold ${selected ? 'text-slate-900 underline' : 'text-slate-800'}`}>
+            <span className={`truncate text-sm font-semibold ${selected ? 'text-ink underline' : 'text-ink'}`}>
               {p.name}
             </span>
             {locked ? (
               <span
-                className="shrink-0 rounded bg-slate-200 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600"
+                className="shrink-0 rounded bg-surface-2 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-ink-soft"
                 title={frozenTitle(p.next_match)}
               >
                 {frozenLabel(p.next_match)}
               </span>
             ) : null}
           </span>
-          <span className="block text-[11px] text-slate-500">
+          <span className="block text-[11px] text-ink-faint">
             {typeof p.value === 'number' ? (
               <>
-                media voto <b className="text-slate-700">{p.value.toFixed(2)}</b>
-                {p.value_basis === 'stimato' ? <span className="text-slate-400"> (stimata)</span> : null}
+                media voto <b className="text-ink-soft">{p.value.toFixed(2)}</b>
+                {p.value_basis === 'stimato' ? <span className="text-ink-faint"> (stimata)</span> : null}
               </>
             ) : (
-              <span className="text-slate-400">nessuno storico</span>
+              <span className="text-ink-faint">nessuno storico</span>
             )}
-            {p.next_match ? <span className="text-slate-400"> · {fixtureLabel(p.next_match)}</span> : null}
+            {p.next_match ? <span className="text-ink-faint"> · {fixtureLabel(p.next_match)}</span> : null}
           </span>
-          {note ? <span className="mt-1 block text-[11px] font-semibold text-rose-600">{note}</span> : null}
+          {note ? <span className="mt-1 block text-[11px] font-semibold text-bad">{note}</span> : null}
           {selected ? <PlayerDetails p={p} /> : null}
         </span>
       </button>
       <div className="flex shrink-0 items-center gap-1">
         {order != null ? (
-          <div className="flex flex-col overflow-hidden rounded border border-slate-200 text-slate-500">
+          <div className="flex flex-col overflow-hidden rounded border border-line text-ink-faint">
             <button
               onClick={onMoveUp}
               disabled={!immutable && !canUp}
               aria-disabled={immutable ? true : undefined}
               className={`px-1.5 text-[9px] leading-tight disabled:opacity-30 ${
-                immutable ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-100'}`}
+                immutable ? 'cursor-not-allowed opacity-30' : 'hover:bg-surface-2'}`}
               title={immutableReason ?? 'Alza priorità'}
             >
               ▲
@@ -1017,14 +1041,14 @@ function RosterRow({
               disabled={!immutable && !canDown}
               aria-disabled={immutable ? true : undefined}
               className={`px-1.5 text-[9px] leading-tight disabled:opacity-30 ${
-                immutable ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-100'}`}
+                immutable ? 'cursor-not-allowed opacity-30' : 'hover:bg-surface-2'}`}
               title={immutableReason ?? 'Abbassa priorità'}
             >
               ▼
             </button>
           </div>
         ) : null}
-        <div className="flex overflow-hidden rounded-lg border border-slate-200 text-[11px] font-semibold">
+        <div className="flex overflow-hidden rounded-lg border border-line text-[11px] font-semibold">
           {/* Deliberately not `disabled`: a disabled button swallows the click AND
               its own tooltip, so it would refuse without ever saying why. It looks
               unavailable and, if pressed, explains itself on the row.
@@ -1039,13 +1063,13 @@ function RosterRow({
             className={
               immutable
                 ? isStarter
-                  ? 'cursor-not-allowed bg-slate-400 px-3 py-1 text-white'
-                  : 'cursor-not-allowed bg-slate-50 px-3 py-1 text-slate-300'
+                  ? 'cursor-not-allowed bg-ink-faint/60 px-3 py-1 text-white'
+                  : 'cursor-not-allowed bg-surface-2 px-3 py-1 text-ink-faint'
                 : isStarter
-                  ? 'bg-slate-900 px-3 py-1 text-white'
+                  ? 'bg-ink px-3 py-1 text-paper'
                   : blocked
-                    ? 'cursor-not-allowed bg-slate-50 px-3 py-1 text-slate-300'
-                    : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'
+                    ? 'cursor-not-allowed bg-surface-2 px-3 py-1 text-ink-faint'
+                    : 'bg-surface px-3 py-1 text-ink-soft hover:bg-surface-2'
             }
           >
             Titolare
@@ -1057,11 +1081,11 @@ function RosterRow({
             className={
               immutable
                 ? !isStarter
-                  ? 'cursor-not-allowed bg-slate-400 px-3 py-1 text-white'
-                  : 'cursor-not-allowed bg-slate-50 px-3 py-1 text-slate-300'
+                  ? 'cursor-not-allowed bg-ink-faint/60 px-3 py-1 text-white'
+                  : 'cursor-not-allowed bg-surface-2 px-3 py-1 text-ink-faint'
                 : !isStarter
-                  ? 'bg-slate-500 px-3 py-1 text-white'
-                  : 'bg-white px-3 py-1 text-slate-600 hover:bg-slate-100'
+                  ? 'bg-ink-faint px-3 py-1 text-white'
+                  : 'bg-surface px-3 py-1 text-ink-soft hover:bg-surface-2'
             }
           >
             Panca
@@ -1095,9 +1119,9 @@ function expectedPos(footprint: Record<string, number>): { col: number; row: num
 }
 
 const DOT_COLOR: Record<PlayerRole, string> = {
-  GK: 'bg-amber-400',
+  GK: 'bg-warn',
   DEF: 'bg-blue-500',
-  MID: 'bg-emerald-500',
+  MID: 'bg-good',
   ATT: 'bg-orange-500',
 };
 
@@ -1285,7 +1309,7 @@ function PitchCanvas({
   return (
     <div
       className={clsx(
-        'relative mt-3 w-full overflow-hidden rounded-xl border border-green-700/40 shadow-inner',
+        'relative mt-3 w-full overflow-hidden rounded-xl border border-good/40 shadow-inner',
         vertical
           ? 'aspect-[5/7] bg-gradient-to-t from-green-600 to-green-500'
           : 'aspect-[7/5] bg-gradient-to-r from-green-600 to-green-500',
@@ -1296,7 +1320,7 @@ function PitchCanvas({
       {/* La linea di metà campo taglia la LUNGHEZZA, quindi gira col campo. */}
       <div
         className={clsx(
-          'pointer-events-none absolute bg-white/40',
+          'pointer-events-none absolute bg-surface/40',
           vertical ? 'inset-x-2 top-1/2 h-px -translate-y-1/2' : 'inset-y-2 left-1/2 w-px -translate-x-1/2',
         )}
       />
@@ -1354,7 +1378,7 @@ function PitchCanvas({
             style={place(d.left, d.top)}
             title={`Manca un ${ROLE_WORD[d.role]}`}
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-dashed border-white/80 bg-white/15 text-[9px] font-bold text-white">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-dashed border-white/80 bg-surface/15 text-[9px] font-bold text-white">
               +
             </span>
             <span className="mt-0.5 rounded bg-black/40 px-1 text-[8px] font-semibold leading-tight text-white/90">
@@ -1379,8 +1403,8 @@ function PitchCanvas({
         >
           <span
             className={`flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold text-white shadow-md ${DOT_COLOR[p.role]} ${
-              isGk ? 'ring-2 ring-amber-200' : ''
-            } ${selectedId === p.player_id ? 'ring-2 ring-slate-900 ring-offset-1' : ''}`}
+              isGk ? 'ring-2 ring-warn/40' : ''
+            } ${selectedId === p.player_id ? 'ring-2 ring-line ring-offset-1' : ''}`}
           >
             {initials(p.name)}
           </span>

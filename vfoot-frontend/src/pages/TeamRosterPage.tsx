@@ -20,9 +20,9 @@ export default function TeamRosterPage() {
     [selectedLeagueId, teamId],
   );
 
-  if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega.</div>;
-  if (loading) return <div className="text-sm text-slate-500">Caricamento rosa…</div>;
-  if (error || !data) return <div className="text-sm text-red-600">Errore: {error?.message ?? '…'}</div>;
+  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega.</div>;
+  if (loading) return <div className="text-sm text-ink-faint">Caricamento rosa…</div>;
+  if (error || !data) return <div className="text-sm text-bad">Errore: {error?.message ?? '…'}</div>;
 
   return (
     <div className="space-y-4">
@@ -36,7 +36,7 @@ export default function TeamRosterPage() {
             <div>
               <SectionTitle>Rosa</SectionTitle>
               <div className="mt-0.5 text-xl font-black">{data.team.name}</div>
-              <div className="text-sm text-slate-500">
+              <div className="text-sm text-ink-faint">
                 {data.team.manager ? (
                   <>
                     Fantallenatore:{' '}
@@ -47,12 +47,12 @@ export default function TeamRosterPage() {
                     {data.team.manager_user_id ? (
                       <Link
                         to={`/fantallenatori/${data.team.manager_user_id}`}
-                        className="font-bold text-slate-700 hover:underline"
+                        className="font-bold text-ink-soft hover:underline"
                       >
                         {data.team.manager}
                       </Link>
                     ) : (
-                      <b className="text-slate-700">{data.team.manager}</b>
+                      <b className="text-ink-soft">{data.team.manager}</b>
                     )}{' '}
                     ·{' '}
                   </>

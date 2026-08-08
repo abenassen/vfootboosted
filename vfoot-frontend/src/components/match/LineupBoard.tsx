@@ -30,15 +30,15 @@ export interface LineupPlayerVM {
 }
 
 const ROLE_BAND: Record<string, { label: string; chip: string }> = {
-  GK: { label: 'POR', chip: 'bg-amber-500' },
+  GK: { label: 'POR', chip: 'bg-warn' },
   DEF: { label: 'DIF', chip: 'bg-blue-500' },
-  MID: { label: 'CEN', chip: 'bg-emerald-500' },
+  MID: { label: 'CEN', chip: 'bg-good' },
   ATT: { label: 'ATT', chip: 'bg-orange-500' },
 };
 const ROLE_RANK: Record<string, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 };
 
 function tendencyBand(role: string | null): { label: string; chip: string } {
-  return (role && ROLE_BAND[role]) || { label: '—', chip: 'bg-slate-300' };
+  return (role && ROLE_BAND[role]) || { label: '—', chip: 'bg-ink-faint' };
 }
 
 // Full lineup list. Clicking a player lights up their zones on the pitch map
@@ -59,7 +59,7 @@ export function LineupColumn({
   selectedPlayerId?: string | number | null;
   onSelectPlayer?: (id: string | number | null) => void;
 }) {
-  const accent = side === 'home' ? 'text-red-600' : 'text-blue-700';
+  const accent = side === 'home' ? 'text-bad' : 'text-blue-700';
   // Goalkeeper → defenders → midfielders → attackers; within a role, by spatial
   // centre of gravity. Slots with no role/action go last.
   const ordered = [...players].sort((a, b) => {
@@ -87,7 +87,7 @@ export function LineupColumn({
               key={p.id}
               className={clsx(
                 'rounded-lg border px-2 py-1.5 transition',
-                selected ? 'border-slate-400 bg-slate-50' : 'border-transparent hover:bg-slate-50',
+                selected ? 'border-line bg-surface-2' : 'border-transparent hover:bg-surface-2',
               )}
             >
               <div className="flex items-center gap-2">
@@ -105,23 +105,23 @@ export function LineupColumn({
                       {band.label}
                     </span>
                     {sentOff ? <span title="Espulso">🟥</span> : null}
-                    <span className={clsx('truncate text-sm', selected ? `font-semibold ${accent}` : 'text-slate-800')}>
+                    <span className={clsx('truncate text-sm', selected ? `font-semibold ${accent}` : 'text-ink')}>
                       {slotNames.map((name, i) => (
                         <span key={i}>
-                          {i > 0 ? <span className="text-slate-400"> / </span> : null}
+                          {i > 0 ? <span className="text-ink-faint"> / </span> : null}
                           {name}
                         </span>
                       ))}
                     </span>
                   </div>
                   {p.role === 'GK' ? (
-                    <div className="mt-0.5 text-[11px] text-slate-500">
+                    <div className="mt-0.5 text-[11px] text-ink-faint">
                       {gkRating == null ? (
                         'portiere'
                       ) : (
                         <>
                           gol evitati{' '}
-                          <b className={gkRating >= 0 ? 'text-green-600' : 'text-red-600'}>
+                          <b className={gkRating >= 0 ? 'text-good' : 'text-bad'}>
                             {gkRating >= 0 ? '+' : ''}
                             {gkRating.toFixed(2)}
                           </b>
@@ -132,10 +132,10 @@ export function LineupColumn({
                     <SlotBar player={p} />
                   )}
                 </button>
-                {hasGaps ? <span className="shrink-0 text-[10px] text-amber-600" title="Slot con sostituzioni">⇄</span> : null}
+                {hasGaps ? <span className="shrink-0 text-[10px] text-warn" title="Slot con sostituzioni">⇄</span> : null}
               </div>
               {hasGaps ? (
-                <div className="mt-1 space-y-0.5 text-[11px] text-slate-600">
+                <div className="mt-1 space-y-0.5 text-[11px] text-ink-soft">
                   {p.events.map((e, i) => (
                     <EventLine key={i} e={e} />
                   ))}
@@ -150,9 +150,9 @@ export function LineupColumn({
 }
 
 const SEGMENT_COLOR: Record<'pos' | 'neg' | 'unc', string> = {
-  pos: 'bg-emerald-500',
-  neg: 'bg-rose-500',
-  unc: 'bg-slate-200',
+  pos: 'bg-good',
+  neg: 'bg-bad',
+  unc: 'bg-surface-2',
 };
 
 // One bar per outfield slot: THICKNESS = the slot's impact (relevance), the
@@ -197,7 +197,7 @@ function SlotBar({ player }: { player: LineupPlayerVM }) {
       title="spessore = impatto · verde = positivo · rosso = negativo · grigio = scoperto · tacca = sostituzione"
     >
       <div
-        className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-stretch overflow-hidden rounded-full bg-slate-100"
+        className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-stretch overflow-hidden rounded-full bg-surface-2"
         style={{ height }}
       >
         {segments.map((s, i) => (
@@ -205,7 +205,7 @@ function SlotBar({ player }: { player: LineupPlayerVM }) {
         ))}
       </div>
       {ticks.map((pct, i) => (
-        <div key={i} className="absolute top-0 h-full w-px -translate-x-1/2 bg-slate-700" style={{ left: `${pct}%` }} />
+        <div key={i} className="absolute top-0 h-full w-px -translate-x-1/2 bg-ink-faint" style={{ left: `${pct}%` }} />
       ))}
     </div>
   );
@@ -232,17 +232,17 @@ function EventLine({ e }: { e: LineupSubEvent }) {
 
   return (
     <div>
-      <span className="text-slate-700">{head}</span>
+      <span className="text-ink-soft">{head}</span>
       {e.kind === 'covered' && e.bench ? (
-        <span className="text-slate-500">
-          {' '}· {coverVerb} <b className="text-slate-700">{e.bench}</b>{' '}
-          <span className="text-green-600">({toMinutes(e.coveredSeconds)})</span>
-          {showUncovered ? <span className="text-amber-600"> · {toMinutes(e.uncoveredSeconds)} scoperti</span> : null}
+        <span className="text-ink-faint">
+          {' '}· {coverVerb} <b className="text-ink-soft">{e.bench}</b>{' '}
+          <span className="text-good">({toMinutes(e.coveredSeconds)})</span>
+          {showUncovered ? <span className="text-warn"> · {toMinutes(e.uncoveredSeconds)} scoperti</span> : null}
         </span>
       ) : e.kind === 'disciplinary' ? (
-        <span className="text-red-600"> · non sostituibile</span>
+        <span className="text-bad"> · non sostituibile</span>
       ) : (
-        <span className="text-amber-600"> · {toMinutes(e.gapEnd - e.gapStart)} scoperti, nessun subentro</span>
+        <span className="text-warn"> · {toMinutes(e.gapEnd - e.gapStart)} scoperti, nessun subentro</span>
       )}
     </div>
   );

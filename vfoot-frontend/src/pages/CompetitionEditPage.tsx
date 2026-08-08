@@ -21,7 +21,7 @@ import type {
 import { DEFAULT_RECORD, PRIZE_RECORDS, recordByValue } from '../utils/prizes';
 
 const PRIZE_ICONS = ['🏆', '🥇', '🥈', '🥉', '🛡️', '⭐', '👑', '🎖️', '🐐', '💩'];
-const inputCls = 'w-full rounded-xl border border-slate-200 px-3 py-2 text-sm';
+const inputCls = 'w-full rounded-xl border border-line px-3 py-2 text-sm';
 
 /**
  * Editing, kept apart from creating.
@@ -91,42 +91,42 @@ export default function CompetitionEditPage() {
   const roundRows = useMemo(() => comp?.rounds ?? [], [comp]);
   const locked = comp?.structure_locked ?? false;
 
-  if (!selectedLeagueId) return <div className="p-6 text-sm text-slate-500">Seleziona una lega.</div>;
+  if (!selectedLeagueId) return <div className="p-6 text-sm text-ink-faint">Seleziona una lega.</div>;
   if (!isAdmin) {
     return (
       <div className="mx-auto max-w-2xl p-6">
-        <Card className="p-6 text-sm text-slate-600">Solo gli admin della lega possono modificare le competizioni.</Card>
+        <Card className="p-6 text-sm text-ink-soft">Solo gli admin della lega possono modificare le competizioni.</Card>
       </div>
     );
   }
-  if (error && !comp) return <div className="p-6 text-sm text-red-600">{error}</div>;
-  if (!comp) return <div className="p-6 text-sm text-slate-500">Caricamento…</div>;
+  if (error && !comp) return <div className="p-6 text-sm text-bad">{error}</div>;
+  if (!comp) return <div className="p-6 text-sm text-ink-faint">Caricamento…</div>;
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 pb-24 sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate text-xl font-bold text-slate-900">{comp.name}</h1>
+          <h1 className="truncate text-xl font-bold text-ink">{comp.name}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <Badge tone="slate">{competitionFormatLabel(comp)}</Badge>
             <Badge tone={comp.status === 'done' ? 'green' : comp.status === 'active' ? 'amber' : 'slate'}>
               {comp.status === 'done' ? 'conclusa' : comp.status === 'active' ? 'in corso' : 'bozza'}
             </Badge>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-ink-faint">
               {comp.fixtures.finished}/{comp.fixtures.total} gare giocate
             </span>
           </div>
         </div>
-        <Link to="/league-admin?tab=league" className="shrink-0 text-sm text-slate-500 hover:text-slate-900">
+        <Link to="/league-admin?tab=league" className="shrink-0 text-sm text-ink-faint hover:text-ink">
           ✕ Chiudi
         </Link>
       </div>
 
       {justCreated ? (
-        <Card className="border border-green-200 bg-green-50 p-4">
+        <Card className="border border-good/40 bg-good-bg p-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-500 text-white">✓</div>
-            <div className="text-sm text-green-900">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-good text-white">✓</div>
+            <div className="text-sm text-good">
               Competizione creata.
               {comp.dependencies.length
                 ? ' I partecipanti compariranno quando la competizione da cui si qualificano avrà giocato.'
@@ -141,18 +141,18 @@ export default function CompetitionEditPage() {
         </Card>
       ) : null}
 
-      {msg ? <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700">{msg}</div> : null}
-      {error ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+      {msg ? <div className="rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink-soft">{msg}</div> : null}
+      {error ? <div className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{error}</div> : null}
 
       {/* structure — read only, with the reason */}
       <Card className="p-4 sm:p-5">
         <SectionTitle>Struttura</SectionTitle>
         <div className="mt-2 space-y-1.5">
           {stages.map((s) => (
-            <div key={s.stage_id} className="rounded-xl border border-slate-200 p-3">
+            <div key={s.stage_id} className="rounded-xl border border-line p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-900">{s.name}</div>
+                  <div className="truncate text-sm font-semibold text-ink">{s.name}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     <Badge tone={s.stage_type === 'knockout' ? 'amber' : 'blue'}>
                       {s.stage_type === 'knockout' ? 'Eliminazione diretta' : 'Tutti contro tutti'}
@@ -162,7 +162,7 @@ export default function CompetitionEditPage() {
                     ) : null}
                   </div>
                   {s.rules_in.length ? (
-                    <div className="mt-1.5 text-[11px] text-slate-500">
+                    <div className="mt-1.5 text-[11px] text-ink-faint">
                       Partecipanti da:{' '}
                       {s.rules_in
                         .map((r) => {
@@ -185,7 +185,7 @@ export default function CompetitionEditPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className="shrink-0 text-right text-[11px] text-slate-500">
+                <div className="shrink-0 text-right text-[11px] text-ink-faint">
                   <div>
                     {s.participants.length || s.expected_participants} squadre
                     {s.participants.length ? '' : ' (attese)'}
@@ -206,9 +206,9 @@ export default function CompetitionEditPage() {
               </div>
             </div>
           ))}
-          {!stages.length ? <div className="text-sm text-slate-500">Nessun turno definito.</div> : null}
+          {!stages.length ? <div className="text-sm text-ink-faint">Nessun turno definito.</div> : null}
         </div>
-        <div className="mt-3 rounded-xl bg-slate-50 p-3 text-[11px] text-slate-500">
+        <div className="mt-3 rounded-xl bg-surface-2 p-3 text-[11px] text-ink-faint">
           {locked
             ? 'Ci sono già risultati: la struttura è congelata. Per cambiarla, elimina la competizione e ricreala.'
             : 'La struttura si decide alla creazione. Per cambiarla, elimina la competizione e ricreala — oppure usa la costruzione avanzata.'}
@@ -222,12 +222,12 @@ export default function CompetitionEditPage() {
       {/* calendar fine-tuning */}
       <Card className="p-4 sm:p-5">
         <SectionTitle>Calendario</SectionTitle>
-        <div className="mt-1 text-xs text-slate-500">
+        <div className="mt-1 text-xs text-ink-faint">
           Ogni turno della competizione si gioca su una giornata di Serie A. La distribuzione è automatica; qui la
           correggi. Un turno non può precedere quello prima di lui.
         </div>
         {schedule?.constraints?.length ? (
-          <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <div className="mt-2 rounded-xl border border-warn/40 bg-warn-bg p-3 text-xs text-warn">
             {schedule.constraints.map((c, i) => (
               <div key={i}>{c}</div>
             ))}
@@ -238,14 +238,14 @@ export default function CompetitionEditPage() {
           {roundRows.map((row) => (
             <div
               key={row.round_no}
-              className="grid items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 sm:grid-cols-[1fr_140px]"
+              className="grid items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 sm:grid-cols-[1fr_140px]"
             >
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-slate-800">{row.label}</div>
-                <div className="text-[11px] text-slate-400">giornata {row.round_no} della competizione</div>
+                <div className="truncate text-sm font-semibold text-ink">{row.label}</div>
+                <div className="text-[11px] text-ink-faint">giornata {row.round_no} della competizione</div>
               </div>
               <select
-                className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                className="rounded-lg border border-line px-2 py-1.5 text-sm"
                 value={draft[String(row.round_no)] ?? ''}
                 onChange={(e) =>
                   setDraft((prev) => ({ ...prev, [String(row.round_no)]: Number(e.target.value) }))
@@ -261,7 +261,7 @@ export default function CompetitionEditPage() {
             </div>
           ))}
           {!roundRows.length ? (
-            <div className="text-sm text-slate-500">
+            <div className="text-sm text-ink-faint">
               Nessuna giornata ancora: la struttura nascerà quando i partecipanti saranno decisi.
             </div>
           ) : null}
@@ -305,14 +305,14 @@ export default function CompetitionEditPage() {
         <SectionTitle>Premi</SectionTitle>
         <div className="mt-2 space-y-1.5">
           {comp.prizes.map((p) => (
-            <div key={p.prize_id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2">
+            <div key={p.prize_id} className="flex items-center justify-between gap-2 rounded-xl border border-line px-3 py-2">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="text-xl leading-none">{p.icon}</span>
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-900">{p.name}</div>
-                  <div className="truncate text-[11px] text-slate-500">{p.condition_label}</div>
+                  <div className="truncate text-sm font-semibold text-ink">{p.name}</div>
+                  <div className="truncate text-[11px] text-ink-faint">{p.condition_label}</div>
                   {p.winner_team_names.length ? (
-                    <div className="truncate text-[11px] font-semibold text-green-700">
+                    <div className="truncate text-[11px] font-semibold text-good">
                       → {p.winner_team_names.join(', ')}
                     </div>
                   ) : null}
@@ -333,10 +333,10 @@ export default function CompetitionEditPage() {
               </Button>
             </div>
           ))}
-          {!comp.prizes.length ? <div className="text-sm text-slate-500">Nessun premio configurato.</div> : null}
+          {!comp.prizes.length ? <div className="text-sm text-ink-faint">Nessun premio configurato.</div> : null}
         </div>
 
-        <div className="mt-3 space-y-2 rounded-xl border border-dashed border-slate-300 p-3">
+        <div className="mt-3 space-y-2 rounded-xl border border-dashed border-line p-3">
           <input
             className={inputCls}
             placeholder="Nome del premio (es. Scudetto)"
@@ -351,7 +351,7 @@ export default function CompetitionEditPage() {
                 onClick={() => setPrizeIcon(icon)}
                 className={
                   'h-9 w-9 rounded-lg border text-lg ' +
-                  (prizeIcon === icon ? 'border-slate-900 bg-slate-100' : 'border-slate-200')
+                  (prizeIcon === icon ? 'border-line bg-surface-2' : 'border-line')
                 }
               >
                 {icon}
@@ -444,7 +444,7 @@ export default function CompetitionEditPage() {
         <SectionTitle>Impostazioni</SectionTitle>
         <div className="mt-3 space-y-3">
           <div>
-            <span className="text-xs font-semibold text-slate-500">Nome</span>
+            <span className="text-xs font-semibold text-ink-faint">Nome</span>
             <div className="mt-1 flex gap-2">
               <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
               <Button
@@ -464,7 +464,7 @@ export default function CompetitionEditPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-            <span className="text-xs font-semibold text-slate-500">Stato:</span>
+            <span className="text-xs font-semibold text-ink-faint">Stato:</span>
             {(['draft', 'active', 'done'] as const).map((st) => (
               <Button
                 key={st}
@@ -498,7 +498,7 @@ export default function CompetitionEditPage() {
             >
               Elimina competizione
             </Button>
-            <div className="mt-1 text-[11px] text-slate-400">
+            <div className="mt-1 text-[11px] text-ink-faint">
               Se un'altra competizione si qualifica da questa, va eliminata prima quella.
             </div>
           </div>

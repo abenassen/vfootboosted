@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './styles/index.css';
 import { AuthProvider } from './auth/AuthContext';
+import { ThemeProvider } from './theme/ThemeContext';
 import { registerServiceWorker } from './pwa/registerSW';
 import { watchInstallPrompt } from './pwa/install';
 
@@ -13,11 +14,13 @@ watchInstallPrompt();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <AuthProvider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   </React.StrictMode>
 );
 

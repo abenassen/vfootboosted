@@ -36,19 +36,19 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
   const tone = zone.winner === 'home' ? 'red' : zone.winner === 'away' ? 'blue' : 'amber';
-  const winnerColor = zone.winner === 'home' ? 'text-red-600' : zone.winner === 'away' ? 'text-blue-600' : 'text-slate-500';
+  const winnerColor = zone.winner === 'home' ? 'text-bad' : zone.winner === 'away' ? 'text-blue-600' : 'text-ink-faint';
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3">
+    <div className="rounded-xl border border-line bg-surface p-3">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-bold text-slate-900">{zone.name}</div>
+        <div className="text-sm font-bold text-ink">{zone.name}</div>
         <Badge tone={tone}>{zone.winner === 'draw' ? 'Pari' : 'Vince ' + zone.winnerLabel}</Badge>
       </div>
 
       {/* Headline: who won and by how much (dominance tug-of-war). */}
       <div className="mt-2">
         <div className="flex items-center justify-between text-[11px]">
-          <span className={zone.winner === 'home' ? 'font-semibold text-red-600' : 'text-slate-500'}>{zone.homeName}</span>
-          <span className="text-slate-500">
+          <span className={zone.winner === 'home' ? 'font-semibold text-bad' : 'text-ink-faint'}>{zone.homeName}</span>
+          <span className="text-ink-faint">
             {zone.winner === 'draw' ? (
               'equilibrio'
             ) : (
@@ -58,14 +58,14 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
               </>
             )}
           </span>
-          <span className={zone.winner === 'away' ? 'font-semibold text-blue-700' : 'text-slate-500'}>{zone.awayName}</span>
+          <span className={zone.winner === 'away' ? 'font-semibold text-blue-700' : 'text-ink-faint'}>{zone.awayName}</span>
         </div>
-        <div className="relative mt-1 h-3 overflow-hidden rounded-full bg-slate-100">
+        <div className="relative mt-1 h-3 overflow-hidden rounded-full bg-surface-2">
           {/* centre line */}
-          <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-slate-300" />
+          <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-line" />
           {zone.winner !== 'draw' ? (
             <div
-              className={`absolute top-0 h-full ${zone.winner === 'home' ? 'bg-red-500' : 'bg-blue-600'}`}
+              className={`absolute top-0 h-full ${zone.winner === 'home' ? 'bg-bad' : 'bg-blue-600'}`}
               style={
                 zone.winner === 'home'
                   ? { right: '50%', width: `${zone.marginShare * 50}%` }
@@ -84,11 +84,11 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
 
       {zone.features.length ? (
         <details className="mt-3 group">
-          <summary className="cursor-pointer list-none text-[11px] uppercase tracking-wide text-slate-400 hover:text-slate-600">
+          <summary className="cursor-pointer list-none text-[11px] uppercase tracking-wide text-ink-faint hover:text-ink-soft">
             Dati reali per feature ▾
           </summary>
-          <div className="mt-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-400">
-            <span className="text-red-600">{zone.homeName}</span>
+          <div className="mt-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-ink-faint">
+            <span className="text-bad">{zone.homeName}</span>
             <span className="text-blue-700">{zone.awayName}</span>
           </div>
           <div className="mt-1 space-y-0.5">
@@ -101,7 +101,7 @@ export function ZoneInspector({ zone }: { zone: ZoneInspectorVM }) {
 
       {zone.homePlayers.length || zone.awayPlayers.length ? (
         <div className="mt-4">
-          <div className="text-[11px] uppercase tracking-wide text-slate-400">Chi ha agito qui</div>
+          <div className="text-[11px] uppercase tracking-wide text-ink-faint">Chi ha agito qui</div>
           <div className="mt-1.5 grid grid-cols-2 gap-3">
             <PlayerColumn players={zone.homePlayers} side="home" />
             <PlayerColumn players={zone.awayPlayers} side="away" />
@@ -122,11 +122,11 @@ function FeatureRow({ f }: { f: ZoneFeatureVM }) {
   const awayBig = f.away > f.home;
   return (
     <div className="flex items-center gap-2 text-[11px]">
-      <span className={clsx('w-12 text-right font-mono', homeBig ? 'font-semibold text-red-600' : 'text-slate-400')}>
+      <span className={clsx('w-12 text-right font-mono', homeBig ? 'font-semibold text-bad' : 'text-ink-faint')}>
         {fmtVal(f.home)}
       </span>
-      <span className="flex-1 text-center text-slate-600">{featureLabel(f.feature)}</span>
-      <span className={clsx('w-12 font-mono', awayBig ? 'font-semibold text-blue-700' : 'text-slate-400')}>
+      <span className="flex-1 text-center text-ink-soft">{featureLabel(f.feature)}</span>
+      <span className={clsx('w-12 font-mono', awayBig ? 'font-semibold text-blue-700' : 'text-ink-faint')}>
         {fmtVal(f.away)}
       </span>
     </div>
@@ -134,23 +134,23 @@ function FeatureRow({ f }: { f: ZoneFeatureVM }) {
 }
 
 function PlayerColumn({ players, side }: { players: ZonePlayerVM[]; side: 'home' | 'away' }) {
-  const bar = side === 'home' ? 'bg-red-500' : 'bg-blue-600';
+  const bar = side === 'home' ? 'bg-bad' : 'bg-blue-600';
   return (
     <div className="space-y-1">
       {players.length ? (
         players.slice(0, 5).map((p) => (
           <div key={p.name} className="text-[11px]" title={`contributo ${p.contribution >= 0 ? '+' : ''}${p.contribution.toFixed(2)}`}>
             <div className="flex items-center justify-between">
-              <span className="truncate text-slate-700">{p.name}</span>
-              <span className="ml-1 font-mono text-slate-400">{pct(p.share)}</span>
+              <span className="truncate text-ink-soft">{p.name}</span>
+              <span className="ml-1 font-mono text-ink-faint">{pct(p.share)}</span>
             </div>
-            <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-surface-2">
               <div className={clsx('h-full', bar)} style={{ width: `${p.share * 100}%` }} />
             </div>
           </div>
         ))
       ) : (
-        <div className="text-[11px] text-slate-300">—</div>
+        <div className="text-[11px] text-ink-faint">—</div>
       )}
     </div>
   );

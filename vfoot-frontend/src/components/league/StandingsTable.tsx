@@ -51,7 +51,7 @@ export function StandingsTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-[11px] uppercase tracking-wide text-slate-500">
+          <tr className="text-left text-[11px] uppercase tracking-wide text-ink-faint">
             <th className="py-2 pr-2">#</th>
             <th className="pr-2">Squadra</th>
             <th className="px-1 text-center">G</th>
@@ -71,9 +71,9 @@ export function StandingsTable({
               key={s.key}
               onClick={onRowClick ? () => onRowClick(s) : undefined}
               className={clsx(
-                'border-t border-slate-100',
-                onRowClick && 'cursor-pointer hover:bg-slate-50',
-                (s.highlight || s.key === selectedKey) && 'bg-amber-50',
+                'border-t border-line',
+                onRowClick && 'cursor-pointer hover:bg-surface-2',
+                (s.highlight || s.key === selectedKey) && 'bg-brand/10',
               )}
             >
               <td className="py-2 pr-2">
@@ -81,42 +81,42 @@ export function StandingsTable({
                   className={clsx(
                     'inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold',
                     prize.has(s.rank)
-                      ? 'bg-green-100 text-green-800'
+                      ? 'bg-good-bg text-good'
                       : qualify.has(s.rank)
-                        ? 'border border-green-300 bg-white text-green-700'
-                        : 'bg-slate-100 text-slate-600',
+                        ? 'border border-good/40 bg-surface text-good'
+                        : 'bg-surface-2 text-ink-soft',
                   )}
                 >
                   {s.rank}
                 </span>
               </td>
-              <td className="pr-2 font-semibold text-slate-900">
+              <td className="pr-2 font-semibold text-ink">
                 <span className="flex items-center gap-2">
                   {showCrest ? <Crest descriptor={s.crest} teamName={s.name} size={22} /> : null}
                   <span className="truncate">{s.name}</span>
                   {s.provisional ? (
                     <span
-                      className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-violet-600"
+                      className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-live"
                       title="Partita in corso: questi numeri possono ancora cambiare"
                     />
                   ) : null}
                 </span>
               </td>
-              <td className="px-1 text-center text-slate-600">{s.played}</td>
-              <td className="px-1 text-center text-slate-600">{s.wins}</td>
-              <td className="px-1 text-center text-slate-600">{s.draws}</td>
-              <td className="px-1 text-center text-slate-600">{s.losses}</td>
-              <td className="px-1 text-center text-slate-600">{s.goalsFor}</td>
-              <td className="px-1 text-center text-slate-600">{s.goalsAgainst}</td>
-              <td className="px-1 text-center text-slate-600">
+              <td className="px-1 text-center text-ink-soft">{s.played}</td>
+              <td className="px-1 text-center text-ink-soft">{s.wins}</td>
+              <td className="px-1 text-center text-ink-soft">{s.draws}</td>
+              <td className="px-1 text-center text-ink-soft">{s.losses}</td>
+              <td className="px-1 text-center text-ink-soft">{s.goalsFor}</td>
+              <td className="px-1 text-center text-ink-soft">{s.goalsAgainst}</td>
+              <td className="px-1 text-center text-ink-soft">
                 {s.goalDiff > 0 ? `+${s.goalDiff}` : s.goalDiff}
               </td>
               {showAvg ? (
-                <td className="px-1 text-center text-slate-500">
+                <td className="px-1 text-center text-ink-faint">
                   {typeof s.avgScore === 'number' ? s.avgScore.toFixed(1) : '—'}
                 </td>
               ) : null}
-              <td className="px-1 text-center font-bold text-slate-900">{s.points}</td>
+              <td className="px-1 text-center font-bold text-ink">{s.points}</td>
             </tr>
           ))}
         </tbody>

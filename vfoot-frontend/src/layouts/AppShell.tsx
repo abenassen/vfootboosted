@@ -1,6 +1,13 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
 import { useMemo } from 'react';
+// Un'icona per voce, e ognuna dice la SUA voce: la maglia per le rose, il podio
+// per la classifica, l'urna per le decisioni. Le emoji le disegnano tre sistemi
+// operativi diversi, quindi la stessa barra aveva tre stili e tre spessori.
+import {
+  ArrowLeftRight, BarChart3, CalendarDays, CircleDot, ClipboardList, Home,
+  LayoutGrid, Settings, Shirt, Vote, type LucideIcon,
+} from 'lucide-react';
 import LeagueSwitcher from '../components/LeagueSwitcher';
 import CompetitionSwitcher from '../components/CompetitionSwitcher';
 import { useAuth } from '../auth/AuthContext';
@@ -23,7 +30,7 @@ import UpdateBanner from '../components/UpdateBanner';
 type NavItem = {
   to: string;
   label: string;
-  icon: string;
+  icon: LucideIcon;
   scope: 'league' | 'competition';
   badge?: number;
   /** Marks the entry that has work waiting on it — a dot, where a badge would
@@ -34,19 +41,19 @@ type NavItem = {
 };
 
 const leagueNav = [
-  { to: '/home', label: 'Home lega', icon: '🏠', scope: 'league' as const },
+  { to: '/home', label: 'Home lega', icon: Home, scope: 'league' as const },
   // "Rose" and not "Squadra": the page opens on your own, but the strip at the
   // top browses every roster in the league, so the plural is what it does.
-  { to: '/squad', label: 'Rose', icon: '👥', scope: 'league' as const },
-  { to: '/matches', label: 'Partite', icon: '🎯', scope: 'competition' as const },
-  { to: '/standings', label: 'Classifica', icon: '📊', scope: 'competition' as const },
-  { to: '/listone', label: 'Listone', icon: '📋', scope: 'league' as const },
-  { to: '/market', label: 'Mercato', icon: '💱', scope: 'league' as const },
-  { to: '/decisioni', label: 'Decisioni', icon: '🗳️', scope: 'league' as const },
-  { to: '/league-admin?tab=league', label: 'Gestione lega', icon: '⚙️', scope: 'league' as const },
+  { to: '/squad', label: 'Rose', icon: Shirt, scope: 'league' as const },
+  { to: '/matches', label: 'Partite', icon: CalendarDays, scope: 'competition' as const },
+  { to: '/standings', label: 'Classifica', icon: BarChart3, scope: 'competition' as const },
+  { to: '/listone', label: 'Listone', icon: ClipboardList, scope: 'league' as const },
+  { to: '/market', label: 'Mercato', icon: ArrowLeftRight, scope: 'league' as const },
+  { to: '/decisioni', label: 'Decisioni', icon: Vote, scope: 'league' as const },
+  { to: '/league-admin?tab=league', label: 'Gestione lega', icon: Settings, scope: 'league' as const },
   // Last, and after a separator: the real championship is what the league is
   // played ON, not a page you need to run it. Everything above is the league.
-  { to: '/serie-a', label: 'Serie A', icon: '⚽', scope: 'league' as const, aside: true },
+  { to: '/serie-a', label: 'Serie A', icon: CircleDot, scope: 'league' as const, aside: true },
 ];
 
 const USER_ADMIN_TO = '/league-admin?tab=user';
@@ -137,7 +144,7 @@ export default function AppShell() {
       .filter((it) => isLeagueAdmin || !it.to.startsWith('/league-admin'))
       .map((it): NavItem => {
         if (it.to === '/standings')
-          return { ...it, label: standingsLabel, icon: resultView === 'classifica' ? '📊' : '🗂️' };
+          return { ...it, label: standingsLabel, icon: resultView === 'classifica' ? BarChart3 : LayoutGrid };
         if (it.to === '/serie-a') return { ...it, label: refCompetition };
         // One number per audience, and they must not be mixed: the admin's is his
         // whole sign-off queue, the member's is only what he was asked. Falling back
@@ -190,25 +197,25 @@ export default function AppShell() {
       active
         ? scope === 'competition'
           ? `${color.bg700} text-white shadow-card`
-          : 'bg-slate-900 text-white shadow-card'
+          : 'bg-brand text-on-brand shadow-card'
         : scope === 'competition'
           ? `${color.text700} ${color.hover50}`
-          : 'text-slate-700 hover:bg-slate-200'
+          : 'text-ink-soft hover:bg-surface-2'
     );
 
   function renderNav(item: NavItem) {
     const manual = leagueAdminActive(location.search, location.pathname, item.to);
     const content = (
       <>
-        <span className="text-lg">{item.icon}</span>
+        <item.icon size={18} strokeWidth={1.9} aria-hidden />
         {item.label}
         {item.badge ? (
-          <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+          <span className="ml-auto rounded-full bg-warn px-1.5 py-0.5 text-[10px] font-bold text-white">
             {item.badge}
           </span>
         ) : item.flag ? (
           <span
-            className="ml-auto h-2 w-2 rounded-full bg-amber-500"
+            className="ml-auto h-2 w-2 rounded-full bg-warn"
             title="Ci sono passi da completare"
             aria-label="Ci sono passi da completare"
           />
@@ -233,10 +240,10 @@ export default function AppShell() {
     location.pathname.startsWith('/matches') || location.pathname.startsWith('/standings');
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen bg-paper text-ink">
       <UpdateBanner />
       {/* Desktop top bar — cross-league: switcher + user admin + account */}
-      <div className="hidden md:block border-b bg-white">
+      <div className="vf-hero hidden border-b border-black/10 md:block">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
           {/* Logo + wordmark are the way home, as everywhere else on the web —
               so Home needs no menu entry of its own. No page title beside it:
@@ -244,8 +251,8 @@ export default function AppShell() {
               "Amministrazione" where the menu entry and the page both said
               "Gestione lega"). */}
           <Link to="/home" className="flex items-center gap-3 rounded-lg hover:opacity-80" aria-label="Vai alla home">
-            <img src={logo} alt="Vfoot logo" className="h-11 w-11 rounded-xl object-cover" />
-            <div className="font-black tracking-tight text-xl">Vfoot Boosted</div>
+            <img src={logo} alt="Vfoot logo" className="h-11 w-11 rounded-xl bg-surface object-cover p-0.5 shadow-sm" />
+            <div className="font-cond text-2xl font-bold uppercase leading-none tracking-wide">Vfoot Boosted</div>
           </Link>
 
           <div className="flex items-center gap-3">
@@ -254,12 +261,12 @@ export default function AppShell() {
             {hasLeagues ? (
               <div className="flex items-end gap-2">
                 <label className="flex flex-col gap-0.5">
-                  <span className="px-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Lega</span>
+                  <span className="px-1 font-cond text-[11px] font-bold uppercase tracking-wide text-white/75">Lega</span>
                   <LeagueSwitcher />
                 </label>
                 {competitions.length ? (
                   <label className="flex flex-col gap-0.5">
-                    <span className={clsx('px-1 text-[11px] font-bold uppercase tracking-wide', color.text500)}>Competizione</span>
+                    <span className="px-1 font-cond text-[11px] font-bold uppercase tracking-wide text-white/75">Competizione</span>
                     <CompetitionSwitcher />
                   </label>
                 ) : null}
@@ -274,20 +281,20 @@ export default function AppShell() {
                 to="/squad"
                 className={clsx(
                   'flex items-center gap-2 rounded-xl px-2 py-1',
-                  location.pathname.startsWith('/squad') ? 'bg-slate-900' : 'hover:bg-slate-100',
+                  location.pathname.startsWith('/squad') ? 'bg-black/30' : 'hover:bg-surface/15',
                 )}
                 title="La tua squadra in questa lega"
               >
                 <Crest descriptor={selectedLeague?.team_crest} teamName={activeTeamName} size={30} />
                 <div className="text-left text-xs leading-tight">
-                  <div className={location.pathname.startsWith('/squad') ? 'text-slate-300' : 'text-slate-400'}>
+                  <div className={'text-white/70'}>
                     Squadra
                   </div>
                   <div
                     className={clsx(
                       'font-semibold',
-                      location.pathname.startsWith('/squad') ? 'text-white' : 'text-slate-700',
-                      !activeTeamName && 'italic font-normal text-slate-400',
+                      'text-white',
+                      !activeTeamName && 'italic font-normal text-white/60',
                     )}
                   >
                     {activeTeamName ?? 'non impostata'}
@@ -300,31 +307,31 @@ export default function AppShell() {
               to={USER_ADMIN_TO}
               className={clsx(
                 'flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold',
-                isUserAdmin ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+                isUserAdmin ? 'bg-black/30 text-white' : 'text-white/85 hover:bg-surface/15'
               )}
             >
               <span>🗂️</span> Le mie leghe
             </Link>
 
-            <div className="h-8 w-px bg-slate-200" aria-hidden />
+            <div className="h-8 w-px bg-surface/25" aria-hidden />
 
             <Link
               to="/profilo"
               className={clsx(
                 'flex items-center gap-2 rounded-xl px-2 py-1',
-                location.pathname.startsWith('/profilo') ? 'bg-slate-900' : 'hover:bg-slate-100',
+                location.pathname.startsWith('/profilo') ? 'bg-black/30' : 'hover:bg-surface/15',
               )}
               title="Il tuo profilo"
             >
               <Avatar descriptor={user?.avatar} username={user?.username} size={30} />
               <div className="text-left text-xs leading-tight">
-                <div className={location.pathname.startsWith('/profilo') ? 'text-slate-300' : 'text-slate-400'}>
+                <div className={'text-white/70'}>
                   Fantallenatore
                 </div>
                 <div
                   className={clsx(
                     'font-semibold',
-                    location.pathname.startsWith('/profilo') ? 'text-white' : 'text-slate-700',
+                    'text-white',
                   )}
                 >
                   {user?.username ?? 'Utente'}
@@ -341,7 +348,7 @@ export default function AppShell() {
       <div className="mx-auto max-w-7xl md:grid md:grid-cols-[240px_1fr] md:gap-6">
         {/* Desktop sidebar — current league only */}
         <aside className="hidden md:block sticky top-0 self-start h-[calc(100vh-57px)] overflow-auto px-4 py-6">
-          <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <div className="px-1 pb-2 font-cond text-xs font-bold uppercase tracking-wide text-ink-faint">
             {selectedLeague?.name ?? 'Nessuna lega'}
           </div>
           {/* The two competition-scoped entries follow the switcher, and until now
@@ -354,7 +361,7 @@ export default function AppShell() {
               .map(renderNav)}
           </nav>
           {selectedCompetition && visibleNav.some((it) => it.scope === 'competition') ? (
-            <div className={clsx('mt-3 rounded-xl border-l-4 py-2 pl-2', color.border600, color.bg50)}>
+            <div className={clsx('mt-3 rounded-xl border-l-4 py-2 pl-2', color.border600, color.tint)}>
               <div className={clsx('flex items-center gap-1.5 px-1 pb-1 text-[10px] font-bold uppercase tracking-wide', color.text700)}>
                 <span className={clsx('h-2 w-2 rounded-full', color.dot)} aria-hidden />
                 <span className="truncate">{selectedCompetition.name}</span>
@@ -375,13 +382,13 @@ export default function AppShell() {
               word, since then the sidebar links lead nowhere useful. */}
           {!selectedLeague && !leaguesLoading ? (
             hasLeagues ? (
-              <div className="mt-6 rounded-2xl bg-white shadow-card p-4 text-xs text-slate-500">
+              <div className="mt-6 rounded-2xl border border-line bg-surface shadow-card p-4 text-xs text-ink-faint">
                 Seleziona una lega dal menu in alto.
               </div>
             ) : (
               <Link
                 to={USER_ADMIN_TO}
-                className="mt-6 block rounded-2xl bg-slate-900 p-4 text-center text-sm font-bold text-white shadow-card hover:bg-slate-800"
+                className="mt-6 block rounded-2xl bg-brand p-4 text-center text-sm font-bold text-on-brand shadow-card hover:bg-brand-strong"
               >
                 Crea o unisciti a una lega
               </Link>
@@ -398,10 +405,10 @@ export default function AppShell() {
                 <img src={logo} alt="Vfoot logo" className="h-8 w-8 rounded-lg object-cover" />
               </Link>
               <div>
-                <div className="text-xs text-slate-500">Vfoot Boosted</div>
+                <div className="text-xs text-ink-faint">Vfoot Boosted</div>
                 <div className="font-bold text-lg leading-tight">{mobileTitle}</div>
                 {selectedLeague ? (
-                  <div className="flex items-center gap-1 text-[11px] text-slate-500 leading-tight">
+                  <div className="flex items-center gap-1 text-[11px] text-ink-faint leading-tight">
                     {activeTeamName ? (
                       <Crest descriptor={selectedLeague.team_crest} teamName={activeTeamName} size={14} />
                     ) : null}
@@ -418,7 +425,7 @@ export default function AppShell() {
                 aria-label="Le mie leghe"
                 className={clsx(
                   'rounded-xl px-2 py-2 text-sm',
-                  isUserAdmin ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                  isUserAdmin ? 'bg-ink text-paper' : 'bg-surface-2 text-ink-soft'
                 )}
               >
                 🗂️
@@ -428,7 +435,7 @@ export default function AppShell() {
                 aria-label="Profilo"
                 className={clsx(
                   'rounded-full',
-                  location.pathname.startsWith('/profilo') ? 'ring-2 ring-slate-900 ring-offset-1' : '',
+                  location.pathname.startsWith('/profilo') ? 'ring-2 ring-brand ring-offset-1' : '',
                 )}
               >
                 <Avatar descriptor={user?.avatar} username={user?.username} size={34} />
@@ -442,9 +449,9 @@ export default function AppShell() {
           {/* Mobile context bar: the active LEAGUE and COMPETITION, clearly labelled
               and full-width so the current selection is always obvious on a phone. */}
           {hasLeagues ? (
-            <div className="md:hidden mb-3 grid grid-cols-1 gap-2 rounded-2xl bg-white p-3 shadow-card">
+            <div className="md:hidden mb-3 grid grid-cols-1 gap-2 rounded-2xl border border-line bg-surface p-3 shadow-card">
               <label className="block">
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">Lega</span>
+                <span className="mb-1 block font-cond text-[10px] font-bold uppercase tracking-wide text-ink-faint">Lega</span>
                 <LeagueSwitcher compact />
               </label>
               {competitions.length ? (
@@ -461,7 +468,7 @@ export default function AppShell() {
           {/* Accent strip: signals at a glance that this page is scoped to the CURRENT
               competition (indigo), vs the neutral league-level pages. */}
           {isCompetitionPage && selectedCompetition ? (
-            <div className={clsx('mb-3 flex items-center gap-2 rounded-xl border-l-4 px-3 py-2', color.border600, color.bg50)}>
+            <div className={clsx('mb-3 flex items-center gap-2 rounded-xl border-l-4 px-3 py-2', color.border600, color.tint)}>
               <span className="text-sm">🏆</span>
               <span className={clsx('text-xs font-semibold uppercase tracking-wide', color.text700)}>Competizione</span>
               <span className={clsx('text-sm font-bold', color.text900)}>{selectedCompetition.name}</span>
@@ -481,7 +488,7 @@ export default function AppShell() {
           (labels stay legible instead of overlapping). */}
       <div
         className={clsx(
-          'md:hidden fixed bottom-0 left-0 right-0 border-t bg-white',
+          'md:hidden fixed bottom-0 left-0 right-0 border-t border-line bg-surface',
           visibleNav.length ? '' : 'hidden',
         )}
       >
@@ -499,21 +506,21 @@ export default function AppShell() {
                 'flex shrink-0 basis-[20%] flex-col items-center justify-center gap-1 whitespace-nowrap border-t-2 px-1 py-2 text-[11px] font-semibold transition-colors',
                 active
                   ? it.scope === 'competition'
-                    ? clsx(color.text700, color.bg50, color.border600)
-                    : 'border-slate-900 bg-slate-100 text-slate-900'
-                  : clsx('border-transparent', it.scope === 'competition' ? color.text400 : 'text-slate-500')
+                    ? clsx(color.text700, color.tint, color.border600)
+                    : 'border-brand bg-brand/12 text-brand-strong'
+                  : clsx('border-transparent', it.scope === 'competition' ? color.text400 : 'text-ink-faint')
               );
             const inner = (
               <>
-                <span className="relative text-lg leading-none">
-                  {it.icon}
+                <span className="relative leading-none">
+                  <it.icon size={19} strokeWidth={1.9} aria-hidden />
                   {it.badge ? (
-                    <span className="absolute -right-2 -top-1 rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white">
+                    <span className="absolute -right-2 -top-1 rounded-full bg-warn px-1 text-[9px] font-bold text-white">
                       {it.badge}
                     </span>
                   ) : it.flag ? (
                     <span
-                      className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-amber-500"
+                      className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-warn"
                       aria-label="Ci sono passi da completare"
                     />
                   ) : null}

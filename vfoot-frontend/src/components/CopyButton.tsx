@@ -42,8 +42,8 @@ export default function CopyButton({
       type="button"
       onClick={() => void copy()}
       className={clsx(
-        'inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100',
-        copied && 'border-emerald-300 bg-emerald-50 text-emerald-700',
+        'inline-flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-xs font-semibold text-ink-soft hover:bg-surface-2',
+        copied && 'border-good/40 bg-good-bg text-good',
         className,
       )}
       aria-label={`Copia: ${value}`}

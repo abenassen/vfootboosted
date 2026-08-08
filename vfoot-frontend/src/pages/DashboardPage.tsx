@@ -24,18 +24,18 @@ export default function DashboardPage() {
         <Card className="p-6 text-center md:p-10">
           <div className="text-4xl">🏆</div>
           <div className="mt-3 text-2xl font-black md:text-3xl">Benvenuto in Vfoot Boosted</div>
-          <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
+          <p className="mx-auto mt-2 max-w-md text-sm text-ink-soft">
             Non fai ancora parte di nessuna lega. Creane una e invita i tuoi amici col
             codice che ti ritrovi, oppure entra in una lega esistente con il codice che
             ti hanno dato.
           </p>
           <Link
             to="/league-admin?tab=user"
-            className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-6 py-4 text-base font-bold text-white shadow-card transition hover:bg-slate-800 active:scale-[0.99]"
+            className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-ink px-6 py-4 text-base font-bold text-paper shadow-card transition hover:opacity-90 active:scale-[0.99]"
           >
             <span className="text-xl">🏟️</span> Crea o unisciti a una lega
           </Link>
-          <div className="mt-4 text-xs text-slate-500">
+          <div className="mt-4 text-xs text-ink-faint">
             Squadra, formazione, mercato e classifiche si attivano appena sei in una lega.
           </div>
         </Card>
@@ -46,7 +46,7 @@ export default function DashboardPage() {
     return (
       <div className="space-y-4">
         <SetupBanner />
-        <Card className="p-4 text-sm text-slate-600">Seleziona una lega dal selettore in alto.</Card>
+        <Card className="p-4 text-sm text-ink-soft">Seleziona una lega dal selettore in alto.</Card>
       </div>
     );
   }
@@ -59,7 +59,7 @@ export default function DashboardPage() {
           non fara' mai — ne' a installare, ne' ad accendere le notifiche — e sparisce
           per sempre una volta chiuso. */}
       <SetupBanner />
-      <Card className="p-4">
+      <Card className="vf-hero border-transparent p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           {/* Lo stemma, che qui mancava. È l'unica pagina della lega che diceva
               il nome della squadra senza mostrarla: la rosa ce l'ha, il
@@ -73,8 +73,8 @@ export default function DashboardPage() {
               className={myName ? undefined : 'opacity-40'}
             />
             <div className="min-w-0">
-              <SectionTitle>{selectedLeague?.name}</SectionTitle>
-              <div className="mt-1 text-2xl font-black">{myName ?? 'Spettatore'}</div>
+              <SectionTitle className="text-white/75">{selectedLeague?.name}</SectionTitle>
+              <div className="mt-1 font-cond text-3xl font-bold uppercase leading-none tracking-wide">{myName ?? 'Spettatore'}</div>
               {/* WHO you are, and nothing else.
 
                   Rank, points, wins and average are COMPETITION-scoped. They were
@@ -89,7 +89,7 @@ export default function DashboardPage() {
                   da schierare: la 23"). Saying it twice is how the two came to
                   disagree — this line used to read "giornata 1" while that one said
                   22. */}
-              {myName ? null : <div className="text-sm text-slate-500">Nessuna squadra associata</div>}
+              {myName ? null : <div className="text-sm text-white/75">Nessuna squadra associata</div>}
             </div>
           </div>
           {/* No "Formazione" button here any more: with a championship and a cup

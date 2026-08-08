@@ -83,7 +83,7 @@ export default function TeamIdentityCard({
           <div className="min-w-0">
             <SectionTitle>Squadra</SectionTitle>
             <div className="mt-1 text-xl font-black">{name}</div>
-            {subtitle ? <div className="text-sm text-slate-500">{subtitle}</div> : null}
+            {subtitle ? <div className="text-sm text-ink-faint">{subtitle}</div> : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -104,7 +104,7 @@ export default function TeamIdentityCard({
       {editing ? (
         <div className="mt-4 border-t pt-4">
           <label className="block">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
               Nome squadra
             </span>
             <input
@@ -120,7 +120,7 @@ export default function TeamIdentityCard({
             <CrestBuilder value={draftCrest} teamName={draftName || name} onChange={setDraftCrest} />
           </div>
 
-          {error ? <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+          {error ? <div className="mt-3 rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{error}</div> : null}
 
           <div className="mt-4 flex gap-2">
             <Button disabled={saving} onClick={() => void save()}>

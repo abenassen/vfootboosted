@@ -32,13 +32,13 @@ export default function RealMatchDetailPage() {
 
   // `loading && !data`, not `loading`: a re-fetch triggered by the socket must not
   // replace a page you are reading with a spinner.
-  if (loading && !data) return <div className="text-sm text-slate-500">Caricamento partita…</div>;
+  if (loading && !data) return <div className="text-sm text-ink-faint">Caricamento partita…</div>;
   // Nothing to show and no longer loading: either the fetch failed or the match
   // has no detail. A LATER failure keeps the page that is already up — a live
   // re-fetch that trips must not throw away the tabellino you were reading.
   if (!data) {
     return (
-      <Card className="p-4 text-sm text-red-600">
+      <Card className="p-4 text-sm text-bad">
         Errore nel caricamento della partita: {error?.message ?? 'sconosciuto'}
       </Card>
     );

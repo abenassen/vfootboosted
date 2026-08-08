@@ -72,10 +72,10 @@ export default function ClassificaPage() {
     };
   }, [selectedCompetitionId]);
 
-  if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega.</div>;
+  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega.</div>;
   if (!selectedCompetitionId)
-    return <div className="text-sm text-slate-500">Questa lega non ha ancora competizioni.</div>;
-  if (loading || !structure) return <div className="text-sm text-slate-500">Caricamento…</div>;
+    return <div className="text-sm text-ink-faint">Questa lega non ha ancora competizioni.</div>;
+  if (loading || !structure) return <div className="text-sm text-ink-faint">Caricamento…</div>;
 
   // DALL'ULTIMA FASE ALLA PRIMA. Le fasi erano disegnate nell'ordine in cui si
   // giocano — gironi, poi tabellone — che è l'ordine giusto per progettare una
@@ -97,7 +97,7 @@ export default function ClassificaPage() {
           <Badge tone="blue">{structure.name}</Badge>
         </div>
         {structure.result_view === 'risultati' ? (
-          <div className="mt-1 text-[11px] text-slate-400">
+          <div className="mt-1 text-[11px] text-ink-faint">
             Dall'ultima fase giocata alla prima: il tabellone, e sotto i gironi da cui è uscito.
           </div>
         ) : null}
@@ -116,20 +116,20 @@ export default function ClassificaPage() {
                 className={
                   'flex items-start gap-2 rounded-xl border px-3 py-2 ' +
                   (p.winner_team_names.length
-                    ? 'border-amber-200 bg-amber-50/60'
-                    : 'border-slate-200 border-dashed')
+                    ? 'border-warn/40 bg-warn-bg/60'
+                    : 'border-line border-dashed')
                 }
               >
                 <span className="text-xl leading-none" aria-hidden>
                   {p.icon}
                 </span>
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-900">{p.name}</div>
-                  <div className="truncate text-[11px] text-slate-500">{p.condition_label}</div>
+                  <div className="truncate text-sm font-semibold text-ink">{p.name}</div>
+                  <div className="truncate text-[11px] text-ink-faint">{p.condition_label}</div>
                   <div
                     className={
                       'truncate text-[11px] font-semibold ' +
-                      (p.winner_team_names.length ? 'text-amber-800' : 'text-slate-400')
+                      (p.winner_team_names.length ? 'text-warn' : 'text-ink-faint')
                     }
                   >
                     {p.winner_team_names.length ? p.winner_team_names.join(', ') : 'ancora da assegnare'}
@@ -220,7 +220,7 @@ function Bracket({ section }: { section: CompetitionSection }) {
         {rounds.map((r) => (
           <div key={r.round_no}>
             {sameName ? null : (
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{r.label}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">{r.label}</div>
             )}
             <div className="mt-2 space-y-2">
               {r.fixtures.map((f) => (
@@ -244,19 +244,19 @@ function BracketMatch({ f }: { f: LeagueFixtureItem }) {
   const homeWin = through !== null ? through === f.home_team.team_id : !!done && hs > as;
   const awayWin = through !== null ? through === f.away_team.team_id : !!done && as > hs;
   return (
-    <Link to={`/matches/${f.fixture_id}`} className="block rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm hover:opacity-80">
+    <Link to={`/matches/${f.fixture_id}`} className="block rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm hover:opacity-80">
       <div className="flex items-center justify-between">
-        <span className={homeWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.home_team.name}</span>
+        <span className={homeWin ? 'font-bold text-ink' : 'text-ink-soft'}>{f.home_team.name}</span>
         <span className="font-mono text-xs font-bold">{done ? Math.round(hs) : '–'}</span>
       </div>
       <div className="flex items-center justify-between">
-        <span className={awayWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.away_team.name}</span>
+        <span className={awayWin ? 'font-bold text-ink' : 'text-ink-soft'}>{f.away_team.name}</span>
         <span className="font-mono text-xs font-bold">{done ? Math.round(as) : '–'}</span>
       </div>
       {/* Non più maiuscoletto: una frase che spiega una regola si legge, una
           targhetta di due parole si guardava. */}
       {f.advanced_reason ? (
-        <div className="mt-1 text-[10px] leading-snug text-slate-500">
+        <div className="mt-1 text-[10px] leading-snug text-ink-faint">
           {ADVANCED_REASON[f.advanced_reason] ?? `passa: ${f.advanced_reason}`}
           {f.shootout ? ` ${f.shootout.home_goals}-${f.shootout.away_goals}` : ''}
           {/* IL NUMERO che ha deciso, non solo il suo nome. «Passa ai punteggi»
@@ -281,7 +281,7 @@ function BracketMatch({ f }: { f: LeagueFixtureItem }) {
                   key={i}
                   aria-label={`${k.name}: ${k.scored ? 'gol' : 'sbagliato'}`}
                   className={
-                    'inline-block h-1.5 w-1.5 rounded-full ' + (k.scored ? 'bg-emerald-500' : 'bg-slate-300')
+                    'inline-block h-1.5 w-1.5 rounded-full ' + (k.scored ? 'bg-good' : 'bg-ink-faint/50')
                   }
                 />
               ))}

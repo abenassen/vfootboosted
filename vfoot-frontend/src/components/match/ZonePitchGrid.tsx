@@ -64,7 +64,7 @@ export function ZonePitchGrid({
           className={clsx(
             'absolute flex items-center justify-center border border-white/10 text-[9px] font-bold text-white/90 transition',
             onSelectZone && 'hover:brightness-125',
-            isHighlighted && 'z-10 ring-2 ring-amber-300',
+            isHighlighted && 'z-10 ring-2 ring-warn/40',
             selected && 'z-10 ring-2 ring-white',
           )}
           style={{
@@ -83,16 +83,16 @@ export function ZonePitchGrid({
 
   return (
     <div>
-      <div className="relative aspect-[7/5] w-full overflow-hidden rounded-xl border border-green-700/40 bg-gradient-to-r from-green-600 to-green-500 shadow-inner">
+      <div className="relative aspect-[7/5] w-full overflow-hidden rounded-xl border border-good/40 bg-gradient-to-r from-green-600 to-green-500 shadow-inner">
         {items}
         {/* pitch markings drawn on top so they stay visible over the zone tints */}
         <div className="pointer-events-none absolute inset-2 rounded border border-white/50" />
-        <div className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-white/50" />
+        <div className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-surface/50" />
         <div className="pointer-events-none absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/50" />
         <div className="pointer-events-none absolute left-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/50" />
         <div className="pointer-events-none absolute right-2 top-1/2 h-24 w-12 -translate-y-1/2 border border-white/50" />
       </div>
-      <div className="mt-1 flex justify-between px-1 text-[10px] text-slate-400">
+      <div className="mt-1 flex justify-between px-1 text-[10px] text-ink-faint">
         <span>← difesa (casa)</span>
         <span>attacco →</span>
       </div>

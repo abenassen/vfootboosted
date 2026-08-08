@@ -28,7 +28,7 @@ export default function Avatar({
       width={size}
       height={size}
       alt={username ? `Avatar di ${username}` : 'Avatar'}
-      className={clsx('shrink-0 rounded-full bg-white object-cover', className)}
+      className={clsx('shrink-0 rounded-full bg-surface object-cover', className)}
       style={{ width: size, height: size }}
     />
   );

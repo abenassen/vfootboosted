@@ -6,7 +6,7 @@ export default function NotFoundPage() {
     <div className="mx-auto max-w-lg">
       <Card className="p-6 text-center">
         <div className="text-2xl font-black">404</div>
-        <div className="mt-2 text-sm text-slate-500">Pagina non trovata.</div>
+        <div className="mt-2 text-sm text-ink-faint">Pagina non trovata.</div>
         <div className="mt-4">
           <Link to="/home"><Button>Torna alla dashboard</Button></Link>
         </div>

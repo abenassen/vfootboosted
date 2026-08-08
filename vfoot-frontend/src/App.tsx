@@ -30,7 +30,7 @@ import ManagerProfilePage from './pages/ManagerProfilePage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="p-6 text-sm text-slate-500">Caricamento sessione…</div>;
+  if (loading) return <div className="p-6 text-sm text-ink-faint">Caricamento sessione…</div>;
   if (!user) return <Navigate to="/" replace />;
   return children;
 }

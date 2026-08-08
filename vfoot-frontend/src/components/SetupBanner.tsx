@@ -63,11 +63,11 @@ function Frame({ title, closeLabel, onClose, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <Card className="border-l-4 border-sky-500 bg-sky-50 p-4">
+    <Card className="border-l-4 border-accent bg-accent/10 p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 text-sm font-bold text-sky-900">{title}</div>
+        <div className="min-w-0 text-sm font-bold text-accent">{title}</div>
         <button type="button" onClick={onClose} aria-label={closeLabel}
-          className="shrink-0 rounded-lg px-2 py-1 text-sky-700 hover:bg-sky-100">
+          className="shrink-0 rounded-lg px-2 py-1 text-accent hover:bg-accent/10">
           ✕
         </button>
       </div>
@@ -94,17 +94,17 @@ export default function SetupBanner() {
         {/* Di proposito non un elenco di funzioni: cio' di cui l'app avvisa
             crescera' (mercato, asta, giornate), e un testo che elenca quelle di
             oggi invecchia male. La promessa e' "non ti perdi niente". */}
-        <div className="mt-1 text-sm text-sky-800">
+        <div className="mt-1 text-sm text-accent">
           Si apre in un tocco, come un'app, e ti avvisa di quello che succede nella
           tua lega.
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <button type="button"
-            className="text-sm font-semibold text-sky-900 underline decoration-dotted"
+            className="text-sm font-semibold text-accent underline decoration-dotted"
             onClick={() => setShowSteps((v) => !v)}>
             {showSteps ? 'Nascondi i passaggi' : 'Come si fa su iPhone'}
           </button>
-          <span className="text-xs text-sky-800">
+          <span className="text-xs text-accent">
             Su iPhone è l'unico modo per ricevere le notifiche — che poi vanno accese
             dall'app installata.
           </span>
@@ -125,7 +125,7 @@ export default function SetupBanner() {
     <Frame title="🔔 Ci sei quasi: attiva le notifiche"
       closeLabel="Chiudi l'invito alle notifiche"
       onClose={() => { setDismissedPush(true); remember(DISMISSED_PUSH); }}>
-      <div className="mt-1 text-sm text-sky-800">
+      <div className="mt-1 text-sm text-accent">
         {isStandalone()
           ? 'L’app è installata, ma gli avvisi sono ancora spenti: vanno accesi una volta, da qui.'
           : 'Ti avvisiamo di quello che succede nella tua lega, anche quando non sei sul sito.'}
@@ -138,13 +138,13 @@ export default function SetupBanner() {
         </Button>
         {push.busy && (
           // Misurati ~30s a browser freddo: mezzo minuto muto sembra un bottone rotto.
-          <span className="text-xs text-sky-800">
+          <span className="text-xs text-accent">
             La prima volta può richiedere una ventina di secondi.
           </span>
         )}
       </div>
       {push.error && (
-        <div className="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{push.error}</div>
+        <div className="mt-2 rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{push.error}</div>
       )}
     </Frame>
   );

@@ -26,7 +26,7 @@ export default function PitchZoneMap({
   const rows = grid.rows;
 
   return (
-    <div className={clsx('rounded-2xl bg-white shadow-card p-4', className)}>
+    <div className={clsx('rounded-2xl bg-surface shadow-card p-4', className)}>
       {title && (
         <div className="flex items-center justify-between gap-2">
           <div className="font-semibold">{title}</div>
@@ -35,7 +35,7 @@ export default function PitchZoneMap({
       )}
 
       <div
-        className="mt-3 grid gap-1 rounded-2xl bg-slate-100 p-2"
+        className="mt-3 grid gap-1 rounded-2xl bg-surface-2 p-2"
         style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
       >
         {cells.map((cell) => {
@@ -47,21 +47,21 @@ export default function PitchZoneMap({
               onClick={() => onSelectZone?.(cell.zone_id)}
               className={clsx(
                 'relative aspect-[1/1] rounded-lg border transition',
-                isSel ? 'border-slate-900 ring-2 ring-slate-900/20' : 'border-transparent',
-                'focus:outline-none focus:ring-2 focus:ring-slate-900/20'
+                isSel ? 'border-line ring-2 ring-line/20' : 'border-transparent',
+                'focus:outline-none focus:ring-2 focus:ring-line/20'
               )}
               style={{ background: bg }}
               title={cell.zone_id}
             >
-              {showZoneLabels && <div className="absolute top-1 left-1 text-[10px] font-semibold text-slate-700/70">{cell.zone_id}</div>}
+              {showZoneLabels && <div className="absolute top-1 left-1 text-[10px] font-semibold text-ink-soft/70">{cell.zone_id}</div>}
               {typeof cell.value === 'number' && (
-                <div className="absolute bottom-1 right-1 text-[11px] font-bold text-slate-900/80">
+                <div className="absolute bottom-1 right-1 text-[11px] font-bold text-ink/80">
                   {cell.value.toFixed(1)}
                 </div>
               )}
               {cell.keyLabel && (
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-semibold text-slate-800">
+                  <span className="rounded-full bg-surface/70 px-2 py-1 text-[10px] font-semibold text-ink">
                     {cell.keyLabel}
                   </span>
                 </div>
@@ -71,7 +71,7 @@ export default function PitchZoneMap({
         })}
       </div>
 
-      <div className="mt-3 text-xs text-slate-500">
+      <div className="mt-3 text-xs text-ink-faint">
         Campo a zone (griglia {cols}×{rows}). Tocca una zona per vedere i dettagli.
       </div>
     </div>

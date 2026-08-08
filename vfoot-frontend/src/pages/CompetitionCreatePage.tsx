@@ -79,13 +79,13 @@ function StepDots({ step, labels }: { step: number; labels: string[] }) {
             <div
               className={
                 'flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ' +
-                (active ? 'bg-slate-900 text-white' : done ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-500')
+                (active ? 'bg-ink text-paper' : done ? 'bg-good text-paper' : 'bg-surface-2 text-ink-faint')
               }
             >
               {done ? '✓' : n}
             </div>
-            <span className={'text-xs ' + (active ? 'font-semibold text-slate-900' : 'text-slate-400')}>{label}</span>
-            {n < labels.length ? <span className="text-slate-300">→</span> : null}
+            <span className={'text-xs ' + (active ? 'font-semibold text-ink' : 'text-ink-faint')}>{label}</span>
+            {n < labels.length ? <span className="text-ink-faint">→</span> : null}
           </div>
         );
       })}
@@ -112,13 +112,13 @@ function ChoiceCard({
       onClick={onClick}
       className={
         'flex w-full items-start gap-3 rounded-2xl border-2 p-4 text-left transition ' +
-        (active ? 'border-slate-900 bg-slate-50 shadow-card' : 'border-slate-200 bg-white hover:border-slate-400')
+        (active ? 'border-line bg-surface-2 shadow-card' : 'border-line bg-surface hover:border-line')
       }
     >
       <span className="text-2xl leading-none">{emoji}</span>
       <span className="min-w-0">
-        <span className="block text-sm font-bold text-slate-900">{title}</span>
-        <span className="mt-0.5 block text-xs text-slate-500">{blurb}</span>
+        <span className="block text-sm font-bold text-ink">{title}</span>
+        <span className="mt-0.5 block text-xs text-ink-faint">{blurb}</span>
       </span>
     </button>
   );
@@ -127,30 +127,30 @@ function ChoiceCard({
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="text-xs font-semibold text-slate-500">{label}</span>
+      <span className="text-xs font-semibold text-ink-faint">{label}</span>
       <div className="mt-1">{children}</div>
-      {hint ? <span className="mt-1 block text-[11px] text-slate-400">{hint}</span> : null}
+      {hint ? <span className="mt-1 block text-[11px] text-ink-faint">{hint}</span> : null}
     </label>
   );
 }
 
-const inputCls = 'w-full rounded-xl border border-slate-200 px-3 py-2 text-sm';
+const inputCls = 'w-full rounded-xl border border-line px-3 py-2 text-sm';
 
 /** The shape the wizard is about to build, said in rounds and matches. */
 function PlanSummary({ plan }: { plan: CompetitionWizardPlan }) {
   return (
     <div className="space-y-1.5">
       {plan.stages.map((s, i) => (
-        <div key={`${s.name}-${i}`} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+        <div key={`${s.name}-${i}`} className="flex items-center justify-between rounded-xl border border-line bg-surface px-3 py-2">
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-slate-900">{s.name}</div>
+            <div className="truncate text-sm font-semibold text-ink">{s.name}</div>
             <div className="mt-0.5">
               <Badge tone={s.type === 'knockout' ? 'amber' : 'blue'}>
                 {s.type === 'knockout' ? 'Eliminazione diretta' : 'Tutti contro tutti'}
               </Badge>
             </div>
           </div>
-          <div className="shrink-0 text-right text-[11px] text-slate-500">
+          <div className="shrink-0 text-right text-[11px] text-ink-faint">
             <div>{s.teams} squadre</div>
             <div>
               {s.rounds} {s.rounds === 1 ? 'turno' : 'turni'} · {s.matches} {s.matches === 1 ? 'gara' : 'gare'}
@@ -158,8 +158,8 @@ function PlanSummary({ plan }: { plan: CompetitionWizardPlan }) {
           </div>
         </div>
       ))}
-      <div className="pt-1 text-xs text-slate-500">
-        In tutto <b className="text-slate-800">{plan.total_rounds}</b>{' '}
+      <div className="pt-1 text-xs text-ink-faint">
+        In tutto <b className="text-ink">{plan.total_rounds}</b>{' '}
         {plan.total_rounds === 1 ? 'turno' : 'turni'} da collocare sul calendario reale.
       </div>
     </div>
@@ -409,16 +409,16 @@ export default function CompetitionCreatePage() {
 
   // ---- guards ----
   if (!selectedLeagueId) {
-    return <div className="p-6 text-sm text-slate-500">Seleziona una lega per creare una competizione.</div>;
+    return <div className="p-6 text-sm text-ink-faint">Seleziona una lega per creare una competizione.</div>;
   }
   if (!isAdmin) {
     return (
       <div className="mx-auto max-w-2xl p-6">
-        <Card className="p-6 text-sm text-slate-600">Solo gli admin della lega possono creare competizioni.</Card>
+        <Card className="p-6 text-sm text-ink-soft">Solo gli admin della lega possono creare competizioni.</Card>
       </div>
     );
   }
-  if (loadErr) return <div className="p-6 text-sm text-red-600">{loadErr}</div>;
+  if (loadErr) return <div className="p-6 text-sm text-bad">{loadErr}</div>;
 
   const stepLabels = ['Formato', 'Chi gioca', 'Quando', 'Premi'];
 
@@ -426,10 +426,10 @@ export default function CompetitionCreatePage() {
     <div className="mx-auto max-w-3xl space-y-4 p-4 pb-24 sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-slate-900">Nuova competizione</h1>
-          <p className="truncate text-sm text-slate-500">{selectedLeague?.name}</p>
+          <h1 className="text-xl font-bold text-ink">Nuova competizione</h1>
+          <p className="truncate text-sm text-ink-faint">{selectedLeague?.name}</p>
         </div>
-        <Link to="/league-admin?tab=league" className="shrink-0 text-sm text-slate-500 hover:text-slate-900">
+        <Link to="/league-admin?tab=league" className="shrink-0 text-sm text-ink-faint hover:text-ink">
           ✕ Annulla
         </Link>
       </div>
@@ -455,13 +455,13 @@ export default function CompetitionCreatePage() {
             ))}
           </div>
           {showStep1Errors && !format ? (
-            <div className="mt-2 text-xs font-semibold text-red-600">Scegli che competizione è.</div>
+            <div className="mt-2 text-xs font-semibold text-bad">Scegli che competizione è.</div>
           ) : null}
           <div className="mt-4">
             <Field label="Nome *">
               <input
                 className={
-                  inputCls + (showStep1Errors && !name.trim() ? ' border-red-500 bg-red-50' : '')
+                  inputCls + (showStep1Errors && !name.trim() ? ' border-bad bg-bad-bg' : '')
                 }
                 aria-invalid={showStep1Errors && !name.trim()}
                 placeholder={format === 'league' ? 'es. Campionato' : 'es. Coppa dei Campioni'}
@@ -469,7 +469,7 @@ export default function CompetitionCreatePage() {
                 onChange={(e) => setName(e.target.value)}
               />
               {showStep1Errors && !name.trim() ? (
-                <div className="mt-1 text-xs font-semibold text-red-600">Dai un nome alla competizione.</div>
+                <div className="mt-1 text-xs font-semibold text-bad">Dai un nome alla competizione.</div>
               ) : null}
             </Field>
           </div>
@@ -521,15 +521,15 @@ export default function CompetitionCreatePage() {
 
             {source === 'teams' ? (
               <div className="mt-4">
-                <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+                <div className="mb-2 flex items-center justify-between text-xs text-ink-faint">
                   <span>
                     {selectedTeamIds.length} di {teams.length} selezionate
                   </span>
                   <div className="flex gap-3">
-                    <button className="hover:text-slate-900" onClick={() => setSelectedTeamIds(teams.map((t) => t.team_id))}>
+                    <button className="hover:text-ink" onClick={() => setSelectedTeamIds(teams.map((t) => t.team_id))}>
                       Tutte
                     </button>
-                    <button className="hover:text-slate-900" onClick={() => setSelectedTeamIds([])}>
+                    <button className="hover:text-ink" onClick={() => setSelectedTeamIds([])}>
                       Nessuna
                     </button>
                   </div>
@@ -544,7 +544,7 @@ export default function CompetitionCreatePage() {
                         onClick={() => toggleTeam(t.team_id)}
                         className={
                           'truncate rounded-lg border px-2 py-2 text-left text-xs ' +
-                          (on ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600')
+                          (on ? 'border-line bg-ink text-paper' : 'border-line bg-surface text-ink-soft')
                         }
                         title={t.name}
                       >
@@ -603,7 +603,7 @@ export default function CompetitionCreatePage() {
                     />
                   </Field>
                 </div>
-                <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+                <div className="rounded-xl bg-surface-2 p-3 text-xs text-ink-soft">
                   {qualifiedCount >= 2 ? (
                     <>
                       <b>{qualifiedCount} squadre</b> qualificate
@@ -641,8 +641,8 @@ export default function CompetitionCreatePage() {
                         className={
                           'rounded-xl border px-2 py-2 text-sm font-semibold ' +
                           (knockoutLegs === n
-                            ? 'border-slate-900 bg-slate-900 text-white'
-                            : 'border-slate-200 bg-white text-slate-600')
+                            ? 'border-line bg-ink text-paper'
+                            : 'border-line bg-surface text-ink-soft')
                         }
                       >
                         {n === 1 ? 'Gara secca' : 'Andata e ritorno'}
@@ -658,7 +658,7 @@ export default function CompetitionCreatePage() {
                       onChange={(e) => setFinalSingle(e.target.checked)}
                     />
                     <span>Finale in gara unica</span>
-                    <span className="text-[11px] text-slate-500">(come quasi tutte le coppe vere)</span>
+                    <span className="text-[11px] text-ink-faint">(come quasi tutte le coppe vere)</span>
                   </label>
                 ) : null}
               </div>
@@ -688,20 +688,20 @@ export default function CompetitionCreatePage() {
                         onClick={() => setLegs(n)}
                         className={
                           'rounded-xl border px-2 py-2 text-sm font-semibold ' +
-                          (legs === n ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600')
+                          (legs === n ? 'border-line bg-ink text-paper' : 'border-line bg-surface text-ink-soft')
                         }
                       >
                         {n}
                       </button>
                     ))}
                   </div>
-                  <div className="mt-1.5 text-[11px] font-semibold text-slate-600">
+                  <div className="mt-1.5 text-[11px] font-semibold text-ink-soft">
                     {LEG_LABELS[legs]}
                     {/* 5 is not "the last button we drew", it is MAX_LEGS in
                         services/competition_stages.py: oltre, il calendario non
                         ha più dove stare. */}
                     {legs === MAX_LEGS ? (
-                      <span className="ml-1 font-normal text-slate-400">
+                      <span className="ml-1 font-normal text-ink-faint">
                         · è il massimo consentito
                       </span>
                     ) : null}
@@ -719,7 +719,7 @@ export default function CompetitionCreatePage() {
                         min={1}
                         max={4}
                         disabled={source === 'qualified'}
-                        className={inputCls + ' disabled:bg-slate-100'}
+                        className={inputCls + ' disabled:bg-surface-2'}
                         value={source === 'qualified' ? 1 : groups}
                         onChange={(e) => setGroups(Math.max(1, Math.min(4, Number(e.target.value) || 1)))}
                       />
@@ -738,7 +738,7 @@ export default function CompetitionCreatePage() {
                 ) : null}
 
                 <div>
-                  <div className="text-xs font-semibold text-slate-500">Punti per vittoria / pareggio / sconfitta</div>
+                  <div className="text-xs font-semibold text-ink-faint">Punti per vittoria / pareggio / sconfitta</div>
                   <div className="mt-1 grid grid-cols-3 gap-2">
                     {(
                       [
@@ -762,14 +762,14 @@ export default function CompetitionCreatePage() {
           ) : null}
 
           {plan ? (
-            <Card className="border border-slate-200 bg-slate-50 p-4 sm:p-5">
+            <Card className="border border-line bg-surface-2 p-4 sm:p-5">
               <SectionTitle>Com'è fatta</SectionTitle>
               <div className="mt-2">
                 <PlanSummary plan={plan} />
               </div>
             </Card>
           ) : planErr ? (
-            <Card className="border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{planErr}</Card>
+            <Card className="border border-warn/40 bg-warn-bg p-4 text-sm text-warn">{planErr}</Card>
           ) : null}
 
           <div className="flex items-center justify-between">
@@ -780,7 +780,7 @@ export default function CompetitionCreatePage() {
               Continua
             </Button>
           </div>
-          {issues.length ? <div className="text-right text-xs text-amber-600">Per continuare: {issues.join(', ')}.</div> : null}
+          {issues.length ? <div className="text-right text-xs text-warn">Per continuare: {issues.join(', ')}.</div> : null}
         </div>
       ) : null}
 
@@ -791,13 +791,13 @@ export default function CompetitionCreatePage() {
             <SectionTitle>Quando si gioca</SectionTitle>
             {refSeason ? (
               <div className="mt-3 space-y-3">
-                <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface-2 p-3 text-sm">
                   <Badge tone="green">{refSeason.competition}</Badge>
-                  <span className="font-semibold text-slate-900">{refSeason.season}</span>
-                  <span className="text-slate-400">· campionato di riferimento</span>
+                  <span className="font-semibold text-ink">{refSeason.season}</span>
+                  <span className="text-ink-faint">· campionato di riferimento</span>
                 </div>
                 {plan?.constraint ? (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  <div className="rounded-xl border border-warn/40 bg-warn-bg p-3 text-xs text-warn">
                     {plan.constraint}: non può cominciare prima della{' '}
                     <b>{plan.min_start_matchday}ª giornata</b>.
                   </div>
@@ -806,7 +806,7 @@ export default function CompetitionCreatePage() {
                     inputs are unbounded boxes and there is no way to know that 38
                     is the end and 39 does not exist. */}
                 {seasonFirstMd != null && seasonLastMd != null ? (
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-ink-faint">
                     {refSeason.competition} {refSeason.season} ha{' '}
                     <b>{plan?.season_real_matchdays.length ?? 0} giornate</b>, dalla {seasonFirstMd}ª
                     alla {seasonLastMd}ª.
@@ -826,7 +826,7 @@ export default function CompetitionCreatePage() {
                       <button
                         type="button"
                         onClick={() => setStartMd(minStartMd)}
-                        className="shrink-0 rounded-xl border border-slate-200 px-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        className="shrink-0 rounded-xl border border-line px-2 text-xs font-semibold text-ink-soft hover:bg-surface-2"
                       >
                         Prima
                       </button>
@@ -846,7 +846,7 @@ export default function CompetitionCreatePage() {
                       <button
                         type="button"
                         onClick={() => setEndMd(seasonLastMd)}
-                        className="shrink-0 rounded-xl border border-slate-200 px-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        className="shrink-0 rounded-xl border border-line px-2 text-xs font-semibold text-ink-soft hover:bg-surface-2"
                       >
                         Ultima
                       </button>
@@ -854,7 +854,7 @@ export default function CompetitionCreatePage() {
                   </Field>
                 </div>
                 {plan ? (
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-ink-faint">
                     {endMd == null ? (
                       <>
                         Le {plan.total_rounds} giornate si giocheranno di fila, dalla {startMd ?? 1}ª alla{' '}
@@ -877,7 +877,7 @@ export default function CompetitionCreatePage() {
                       ).length;
                       if (room >= plan.total_rounds) return null;
                       return (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                        <div className="rounded-xl border border-warn/40 bg-warn-bg p-3 text-xs text-warn">
                           Servono {plan.total_rounds} giornate reali, in questo intervallo ce ne sono {room}. Allarga
                           l'intervallo o riduci le tornate.
                         </div>
@@ -887,7 +887,7 @@ export default function CompetitionCreatePage() {
               </div>
             ) : (
               <div className="mt-3 space-y-2">
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-ink-soft">
                   Questa lega non ha ancora un campionato reale di riferimento. Sceglilo una volta: vale per tutta la lega.
                 </p>
                 <select
@@ -921,13 +921,13 @@ export default function CompetitionCreatePage() {
         <div className="space-y-4">
           <Card className="p-4 sm:p-5">
             <SectionTitle>Cosa si vince</SectionTitle>
-            <div className="mt-1 text-xs text-slate-500">
+            <div className="mt-1 text-xs text-ink-faint">
               Un premio è un nome, un'icona e la condizione che lo assegna. Verrà consegnato da solo quando la condizione
               si realizza.
             </div>
             <div className="mt-3 space-y-3">
               {prizes.map((prize, idx) => (
-                <div key={idx} className="rounded-xl border border-slate-200 p-3">
+                <div key={idx} className="rounded-xl border border-line p-3">
                   <div className="flex items-center gap-2">
                     <input
                       className={inputCls}
@@ -939,7 +939,7 @@ export default function CompetitionCreatePage() {
                     />
                     <button
                       type="button"
-                      className="shrink-0 rounded-lg px-2 py-2 text-slate-400 hover:text-red-600"
+                      className="shrink-0 rounded-lg px-2 py-2 text-ink-faint hover:text-bad"
                       onClick={() => setPrizes((prev) => prev.filter((_, i) => i !== idx))}
                       aria-label="Togli premio"
                     >
@@ -954,7 +954,7 @@ export default function CompetitionCreatePage() {
                         onClick={() => setPrizes((prev) => prev.map((p, i) => (i === idx ? { ...p, icon } : p)))}
                         className={
                           'h-9 w-9 rounded-lg border text-lg ' +
-                          (prize.icon === icon ? 'border-slate-900 bg-slate-100' : 'border-slate-200')
+                          (prize.icon === icon ? 'border-line bg-surface-2' : 'border-line')
                         }
                       >
                         {icon}
@@ -999,7 +999,7 @@ export default function CompetitionCreatePage() {
                           </option>
                         ))}
                       </select>
-                      <div className="mt-1 text-[11px] text-slate-500">
+                      <div className="mt-1 text-[11px] text-ink-faint">
                         Si assegna a fine competizione, su tutte le giornate giocate.
                       </div>
                     </div>
@@ -1048,18 +1048,18 @@ export default function CompetitionCreatePage() {
 
           <Card className="p-4 sm:p-5">
             <SectionTitle>Riepilogo</SectionTitle>
-            <dl className="mt-2 divide-y divide-slate-100 text-sm">
+            <dl className="mt-2 divide-y divide-line text-sm">
               <div className="flex justify-between gap-3 py-2">
-                <dt className="text-slate-500">Nome</dt>
-                <dd className="truncate font-semibold text-slate-900">{name}</dd>
+                <dt className="text-ink-faint">Nome</dt>
+                <dd className="truncate font-semibold text-ink">{name}</dd>
               </div>
               <div className="flex justify-between gap-3 py-2">
-                <dt className="text-slate-500">Formato</dt>
-                <dd className="font-semibold text-slate-900">{FORMATS.find((f) => f.id === format)?.title}</dd>
+                <dt className="text-ink-faint">Formato</dt>
+                <dd className="font-semibold text-ink">{FORMATS.find((f) => f.id === format)?.title}</dd>
               </div>
               <div className="flex justify-between gap-3 py-2">
-                <dt className="text-slate-500">Partecipanti</dt>
-                <dd className="text-right font-semibold text-slate-900">
+                <dt className="text-ink-faint">Partecipanti</dt>
+                <dd className="text-right font-semibold text-ink">
                   {source === 'teams'
                     ? `${selectedTeamIds.length} squadre`
                     : `${qualifiedCount} qualificate${selectedQualRound ? ` · ${selectedQualRound.compName}` : ''}`}
@@ -1067,16 +1067,16 @@ export default function CompetitionCreatePage() {
               </div>
               {plan ? (
                 <div className="flex justify-between gap-3 py-2">
-                  <dt className="text-slate-500">Giornate</dt>
-                  <dd className="text-right font-semibold text-slate-900">
+                  <dt className="text-ink-faint">Giornate</dt>
+                  <dd className="text-right font-semibold text-ink">
                     {plan.total_rounds}
                     {startMd ? ` · dalla ${startMd}ª reale` : ''}
                   </dd>
                 </div>
               ) : null}
               <div className="flex justify-between gap-3 py-2">
-                <dt className="text-slate-500">Premi</dt>
-                <dd className="text-right font-semibold text-slate-900">
+                <dt className="text-ink-faint">Premi</dt>
+                <dd className="text-right font-semibold text-ink">
                   {prizes.filter((p) => p.name.trim()).length
                     ? prizes
                         .filter((p) => p.name.trim())
@@ -1087,7 +1087,7 @@ export default function CompetitionCreatePage() {
               </div>
             </dl>
 
-            {error ? <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
+            {error ? <div className="mt-3 rounded-xl bg-bad-bg p-3 text-sm text-bad">{error}</div> : null}
 
             <div className="mt-4 flex items-center justify-between">
               <Button variant="ghost" onClick={() => setStep(3)} disabled={busy}>

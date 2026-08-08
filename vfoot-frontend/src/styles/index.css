@@ -1,16 +1,125 @@
+/* I caratteri, dentro il progetto e non da una CDN: un font che arriva da un
+   altro sito è una dipendenza da terzi su ogni caricamento, e il primo disegno
+   della pagina aspetta lui. Solo i pesi che usiamo davvero. */
+@import '@fontsource/barlow/400.css';
+@import '@fontsource/barlow/500.css';
+@import '@fontsource/barlow/600.css';
+@import '@fontsource/barlow/700.css';
+@import '@fontsource/barlow-condensed/600.css';
+@import '@fontsource/barlow-condensed/700.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   IL TEMA, IN UN POSTO SOLO.
+
+   Ogni colore dell'app nasce qui e arriva alle pagine come classe Tailwind
+   (bg-surface, text-ink, border-line…). È ciò che rende il restyling una cosa
+   che si fa una volta invece che in cinquantaquattro file: cambiare una riga
+   qui ridipinge tutto, e nessuna pagina viene riscritta.
+
+   DUE VOCABOLARI, che non devono toccarsi (v. league/competitionColors.ts):
+   · IDENTITÀ — di chi stiamo parlando: il marchio, e i colori delle competizioni.
+   · STATO — come sta andando: attenzione, in corso, fatto, sbagliato.
+   Un colore che appartiene a tutti e due non dice più niente in nessuno dei due.
+
+   Il verde è il marchio (sta nel logo), l'azzurro è l'accento. Il verde NON è
+   anche lo stato "fatto": quello sarebbe il terzo significato sullo stesso tono,
+   ed è il motivo per cui "riuscito" qui è un verde-azzurro diverso.
+   --------------------------------------------------------------------------- */
 :root {
   color-scheme: light;
+
+  /* identità */
+  --vf-brand: 18 161 80;          /* #12a150 — il verde del logo */
+  --vf-brand-strong: 11 122 59;   /* #0b7a3b */
+  --vf-accent: 2 132 199;         /* #0284c7 — l'azzurro */
+  --vf-accent-strong: 3 105 161;
+
+  /* fondi e inchiostri */
+  --vf-paper: 244 246 245;        /* la pagina */
+  --vf-surface: 255 255 255;      /* le card */
+  --vf-surface-2: 248 250 249;    /* righe alterne, riquadri interni */
+  --vf-ink: 16 23 28;
+  --vf-ink-soft: 74 87 96;
+  --vf-ink-faint: 139 151 158;
+  --vf-line: 228 234 231;
+
+  /* stato */
+  --vf-warn: 180 83 9;      --vf-warn-bg: 254 243 199;
+  --vf-live: 109 40 217;    --vf-live-bg: 237 233 254;
+  --vf-good: 5 122 85;      --vf-good-bg: 209 250 229;
+  --vf-bad: 190 18 60;      --vf-bad-bg: 255 228 230;
+
+  /* il testo che sta SOPRA il colore pieno (barra, fasce, pulsanti) */
+  --vf-on-brand: 255 255 255;
+}
+
+/* Lo scuro è una scelta esplicita, non l'ombra del chiaro: i toni sono
+   ricalibrati perché reggano su fondo profondo, non invertiti. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --vf-brand: 46 204 113;
+  --vf-brand-strong: 37 163 90;
+  --vf-accent: 56 189 248;
+  --vf-accent-strong: 14 165 233;
+
+  --vf-paper: 11 16 20;
+  --vf-surface: 20 27 33;
+  --vf-surface-2: 26 34 41;
+  --vf-ink: 232 238 241;
+  --vf-ink-soft: 163 177 186;
+  --vf-ink-faint: 110 125 135;
+  --vf-line: 34 48 58;
+
+  --vf-warn: 251 191 36;    --vf-warn-bg: 58 44 7;
+  --vf-live: 167 139 250;   --vf-live-bg: 42 33 69;
+  --vf-good: 52 211 153;    --vf-good-bg: 6 55 44;
+  --vf-bad: 251 113 133;    --vf-bad-bg: 61 18 32;
+
+  --vf-on-brand: 8 16 12;
 }
 
 html, body {
   height: 100%;
 }
 
+body {
+  background-color: rgb(var(--vf-paper));
+  color: rgb(var(--vf-ink));
+  font-family: 'Barlow', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+  /* Le cifre incolonnate ovunque: un'app di fantacalcio è fatta di tabelle, e
+     un 1 più stretto di un 8 fa ballare ogni colonna di punti. */
+  font-variant-numeric: tabular-nums;
+}
+
 /* nicer touch targets on mobile */
 button, a {
   -webkit-tap-highlight-color: transparent;
+}
+
+@layer components {
+  /* LA TRAMA DEL PRATO, sulle sole superfici colorate: bande larghe come quelle
+     dell'erba appena tagliata, con una differenza minima fra l'una e l'altra.
+     Sopra ci va del testo, quindi resta un accenno — se si vedesse bene sarebbe
+     già troppo. */
+  .vf-hero {
+    background-image:
+      repeating-linear-gradient(90deg, rgb(255 255 255 / .055) 0 34px, transparent 34px 68px),
+      linear-gradient(105deg, rgb(var(--vf-brand-strong)), rgb(var(--vf-brand)) 52%, rgb(var(--vf-accent)));
+    color: rgb(var(--vf-on-brand));
+  }
+}
+
+/* Chi ha chiesto meno movimento lo ottiene: i pallini che pulsano e le
+   transizioni sono decorazione, non informazione. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }

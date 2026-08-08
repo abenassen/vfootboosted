@@ -33,15 +33,15 @@ export default function ManagerProfilePage() {
     [id],
   );
 
-  if (loading) return <div className="text-sm text-slate-500">Caricamento profilo…</div>;
+  if (loading) return <div className="text-sm text-ink-faint">Caricamento profilo…</div>;
   if (error || !data) {
     // Un 404 qui vuol dire "non avete leghe in comune", ed è il caso normale, non
     // un guasto: si dice così invece di mostrare un errore tecnico.
     return (
       <Card className="p-6 text-center">
         <div className="text-3xl">🔒</div>
-        <div className="mt-2 font-semibold text-slate-700">Questo profilo non è visibile</div>
-        <div className="mt-1 text-sm text-slate-500">
+        <div className="mt-2 font-semibold text-ink-soft">Questo profilo non è visibile</div>
+        <div className="mt-1 text-sm text-ink-faint">
           Puoi vedere la scheda dei fantallenatori con cui condividi almeno una lega.
         </div>
         <Link to="/home" className="mt-4 inline-block">
@@ -60,7 +60,7 @@ export default function ManagerProfilePage() {
             <div className="min-w-0">
               <SectionTitle>Fantallenatore</SectionTitle>
               <div className="mt-0.5 text-2xl font-black leading-tight">{data.username}</div>
-              <div className="text-sm text-slate-500">
+              <div className="text-sm text-ink-faint">
                 {data.leagues.length} {data.leagues.length === 1 ? 'lega' : 'leghe'}
                 {data.joined_at ? ` · iscritto dal ${new Date(data.joined_at).toLocaleDateString('it-IT')}` : ''}
               </div>
@@ -99,10 +99,10 @@ export default function ManagerProfilePage() {
                 <>
                   <Crest descriptor={l.team_crest} teamName={l.team_name ?? l.name} size={30} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-slate-800">
-                      {l.team_name ?? <span className="italic text-slate-400">nessuna squadra</span>}
+                    <span className="block truncate text-sm font-semibold text-ink">
+                      {l.team_name ?? <span className="italic text-ink-faint">nessuna squadra</span>}
                     </span>
-                    <span className="block truncate text-xs text-slate-500">{l.name}</span>
+                    <span className="block truncate text-xs text-ink-faint">{l.name}</span>
                   </span>
                   {l.role === 'admin' ? <Badge tone="blue">admin</Badge> : null}
                 </>
@@ -111,14 +111,14 @@ export default function ManagerProfilePage() {
                 <Link
                   key={l.league_id}
                   to={roster}
-                  className="flex items-center gap-2 rounded-xl border border-slate-100 px-3 py-2 transition hover:bg-slate-50"
+                  className="flex items-center gap-2 rounded-xl border border-line px-3 py-2 transition hover:bg-surface-2"
                 >
                   {body}
                 </Link>
               ) : (
                 <div
                   key={l.league_id}
-                  className="flex items-center gap-2 rounded-xl border border-slate-100 px-3 py-2"
+                  className="flex items-center gap-2 rounded-xl border border-line px-3 py-2"
                 >
                   {body}
                 </div>
@@ -126,7 +126,7 @@ export default function ManagerProfilePage() {
             })}
           </div>
         ) : (
-          <div className="mt-2 text-sm text-slate-500">
+          <div className="mt-2 text-sm text-ink-faint">
             {data.is_self ? 'Non fai ancora parte di nessuna lega.' : 'Nessuna lega in comune.'}
           </div>
         )}

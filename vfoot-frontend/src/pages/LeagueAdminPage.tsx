@@ -449,7 +449,7 @@ export default function LeagueAdminPage() {
     <div className="space-y-4">
       <Card className="p-4">
         <SectionTitle>{activeTab === 'user' ? 'Le mie leghe' : 'Gestione lega'}</SectionTitle>
-        <div className="mt-2 text-sm text-slate-600">
+        <div className="mt-2 text-sm text-ink-soft">
           {activeTab === 'user'
             ? 'Profilo utente e gestione delle tue leghe.'
             : selectedLeague
@@ -482,12 +482,12 @@ export default function LeagueAdminPage() {
           <div
             className={`mt-3 rounded-xl px-3 py-2 text-sm ${
               msgTone === 'error'
-                ? 'bg-rose-50 text-rose-700'
+                ? 'bg-bad-bg text-bad'
                 : msgTone === 'warning'
-                  ? 'bg-amber-50 text-amber-700'
+                  ? 'bg-warn-bg text-warn'
                   : msgTone === 'success'
-                    ? 'bg-emerald-50 text-emerald-700'
-                    : 'bg-slate-100 text-slate-700'
+                    ? 'bg-good-bg text-good'
+                    : 'bg-surface-2 text-ink-soft'
             }`}
             role="status"
             aria-live="polite"
@@ -513,12 +513,12 @@ export default function LeagueAdminPage() {
                       key={l.league_id}
                       className={clsx(
                         'flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2',
-                        active ? 'border-slate-900 bg-slate-50' : 'border-slate-200',
+                        active ? 'border-line bg-surface-2' : 'border-line',
                       )}
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold text-slate-800">{l.name}</div>
-                        <div className="text-xs text-slate-500">
+                        <div className="truncate font-semibold text-ink">{l.name}</div>
+                        <div className="text-xs text-ink-faint">
                           Squadra: {l.team_name?.trim() || 'non impostata'}
                         </div>
                       </div>
@@ -543,7 +543,7 @@ export default function LeagueAdminPage() {
                 })}
               </div>
             ) : (
-              <div className="mt-3 text-sm text-slate-600">
+              <div className="mt-3 text-sm text-ink-soft">
                 Non appartieni ancora a nessuna lega. Creane una o unisciti con un invite code qui sotto.
               </div>
             )}
@@ -576,22 +576,22 @@ export default function LeagueAdminPage() {
                   });
                 }}
               >
-                <label className="block text-sm font-medium text-slate-700">
-                  Nome lega <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-ink-soft">
+                  Nome lega <span className="text-bad">*</span>
                   <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="es. I Fenomeni del Lunedì" value={createName} onChange={(e) => setCreateName(e.target.value)} required />
                   {/* Every place that shows the name already labels it as a league
                       (the "Lega" label over the switcher, the Gestione lega page),
                       so a name starting with "Lega" reads doubled everywhere. */}
-                  <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                  <span className="mt-1 block text-[11px] font-normal text-ink-faint">
                     Non serve iniziare con «Lega»: compare già come etichetta accanto al nome.
                   </span>
                 </label>
-                <label className="block text-sm font-medium text-slate-700">
-                  Nome tua squadra <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-ink-soft">
+                  Nome tua squadra <span className="text-bad">*</span>
                   <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Nome tua squadra" value={createTeam} onChange={(e) => setCreateTeam(e.target.value)} required />
                 </label>
-                <fieldset className="block text-sm font-medium text-slate-700">
-                  <legend>Come si fanno i punti <span className="text-red-500">*</span></legend>
+                <fieldset className="block text-sm font-medium text-ink-soft">
+                  <legend>Come si fanno i punti <span className="text-bad">*</span></legend>
                   <div className="mt-1 grid gap-2 sm:grid-cols-2">
                     {([
                       ['classic', 'Fantacalcio classico', 'Voti + bonus/malus, ruoli P/D/C/A, listone e asta. Quello a cui giocano tutti.'],
@@ -601,7 +601,7 @@ export default function LeagueAdminPage() {
                         key={value}
                         className={clsx(
                           'cursor-pointer rounded-xl border-2 p-3 transition',
-                          createMode === value ? 'border-slate-900 bg-slate-50' : 'border-slate-200 hover:border-slate-400',
+                          createMode === value ? 'border-line bg-surface-2' : 'border-line hover:border-line',
                         )}
                       >
                         <div className="flex items-center gap-2">
@@ -614,16 +614,16 @@ export default function LeagueAdminPage() {
                           />
                           <span className="font-semibold">{title}</span>
                         </div>
-                        <div className="mt-1 pl-6 text-xs font-normal text-slate-500">{blurb}</div>
+                        <div className="mt-1 pl-6 text-xs font-normal text-ink-faint">{blurb}</div>
                       </label>
                     ))}
                   </div>
-                  <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                  <span className="mt-1 block text-[11px] font-normal text-ink-faint">
                     Si sceglie ora e non si cambia più, come il campionato di riferimento.
                   </span>
                 </fieldset>
-                <label className="block text-sm font-medium text-slate-700">
-                  Campionato di riferimento <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-ink-soft">
+                  Campionato di riferimento <span className="text-bad">*</span>
                   <select
                     className="mt-1 w-full rounded-xl border px-3 py-2 font-normal"
                     value={createSeasonId}
@@ -638,22 +638,22 @@ export default function LeagueAdminPage() {
                     ))}
                   </select>
                 </label>
-                <div className="text-xs text-slate-500">
-                  <span className="text-red-500">*</span> Campi obbligatori. Il campionato di riferimento non è
+                <div className="text-xs text-ink-faint">
+                  <span className="text-bad">*</span> Campi obbligatori. Il campionato di riferimento non è
                   modificabile dopo la creazione: rose, listone e calendario dipendono da esso.
                 </div>
                 <Button type="submit" disabled={busy}>Crea</Button>
               </form>
               {createdInvite ? (
-                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
-                  <span className="text-emerald-800">
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-good/40 bg-good-bg px-3 py-2 text-sm">
+                  <span className="text-good">
                     Invite code: <span className="font-mono font-semibold">{createdInvite}</span>
                   </span>
                   <CopyButton value={createdInvite} label="Copia codice" />
                   <button
                     type="button"
                     onClick={() => setCreatedInvite(null)}
-                    className="ml-auto text-xs font-semibold text-slate-400 hover:text-slate-700"
+                    className="ml-auto text-xs font-semibold text-ink-faint hover:text-ink-soft"
                   >
                     Chiudi
                   </button>
@@ -677,12 +677,12 @@ export default function LeagueAdminPage() {
                   });
                 }}
               >
-                <label className="block text-sm font-medium text-slate-700">
-                  Invite code <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-ink-soft">
+                  Invite code <span className="text-bad">*</span>
                   <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Invite code" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} required />
                 </label>
-                <label className="block text-sm font-medium text-slate-700">
-                  Nome squadra <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-ink-soft">
+                  Nome squadra <span className="text-bad">*</span>
                   <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Nome squadra" value={joinTeam} onChange={(e) => setJoinTeam(e.target.value)} required />
                 </label>
                 <Button type="submit" disabled={busy}>Join</Button>
@@ -693,7 +693,7 @@ export default function LeagueAdminPage() {
       ) : !isAdmin ? (
         <Card className="p-4">
           <SectionTitle>Gestione lega</SectionTitle>
-          <div className="mt-2 text-sm text-slate-600">
+          <div className="mt-2 text-sm text-ink-soft">
             Serve il ruolo <b>admin</b> in questa lega per gestire roster, competizioni, giornate e asta.
             {selectedLeague ? ` Il tuo ruolo qui è "${selectedLeague.role}".` : ' Seleziona una lega.'}
           </div>
@@ -703,11 +703,11 @@ export default function LeagueAdminPage() {
           <Card className="p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <SectionTitle>
-                Gestione lega{selectedLeague ? <span className="ml-1 normal-case text-slate-800">· {selectedLeague.name}</span> : null}
+                Gestione lega{selectedLeague ? <span className="ml-1 normal-case text-ink">· {selectedLeague.name}</span> : null}
               </SectionTitle>
               {selectedLeague ? <Badge tone={selectedLeague.market_open ? 'green' : 'slate'}>Rosa {selectedLeague.market_open ? 'modificabile' : 'bloccata'}</Badge> : null}
             </div>
-            <div className="mt-1 text-[11px] text-slate-400">
+            <div className="mt-1 text-[11px] text-ink-faint">
               Riferita alla lega selezionata in alto. Cambia lega dal selettore in cima alla pagina.
             </div>
 
@@ -716,7 +716,7 @@ export default function LeagueAdminPage() {
                 <div id="vfoot-invite-code" className="flex flex-wrap items-center gap-2 scroll-mt-24">
                   <span>
                     <span className="font-semibold">Invite code:</span>{' '}
-                    <span className="font-mono font-semibold text-slate-800">{league.invite_code}</span>
+                    <span className="font-mono font-semibold text-ink">{league.invite_code}</span>
                   </span>
                   <CopyButton value={league.invite_code} label="Copia codice" />
                 </div>
@@ -729,11 +729,11 @@ export default function LeagueAdminPage() {
                     <div className="min-w-0">
                       <div className="text-sm">
                         Modifiche manuali alla rosa:{' '}
-                        <b className={league.market_open ? 'text-emerald-700' : 'text-slate-700'}>
+                        <b className={league.market_open ? 'text-good' : 'text-ink-soft'}>
                           {league.market_open ? 'abilitate' : 'bloccate'}
                         </b>
                       </div>
-                      <div className="mt-1 text-[11px] text-slate-500">
+                      <div className="mt-1 text-[11px] text-ink-faint">
                         Inserimento manuale e import di rose (add/rimuovi/bulk/CSV). Non è il mercato a
                         offerte: quello si gestisce nella scheda <b>Mercato</b>.
                       </div>
@@ -772,13 +772,13 @@ export default function LeagueAdminPage() {
                     <div
                       className={clsx(
                         'space-y-3 rounded-xl border px-3 py-2 transition',
-                        dirty ? 'border-amber-400 bg-amber-50/60' : '',
+                        dirty ? 'border-warn bg-warn-bg/60' : '',
                       )}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="font-semibold">Opzioni partita</div>
                         {dirty ? (
-                          <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                          <span className="rounded-full bg-warn px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
                             {changed.length} modifica{changed.length > 1 ? 'he' : ''} non salvata{changed.length > 1 ? 'e' : ''}
                           </span>
                         ) : null}
@@ -796,7 +796,7 @@ export default function LeagueAdminPage() {
                             className="w-16 rounded-lg border px-2 py-1 text-sm"
                           />
                         </label>
-                        <div className="mt-1 text-[11px] text-slate-500">
+                        <div className="mt-1 text-[11px] text-ink-faint">
                           Un titolare senza voto viene rimpiazzato dal primo panchinaro utile, fino a questo numero.
                         </div>
                       </div>
@@ -824,7 +824,7 @@ export default function LeagueAdminPage() {
                             <option value="subtract_opponent">Sottratto alla squadra avversaria</option>
                           </select>
                         </label>
-                        <div className="mt-1 text-[11px] text-slate-500">
+                        <div className="mt-1 text-[11px] text-ink-faint">
                           Premia chi schiera ≥4 difensori titolari: media dei 3 migliori difensori + portiere (voti
                           puri) → bonus a fasce.
                         </div>
@@ -839,7 +839,7 @@ export default function LeagueAdminPage() {
                           />
                           <span>Modificatore portiere imbattuto</span>
                         </label>
-                        <div className="mt-1 text-[11px] text-slate-500">
+                        <div className="mt-1 text-[11px] text-ink-faint">
                           +1 al fantatotale se il portiere schierato prende voto e non subisce gol.
                         </div>
                       </div>
@@ -856,9 +856,9 @@ export default function LeagueAdminPage() {
                             onChange={(e) => set({ home_advantage_bonus: Number(e.target.value) })}
                             className="w-16 rounded-lg border px-2 py-1 text-sm"
                           />
-                          <span className="text-slate-500">al fantatotale di chi gioca in casa</span>
+                          <span className="text-ink-faint">al fantatotale di chi gioca in casa</span>
                         </label>
-                        <div className="mt-1 text-[11px] text-slate-500">
+                        <div className="mt-1 text-[11px] text-ink-faint">
                           0 = spento. Vale <b>solo dove il campo esiste</b>: turni di coppa con andata e ritorno e
                           tornate di andata e ritorno di un campionato o girone. In una gara secca, o nella tornata
                           dispari in più, chi ospita l'ha deciso il calendario e il bonus non viene assegnato.
@@ -874,12 +874,12 @@ export default function LeagueAdminPage() {
                           />
                           <span>Blocca la formazione</span>
                         </label>
-                        <div className="mt-1 text-[11px] text-slate-500">
+                        <div className="mt-1 text-[11px] text-ink-faint">
                           Attivo in una lega reale. <b>Disattivalo</b> per le leghe di test su una stagione già
                           conclusa (altrimenti ogni formazione risulterebbe bloccata).
                         </div>
                         {draft.enforce_lineup_deadline ? (
-                          <div className="mt-2 space-y-2 border-l-2 border-slate-200 pl-3">
+                          <div className="mt-2 space-y-2 border-l-2 border-line pl-3">
                             <label className="flex items-start gap-2 text-sm">
                               <input
                                 type="radio"
@@ -890,7 +890,7 @@ export default function LeagueAdminPage() {
                               />
                               <span>
                                 <b>Al primo calcio d'inizio della giornata</b>
-                                <span className="mt-0.5 block text-[11px] text-slate-500">
+                                <span className="mt-0.5 block text-[11px] text-ink-faint">
                                   Tutta la formazione si chiude insieme, prima che si giochi la prima partita.
                                   È la regola tradizionale del fantacalcio.
                                 </span>
@@ -906,7 +906,7 @@ export default function LeagueAdminPage() {
                               />
                               <span>
                                 <b>Ogni giocatore all'inizio della sua partita</b>
-                                <span className="mt-0.5 block text-[11px] text-slate-500">
+                                <span className="mt-0.5 block text-[11px] text-ink-faint">
                                   Chi ha la partita iniziata resta dov'è; sul resto della formazione si
                                   decide fino all'ultimo calcio d'inizio della giornata.
                                 </span>
@@ -945,7 +945,7 @@ export default function LeagueAdminPage() {
                           Annulla
                         </Button>
                         {!dirty ? (
-                          <span className="text-[11px] text-slate-400">Nessuna modifica in sospeso.</span>
+                          <span className="text-[11px] text-ink-faint">Nessuna modifica in sospeso.</span>
                         ) : null}
                       </div>
                     </div>
@@ -981,13 +981,13 @@ export default function LeagueAdminPage() {
                               {team ? (
                                 <Crest descriptor={team.crest} teamName={team.name} size={28} />
                               ) : (
-                                <span className="h-7 w-7 shrink-0 rounded-full border border-dashed border-slate-300" />
+                                <span className="h-7 w-7 shrink-0 rounded-full border border-dashed border-line" />
                               )}
                               <div className="min-w-0">
-                                <div className="truncate font-semibold text-slate-800">
-                                  {team?.name ?? <span className="italic text-slate-400">nessuna squadra</span>}
+                                <div className="truncate font-semibold text-ink">
+                                  {team?.name ?? <span className="italic text-ink-faint">nessuna squadra</span>}
                                 </div>
-                                <div className="truncate text-xs text-slate-500">{m.username}</div>
+                                <div className="truncate text-xs text-ink-faint">{m.username}</div>
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -1034,7 +1034,7 @@ export default function LeagueAdminPage() {
                                 {demoting ? 'Revoca amministratore' : 'Rendi amministratore'}
                               </Button>
                               {isLastAdmin ? (
-                                <span className="text-xs text-amber-600">unico amministratore</span>
+                                <span className="text-xs text-warn">unico amministratore</span>
                               ) : null}
                             </div>
                           </div>
@@ -1045,7 +1045,7 @@ export default function LeagueAdminPage() {
                 </div>
               </div>
             ) : (
-              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <div className="mt-3 rounded-xl border border-warn/40 bg-warn-bg p-3 text-sm text-warn">
                 Seleziona una lega dal menu. Le funzioni avanzate sono disponibili solo su una lega selezionata.
               </div>
             )}
@@ -1057,7 +1057,7 @@ export default function LeagueAdminPage() {
                 {/* Five tabs do not fit 390px: the BAR scrolls, so the page does
                     not get a horizontal scrollbar of its own. */}
                 <div className="-mx-1 overflow-x-auto px-1">
-                  <div className="inline-flex rounded-xl bg-slate-100 p-1">
+                  <div className="inline-flex rounded-xl bg-surface-2 p-1">
                   {([
                     ['roster', 'Roster'],
                     ['competitions', 'Competizioni'],
@@ -1072,8 +1072,8 @@ export default function LeagueAdminPage() {
                       className={
                         'whitespace-nowrap ' +
                         (leagueTab === id
-                          ? 'rounded-lg bg-white px-3 py-2 text-sm font-semibold'
-                          : 'px-3 py-2 text-sm font-semibold text-slate-600')
+                          ? 'rounded-lg bg-surface px-3 py-2 text-sm font-semibold'
+                          : 'px-3 py-2 text-sm font-semibold text-ink-soft')
                       }
                     >
                       {label}
@@ -1087,9 +1087,9 @@ export default function LeagueAdminPage() {
                 <div className="grid gap-4 lg:grid-cols-2">
                   <Card className="p-4">
                     <SectionTitle>Roster Team</SectionTitle>
-                    <div className="mt-2 text-xs text-slate-500">I nomi qui sotto (es. Alpha/Beta) sono i team fantasy della lega, non calciatori reali.</div>
+                    <div className="mt-2 text-xs text-ink-faint">I nomi qui sotto (es. Alpha/Beta) sono i team fantasy della lega, non calciatori reali.</div>
                     <div className="mt-2">
-                      <label htmlFor="roster-team-select" className="mb-1 block text-xs font-semibold text-slate-500">Fantasy Team</label>
+                      <label htmlFor="roster-team-select" className="mb-1 block text-xs font-semibold text-ink-faint">Fantasy Team</label>
                       <select id="roster-team-select" className="w-full rounded-xl border px-3 py-2 text-sm" value={selectedTeamId ?? ''} onChange={(e) => setSelectedTeamId(Number(e.target.value))}>
                         {league.teams.map((t) => (
                           <option key={t.team_id} value={t.team_id}>{t.name}</option>
@@ -1098,7 +1098,7 @@ export default function LeagueAdminPage() {
                     </div>
 
                     <div className="mt-3 rounded-xl border p-3">
-                      <div className="text-xs font-semibold text-slate-500">Aggiungi giocatore per nome</div>
+                      <div className="text-xs font-semibold text-ink-faint">Aggiungi giocatore per nome</div>
                       <label htmlFor="roster-player-search" className="sr-only">Cerca giocatore</label>
                       <input
                         id="roster-player-search"
@@ -1116,20 +1116,20 @@ export default function LeagueAdminPage() {
                             <button
                               key={p.player_id}
                               type="button"
-                              className="w-full rounded-lg border px-2 py-1 text-left text-xs hover:bg-slate-50"
+                              className="w-full rounded-lg border px-2 py-1 text-left text-xs hover:bg-surface-2"
                               onClick={() => {
                                 setSelectedPlayer(p);
                                 setPlayerQuery(p.full_name);
                               }}
                             >
-                              {p.full_name} <span className="text-slate-400">(id {p.player_id})</span>
+                              {p.full_name} <span className="text-ink-faint">(id {p.player_id})</span>
                             </button>
                           ))}
                         </div>
                       ) : null}
 
                       <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_120px_auto]">
-                        <div className="rounded-xl border bg-slate-50 px-3 py-2 text-sm">
+                        <div className="rounded-xl border bg-surface-2 px-3 py-2 text-sm">
                           {selectedPlayer ? `Selezionato: ${selectedPlayer.full_name}` : 'Seleziona un giocatore dalla ricerca'}
                         </div>
                         <label htmlFor="roster-player-price" className="sr-only">Prezzo acquisto</label>
@@ -1153,8 +1153,8 @@ export default function LeagueAdminPage() {
                     </div>
 
                     <div className="mt-3 rounded-xl border p-3">
-                      <div className="text-xs font-semibold text-slate-500">Import roster in blocco</div>
-                      <div className="mt-1 text-xs text-slate-500">
+                      <div className="text-xs font-semibold text-ink-faint">Import roster in blocco</div>
+                      <div className="mt-1 text-xs text-ink-faint">
                         Riempi più squadre in una volta. Colonne: <code>team_name</code> oppure{' '}
                         <code>manager_username</code>, più <code>player_id</code> e <code>price</code>. Puoi
                         incollare il testo oppure caricare un file <code>.csv</code>. Gli <b>id</b> dei
@@ -1196,9 +1196,9 @@ export default function LeagueAdminPage() {
                       </Button>
                     </div>
 
-                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
-                      <div className="text-xs font-semibold text-slate-500">Import da listone .xlsx compilato</div>
-                      <div className="mt-1 text-xs text-slate-500">
+                    <div className="mt-3 rounded-xl border border-good/40 bg-good-bg/40 p-3">
+                      <div className="text-xs font-semibold text-ink-faint">Import da listone .xlsx compilato</div>
+                      <div className="mt-1 text-xs text-ink-faint">
                         Scarica il listone dalla pagina <Link to="/listone" className="underline">Listone</Link>,
                         compila le colonne <b>Assegnato a</b> (menu a discesa) e <b>Prezzo</b>, poi ricaricalo
                         qui: assegna le rose in un colpo solo, con gli <b>id</b> già corretti.
@@ -1232,7 +1232,7 @@ export default function LeagueAdminPage() {
 
                   <Card className="p-4">
                     <SectionTitle>Roster corrente</SectionTitle>
-                    <div className="mt-2 text-sm text-slate-600">Team: <span className="font-semibold">{selectedTeamName || '-'}</span></div>
+                    <div className="mt-2 text-sm text-ink-soft">Team: <span className="font-semibold">{selectedTeamName || '-'}</span></div>
                     <div className="mt-2 max-h-[520px] overflow-auto space-y-1 text-xs">
                       {roster?.players.length ? (
                         roster.players.map((p) => (
@@ -1254,7 +1254,7 @@ export default function LeagueAdminPage() {
                           </div>
                         ))
                       ) : (
-                        <div className="text-slate-500">Nessun giocatore nel roster.</div>
+                        <div className="text-ink-faint">Nessun giocatore nel roster.</div>
                       )}
                     </div>
                   </Card>
@@ -1273,7 +1273,7 @@ export default function LeagueAdminPage() {
                       <SectionTitle>Competizioni</SectionTitle>
                       <Link
                         to="/league-admin/competitions/new"
-                        className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                        className="rounded-xl bg-ink px-3 py-2 text-sm font-semibold text-paper hover:opacity-90"
                       >
                         + Crea competizione
                       </Link>
@@ -1287,10 +1287,10 @@ export default function LeagueAdminPage() {
                           <Link
                             key={c.competition_id}
                             to={`/league-admin/competitions/${c.competition_id}`}
-                            className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 p-3 transition hover:border-slate-400 hover:bg-slate-50"
+                            className="flex items-start justify-between gap-3 rounded-xl border border-line p-3 transition hover:border-line hover:bg-surface-2"
                           >
                             <div className="min-w-0">
-                              <div className="truncate text-sm font-semibold text-slate-900">{c.name}</div>
+                              <div className="truncate text-sm font-semibold text-ink">{c.name}</div>
                               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                                 <Badge tone="slate">{competitionFormatLabel(c)}</Badge>
                                 <Badge tone={c.status === 'done' ? 'green' : c.status === 'active' ? 'amber' : 'slate'}>
@@ -1303,12 +1303,12 @@ export default function LeagueAdminPage() {
                                 ))}
                               </div>
                               {dependsOn.length ? (
-                                <div className="mt-1 text-[11px] text-slate-500">
+                                <div className="mt-1 text-[11px] text-ink-faint">
                                   partecipanti da: {dependsOn.join(', ')}
                                 </div>
                               ) : null}
                             </div>
-                            <div className="shrink-0 text-right text-[11px] text-slate-500">
+                            <div className="shrink-0 text-right text-[11px] text-ink-faint">
                               <div>
                                 {c.fixtures.finished}/{c.fixtures.total} gare
                               </div>
@@ -1325,14 +1325,14 @@ export default function LeagueAdminPage() {
                         );
                       })}
                       {!competitions.length ? (
-                        <div className="rounded-xl border border-dashed border-slate-300 p-4 text-center text-sm text-slate-500">
+                        <div className="rounded-xl border border-dashed border-line p-4 text-center text-sm text-ink-faint">
                           Nessuna competizione. Il percorso guidato costruisce un campionato, una coppa o un girone con
                           playoff in quattro passi.
                         </div>
                       ) : null}
                     </div>
 
-                    <div className="mt-4 border-t pt-3 text-xs text-slate-500">
+                    <div className="mt-4 border-t pt-3 text-xs text-ink-faint">
                       Ti serve una formula diversa dalle tre guidate?{' '}
                       <Link to="/league-admin/competitions/advanced" className="font-semibold underline">
                         Costruzione avanzata
@@ -1346,7 +1346,7 @@ export default function LeagueAdminPage() {
               {leagueTab === 'matchdays' ? (
                 <Card className="p-4">
                   <SectionTitle>Giornate — progressione della lega</SectionTitle>
-                  <div className="mt-1 text-xs text-slate-500">
+                  <div className="mt-1 text-xs text-ink-faint">
                     Questo è il <b>registro</b> della lega: cosa è stato conteggiato. Il campionato va avanti da sé —
                     formazioni e blocchi seguono il calendario reale e non aspettano queste chiusure. Se una partita è
                     stata rinviata puoi mettere la giornata <b>in attesa</b>: la lega prosegue e la chiudi al recupero.
@@ -1366,10 +1366,10 @@ export default function LeagueAdminPage() {
                             : { tone: 'slate' as const, label: 'Futura' };
                         const frame =
                           md.phase === 'current' || md.phase === 'awaiting'
-                            ? 'border-amber-300 bg-amber-50'
+                            ? 'border-warn/40 bg-warn-bg'
                             : md.phase === 'concluded'
-                            ? 'border-slate-100 bg-white'
-                            : 'border-slate-100 bg-slate-50 opacity-70';
+                            ? 'border-line bg-surface'
+                            : 'border-line bg-surface-2 opacity-70';
                         return (
                           <div key={md.fantasy_matchday_id} className={'rounded-xl border p-3 ' + frame}>
                             <div className="flex flex-wrap items-center gap-2">
@@ -1383,7 +1383,7 @@ export default function LeagueAdminPage() {
                               {md.is_playing ? <Badge tone="blue">In campo ora</Badge> : null}
                               {md.is_fieldable ? <Badge tone="blue">Schierabile</Badge> : null}
                             </div>
-                            <div className="mt-1 text-xs text-slate-600">
+                            <div className="mt-1 text-xs text-ink-soft">
                               Fixture fantasy: {md.fixtures.finished}/{md.fixtures.total}
                               {md.concluded_by ? ` · conclusa da ${md.concluded_by}` : ''}
                               {md.awaiting_reason ? ` · ${md.awaiting_reason}` : ''}
@@ -1394,18 +1394,18 @@ export default function LeagueAdminPage() {
                                 steps over an open round by design — a cup reading its
                                 table cannot, and there was nothing anywhere to say so. */}
                             {(md.decides ?? []).length ? (
-                              <div className="mt-1.5 rounded-lg border border-slate-200 bg-white/70 px-2 py-1.5 text-xs text-slate-700">
+                              <div className="mt-1.5 rounded-lg border border-line bg-surface/70 px-2 py-1.5 text-xs text-ink-soft">
                                 <b>Decide una fase:</b>
                                 <ul className="mt-0.5 space-y-0.5">
                                   {(md.decides ?? []).map((d) => (
                                     <li key={d.stage_id}>
                                       {d.competition_name} · {d.stage_name} — {d.rule_text}
                                       {d.at_risk ? (
-                                        <span className="ml-1 font-semibold text-amber-700">
+                                        <span className="ml-1 font-semibold text-warn">
                                           (le sue giornate sono già passate: verrà spostata più avanti)
                                         </span>
                                       ) : d.target_matchday != null ? (
-                                        <span className="text-slate-500">
+                                        <span className="text-ink-faint">
                                           {' '}
                                           · si gioca alla giornata {d.target_matchday}
                                         </span>
@@ -1434,7 +1434,7 @@ export default function LeagueAdminPage() {
                                     type="button"
                                     disabled={busy}
                                     onClick={() => void run(() => openOfficePanel(md))}
-                                    className="text-xs font-semibold text-sky-700 hover:text-sky-900 disabled:opacity-50"
+                                    className="text-xs font-semibold text-accent hover:text-accent disabled:opacity-50"
                                   >
                                     Voto d'ufficio…
                                   </button>
@@ -1450,7 +1450,7 @@ export default function LeagueAdminPage() {
                                       );
                                       if (reason !== null) void run(() => awaitAction(md, true, reason));
                                     }}
-                                    className="text-xs font-semibold text-amber-700 hover:text-amber-900 disabled:opacity-50"
+                                    className="text-xs font-semibold text-warn hover:text-warn disabled:opacity-50"
                                   >
                                     Avanza, questa resta in attesa
                                   </button>
@@ -1460,13 +1460,13 @@ export default function LeagueAdminPage() {
                                     type="button"
                                     disabled={busy}
                                     onClick={() => void run(() => awaitAction(md, false))}
-                                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                                    className="text-xs font-semibold text-ink-faint hover:text-ink disabled:opacity-50"
                                   >
                                     Rimetti in coda
                                   </button>
                                 ) : null}
                                 {disabledReason ? (
-                                  <span className="text-xs text-amber-700">{disabledReason}</span>
+                                  <span className="text-xs text-warn">{disabledReason}</span>
                                 ) : null}
                               </div>
                             ) : null}
@@ -1491,7 +1491,7 @@ export default function LeagueAdminPage() {
                                     if (window.confirm(`Ricalcolare la giornata ${md.real_matchday} con il regolamento CONGELATO alla conclusione (es. dopo una correzione voti)?`))
                                       void run(() => recomputeAction(md, 'snapshot'));
                                   }}
-                                  className="text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                                  className="text-xs font-semibold text-ink-faint hover:text-ink disabled:opacity-50"
                                 >
                                   …con regole congelate
                                 </button>
@@ -1499,11 +1499,11 @@ export default function LeagueAdminPage() {
                             ) : null}
 
                             {officePanel && officePanel.md.fantasy_matchday_id === md.fantasy_matchday_id ? (
-                              <div className="mt-3 rounded-xl border border-sky-300 bg-sky-50 p-3">
-                                <div className="text-sm font-semibold text-sky-900">
+                              <div className="mt-3 rounded-xl border border-accent/40 bg-accent/10 p-3">
+                                <div className="text-sm font-semibold text-accent">
                                   Voto d'ufficio — solo per questa lega
                                 </div>
-                                <div className="mt-1 text-xs text-sky-800">
+                                <div className="mt-1 text-xs text-accent">
                                   Un voto <b>imposto</b>, non un dato: vale come voto puro e come fantavoto, senza
                                   bonus né malus, perché la partita non si è giocata. Le altre leghe non ne sono
                                   toccate: possono aspettare il recupero.
@@ -1514,7 +1514,7 @@ export default function LeagueAdminPage() {
                                       {officePanel.matches.map((m) => (
                                         <label
                                           key={m.match_id}
-                                          className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-sm"
+                                          className="flex items-center gap-2 rounded-lg bg-surface px-2 py-1.5 text-sm"
                                         >
                                           <input
                                             type="checkbox"
@@ -1540,7 +1540,7 @@ export default function LeagueAdminPage() {
                                       ))}
                                     </div>
                                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                                      <label className="text-xs text-sky-900">
+                                      <label className="text-xs text-accent">
                                         Voto{' '}
                                         <input
                                           type="number"
@@ -1551,7 +1551,7 @@ export default function LeagueAdminPage() {
                                           onChange={(e) =>
                                             setOfficePanel((p) => (p ? { ...p, voto: e.target.value } : p))
                                           }
-                                          className="w-16 rounded-lg border border-slate-300 px-2 py-1"
+                                          className="w-16 rounded-lg border border-line px-2 py-1"
                                         />
                                       </label>
                                       <Button size="sm" disabled={busy} onClick={() => void run(() => applyOfficeVotes(false))}>
@@ -1561,21 +1561,21 @@ export default function LeagueAdminPage() {
                                         type="button"
                                         disabled={busy}
                                         onClick={() => void run(() => applyOfficeVotes(true))}
-                                        className="text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                                        className="text-xs font-semibold text-ink-faint hover:text-ink disabled:opacity-50"
                                       >
                                         Revoca
                                       </button>
                                       <button
                                         type="button"
                                         onClick={() => setOfficePanel(null)}
-                                        className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                                        className="text-xs font-semibold text-ink-faint hover:text-ink"
                                       >
                                         Chiudi
                                       </button>
                                     </div>
                                   </>
                                 ) : (
-                                  <div className="mt-2 text-xs text-sky-800">
+                                  <div className="mt-2 text-xs text-accent">
                                     Nessuna partita senza dati definitivi in questa giornata.
                                   </div>
                                 )}
@@ -1584,19 +1584,19 @@ export default function LeagueAdminPage() {
 
                             {lineupPrompt && lineupPrompt.md.fantasy_matchday_id === md.fantasy_matchday_id ? (
                               <div className="mt-3">
-                                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
-                                    <div className="text-sm font-semibold text-amber-900">
+                                <div className="rounded-xl border border-warn/40 bg-warn-bg p-3">
+                                    <div className="text-sm font-semibold text-warn">
                                       Alcune squadre non hanno schierato la formazione
                                     </div>
-                                    <div className="mt-1 text-xs text-amber-800">
+                                    <div className="mt-1 text-xs text-warn">
                                       Scegli per ciascuna: <b>forfait</b> (fantatotale 0) oppure <b>rischiera la precedente</b>
                                       (filtrata sui giocatori ancora in rosa).
                                     </div>
                                     <div className="mt-2 space-y-1.5">
                                       {lineupPrompt.teams.map((t) => (
-                                        <div key={t.team_id} className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2 py-1.5">
+                                        <div key={t.team_id} className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-2 py-1.5">
                                           <span className="min-w-0 flex-1 text-sm font-medium">{t.name}</span>
-                                          <div className="inline-flex overflow-hidden rounded-lg border border-slate-300 text-xs">
+                                          <div className="inline-flex overflow-hidden rounded-lg border border-line text-xs">
                                             {(['previous', 'forfait'] as const).map((opt) => {
                                               const active = lineupPrompt.resolutions[t.team_id] === opt;
                                               const disabled = opt === 'previous' && !t.has_previous_lineup;
@@ -1611,8 +1611,8 @@ export default function LeagueAdminPage() {
                                                     )
                                                   }
                                                   className={
-                                                    (active ? 'bg-slate-900 text-white ' : 'bg-white text-slate-600 ') +
-                                                    (disabled ? 'cursor-not-allowed opacity-40 ' : 'hover:bg-slate-100 ') +
+                                                    (active ? 'bg-ink text-paper ' : 'bg-surface text-ink-soft ') +
+                                                    (disabled ? 'cursor-not-allowed opacity-40 ' : 'hover:bg-surface-2 ') +
                                                     'px-2.5 py-1 font-semibold'
                                                   }
                                                 >
@@ -1622,11 +1622,11 @@ export default function LeagueAdminPage() {
                                             })}
                                           </div>
                                           {t.has_previous_lineup && t.previous_lineup_stale > 0 ? (
-                                            <span className="text-[11px] text-amber-700">
+                                            <span className="text-[11px] text-warn">
                                               {t.previous_lineup_stale} non più in rosa
                                             </span>
                                           ) : !t.has_previous_lineup ? (
-                                            <span className="text-[11px] text-slate-500">nessuna precedente</span>
+                                            <span className="text-[11px] text-ink-faint">nessuna precedente</span>
                                           ) : null}
                                         </div>
                                       ))}
@@ -1648,7 +1648,7 @@ export default function LeagueAdminPage() {
                                       <button
                                         type="button"
                                         onClick={() => setLineupPrompt(null)}
-                                        className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                                        className="text-xs font-semibold text-ink-faint hover:text-ink"
                                       >
                                         Annulla
                                       </button>
@@ -1660,7 +1660,7 @@ export default function LeagueAdminPage() {
                         );
                       })
                     ) : (
-                      <div className="text-slate-500">
+                      <div className="text-ink-faint">
                         Nessuna giornata: crea una competizione e mappala sulle giornate reali (tab Competizioni).
                       </div>
                     )}
@@ -1671,7 +1671,7 @@ export default function LeagueAdminPage() {
               {leagueTab === 'auction' ? (
                 <Card className="p-4">
                   <SectionTitle>Asta</SectionTitle>
-                  <div className="mt-2 text-sm text-slate-600">
+                  <div className="mt-2 text-sm text-ink-soft">
                     L’asta si svolge nella <b>Sala asta</b> live: chiamata del giocatore (manuale, casuale
                     o casuale per ruolo), rilanci in tempo reale, aggiudicazione e assegnazione diretta,
                     con controllo automatico di budget e slot. Da lì puoi anche avviare l’asta iniziale.
@@ -1690,7 +1690,7 @@ export default function LeagueAdminPage() {
             <div className="grid gap-4 lg:grid-cols-2">
               <Card className="p-4">
                 <SectionTitle>Funzioni di gestione lega</SectionTitle>
-                <ul className="mt-3 space-y-2 text-sm text-slate-700">
+                <ul className="mt-3 space-y-2 text-sm text-ink-soft">
                   <li>• Mercato di riparazione: apri/gestisci sessioni di offerte, valida gli scambi</li>
                   <li>• Modifica roster con ricerca giocatori per nome</li>
                   <li>• Crea competizioni (campionato o coppa)</li>
@@ -1699,7 +1699,7 @@ export default function LeagueAdminPage() {
               </Card>
               <Card className="p-4">
                 <SectionTitle>Come Procedere</SectionTitle>
-                <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-700">
+                <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-ink-soft">
                   <li>Passa alla scheda Le mie leghe per creare una lega o unirti a una esistente.</li>
                   <li>Seleziona la lega nel menu in alto.</li>
                   <li>Torna su Gestione lega per i controlli avanzati.</li>

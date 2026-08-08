@@ -63,20 +63,20 @@ export default function VerifyEmailPage() {
   }, [uid, token, refresh]);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,#dbeafe_0%,#eff6ff_45%,#f8fafc_100%)] px-4 py-16 text-slate-900">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,#dbeafe_0%,#eff6ff_45%,#f8fafc_100%)] px-4 py-16 text-ink">
       <Card className="mx-auto max-w-md p-6 md:p-8">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Account</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Account</div>
         <div className="mt-1 text-xl font-black">Conferma email</div>
 
         <div className="mt-4 text-sm">
           {state.kind === 'working' ? (
-            <div className="text-slate-600">Verifica in corso…</div>
+            <div className="text-ink-soft">Verifica in corso…</div>
           ) : state.kind === 'done' ? (
-            <div className="rounded-xl bg-emerald-50 px-3 py-2 font-medium text-emerald-800">
+            <div className="rounded-xl bg-good-bg px-3 py-2 font-medium text-good">
               {state.message}
             </div>
           ) : (
-            <div className="rounded-xl bg-red-50 px-3 py-2 font-medium text-red-700">
+            <div className="rounded-xl bg-bad-bg px-3 py-2 font-medium text-bad">
               {state.message}
             </div>
           )}
@@ -90,7 +90,7 @@ export default function VerifyEmailPage() {
           ) : state.kind === 'working' ? null : (
             <Link
               to="/"
-              className="inline-block rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+              className="inline-block rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-paper"
             >
               Vai all’accesso
             </Link>

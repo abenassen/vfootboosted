@@ -94,7 +94,7 @@ export default function GoogleSignInButton({
   if (!clientId) return null;
   if (failed) {
     return (
-      <div className="text-xs text-slate-500">
+      <div className="text-xs text-ink-faint">
         Login con Google non disponibile al momento.
       </div>
     );

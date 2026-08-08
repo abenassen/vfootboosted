@@ -78,14 +78,14 @@ export default function LeagueSetupChecklist({
   if (!remaining) return null;
 
   return (
-    <div className="mt-3 rounded-2xl border-l-4 border-sky-500 bg-sky-50 p-4">
+    <div className="mt-3 rounded-2xl border-l-4 border-accent bg-accent/10 p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="text-sm font-bold text-sky-900">🚧 Lega in costruzione</div>
-        <div className="text-xs font-semibold text-sky-700">
+        <div className="text-sm font-bold text-accent">🚧 Lega in costruzione</div>
+        <div className="text-xs font-semibold text-accent">
           {steps.length - remaining} di {steps.length} completati
         </div>
       </div>
-      <p className="mt-1 text-xs text-sky-800">
+      <p className="mt-1 text-xs text-accent">
         Le impostazioni qui sotto sono già attive, ma la lega non è ancora giocabile.
         {next ? <> Il prossimo passo è <b>{next.label.toLowerCase()}</b>.</> : null}
       </p>
@@ -99,10 +99,10 @@ export default function LeagueSetupChecklist({
                 className={clsx(
                   'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold',
                   s.done
-                    ? 'bg-emerald-500 text-white'
+                    ? 'bg-good text-white'
                     : locked
-                      ? 'border-2 border-slate-200 bg-white text-slate-400'
-                      : 'border-2 border-sky-300 bg-white text-sky-400',
+                      ? 'border-2 border-line bg-surface text-ink-faint'
+                      : 'border-2 border-accent/40 bg-surface text-accent',
                 )}
                 aria-hidden
               >
@@ -113,15 +113,15 @@ export default function LeagueSetupChecklist({
                   className={clsx(
                     'text-sm font-semibold',
                     s.done
-                      ? 'text-slate-500 line-through decoration-slate-300'
+                      ? 'text-ink-faint line-through decoration-ink-faint'
                       : locked
-                        ? 'text-slate-400'
-                        : 'text-sky-900',
+                        ? 'text-ink-faint'
+                        : 'text-accent',
                   )}
                 >
                   {s.label}
                 </div>
-                <div className={clsx('text-xs', locked ? 'text-slate-400' : 'text-slate-600')}>
+                <div className={clsx('text-xs', locked ? 'text-ink-faint' : 'text-ink-soft')}>
                   {locked ? s.blockedReason : s.hint}
                 </div>
               </div>
@@ -129,7 +129,7 @@ export default function LeagueSetupChecklist({
                 <button
                   type="button"
                   onClick={s.action}
-                  className="shrink-0 rounded-lg bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-sky-500"
+                  className="shrink-0 rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-white hover:bg-accent"
                 >
                   {s.actionLabel}
                 </button>

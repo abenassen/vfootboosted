@@ -71,14 +71,14 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
     return (
       <Card className="p-4">
         <SectionTitle>Mercato di riparazione</SectionTitle>
-        <div className="mt-2 text-sm text-slate-600">Disponibile solo per le leghe in <b>modalità classic</b>.</div>
+        <div className="mt-2 text-sm text-ink-soft">Disponibile solo per le leghe in <b>modalità classic</b>.</div>
       </Card>
     );
   }
 
   return (
     <div className="space-y-4">
-      {error && <Card className="border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</Card>}
+      {error && <Card className="border border-bad/40 bg-bad-bg p-3 text-sm text-bad">{error}</Card>}
 
       {session && (
         <>
@@ -89,7 +89,7 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
                   <SectionTitle>{session.name}</SectionTitle>
                   <Badge tone={SESSION_TONE[session.status]}>{SESSION_LABEL[session.status]}</Badge>
                 </div>
-                <div className="mt-1 text-sm text-slate-600">
+                <div className="mt-1 text-sm text-ink-soft">
                   Recupero: <b>{recoveryText(session.credit_recovery_mode, session.fixed_recovery_amount)}</b>
                   {' · '}
                   {session.closes_at ? `chiude il ${new Date(session.closes_at).toLocaleString('it-IT')}` : 'chiusura indefinita'}
@@ -109,7 +109,7 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
                 </div>
               )}
             </div>
-            <div className="mt-3 text-xs text-slate-500">
+            <div className="mt-3 text-xs text-ink-faint">
               Le offerte che restano in testa 24h senza rilanci passano in “da validare”. Applicando l’offerta
               il giocatore svincolato lascia la rosa e quello acquistato entra al prezzo offerto.
             </div>
@@ -127,9 +127,9 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
           <Card className="p-4">
             <SectionTitle>Offerte in testa ({leadingOffers.length})</SectionTitle>
             {leadingOffers.length === 0 ? (
-              <div className="mt-2 text-sm text-slate-500">Nessuna offerta attiva al momento.</div>
+              <div className="mt-2 text-sm text-ink-faint">Nessuna offerta attiva al momento.</div>
             ) : (
-              <div className="mt-2 divide-y divide-slate-100">
+              <div className="mt-2 divide-y divide-line">
                 {leadingOffers.map((f) => (
                   <LeadingRow key={f.player_id} f={f} nowMs={nowMs} busy={busy} closesAt={data?.session?.closes_at}
                     onCancel={() => { if (window.confirm('Annullare l’offerta in testa?')) void act(() => adminMarketOffer(leagueId, f.leading!.offer_id, 'cancel')); }} />
@@ -169,16 +169,16 @@ function QueueCard({ queue, sessionLive, busy, onAccept, onReject }: {
     <Card className="p-4">
       <SectionTitle>Offerte da validare ({queue.length})</SectionTitle>
       {queue.length === 0 ? (
-        <div className="mt-2 text-sm text-slate-500">Nessuna offerta in attesa.</div>
+        <div className="mt-2 text-sm text-ink-faint">Nessuna offerta in attesa.</div>
       ) : (
         <>
           {fromClosed > 0 && (
-            <div className="mt-1 text-xs text-amber-600">
+            <div className="mt-1 text-xs text-warn">
               {fromClosed === queue.length ? (fromClosed === 1 ? 'Arriva' : 'Arrivano') : `${fromClosed} arrivano`}
               {' '}da una sessione già chiusa: restano da decidere, e finché non decidi le rose non cambiano.
             </div>
           )}
-          <div className="mt-2 divide-y divide-slate-100">
+          <div className="mt-2 divide-y divide-line">
             {queue.map((o) => (
               <QueueRow key={o.offer_id} o={o} busy={busy}
                 onAccept={() => onAccept(o.offer_id)} onReject={() => onReject(o.offer_id)} />
@@ -195,8 +195,8 @@ function QueueRow({ o, busy, onAccept, onReject }: { o: MarketOfferRow; busy: bo
     <div className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
       <div>
         <Badge tone="blue">{o.role}</Badge>{' '}
-        <b>{o.target_name}</b> <span className="text-slate-500">← {o.team_name} svincola {o.release_name}</span>
-        {' · '}<b>{o.amount}</b> cr <span className="text-slate-400">(recupero {o.recovery})</span>
+        <b>{o.target_name}</b> <span className="text-ink-faint">← {o.team_name} svincola {o.release_name}</span>
+        {' · '}<b>{o.amount}</b> cr <span className="text-ink-faint">(recupero {o.recovery})</span>
       </div>
       <div className="flex gap-2">
         <Button size="sm" disabled={busy} onClick={onAccept}>Accetta (applica rose)</Button>
@@ -214,7 +214,7 @@ function LeadingRow({ f, nowMs, closesAt, busy, onCancel }: {
     <div className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
       <div>
         <Badge tone="blue">{f.role}</Badge>{' '}
-        <b>{f.name}</b> <span className="text-slate-500">· {l.team_name} a <b>{l.amount}</b> ·{' '}
+        <b>{f.name}</b> <span className="text-ink-faint">· {l.team_name} a <b>{l.amount}</b> ·{' '}
           <OfferDeadline deadlineAt={l.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} /></span>
       </div>
       <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Annulla</Button>
@@ -237,17 +237,17 @@ function CreateSessionCard({
   return (
     <Card className="p-4">
       <SectionTitle>Apri una sessione di mercato</SectionTitle>
-      <div className="mt-1 text-sm text-slate-600">
+      <div className="mt-1 text-sm text-ink-soft">
         Nessuna sessione aperta. Apri una finestra di offerte sugli svincolati; una sola sessione viva per lega.
       </div>
-      <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+      <div className="mt-4 space-y-3 border-t border-line pt-4">
         <label className="block text-sm">
-          <span className="text-slate-600">Nome</span>
-          <input className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" value={name} onChange={(e) => setName(e.target.value)} />
+          <span className="text-ink-soft">Nome</span>
+          <input className="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="block text-sm">
-          <span className="text-slate-600">Recupero {CURRENCY_NAME_PLURAL} dallo svincolo</span>
-          <select className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" value={mode} onChange={(e) => setMode(e.target.value as MarketRecoveryMode)}>
+          <span className="text-ink-soft">Recupero {CURRENCY_NAME_PLURAL} dallo svincolo</span>
+          <select className="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm" value={mode} onChange={(e) => setMode(e.target.value as MarketRecoveryMode)}>
             <option value="fixed">Cifra fissa</option>
             <option value="frac30">30% del prezzo pagato (arrotondato per eccesso)</option>
             <option value="frac50">50% del prezzo pagato (arrotondato per eccesso)</option>
@@ -256,19 +256,19 @@ function CreateSessionCard({
         </label>
         {mode === 'fixed' && (
           <label className="block text-sm">
-            <span className="text-slate-600">Quanti {CURRENCY_NAME_PLURAL} si recuperano</span>
-            <input type="number" min={0} className="mt-1 w-32 rounded-xl border border-slate-200 px-3 py-2 text-sm" value={fixed} onChange={(e) => setFixed(Math.max(0, Number(e.target.value)))} />
+            <span className="text-ink-soft">Quanti {CURRENCY_NAME_PLURAL} si recuperano</span>
+            <input type="number" min={0} className="mt-1 w-32 rounded-xl border border-line px-3 py-2 text-sm" value={fixed} onChange={(e) => setFixed(Math.max(0, Number(e.target.value)))} />
           </label>
         )}
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+        <label className="flex items-center gap-2 text-sm text-ink-soft">
           <input type="checkbox" checked={scheduled} onChange={(e) => setScheduled(e.target.checked)} />
           Chiusura programmata (altrimenti indefinita, la chiudi a mano)
         </label>
         {scheduled && (
           <label className="block text-sm">
-            <span className="text-slate-600">Data/ora di chiusura</span>
-            <input type="datetime-local" className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
-            <span className="mt-1 block text-xs text-slate-500">
+            <span className="text-ink-soft">Data/ora di chiusura</span>
+            <input type="datetime-local" className="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
+            <span className="mt-1 block text-xs text-ink-faint">
               Alla chiusura ogni offerta ancora in testa passa in validazione, anche se
               non ha compiuto le sue 24 ore: aspettarsi rilanci sul filo è normale.
             </span>

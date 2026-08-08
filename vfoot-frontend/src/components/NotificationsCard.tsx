@@ -31,15 +31,15 @@ export default function NotificationsCard() {
       <SectionTitle>Notifiche e installazione</SectionTitle>
 
       {!installed && ios ? (
-        <div className="mt-3 rounded-xl border-l-4 border-sky-500 bg-sky-50 p-3">
-          <div className="text-sm font-bold text-sky-900">Installa l'app per ricevere le notifiche</div>
-          <div className="mt-1 text-sm text-sky-800">
+        <div className="mt-3 rounded-xl border-l-4 border-accent bg-accent/10 p-3">
+          <div className="text-sm font-bold text-accent">Installa l'app per ricevere le notifiche</div>
+          <div className="mt-1 text-sm text-accent">
             Su iPhone e iPad gli avvisi arrivano solo dall'app aggiunta alla schermata
             Home. Safari non lo propone da sé: va fatto una volta a mano.
           </div>
           <button
             type="button"
-            className="mt-2 text-sm font-semibold text-sky-900 underline decoration-dotted"
+            className="mt-2 text-sm font-semibold text-accent underline decoration-dotted"
             onClick={() => setShowIosSteps((v) => !v)}
           >
             {showIosSteps ? 'Nascondi i passaggi' : 'Come si fa'}
@@ -54,7 +54,7 @@ export default function NotificationsCard() {
             <Button size="sm" variant="secondary" onClick={() => void promptInstall()}>
               Installa l'app
             </Button>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-ink-faint">
               Si apre in un tocco, come un'app, e ti tiene la lega a portata di mano.
             </span>
           </div>
@@ -63,7 +63,7 @@ export default function NotificationsCard() {
              beforeinstallprompt once the user has engaged with the page, and some
              browsers never fire it at all. Without this line the whole install
              option would silently disappear on a first visit. */
-          <div className="mt-3 text-xs text-slate-500">
+          <div className="mt-3 text-xs text-ink-faint">
             Puoi installare l'app dal menu del browser (⋮ → «Installa app»): si apre in
             un tocco e ti tiene la lega a portata di mano. Se la voce non c'è ancora,
             ricarica dopo qualche secondo di navigazione.
@@ -72,7 +72,7 @@ export default function NotificationsCard() {
       ) : null}
 
       {installed ? (
-        <div className="mt-3 text-xs font-semibold text-emerald-700">
+        <div className="mt-3 text-xs font-semibold text-good">
           App installata su questo dispositivo.
         </div>
       ) : null}
@@ -85,13 +85,13 @@ export default function NotificationsCard() {
             it for ever: the one server whose keys were fine got blamed for the
             worker's crash. Loading is not a diagnosis and must not read like one. */}
         {!push.loaded ? (
-          <div className="text-sm text-slate-500">Controllo le notifiche…</div>
+          <div className="text-sm text-ink-faint">Controllo le notifiche…</div>
         ) : !push.available ? (
-          <div className="text-sm text-slate-500">
+          <div className="text-sm text-ink-faint">
             Le notifiche push non sono attive su questo server. Gli avvisi arrivano per email.
           </div>
         ) : push.blocked ? (
-          <div className="text-sm text-slate-500">{push.blocked}</div>
+          <div className="text-sm text-ink-faint">{push.blocked}</div>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
             <Button
@@ -106,7 +106,7 @@ export default function NotificationsCard() {
                   ? 'Disattiva le notifiche'
                   : 'Attiva le notifiche'}
             </Button>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-ink-faint">
               {push.busy
                 ? /* Measured at ~30s on a cold browser: the first subscription
                      makes the browser register with its push service, and a
@@ -121,7 +121,7 @@ export default function NotificationsCard() {
           </div>
         )}
         {push.error ? (
-          <div className="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <div className="mt-2 rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">
             {push.error}
           </div>
         ) : null}

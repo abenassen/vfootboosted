@@ -35,7 +35,7 @@ export default function CompetitionSwitcher({ compact }: { compact?: boolean }) 
 
   if (!competitions.length) {
     return compact ? null : (
-      <span className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-400 shadow-sm">
+      <span className="rounded-xl border border-line bg-surface px-3 py-2 text-xs text-ink-faint shadow-sm">
         Nessuna competizione
       </span>
     );
@@ -55,7 +55,11 @@ export default function CompetitionSwitcher({ compact }: { compact?: boolean }) 
         className={clsx(
           'flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold shadow-sm',
           compact ? 'w-full' : 'min-w-[12rem]',
-          curColor.border300, curColor.bg50, curColor.text800,
+          // Fondo PIENO e non velato: questo pulsante sta sulla barra colorata,
+          // e una tinta trasparente ci si scioglie dentro. Il colore della
+          // competizione resta dov'è utile — il pallino e il testo.
+          'bg-surface',
+          curColor.border300, curColor.text700,
         )}
       >
         <span className={clsx('h-2.5 w-2.5 shrink-0 rounded-full', curColor.dot)} />
@@ -64,7 +68,7 @@ export default function CompetitionSwitcher({ compact }: { compact?: boolean }) 
       </button>
 
       {open ? (
-        <div className="absolute z-30 mt-1 w-full min-w-[14rem] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+        <div className="absolute z-30 mt-1 w-full min-w-[14rem] overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-lift">
           {competitions.map((c, i) => {
             const cc = compColor(i);
             const sel = c.competition_id === selectedCompetitionId;
@@ -79,11 +83,11 @@ export default function CompetitionSwitcher({ compact }: { compact?: boolean }) 
                 className={clsx(
                   'flex min-h-[44px] w-full items-center gap-2 border-l-4 px-3 py-2 text-left text-sm',
                   cc.border600,
-                  sel ? cc.bg50 : 'bg-white hover:bg-slate-50',
+                  sel ? cc.tint : 'bg-surface hover:bg-surface-2',
                 )}
               >
                 <span className={clsx('h-2.5 w-2.5 shrink-0 rounded-full', cc.dot)} />
-                <span className={clsx('truncate', sel ? clsx('font-semibold', cc.text800) : 'text-slate-700')}>
+                <span className={clsx('truncate', sel ? clsx('font-semibold', cc.text800) : 'text-ink-soft')}>
                   {label(c)}
                 </span>
               </button>

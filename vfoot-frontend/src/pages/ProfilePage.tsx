@@ -4,6 +4,7 @@ import { Button, Card, SectionTitle } from '../components/ui';
 import Avatar from '../components/Avatar';
 import AvatarBuilder from '../components/AvatarBuilder';
 import NotificationsCard from '../components/NotificationsCard';
+import ThemeCard from '../components/ThemeCard';
 import { useAuth } from '../auth/AuthContext';
 import { changePassword, updateProfile } from '../api';
 import { ApiError } from '../api/backend';
@@ -17,8 +18,8 @@ function BannerLine({ banner }: { banner: Banner }) {
     <div
       className={
         banner.tone === 'success'
-          ? 'rounded-xl bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800'
-          : 'rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700'
+          ? 'rounded-xl bg-good-bg px-3 py-2 text-sm font-medium text-good'
+          : 'rounded-xl bg-bad-bg px-3 py-2 text-sm font-medium text-bad'
       }
     >
       {banner.text}
@@ -110,7 +111,7 @@ export default function ProfilePage() {
   }
 
   const inputClass =
-    'w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-sky-200 focus:ring';
+    'w-full rounded-xl border border-line px-3 py-2 outline-none ring-accent/40 focus:ring';
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -125,7 +126,7 @@ export default function ProfilePage() {
             <Avatar descriptor={user?.avatar} username={user?.username} size={64} />
             <div className="min-w-0">
               <div className="text-lg font-black leading-tight">{user?.username ?? 'Utente'}</div>
-              <div className="truncate text-sm text-slate-500">{user?.email || 'Email non impostata'}</div>
+              <div className="truncate text-sm text-ink-faint">{user?.email || 'Email non impostata'}</div>
             </div>
           </div>
           {user ? (
@@ -140,6 +141,12 @@ export default function ProfilePage() {
           install is a prerequisite for notifications and nothing else announces it. */}
       <NotificationsCard />
 
+      {/* L'aspetto è una preferenza dell'utente, quindi sta con le altre. Non
+          nella barra in alto: lì ci sono già lega, competizione, squadra e
+          profilo, e un interruttore che si tocca una volta ogni tanto non
+          merita un posto fisso in cima a ogni pagina. */}
+      <ThemeCard />
+
       {/* Avatar builder, CHIUSO finché non lo si chiede — come "Nome e stemma"
           nella pagina rose. È una tavolozza alta mezzo schermo (pelle, capelli,
           occhi, vestiti…), e tenerla sempre aperta spingeva sotto la piega tutto
@@ -150,7 +157,7 @@ export default function ProfilePage() {
             <Avatar descriptor={user?.avatar} username={user?.username} size={44} />
             <div>
               <SectionTitle>Avatar</SectionTitle>
-              <div className="text-sm text-slate-500">
+              <div className="text-sm text-ink-faint">
                 Ti identifica in ogni lega: ce n'è uno solo per account.
               </div>
             </div>
@@ -182,7 +189,7 @@ export default function ProfilePage() {
                 <button
                   type="button"
                   onClick={() => setAvatar(parseAvatar(user?.avatar) ?? DEFAULT_AVATAR)}
-                  className="text-sm font-semibold text-slate-500 hover:text-slate-800"
+                  className="text-sm font-semibold text-ink-faint hover:text-ink"
                 >
                   Annulla
                 </button>
@@ -217,8 +224,8 @@ export default function ProfilePage() {
       {/* Email (read-only for now) */}
       <Card className="p-4">
         <SectionTitle>Email</SectionTitle>
-        <div className="mt-3 text-sm text-slate-700">{user?.email || 'Email non impostata'}</div>
-        <div className="mt-1 text-xs text-slate-500">
+        <div className="mt-3 text-sm text-ink-soft">{user?.email || 'Email non impostata'}</div>
+        <div className="mt-1 text-xs text-ink-faint">
           Il cambio email arriverà più avanti: richiede una nuova conferma via link.
         </div>
       </Card>
@@ -228,15 +235,15 @@ export default function ProfilePage() {
         <SectionTitle>Cambia password</SectionTitle>
         <form className="mt-3 space-y-3" onSubmit={onChangePassword}>
           <label className="block text-sm">
-            <div className="mb-1 font-semibold text-slate-700">Password attuale</div>
+            <div className="mb-1 font-semibold text-ink-soft">Password attuale</div>
             <input type="password" value={currentPw} onChange={(e) => setCurrentPw(e.target.value)} className={inputClass} autoComplete="current-password" />
           </label>
           <label className="block text-sm">
-            <div className="mb-1 font-semibold text-slate-700">Nuova password</div>
+            <div className="mb-1 font-semibold text-ink-soft">Nuova password</div>
             <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} className={inputClass} autoComplete="new-password" />
           </label>
           <label className="block text-sm">
-            <div className="mb-1 font-semibold text-slate-700">Conferma nuova password</div>
+            <div className="mb-1 font-semibold text-ink-soft">Conferma nuova password</div>
             <input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} className={inputClass} autoComplete="new-password" />
           </label>
           <Button type="submit" disabled={pwPending || !currentPw || !newPw || !confirmPw}>

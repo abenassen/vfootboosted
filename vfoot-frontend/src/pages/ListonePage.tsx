@@ -18,9 +18,9 @@ const ROLE_NAMES: Record<string, string> = {
   ATT: 'Attaccante',
 };
 const ROLE_CHIP: Record<string, string> = {
-  POR: 'bg-amber-500',
+  POR: 'bg-warn',
   DIF: 'bg-blue-500',
-  CEN: 'bg-emerald-500',
+  CEN: 'bg-good',
   ATT: 'bg-orange-500',
 };
 
@@ -116,9 +116,9 @@ export default function ListonePage() {
     return sorted;
   }, [data, role, freeOnly, ratedOnly, search, sort, desc]);
 
-  if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega.</div>;
-  if (loading) return <div className="text-sm text-slate-500">Caricamento listone…</div>;
-  if (error) return <div className="text-sm text-red-600">Errore: {error}</div>;
+  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega.</div>;
+  if (loading) return <div className="text-sm text-ink-faint">Caricamento listone…</div>;
+  if (error) return <div className="text-sm text-bad">Errore: {error}</div>;
   if (!data) return null;
 
   return (
@@ -148,10 +148,10 @@ export default function ListonePage() {
             <Badge tone="slate">~ = stimato dal mercato (r={data.value_fit.r.toFixed(2)})</Badge>
           ) : null}
         </div>
-        <div className="mt-1 text-sm text-slate-600">
+        <div className="mt-1 text-sm text-ink-soft">
           {shown.length} di {data.count} giocatori
         </div>
-        <div className="mt-1 text-[11px] text-slate-400">
+        <div className="mt-1 text-[11px] text-ink-faint">
           Il <b>Valore</b> è la media del <b>voto puro</b> (la nostra pagella), senza bonus/malus: non è
           il fantavoto. La colonna <b>Mercato</b> è il valore Transfermarkt, a solo titolo indicativo.
         </div>
@@ -165,15 +165,15 @@ export default function ListonePage() {
                 onClick={() => setRole(r)}
                 className={
                   r === role
-                    ? 'rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white'
-                    : 'rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-200'
+                    ? 'rounded-lg bg-ink px-2.5 py-1 text-xs font-semibold text-paper'
+                    : 'rounded-lg bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-soft hover:bg-surface-2'
                 }
               >
                 {r === 'ALL' ? 'Tutti' : r}
               </button>
             ))}
           </div>
-          <label className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+          <label className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-soft">
             <input type="checkbox" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} />
             Solo svincolati
           </label>
@@ -181,9 +181,9 @@ export default function ListonePage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Cerca giocatore o squadra…"
-            className="min-w-[10rem] flex-1 rounded-lg border border-slate-200 px-2.5 py-1 text-sm"
+            className="min-w-[10rem] flex-1 rounded-lg border border-line px-2.5 py-1 text-sm"
           />
-          <label className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+          <label className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-soft">
             <input type="checkbox" checked={ratedOnly} onChange={(e) => setRatedOnly(e.target.checked)} />
             Solo con voto reale
           </label>
@@ -194,7 +194,7 @@ export default function ListonePage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+              <tr className="text-left text-[11px] uppercase tracking-wide text-ink-faint">
                 <Th k="name" label="Giocatore" sort={sort} desc={desc} onSort={toggleSort} />
                 <Th k="team" label="Squadra" sort={sort} desc={desc} onSort={toggleSort} />
                 <Th k="value" label="Valore" sort={sort} desc={desc} onSort={toggleSort} right />
@@ -216,7 +216,7 @@ export default function ListonePage() {
             </tbody>
           </table>
           {!shown.length ? (
-            <div className="px-2 py-6 text-center text-sm text-slate-500">Nessun giocatore con questi filtri.</div>
+            <div className="px-2 py-6 text-center text-sm text-ink-faint">Nessun giocatore con questi filtri.</div>
           ) : null}
         </div>
       </Card>
@@ -244,8 +244,8 @@ function Th({
     <th className={`px-2 py-1.5 ${right ? 'text-right' : ''}`}>
       <button
         onClick={() => onSort(k)}
-        className={`inline-flex items-center gap-0.5 uppercase tracking-wide hover:text-slate-700 ${
-          active ? 'font-bold text-slate-700' : ''
+        className={`inline-flex items-center gap-0.5 uppercase tracking-wide hover:text-ink-soft ${
+          active ? 'font-bold text-ink-soft' : ''
         }`}
         title={`Ordina per ${label}`}
       >
@@ -276,7 +276,7 @@ function PlayerRow({
 }) {
   return (
     <>
-    <tr className="border-t border-slate-100">
+    <tr className="border-t border-line">
       <td className="px-2 py-1.5">
         {/* The name opens the detail too. Only the value column did, which is not
             where anyone clicks to ask "who is this". */}
@@ -288,22 +288,22 @@ function PlayerRow({
           className="inline-flex items-center gap-1.5 text-left"
         >
           {p.role ? (
-            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[p.role] ?? 'bg-slate-400'}`}>
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[p.role] ?? 'bg-ink-faint'}`}>
               {p.role}
             </span>
           ) : null}
-          <span className="font-medium text-slate-800 underline decoration-slate-300 decoration-dotted underline-offset-2 hover:decoration-slate-600">
+          <span className="font-medium text-ink underline decoration-ink-faint decoration-dotted underline-offset-2 hover:decoration-ink">
             {p.name}
           </span>
         </button>
       </td>
-      <td className="px-2 py-1.5 text-slate-600">{p.team ?? '—'}</td>
+      <td className="px-2 py-1.5 text-ink-soft">{p.team ?? '—'}</td>
       <td className="px-2 py-1.5 text-right">
         <button
           onClick={onToggle}
           title="Come è stato ottenuto questo valore"
-          className={`font-mono underline decoration-dotted underline-offset-2 hover:text-slate-900 ${
-            p.value_basis === 'stimato' ? 'italic text-slate-500' : 'font-semibold text-slate-800'
+          className={`font-mono underline decoration-dotted underline-offset-2 hover:text-ink ${
+            p.value_basis === 'stimato' ? 'italic text-ink-faint' : 'font-semibold text-ink'
           }`}
         >
           {p.value_basis === 'stimato' ? '~' : ''}
@@ -314,24 +314,24 @@ function PlayerRow({
               : '—'}
         </button>
       </td>
-      <td className="px-2 py-1.5 text-right text-slate-400">{p.appearances || '—'}</td>
-      <td className="px-2 py-1.5 text-right font-mono text-slate-600">{fmtMarket(p.market_value)}</td>
+      <td className="px-2 py-1.5 text-right text-ink-faint">{p.appearances || '—'}</td>
+      <td className="px-2 py-1.5 text-right font-mono text-ink-soft">{fmtMarket(p.market_value)}</td>
       <td className="px-2 py-1.5">
         {p.owned ? (
-          <span className="text-xs text-slate-500">
-            di <span className="font-medium text-slate-700">{p.owner}</span>
+          <span className="text-xs text-ink-faint">
+            di <span className="font-medium text-ink-soft">{p.owner}</span>
           </span>
         ) : p.role_undecided ? (
           /* Shown rather than hidden: planning an auction around someone you
              cannot actually buy is worse than seeing why he is unavailable. */
           <span
             title="Il suo ruolo attende una decisione dell'amministratore: non è acquistabile finché non viene presa."
-            className="rounded border border-dashed border-amber-400 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+            className="rounded border border-dashed border-warn px-1.5 py-0.5 text-[10px] font-semibold text-warn"
           >
             Ruolo da decidere
           </span>
         ) : (
-          <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Svincolato</span>
+          <span className="rounded bg-good-bg px-1.5 py-0.5 text-[10px] font-semibold text-good">Svincolato</span>
         )}
       </td>
     </tr>
@@ -350,28 +350,28 @@ function ValueDetail({
 }) {
   const estimated = p.value_basis === 'stimato';
   return (
-    <tr className="bg-slate-50">
-      <td colSpan={6} className="px-4 py-2 text-xs text-slate-600">
+    <tr className="bg-surface-2">
+      <td colSpan={6} className="px-4 py-2 text-xs text-ink-soft">
         {/* Who the player IS, before why he is worth what he is worth: the list
             can only show an abbreviated name and a role chip, so opening a row
             was the one place left to say the rest. */}
         <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-b pb-2">
-          <span className="text-sm font-bold text-slate-900">{p.full_name || p.name}</span>
+          <span className="text-sm font-bold text-ink">{p.full_name || p.name}</span>
           {p.role ? <Badge tone="slate">{ROLE_NAMES[p.role] ?? p.role}</Badge> : null}
-          {p.team ? <span>Squadra reale: <b className="text-slate-700">{p.team}</b></span> : null}
+          {p.team ? <span>Squadra reale: <b className="text-ink-soft">{p.team}</b></span> : null}
           <span>
             {p.owned ? (
-              <>In rosa a <b className="text-slate-700">{p.owner ?? '—'}</b></>
+              <>In rosa a <b className="text-ink-soft">{p.owner ?? '—'}</b></>
             ) : (
-              <b className="text-emerald-700">Svincolato</b>
+              <b className="text-good">Svincolato</b>
             )}
           </span>
-          {p.market_value ? <span>Valore di mercato: <b className="text-slate-700">{fmtMarket(p.market_value)}</b></span> : null}
+          {p.market_value ? <span>Valore di mercato: <b className="text-ink-soft">{fmtMarket(p.market_value)}</b></span> : null}
           {p.role_undecided ? (
             <Badge tone="amber">Ruolo da decidere</Badge>
           ) : null}
         </div>
-        <div className="font-semibold text-slate-700">
+        <div className="font-semibold text-ink-soft">
           {p.estimated_value === null
             ? 'Nessun dato disponibile'
             : estimated
@@ -403,7 +403,7 @@ function ValueDetail({
                   </>
                 ) : null}
               </li>
-              <li className="text-slate-500">
+              <li className="text-ink-faint">
                 Le medie basate su poche presenze sono avvicinate al 6, per evitare che una
                 singola grande prestazione domini la classifica.
               </li>

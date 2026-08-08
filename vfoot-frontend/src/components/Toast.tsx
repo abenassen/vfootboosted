@@ -8,10 +8,10 @@ export default function Toast({ message, onClose, tone = 'slate' }: { message: s
   }, [onClose]);
 
   const tones: Record<string, string> = {
-    slate: 'bg-slate-900 text-white',
-    green: 'bg-green-600 text-white',
-    red: 'bg-red-600 text-white',
-    amber: 'bg-amber-500 text-white'
+    slate: 'bg-ink text-paper',
+    green: 'bg-good text-white',
+    red: 'bg-bad text-white',
+    amber: 'bg-warn text-white'
   };
 
   return (

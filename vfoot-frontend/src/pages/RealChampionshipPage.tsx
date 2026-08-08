@@ -62,11 +62,11 @@ export default function RealChampionshipPage() {
     [data, active],
   );
 
-  if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega.</div>;
-  if (loading && !data) return <div className="text-sm text-slate-500">Caricamento calendario…</div>;
-  if (error && !data) return <div className="text-sm text-red-600">Errore: {error}</div>;
+  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega.</div>;
+  if (loading && !data) return <div className="text-sm text-ink-faint">Caricamento calendario…</div>;
+  if (error && !data) return <div className="text-sm text-bad">Errore: {error}</div>;
   if (!data?.season)
-    return <div className="text-sm text-slate-500">Questa lega non ha una stagione di riferimento.</div>;
+    return <div className="text-sm text-ink-faint">Questa lega non ha una stagione di riferimento.</div>;
 
   return (
     <div className="space-y-4">
@@ -75,7 +75,7 @@ export default function RealChampionshipPage() {
           <SectionTitle>{data.season.competition}</SectionTitle>
           <Badge tone="blue">{data.season.name}</Badge>
         </div>
-        <div className="mt-1 text-sm text-slate-600">Calendario e risultati reali · {matchdays.length} giornate</div>
+        <div className="mt-1 text-sm text-ink-soft">Calendario e risultati reali · {matchdays.length} giornate</div>
         <div className="mt-3 flex flex-wrap gap-1">
           {matchdays.map((m) => (
             <button
@@ -83,8 +83,8 @@ export default function RealChampionshipPage() {
               onClick={() => setMatchday(m)}
               className={
                 m === active
-                  ? 'rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white'
-                  : 'rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-200'
+                  ? 'rounded-lg bg-ink px-2.5 py-1 text-xs font-semibold text-paper'
+                  : 'rounded-lg bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-soft hover:bg-surface-2'
               }
             >
               {m}
@@ -99,7 +99,7 @@ export default function RealChampionshipPage() {
           {group?.fixtures.length ? (
             group.fixtures.map((f) => <RealFixtureRow key={f.id} f={f} />)
           ) : (
-            <div className="text-sm text-slate-500">Nessuna partita.</div>
+            <div className="text-sm text-ink-faint">Nessuna partita.</div>
           )}
         </div>
       </Card>
@@ -129,27 +129,27 @@ function RealFixtureRow({ f }: { f: RealFixtureItem }) {
   const body = (
     <div className="flex items-center gap-3">
       <div className="flex-1 text-right">
-        <span className={homeWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.home_team}</span>
+        <span className={homeWin ? 'font-bold text-ink' : 'text-ink-soft'}>{f.home_team}</span>
       </div>
-      <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 font-mono text-sm font-bold shadow-sm">
+      <div className="flex items-center gap-1 rounded-lg bg-surface px-2 py-1 font-mono text-sm font-bold shadow-sm">
         {played ? (
           <>
-            <span className={homeWin ? 'text-green-600' : 'text-slate-700'}>{hs}</span>
-            <span className="text-slate-300">-</span>
-            <span className={awayWin ? 'text-green-600' : 'text-slate-700'}>{as}</span>
+            <span className={homeWin ? 'text-good' : 'text-ink-soft'}>{hs}</span>
+            <span className="text-ink-faint">-</span>
+            <span className={awayWin ? 'text-good' : 'text-ink-soft'}>{as}</span>
           </>
         ) : (
-          <span className="text-slate-400">vs</span>
+          <span className="text-ink-faint">vs</span>
         )}
       </div>
       <div className="flex-1">
-        <span className={awayWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.away_team}</span>
+        <span className={awayWin ? 'font-bold text-ink' : 'text-ink-soft'}>{f.away_team}</span>
       </div>
     </div>
   );
 
   return (
-    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+    <div className="rounded-xl border border-line bg-surface-2 px-3 py-2.5">
       {f.has_detail ? (
         <Link to={`/serie-a/${f.id}`} className="block transition hover:opacity-80">
           {body}
@@ -157,18 +157,18 @@ function RealFixtureRow({ f }: { f: RealFixtureItem }) {
       ) : (
         body
       )}
-      <div className="mt-1 flex items-center justify-center gap-2 text-[10px] uppercase tracking-wide text-slate-400">
+      <div className="mt-1 flex items-center justify-center gap-2 text-[10px] uppercase tracking-wide text-ink-faint">
         {f.status === 'live' ? (
-          <span className="inline-flex items-center gap-1 font-bold text-red-600">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-600" />
+          <span className="inline-flex items-center gap-1 font-bold text-bad">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-bad" />
             In corso
           </span>
         ) : f.status === 'finished' ? (
           <span>Finale{f.has_detail ? ' · voti disponibili' : ''}</span>
         ) : f.status === 'postponed' ? (
-          <span className="font-semibold text-amber-600">Rinviata</span>
+          <span className="font-semibold text-warn">Rinviata</span>
         ) : f.status === 'cancelled' ? (
-          <span className="font-semibold text-rose-600">Annullata</span>
+          <span className="font-semibold text-bad">Annullata</span>
         ) : (
           <span>{fmtKickoff(f.kickoff, f.kickoff_provisional)}</span>
         )}

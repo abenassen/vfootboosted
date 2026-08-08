@@ -16,9 +16,9 @@ import type {
 
 const ROLE_LABEL: Record<ClassicRole, string> = { POR: 'POR', DIF: 'DIF', CEN: 'CEN', ATT: 'ATT' };
 const ROLE_CHIP: Record<ClassicRole, string> = {
-  POR: 'bg-amber-500',
+  POR: 'bg-warn',
   DIF: 'bg-blue-500',
-  CEN: 'bg-emerald-500',
+  CEN: 'bg-good',
   ATT: 'bg-orange-500',
 };
 
@@ -47,11 +47,11 @@ function EventIcons({ ev }: { ev?: ClassicPlayerEvents }) {
       {items.map((x, i) => (
         <span key={i} title={x.title} className="text-[11px] leading-none">
           {x.node}
-          {x.n > 1 ? <span className="text-[9px] text-slate-500">×{x.n}</span> : null}
+          {x.n > 1 ? <span className="text-[9px] text-ink-faint">×{x.n}</span> : null}
         </span>
       ))}
       {ev.own_goals > 0 ? (
-        <span title="autogol" className="rounded bg-rose-100 px-1 text-[9px] font-bold text-rose-700">
+        <span title="autogol" className="rounded bg-bad-bg px-1 text-[9px] font-bold text-bad">
           AG{ev.own_goals > 1 ? `×${ev.own_goals}` : ''}
         </span>
       ) : null}
@@ -115,9 +115,9 @@ function LiveBadge({
   return (
     <span
       title={title}
-      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-700"
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-live-bg px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-live"
     >
-      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-500" />
+      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" />
       {label}
     </span>
   );
@@ -187,9 +187,9 @@ export function ClassicMatchDetail({
             </Link>
           }
           footer={
-            <div className="text-[11px] text-slate-500">
-              Fantavoto = <b>voto puro</b> + <span className="text-emerald-600">bonus</span> −{' '}
-              <span className="text-rose-600">malus</span> (gol +3, assist +1, autogol −2, rig. sbagliato
+            <div className="text-[11px] text-ink-faint">
+              Fantavoto = <b>voto puro</b> + <span className="text-good">bonus</span> −{' '}
+              <span className="text-bad">malus</span> (gol +3, assist +1, autogol −2, rig. sbagliato
               −3, rig. parato +3, giallo −0,5, rosso −1, portiere −1 a gol subito).
               {!realMatch ? (
                 <>
@@ -235,7 +235,7 @@ function TeamColumn({
     <Card className="p-4">
       <div className="flex items-baseline justify-between gap-2">
         <SectionTitle>{name}</SectionTitle>
-        <div className="flex items-center gap-1.5 text-sm text-slate-600">
+        <div className="flex items-center gap-1.5 text-sm text-ink-soft">
           {/* A total made in part of provisional votes is itself provisional —
               there is no honest way to show a settled number on unsettled ones. */}
           {team.provisional ? <LiveBadge label="provvisorio" /> : null}
@@ -249,15 +249,15 @@ function TeamColumn({
       {!realMatch ? (
         <div className="mt-0.5 text-[11px]">
           {team.defense.eligible ? (
-            <span className="text-slate-600">
+            <span className="text-ink-soft">
               🛡 Modificatore difesa: media <b>{fmt(team.defense.avg ?? 0)}</b> →{' '}
-              <b className="text-emerald-700">+{fmt(team.defense.bonus)}</b>
+              <b className="text-good">+{fmt(team.defense.bonus)}</b>
             </span>
           ) : (
-            <span className="text-slate-400">🛡 Modificatore difesa non attivo (servono ≥4 difensori titolari)</span>
+            <span className="text-ink-faint">🛡 Modificatore difesa non attivo (servono ≥4 difensori titolari)</span>
           )}
           {team.defense.applied !== 0 ? (
-            <span className="text-slate-400">
+            <span className="text-ink-faint">
               {' '}
               · totale {fmt(team.base_total)} {team.defense.applied >= 0 ? '+' : '−'}
               {fmt(Math.abs(team.defense.applied))} = {fmt(team.total)}
@@ -266,21 +266,21 @@ function TeamColumn({
           {/* Il fattore campo si vede solo dove è stato assegnato: dirlo anche a
               chi gioca fuori casa ("non hai preso il bonus") sarebbe rumore. */}
           {homeBonus ? (
-            <div className="text-slate-600">
-              🏟 Fattore campo: <b className="text-emerald-700">+{fmt(homeBonus)}</b>
+            <div className="text-ink-soft">
+              🏟 Fattore campo: <b className="text-good">+{fmt(homeBonus)}</b>
             </div>
           ) : null}
         </div>
       ) : null}
 
-      <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Titolari</div>
+      <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Titolari</div>
       <div className="divide-y">
         {team.starters.map((p) => (
           <PlayerRow key={p.player_id} p={p} />
         ))}
       </div>
 
-      <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+      <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
         {realMatch ? 'Panchina' : 'Panchina · ordine = priorità'}
       </div>
       <div className="divide-y">
@@ -310,7 +310,7 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
     <div className={`flex items-center justify-between gap-2 py-1.5 ${inactive ? 'opacity-50' : ''}`}>
       <div className="flex min-w-0 items-center gap-2">
         {order != null ? (
-          <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-400">{order}</span>
+          <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-ink-faint">{order}</span>
         ) : null}
         {/* A guessed role is drawn hollow with a '?': showing it solid would state
             as fact something we inferred because his squad data is incomplete.
@@ -321,7 +321,7 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
             title={p.role_known === false ? 'Ruolo non disponibile: stimato dai dati della partita' : undefined}
             className={
               p.role_known === false
-                ? 'rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-500'
+                ? 'rounded border border-dashed border-line px-1.5 py-0.5 text-[10px] font-bold leading-none text-ink-faint'
                 : `rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[role]}`
             }
           >
@@ -330,18 +330,18 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
           </span>
         ) : null}
         <span className="min-w-0">
-          <span className={`block truncate text-sm font-semibold text-slate-800 ${p.replaced_by ? 'line-through opacity-60' : ''}`}>
+          <span className={`block truncate text-sm font-semibold text-ink ${p.replaced_by ? 'line-through opacity-60' : ''}`}>
             {p.name}
-            {p.minutes > 0 ? <span className="ml-1 text-[11px] font-normal text-slate-400">{p.minutes}′</span> : null}
+            {p.minutes > 0 ? <span className="ml-1 text-[11px] font-normal text-ink-faint">{p.minutes}′</span> : null}
             <EventIcons ev={p.events} />
           </span>
           {/* annotation line — always reserved (fixed height) so every row has the
               same height and the two teams' bench sections start at the same point */}
           <span className="block h-[15px] truncate text-[11px] leading-[15px]">
             {p.replaced_by ? (
-              <span className="text-slate-500">↓ esce · entra {p.replaced_by.name}</span>
+              <span className="text-ink-faint">↓ esce · entra {p.replaced_by.name}</span>
             ) : p.entered && p.entered_for ? (
-              <span className="font-semibold text-emerald-600">▲ entra per {p.entered_for.name}</span>
+              <span className="font-semibold text-good">▲ entra per {p.entered_for.name}</span>
             ) : null}
           </span>
         </span>
@@ -366,7 +366,7 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
           // reason is the round's business, not the row's.
           <span
             title="Il suo club non ha ancora giocato la partita di questa giornata"
-            className="rounded border border-dashed border-sky-400 px-1.5 py-0.5 text-[10px] font-bold text-sky-600"
+            className="rounded border border-dashed border-accent px-1.5 py-0.5 text-[10px] font-bold text-accent"
           >
             non ancora giocata
           </span>
@@ -380,9 +380,9 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
             // performance to judge, only a match that has barely started.
             <span
               title="È in campo: la partita è in corso e il suo voto non è ancora determinabile"
-              className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700"
+              className="inline-flex items-center gap-1 rounded-full bg-live-bg px-1.5 py-0.5 text-[10px] font-bold text-live"
             >
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-500" />
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" />
               in campo
             </span>
           ) : svKind(p) === 'non_entrato' ? (
@@ -396,21 +396,21 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
                   ? 'Non ancora entrato: la partita è in corso, può ancora giocare'
                   : 'Non è entrato in campo: nessun minuto giocato'
               }
-              className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500"
+              className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-faint"
             >
               {p.provisional ? 'in panchina' : 'non ha giocato'}
             </span>
           ) : svKind(p) === 'dati_mancanti' ? (
             <span
               title="Ha giocato, ma non abbiamo la sua prestazione per questa partita"
-              className="rounded border border-dashed border-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-amber-600"
+              className="rounded border border-dashed border-warn px-1.5 py-0.5 text-[10px] font-bold text-warn"
             >
               n.d.
             </span>
           ) : (
             <span
               title="Senza voto: impiego insufficiente"
-              className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-500"
+              className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-faint"
             >
               S.V.
             </span>
@@ -425,25 +425,25 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
                 type="button"
                 onClick={() => setOpen((v) => !v)}
                 title="Mostra il dettaglio del voto"
-                className="text-[11px] text-slate-500 underline decoration-dotted underline-offset-2 hover:text-slate-800"
+                className="text-[11px] text-ink-faint underline decoration-dotted underline-offset-2 hover:text-ink"
               >
                 {fmt(p.voto_puro ?? 0)}
               </button>
             ) : (
-              <span className="text-[11px] text-slate-500">{fmt(p.voto_puro ?? 0)}</span>
+              <span className="text-[11px] text-ink-faint">{fmt(p.voto_puro ?? 0)}</span>
             )}
             {p.office ? (
               <span
                 title="Voto d'ufficio: la lega ha imposto questo voto per una partita non giocata"
-                className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700"
+                className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-bold text-accent"
               >
                 ufficio
               </span>
             ) : null}
-            {p.bonus > 0 ? <span className="text-[11px] font-semibold text-emerald-600">+{fmt(p.bonus)}</span> : null}
-            {p.malus > 0 ? <span className="text-[11px] font-semibold text-rose-600">−{fmt(p.malus)}</span> : null}
+            {p.bonus > 0 ? <span className="text-[11px] font-semibold text-good">+{fmt(p.bonus)}</span> : null}
+            {p.malus > 0 ? <span className="text-[11px] font-semibold text-bad">−{fmt(p.malus)}</span> : null}
             <span
-              className={`w-9 text-sm font-bold tabular-nums ${(p.fantavoto ?? 0) >= 6 ? 'text-emerald-700' : 'text-rose-700'}`}
+              className={`w-9 text-sm font-bold tabular-nums ${(p.fantavoto ?? 0) >= 6 ? 'text-good' : 'text-bad'}`}
             >
               {fmt(p.fantavoto ?? 0)}
             </span>
@@ -463,36 +463,36 @@ function WhyThisVote({ why }: { why: NonNullable<ClassicPlayerLine['explanation'
   const fmtPts = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(2)}`;
   const line = (label: string, pts: number, key?: string) => (
     <div key={key ?? label} className="flex items-baseline justify-between gap-3">
-      <span className="text-slate-600">{label}</span>
-      <span className={`shrink-0 font-mono text-[11px] font-semibold ${pts >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+      <span className="text-ink-soft">{label}</span>
+      <span className={`shrink-0 font-mono text-[11px] font-semibold ${pts >= 0 ? 'text-good' : 'text-bad'}`}>
         {fmtPts(pts)}
       </span>
     </div>
   );
   return (
-    <div className="mb-2 ml-8 rounded-xl bg-slate-50 px-3 py-2 text-[12px]">
-      <div className="mb-1 flex items-baseline justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+    <div className="mb-2 ml-8 rounded-xl bg-surface-2 px-3 py-2 text-[12px]">
+      <div className="mb-1 flex items-baseline justify-between text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
         <span>Come nasce il voto puro</span>
         <span>{why.minutes}′ giocati</span>
       </div>
       <div className="space-y-0.5">
-        <div className="flex items-baseline justify-between gap-3 text-slate-500">
+        <div className="flex items-baseline justify-between gap-3 text-ink-faint">
           <span>Media del ruolo</span>
           <span className="shrink-0 font-mono text-[11px] font-semibold">{why.base.toFixed(1)}</span>
         </div>
         {why.contributions.map((c) => line(c.label, c.points))}
         {why.other_count > 0 ? line(`altre ${why.other_count} voci minori`, why.other_points, '__other') : null}
-        <div className="mt-1 flex items-baseline justify-between gap-3 border-t border-slate-200 pt-1 font-semibold text-slate-800">
+        <div className="mt-1 flex items-baseline justify-between gap-3 border-t border-line pt-1 font-semibold text-ink">
           <span>Voto puro</span>
           <span className="shrink-0 font-mono">
             {why.voto.toFixed(1)}
             {Math.abs(why.subtotal - why.voto) >= 0.05 ? (
-              <span className="ml-1 text-[10px] font-normal text-slate-400">({why.subtotal.toFixed(2)} arrotondato)</span>
+              <span className="ml-1 text-[10px] font-normal text-ink-faint">({why.subtotal.toFixed(2)} arrotondato)</span>
             ) : null}
           </span>
         </div>
       </div>
-      {why.note ? <div className="mt-1.5 text-[11px] text-slate-500">{why.note}</div> : null}
+      {why.note ? <div className="mt-1.5 text-[11px] text-ink-faint">{why.note}</div> : null}
     </div>
   );
 }

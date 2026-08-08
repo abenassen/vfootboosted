@@ -5,7 +5,7 @@
  *  them subtly wrong in one of two places is how a user gives up.
  */
 export default function IosInstallSteps({ tone = 'sky' }: { tone?: 'sky' | 'slate' }) {
-  const text = tone === 'sky' ? 'text-sky-900' : 'text-slate-700';
+  const text = tone === 'sky' ? 'text-accent' : 'text-ink-soft';
   return (
     <ol className={`mt-2 list-decimal space-y-1 pl-5 text-sm ${text}`}>
       <li>Tocca il tasto Condividi in basso (il quadrato con la freccia verso l'alto).</li>

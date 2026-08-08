@@ -39,6 +39,10 @@ export interface CompColor {
   text800: string;
   text500: string;
   dot: string;
+  /** Il fondo tenue della competizione, in trasparenza: vale su entrambi i
+   *  temi, mentre `bg50` è una tinta chiara e va usata solo dove il fondo è
+   *  chiaro per costruzione. */
+  tint: string;
 }
 
 export const COMP_COLORS: CompColor[] = [
@@ -46,31 +50,31 @@ export const COMP_COLORS: CompColor[] = [
     bg700: 'bg-indigo-700', text700: 'text-indigo-700', text400: 'text-indigo-400',
     hover50: 'hover:bg-indigo-50', border600: 'border-indigo-600', border300: 'border-indigo-300',
     bg50: 'bg-indigo-50', text900: 'text-indigo-900', text800: 'text-indigo-800', text500: 'text-indigo-500',
-    dot: 'bg-indigo-500',
+    dot: 'bg-indigo-500', tint: 'bg-indigo-500/12',
   },
   {
     bg700: 'bg-fuchsia-700', text700: 'text-fuchsia-700', text400: 'text-fuchsia-400',
     hover50: 'hover:bg-fuchsia-50', border600: 'border-fuchsia-600', border300: 'border-fuchsia-300',
     bg50: 'bg-fuchsia-50', text900: 'text-fuchsia-900', text800: 'text-fuchsia-800', text500: 'text-fuchsia-500',
-    dot: 'bg-fuchsia-500',
+    dot: 'bg-fuchsia-500', tint: 'bg-fuchsia-500/12',
   },
   {
     bg700: 'bg-teal-700', text700: 'text-teal-700', text400: 'text-teal-400',
     hover50: 'hover:bg-teal-50', border600: 'border-teal-600', border300: 'border-teal-300',
     bg50: 'bg-teal-50', text900: 'text-teal-900', text800: 'text-teal-800', text500: 'text-teal-500',
-    dot: 'bg-teal-500',
+    dot: 'bg-teal-500', tint: 'bg-teal-500/12',
   },
   {
     bg700: 'bg-sky-700', text700: 'text-sky-700', text400: 'text-sky-400',
     hover50: 'hover:bg-sky-50', border600: 'border-sky-600', border300: 'border-sky-300',
     bg50: 'bg-sky-50', text900: 'text-sky-900', text800: 'text-sky-800', text500: 'text-sky-500',
-    dot: 'bg-sky-500',
+    dot: 'bg-sky-500', tint: 'bg-sky-500/12',
   },
   {
     bg700: 'bg-cyan-700', text700: 'text-cyan-700', text400: 'text-cyan-400',
     hover50: 'hover:bg-cyan-50', border600: 'border-cyan-600', border300: 'border-cyan-300',
     bg50: 'bg-cyan-50', text900: 'text-cyan-900', text800: 'text-cyan-800', text500: 'text-cyan-500',
-    dot: 'bg-cyan-500',
+    dot: 'bg-cyan-500', tint: 'bg-cyan-500/12',
   },
   {
     // Il grigio caldo chiude il giro: non è una tinta identitaria forte, ma una
@@ -79,7 +83,7 @@ export const COMP_COLORS: CompColor[] = [
     bg700: 'bg-stone-700', text700: 'text-stone-700', text400: 'text-stone-400',
     hover50: 'hover:bg-stone-50', border600: 'border-stone-600', border300: 'border-stone-300',
     bg50: 'bg-stone-50', text900: 'text-stone-900', text800: 'text-stone-800', text500: 'text-stone-500',
-    dot: 'bg-stone-500',
+    dot: 'bg-stone-500', tint: 'bg-stone-500/12',
   },
 ];
 

@@ -42,7 +42,7 @@ function ColorRow({
 }) {
   return (
     <div>
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">{label}</div>
       <div className="flex flex-wrap gap-2">
         {CREST_COLORS.map((c) => (
           <button
@@ -53,7 +53,7 @@ function ColorRow({
             aria-pressed={c === value}
             className={clsx(
               'h-9 w-9 rounded-full border transition',
-              c === value ? 'ring-2 ring-slate-900 ring-offset-2' : 'border-slate-200 hover:scale-105',
+              c === value ? 'ring-2 ring-line ring-offset-2' : 'border-line hover:scale-105',
             )}
             style={{ backgroundColor: `#${c}` }}
           />
@@ -83,7 +83,7 @@ function ChoiceRow<K extends keyof CrestOptions>({
 }) {
   return (
     <div>
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">{label}</div>
       <div className="flex flex-wrap gap-2">
         {options.map((opt) => {
           const active = value[field] === opt;
@@ -97,7 +97,7 @@ function ChoiceRow<K extends keyof CrestOptions>({
               title={labels?.[String(opt)]}
               className={clsx(
                 'rounded-xl border p-1 transition',
-                active ? 'border-slate-900 bg-slate-100 ring-2 ring-slate-900' : 'border-slate-200 hover:bg-slate-50',
+                active ? 'border-line bg-surface-2 ring-2 ring-line' : 'border-line hover:bg-surface-2',
               )}
             >
               <Crest
@@ -130,8 +130,8 @@ export default function CrestBuilder({
       <div className="flex items-center gap-4">
         <Crest descriptor={serializeCrest(value)} teamName={teamName} size={96} />
         <div className="min-w-0">
-          <div className="text-sm font-bold text-slate-800">{teamName || 'La tua squadra'}</div>
-          <div className="mt-1 text-xs text-slate-500">
+          <div className="text-sm font-bold text-ink">{teamName || 'La tua squadra'}</div>
+          <div className="mt-1 text-xs text-ink-faint">
             Senza simbolo lo stemma porta le iniziali del nome squadra, e cambia se
             rinomini la squadra.
           </div>

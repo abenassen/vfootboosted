@@ -59,7 +59,7 @@ export default function HonoursBoard({
       <div className="flex items-baseline justify-between gap-3">
         <SectionTitle>Albo d'oro</SectionTitle>
         {awards.length ? (
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-ink-faint">
             {awards.length} {awards.length === 1 ? 'trofeo' : 'trofei'}
           </span>
         ) : null}
@@ -70,29 +70,29 @@ export default function HonoursBoard({
           {awards.map((a) => (
             <li
               key={`${a.prize_id}-${a.team_id}`}
-              className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2"
+              className="flex items-center gap-3 rounded-xl border border-warn/40 bg-warn-bg/60 px-3 py-2"
             >
               <span className="text-2xl leading-none" aria-hidden>
                 {a.icon}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold text-amber-900">
+                <div className="truncate font-semibold text-warn">
                   {a.name}
                   {/* `shared_with` is a COUNT of the OTHER teams that tied, so it
                       needs "altri" or the line reads as a team number: a record
                       shared with one rival printed "(a pari merito con 1)". */}
                   {a.shared_with ? (
-                    <span className="ml-1 text-xs font-normal text-amber-700">
+                    <span className="ml-1 text-xs font-normal text-warn">
                       {a.shared_with === 1
                         ? '(a pari merito con un’altra squadra)'
                         : `(a pari merito con altre ${a.shared_with} squadre)`}
                     </span>
                   ) : null}
                 </div>
-                <div className="truncate text-xs text-amber-800">
+                <div className="truncate text-xs text-warn">
                   {a.competition_name} · {a.condition_label}
                 </div>
-                <div className="truncate text-xs text-slate-500">
+                <div className="truncate text-xs text-ink-faint">
                   {a.league_name}
                   {a.at ? ` · ${new Date(a.at).toLocaleDateString('it-IT')}` : ''}
                 </div>
@@ -106,7 +106,7 @@ export default function HonoursBoard({
           ))}
         </ul>
       ) : (
-        <div className="mt-2 text-sm text-slate-500">
+        <div className="mt-2 text-sm text-ink-faint">
           {own
             ? 'Bacheca vuota: i premi delle competizioni concluse finiscono qui.'
             : `Bacheca vuota${name ? ` di ${name}` : ''}: i premi delle competizioni concluse finiscono qui.`}

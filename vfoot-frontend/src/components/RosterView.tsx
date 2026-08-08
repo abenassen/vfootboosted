@@ -20,9 +20,9 @@ const ROLE_NAME: Record<PlayerRole, string> = {
   ATT: 'Attaccanti',
 };
 const ROLE_CHIP: Record<PlayerRole, string> = {
-  GK: 'bg-amber-500',
+  GK: 'bg-warn',
   DEF: 'bg-blue-500',
-  MID: 'bg-emerald-500',
+  MID: 'bg-good',
   ATT: 'bg-orange-500',
 };
 const ROLES: PlayerRole[] = ['GK', 'DEF', 'MID', 'ATT'];
@@ -47,10 +47,10 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
             <Stat label="Speso" value={budget.spent} tone="rose" />
             <Stat label="Residuo" value={budget.remaining} tone="emerald" />
           </div>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
             {ROLES.filter((r) => budget.by_role[r]).map((r) => (
               <span key={r}>
-                {ROLE_NAME[r]}: <b className="text-slate-700">{price(budget.by_role[r])}</b>
+                {ROLE_NAME[r]}: <b className="text-ink-soft">{price(budget.by_role[r])}</b>
               </span>
             ))}
           </div>
@@ -64,7 +64,7 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
           <Card key={role} className="p-4">
             <div className="flex items-baseline justify-between">
               <SectionTitle>{ROLE_NAME[role]}</SectionTitle>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-ink-faint">
                 {group.length} · {amount(group.reduce((s, p) => s + p.price, 0))}
               </span>
             </div>
@@ -73,7 +73,7 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
                 si parla una volta sola, in cima, invece di ripetere la parola
                 venticinque volte. Stesse larghezze della riga (w-20 / w-28), o
                 le etichette non starebbero sopra la loro colonna. */}
-            <div className="mt-2 flex items-center justify-between gap-3 border-b pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="mt-2 flex items-center justify-between gap-3 border-b pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
               <span className="min-w-0">Giocatore</span>
               <span className="flex shrink-0 items-center gap-2">
                 <span className="w-20 text-right normal-case tracking-normal">{CURRENCY_NAME_PLURAL}</span>
@@ -94,7 +94,7 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
         );
       })}
 
-      {statsNote ? <div className="px-1 text-[11px] text-slate-400">{statsNote}</div> : null}
+      {statsNote ? <div className="px-1 text-[11px] text-ink-faint">{statsNote}</div> : null}
     </div>
   );
 }
@@ -136,12 +136,12 @@ function TeamSwitcher({ currentTeamId }: { currentTeamId: number; ownTeamId: num
             title={own ? 'La tua squadra' : undefined}
             className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
               active
-                ? 'bg-slate-900 text-white'
+                ? 'bg-ink text-paper'
                 : own
                   // Marked even when it is not the one on screen: in a strip of
                   // eight unfamiliar names, yours should not have to be recalled.
-                  ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-300 hover:bg-emerald-100'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'bg-good-bg text-good ring-1 ring-good/40 hover:bg-good-bg'
+                  : 'bg-surface-2 text-ink-soft hover:bg-surface-2'
             }`}
           >
             {/* No crest here on purpose. The strip is a way to move between
@@ -158,10 +158,10 @@ function TeamSwitcher({ currentTeamId }: { currentTeamId: number; ownTeamId: num
 }
 
 function Stat({ label, value, tone = 'slate' }: { label: string; value: number; tone?: 'slate' | 'rose' | 'emerald' }) {
-  const color = tone === 'rose' ? 'text-rose-700' : tone === 'emerald' ? 'text-emerald-700' : 'text-slate-900';
+  const color = tone === 'rose' ? 'text-bad' : tone === 'emerald' ? 'text-good' : 'text-ink';
   return (
-    <div className="rounded-xl bg-slate-50 px-3 py-2 text-center">
-      <div className="text-[10px] uppercase tracking-wide text-slate-400">{label}</div>
+    <div className="rounded-xl bg-surface-2 px-3 py-2 text-center">
+      <div className="text-[10px] uppercase tracking-wide text-ink-faint">{label}</div>
       {/* Anche qui la moneta: erano tre numeri nudi sopra una colonna che
           adesso dice «vfooties», e la domanda «vfooties anche questi?» non deve
           nascere. */}
@@ -179,14 +179,14 @@ function PlayerRow({ p, open, onToggle }: { p: TeamLineupPlayer; open: boolean; 
             {ROLE_LABEL[p.role]}
           </span>
           <div className="min-w-0">
-            <div className="truncate font-semibold text-slate-900">{p.name}</div>
-            <div className="truncate text-xs text-slate-500">{p.real_team ?? '—'}</div>
+            <div className="truncate font-semibold text-ink">{p.name}</div>
+            <div className="truncate text-xs text-ink-faint">{p.real_team ?? '—'}</div>
           </div>
         </div>
         {/* Fixed columns: the price sits in its own right-aligned slot so a missing
             usage badge (a newcomer with no history) never shifts it out of line. */}
         <div className="flex shrink-0 items-center gap-2">
-          <span className="w-20 text-right font-mono text-sm font-bold tabular-nums text-slate-700">{price(p.price)}</span>
+          <span className="w-20 text-right font-mono text-sm font-bold tabular-nums text-ink-soft">{price(p.price)}</span>
           <span className="hidden w-28 text-right sm:block">
             <MinutesBadge label={p.minutes_label} />
           </span>
@@ -204,7 +204,7 @@ function PlayerRow({ p, open, onToggle }: { p: TeamLineupPlayer; open: boolean; 
 function PlayerDetail({ p }: { p: TeamLineupPlayer }) {
   const vote = p.value != null ? p.value.toFixed(2) : null;
   return (
-    <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[12px]">
+    <div className="mt-2 rounded-xl bg-surface-2 px-3 py-2 text-[12px]">
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
         <Field label="Squadra" value={p.real_team ?? '—'} />
         <Field
@@ -215,9 +215,9 @@ function PlayerDetail({ p }: { p: TeamLineupPlayer }) {
         <Field label="Media voto" value={vote ?? '—'} hint={p.value_basis === 'estimate' ? 'stimata' : undefined} />
       </div>
       {p.next_match ? (
-        <div className="mt-1.5 text-[11px] text-slate-500">
+        <div className="mt-1.5 text-[11px] text-ink-faint">
           Prossima: {p.next_match.home ? 'in casa contro' : 'in trasferta contro'}{' '}
-          <b className="text-slate-700">{p.next_match.opponent}</b>
+          <b className="text-ink-soft">{p.next_match.opponent}</b>
         </div>
       ) : null}
       {/* Che cosa vuol dire l'etichetta di QUESTO giocatore, per esteso. Sul
@@ -226,9 +226,9 @@ function PlayerDetail({ p }: { p: TeamLineupPlayer }) {
           numeri da cui è ricavata — presenze e minuti medi — e si legge come la
           loro conclusione. */}
       {p.minutes_label !== 'unknown' ? (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-slate-200 pt-1.5 text-[11px] text-slate-500">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line pt-1.5 text-[11px] text-ink-faint">
           <MinutesBadge label={p.minutes_label} />
-          <span className="font-semibold text-slate-700">{MINUTES_MEANING[p.minutes_label]}</span>
+          <span className="font-semibold text-ink-soft">{MINUTES_MEANING[p.minutes_label]}</span>
           <span>{recentUsage(p)}</span>
         </div>
       ) : null}
@@ -239,10 +239,10 @@ function PlayerDetail({ p }: { p: TeamLineupPlayer }) {
 function Field({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-slate-400">{label}</div>
-      <div className="font-semibold text-slate-700">
+      <div className="text-[10px] uppercase tracking-wide text-ink-faint">{label}</div>
+      <div className="font-semibold text-ink-soft">
         {value}
-        {hint ? <span className="ml-1 text-[10px] font-normal text-slate-400">({hint})</span> : null}
+        {hint ? <span className="ml-1 text-[10px] font-normal text-ink-faint">({hint})</span> : null}
       </div>
     </div>
   );

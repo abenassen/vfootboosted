@@ -40,7 +40,7 @@ export default function LeagueMatchDetailPage() {
     }
   }, [fixtureCompetitionId, selectedCompetitionId, setSelectedCompetitionId]);
 
-  if (loading && !data) return <div className="text-sm text-slate-500">Caricamento partita…</div>;
+  if (loading && !data) return <div className="text-sm text-ink-faint">Caricamento partita…</div>;
   if ((error && !data) || (!loading && !data)) {
     // A fixture whose round has not kicked off has no detail, and the API says so
     // with a 404: that is a normal state, not a failure, and showing it in red
@@ -52,20 +52,20 @@ export default function LeagueMatchDetailPage() {
         <Card className="p-6 text-center">
           <div className="text-3xl">📋</div>
           <div className="mt-2 font-bold">Partita non ancora giocata</div>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-slate-600">
+          <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">
             Il tabellino compare quando la giornata comincia: prima non ci sono
             né voti né formazioni da mostrare.
           </p>
           <Link
             to="/matches"
-            className="mt-4 inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            className="mt-4 inline-flex rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-paper hover:opacity-90"
           >
             ← Torna al calendario
           </Link>
         </Card>
       );
     }
-    return <Card className="p-4 text-sm text-red-600">Errore nel caricamento della partita: {error?.message ?? 'sconosciuto'}</Card>;
+    return <Card className="p-4 text-sm text-bad">Errore nel caricamento della partita: {error?.message ?? 'sconosciuto'}</Card>;
   }
   if (!data) return null;
   // Classic leagues carry mode:'classic' in the payload -> fantavoto detail (no zone

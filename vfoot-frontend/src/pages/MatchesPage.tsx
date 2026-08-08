@@ -31,11 +31,11 @@ type CalendarEntry =
     };
 
 const BLOCKER_TONE: Record<CompetitionBlocker['kind'], string> = {
-  da_giocare: 'border-slate-200 bg-slate-50 text-slate-600',
-  da_conteggiare: 'border-emerald-300 bg-emerald-50 text-emerald-800',
-  recupero: 'border-amber-300 bg-amber-50 text-amber-800',
-  sorgente_da_definire: 'border-slate-200 bg-slate-50 text-slate-600',
-  senza_giornate: 'border-rose-300 bg-rose-50 text-rose-800',
+  da_giocare: 'border-line bg-surface-2 text-ink-soft',
+  da_conteggiare: 'border-good/40 bg-good-bg text-good',
+  recupero: 'border-warn/40 bg-warn-bg text-warn',
+  sorgente_da_definire: 'border-line bg-surface-2 text-ink-soft',
+  senza_giornate: 'border-bad/40 bg-bad-bg text-bad',
 };
 
 /** What the reader can do about it, which is the part the raw reason does not say. */
@@ -212,11 +212,11 @@ export default function MatchesPage() {
   const myTeamName = selectedLeague?.team_name?.trim() || null;
   const seasonName = selectedLeague?.reference_season?.competition ?? 'Serie A';
 
-  if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per vedere le partite.</div>;
+  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega per vedere le partite.</div>;
   if (!selectedCompetitionId)
-    return <div className="text-sm text-slate-500">Questa lega non ha ancora competizioni.</div>;
-  if (loading) return <div className="text-sm text-slate-500">Caricamento partite…</div>;
-  if (error) return <div className="text-sm text-red-600">Errore: {error}</div>;
+    return <div className="text-sm text-ink-faint">Questa lega non ha ancora competizioni.</div>;
+  if (loading) return <div className="text-sm text-ink-faint">Caricamento partite…</div>;
+  if (error) return <div className="text-sm text-bad">Errore: {error}</div>;
 
   const plannedRounds = planRows.length;
 
@@ -233,7 +233,7 @@ export default function MatchesPage() {
             competizione, e "giornata" è riservata a quella del campionato vero —
             che è un altro numero e viene detto sotto ogni turno ("si gioca sulla
             giornata 22 di Serie A"). */}
-        <div className="mt-1 text-sm text-slate-600">
+        <div className="mt-1 text-sm text-ink-soft">
           {fixtures.length} partite · {plannedRounds} {plannedRounds === 1 ? 'turno' : 'turni'}
         </div>
         <div className="mt-3 flex flex-wrap gap-1">
@@ -244,11 +244,11 @@ export default function MatchesPage() {
               className={clsx(
                 'rounded-lg px-2.5 py-1 text-xs font-semibold',
                 e.key === activeKey
-                  ? 'bg-slate-900 text-white'
+                  ? 'bg-ink text-paper'
                   : e.kind === 'phase'
                   ? // Drawn hollow: this one is a promise, not a fixture list.
-                    'border border-dashed border-slate-300 text-slate-500 hover:border-slate-400'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                    'border border-dashed border-line text-ink-faint hover:border-line'
+                  : 'bg-surface-2 text-ink-soft hover:bg-surface-2',
               )}
             >
               {e.kind === 'phase' || isKnockout ? e.label : e.roundNo}
@@ -265,7 +265,7 @@ export default function MatchesPage() {
           {/* Said once for the round, not repeated identically under every match of
               it: all the fixtures of a round share the same real matchday. */}
           {roundRealMatchday != null ? (
-            <div className="mt-0.5 text-xs text-slate-500">
+            <div className="mt-0.5 text-xs text-ink-faint">
               Si gioca sulla giornata {roundRealMatchday} di {seasonName}
             </div>
           ) : null}
@@ -278,7 +278,7 @@ export default function MatchesPage() {
               shownByStage.map(([stageName, group]) => (
                 <div key={stageName ?? 'unico'}>
                   {shownByStage.length > 1 && stageName ? (
-                    <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
+                    <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-ink-faint">
                       {stageName}
                     </div>
                   ) : null}
@@ -290,7 +290,7 @@ export default function MatchesPage() {
                 </div>
               ))
             ) : (
-              <div className="text-sm text-slate-500">Nessuna partita in questa giornata.</div>
+              <div className="text-sm text-ink-faint">Nessuna partita in questa giornata.</div>
             )}
           </div>
         </Card>
@@ -324,23 +324,23 @@ function PendingPhase({ entry, seasonName }: { entry: Extract<CalendarEntry, { k
   const terminal = isTerminal(blocker);
 
   return (
-    <Card className={clsx('border-2 border-dashed p-4', terminal ? 'border-rose-300' : 'border-slate-300')}>
+    <Card className={clsx('border-2 border-dashed p-4', terminal ? 'border-bad/40' : 'border-line')}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SectionTitle className="!mb-0">{entry.label}</SectionTitle>
         <span
           className={clsx(
             'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-            terminal ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500',
+            terminal ? 'bg-bad-bg text-bad' : 'bg-surface-2 text-ink-faint',
           )}
         >
           {terminal ? 'non più disputabile' : 'partecipanti da definire'}
         </span>
       </div>
 
-      <div className="mt-3 rounded-xl bg-slate-50 p-3">
-        <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Chi ci gioca</div>
+      <div className="mt-3 rounded-xl bg-surface-2 p-3">
+        <div className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">Chi ci gioca</div>
         {entry.plans.map((p) => (
-          <div key={p.stage_id} className="mt-1 text-sm text-slate-700">
+          <div key={p.stage_id} className="mt-1 text-sm text-ink-soft">
             {entry.plans.length > 1 ? <b>{p.name}: </b> : null}
             {p.rule_text || 'da sorteggiare'}
           </div>
@@ -348,9 +348,9 @@ function PendingPhase({ entry, seasonName }: { entry: Extract<CalendarEntry, { k
       </div>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <div className="rounded-xl border border-slate-100 p-3">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Quando</div>
-          <div className="mt-0.5 text-sm text-slate-700">
+        <div className="rounded-xl border border-line p-3">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">Quando</div>
+          <div className="mt-0.5 text-sm text-ink-soft">
             {terminal
               ? // The reserved matchdays are still in the plan, but they have gone
                 // by — printing them as a date would read as a promise.
@@ -362,9 +362,9 @@ function PendingPhase({ entry, seasonName }: { entry: Extract<CalendarEntry, { k
               : `Giornate ${first}–${last} di ${seasonName}`}
           </div>
         </div>
-        <div className="rounded-xl border border-slate-100 p-3">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Quante partite</div>
-          <div className="mt-0.5 text-sm text-slate-700">
+        <div className="rounded-xl border border-line p-3">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">Quante partite</div>
+          <div className="mt-0.5 text-sm text-ink-soft">
             {matches > 0
               ? `${matches} ${matches === 1 ? 'partita' : 'partite'} in ${entry.rows.length} ${
                   entry.rows.length === 1 ? 'turno' : 'turni'
@@ -382,7 +382,7 @@ function PendingPhase({ entry, seasonName }: { entry: Extract<CalendarEntry, { k
           ) : null}
         </div>
       ) : (
-        <div className="mt-3 text-xs text-slate-500">
+        <div className="mt-3 text-xs text-ink-faint">
           La regola è già soddisfatta: il sorteggio avviene alla prossima chiusura di giornata.
         </div>
       )}
@@ -409,23 +409,23 @@ function FixtureRow({ f, myTeam }: { f: LeagueFixtureItem; myTeam: string | null
   const body = (
     <div className="flex items-center gap-3">
       <div className="flex flex-1 items-center justify-end gap-2">
-        <span className={homeWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.home_team.name}</span>
+        <span className={homeWin ? 'font-bold text-ink' : 'text-ink-soft'}>{f.home_team.name}</span>
         <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={24} />
       </div>
       {/* A played match shows a score plate; an unplayed one used to show "vs" in
           the same white box with a shadow, which reads as a button. */}
       {hasScore ? (
         <div className="flex flex-col items-center">
-          <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 font-mono text-sm font-bold shadow-sm">
-            <span className={homeWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(hs)}</span>
-            <span className="text-slate-300">-</span>
-            <span className={awayWin ? 'text-green-600' : 'text-slate-700'}>{Math.round(as)}</span>
+          <div className="flex items-center gap-1 rounded-lg bg-surface px-2 py-1 font-mono text-sm font-bold shadow-sm">
+            <span className={homeWin ? 'text-good' : 'text-ink-soft'}>{Math.round(hs)}</span>
+            <span className="text-ink-faint">-</span>
+            <span className={awayWin ? 'text-good' : 'text-ink-soft'}>{Math.round(as)}</span>
           </div>
           {partial ? (
             <span
               className={clsx(
                 'mt-0.5 text-[9px] font-bold uppercase tracking-wide',
-                f.score_provisional ? 'text-violet-600' : 'text-slate-400',
+                f.score_provisional ? 'text-live' : 'text-ink-faint',
               )}
             >
               {/* "live" = qualcosa si muove ancora; "da conteggiare" = il numero è
@@ -435,11 +435,11 @@ function FixtureRow({ f, myTeam }: { f: LeagueFixtureItem; myTeam: string | null
           ) : null}
         </div>
       ) : (
-        <span className="px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">vs</span>
+        <span className="px-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">vs</span>
       )}
       <div className="flex flex-1 items-center gap-2">
         <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={24} />
-        <span className={awayWin ? 'font-bold text-slate-900' : 'text-slate-600'}>{f.away_team.name}</span>
+        <span className={awayWin ? 'font-bold text-ink' : 'text-ink-soft'}>{f.away_team.name}</span>
       </div>
     </div>
   );
@@ -448,7 +448,7 @@ function FixtureRow({ f, myTeam }: { f: LeagueFixtureItem; myTeam: string | null
     <div
       className={clsx(
         'rounded-xl border px-3 py-2.5',
-        f.is_user_involved ? 'border-slate-300 bg-white' : 'border-slate-100 bg-slate-50',
+        f.is_user_involved ? 'border-line bg-surface' : 'border-line bg-surface-2',
       )}
     >
       {openable ? (
@@ -462,7 +462,7 @@ function FixtureRow({ f, myTeam }: { f: LeagueFixtureItem; myTeam: string | null
         <div className="mt-2 flex justify-center">
           <Link
             to={`/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`}
-            className="rounded-lg bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-700"
+            className="rounded-lg bg-ink px-2.5 py-1 text-[11px] font-semibold text-paper hover:opacity-90"
           >
             {/* Named, because on a row of two unfamiliar team names a bare
                 "Imposta formazione" does not say whose match this is. */}

@@ -121,15 +121,15 @@ export default function AuctionRoomPage() {
   );
 
   if (!selectedLeagueId) {
-    return <Card className="p-6 text-sm text-slate-600">Seleziona una lega.</Card>;
+    return <Card className="p-6 text-sm text-ink-soft">Seleziona una lega.</Card>;
   }
   if (loading) {
-    return <Card className="p-6 text-sm text-slate-600">Caricamento asta…</Card>;
+    return <Card className="p-6 text-sm text-ink-soft">Caricamento asta…</Card>;
   }
 
   if (info && info.mode !== 'classic') {
     return (
-      <Card className="p-6 text-sm text-slate-600">
+      <Card className="p-6 text-sm text-ink-soft">
         L’asta è disponibile solo per le leghe in modalità <b>classic</b>.
       </Card>
     );
@@ -139,7 +139,7 @@ export default function AuctionRoomPage() {
     return (
       <div className="space-y-4">
         <SectionTitle>Asta della lega</SectionTitle>
-        <Card className="p-6 text-sm text-slate-600">
+        <Card className="p-6 text-sm text-ink-soft">
           Nessun’asta in corso.
           {isAdmin ? (
             <div className="mt-3">
@@ -155,12 +155,12 @@ export default function AuctionRoomPage() {
               >
                 Avvia asta iniziale
               </Button>
-              <div className="mt-2 text-xs text-slate-500">
+              <div className="mt-2 text-xs text-ink-faint">
                 Il pool è l’intero listone congelato della lega.
               </div>
             </div>
           ) : (
-            <div className="mt-2 text-xs text-slate-500">
+            <div className="mt-2 text-xs text-ink-faint">
               L’amministratore non ha ancora avviato l’asta.
             </div>
           )}
@@ -233,7 +233,7 @@ export default function AuctionRoomPage() {
 }
 
 function Banner({ tone, children }: { tone: 'green' | 'red'; children: React.ReactNode }) {
-  const cls = tone === 'green' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-red-50 text-red-800 border-red-200';
+  const cls = tone === 'green' ? 'bg-good-bg text-good border-good/40' : 'bg-bad-bg text-bad border-bad/40';
   return <div className={`rounded-xl border px-3 py-2 text-sm ${cls}`}>{children}</div>;
 }
 
@@ -275,7 +275,7 @@ function CurrentPlayerPanel({
     return (
       <Card className="p-4">
         <SectionTitle>In chiamata</SectionTitle>
-        <div className="mt-2 text-sm text-slate-500">
+        <div className="mt-2 text-sm text-ink-faint">
           Nessun giocatore in chiamata. {isAdmin ? 'Chiama un giocatore dai controlli qui sotto.' : 'In attesa dell’amministratore.'}
         </div>
       </Card>
@@ -289,16 +289,16 @@ function CurrentPlayerPanel({
           <div className="text-lg font-bold">{nom.player_name}</div>
           <div className="mt-1 flex items-center gap-2 text-xs">
             {nom.player_role ? <Badge tone="blue">{ROLE_LABEL[nom.player_role]}</Badge> : null}
-            <span className="text-slate-500">chiamato da {nom.nominator}</span>
+            <span className="text-ink-faint">chiamato da {nom.nominator}</span>
           </div>
         </div>
         <div className="text-right">
-          <div className="text-xs text-slate-500">Offerta migliore</div>
+          <div className="text-xs text-ink-faint">Offerta migliore</div>
           <div className="text-2xl font-extrabold">{nom.top_bid}</div>
           {nom.top_bidder_team_name ? (
-            <div className="text-xs text-slate-500">{nom.top_bidder_team_name}</div>
+            <div className="text-xs text-ink-faint">{nom.top_bidder_team_name}</div>
           ) : (
-            <div className="text-xs text-slate-400">nessuna</div>
+            <div className="text-xs text-ink-faint">nessuna</div>
           )}
         </div>
       </div>
@@ -306,7 +306,7 @@ function CurrentPlayerPanel({
       {/* Bidding */}
       <div className="mt-4 flex flex-wrap items-end gap-2">
         <div>
-          <label htmlFor="bid-amount" className="block text-[11px] font-semibold text-slate-500">
+          <label htmlFor="bid-amount" className="block text-[11px] font-semibold text-ink-faint">
             La tua offerta (min {nom.min_next_bid})
           </label>
           <input
@@ -319,7 +319,7 @@ function CurrentPlayerPanel({
         </div>
         {isAdmin ? (
           <div>
-            <label htmlFor="on-behalf" className="block text-[11px] font-semibold text-slate-500">
+            <label htmlFor="on-behalf" className="block text-[11px] font-semibold text-ink-faint">
               Per conto di
             </label>
             <select
@@ -356,7 +356,7 @@ function CurrentPlayerPanel({
       {/* Bids list */}
       {nom.bids.length ? (
         <div className="mt-4">
-          <div className="text-[11px] font-semibold text-slate-500">Offerte</div>
+          <div className="text-[11px] font-semibold text-ink-faint">Offerte</div>
           <div className="mt-1 space-y-1">
             {nom.bids.map((b) => (
               <div key={b.bid_id} className="flex items-center justify-between rounded-lg border px-2 py-1 text-xs">
@@ -364,7 +364,7 @@ function CurrentPlayerPanel({
                   <b>{b.amount}</b> · {b.team_name ?? b.manager}
                 </span>
                 {isAdmin ? (
-                  <button className="text-red-600 hover:underline" onClick={() => onVoidBid(b.bid_id)}>
+                  <button className="text-bad hover:underline" onClick={() => onVoidBid(b.bid_id)}>
                     annulla
                   </button>
                 ) : null}
@@ -386,8 +386,8 @@ function CurrentPlayerPanel({
           </div>
           {/* Verbal auction: assign THIS player to the winner at the agreed price,
               no in-app bids required. */}
-          <div className="rounded-xl bg-slate-50 p-2">
-            <div className="text-[11px] font-semibold text-slate-500">
+          <div className="rounded-xl bg-surface-2 p-2">
+            <div className="text-[11px] font-semibold text-ink-faint">
               Assegna {nom.player_name} (rilanci a voce)
             </div>
             <div className="mt-1 flex flex-wrap items-end gap-2">
@@ -534,7 +534,7 @@ function AdminControls({
 
       {/* Manual search */}
       <div className="mt-4">
-        <label htmlFor="nom-search" className="block text-[11px] font-semibold text-slate-500">
+        <label htmlFor="nom-search" className="block text-[11px] font-semibold text-ink-faint">
           Chiama un giocatore specifico
         </label>
         <input
@@ -551,7 +551,7 @@ function AdminControls({
               <button
                 key={p.player_id}
                 disabled={busy || hasOpen}
-                className="block w-full rounded-lg border px-2 py-1 text-left text-xs hover:bg-slate-50 disabled:opacity-50"
+                className="block w-full rounded-lg border px-2 py-1 text-left text-xs hover:bg-surface-2 disabled:opacity-50"
                 onClick={() =>
                   run(async () => {
                     await nominatePlayer(auctionId, { mode: 'manual', player_id: p.player_id });
@@ -562,12 +562,12 @@ function AdminControls({
                 <span className="flex items-center justify-between gap-2">
                   <span className="truncate">{p.full_name}</span>
                   <span className="flex shrink-0 items-center gap-1">
-                    {p.role ? <span className="text-[10px] text-slate-400">{p.role}</span> : null}
+                    {p.role ? <span className="text-[10px] text-ink-faint">{p.role}</span> : null}
                     {/* Callable but not in the drawn order: signed after the
                         auction began, or already gone round once. Worth saying,
                         because calling him is a deliberate act. */}
                     {!p.in_draw_order ? (
-                      <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">
+                      <span className="rounded bg-warn-bg px-1 text-[10px] font-semibold text-warn">
                         fuori lista
                       </span>
                     ) : null}
@@ -577,7 +577,7 @@ function AdminControls({
             ))}
           </div>
         ) : null}
-        <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-600">
+        <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-ink-soft">
           <input
             type="checkbox"
             checked={includeCalled}
@@ -587,9 +587,9 @@ function AdminControls({
           <span>
             Includi i già chiamati e non acquistati
             {drawLeft === 0 ? (
-              <span className="ml-1 text-slate-400">· il giro è finito, non resta altro</span>
+              <span className="ml-1 text-ink-faint">· il giro è finito, non resta altro</span>
             ) : (
-              <span className="ml-1 text-slate-400">· {drawLeft} ancora in lista</span>
+              <span className="ml-1 text-ink-faint">· {drawLeft} ancora in lista</span>
             )}
           </span>
         </label>
@@ -597,7 +597,7 @@ function AdminControls({
 
       {/* Direct assign shortcut */}
       <div className="mt-4 border-t pt-3">
-        <div className="text-[11px] font-semibold text-slate-500">Assegnazione diretta (asta dal vivo)</div>
+        <div className="text-[11px] font-semibold text-ink-faint">Assegnazione diretta (asta dal vivo)</div>
         <div className="mt-1 flex flex-wrap items-end gap-2">
           <input
             className="w-40 rounded-xl border px-3 py-2 text-sm"
@@ -633,7 +633,7 @@ function AdminControls({
               <button
                 key={p.player_id}
                 disabled={busy || !assignTeam || !assignPrice}
-                className="block w-full rounded-lg border px-2 py-1 text-left text-xs hover:bg-slate-50 disabled:opacity-50"
+                className="block w-full rounded-lg border px-2 py-1 text-left text-xs hover:bg-surface-2 disabled:opacity-50"
                 onClick={() =>
                   run(async () => {
                     await assignPlayer(auctionId, p.player_id, Number(assignTeam), Number(assignPrice));
@@ -651,7 +651,7 @@ function AdminControls({
       {/* Revoke a completed purchase (fix a data-entry error on any past sale). */}
       {state.recent_nominations.some((n) => n.status === 'closed') ? (
         <div className="mt-4 border-t pt-3">
-          <div className="text-[11px] font-semibold text-slate-500">Acquisti recenti</div>
+          <div className="text-[11px] font-semibold text-ink-faint">Acquisti recenti</div>
           <div className="mt-1 max-h-40 space-y-1 overflow-auto">
             {state.recent_nominations
               .filter((n) => n.status === 'closed')
@@ -663,7 +663,7 @@ function AdminControls({
                   </span>
                   <button
                     disabled={busy}
-                    className="text-red-600 hover:underline disabled:opacity-50"
+                    className="text-bad hover:underline disabled:opacity-50"
                     onClick={() => run(() => revertNomination(n.nomination_id), 'Acquisto revocato.')}
                   >
                     revoca
@@ -692,7 +692,7 @@ function BudgetBoard({ state }: { state: AuctionState }) {
               <div className="text-sm font-semibold">{t.team_name}</div>
               <div className="text-sm">
                 <span className="font-bold">{t.available_budget}</span>
-                <span className="text-xs text-slate-400"> / {t.initial_budget}</span>
+                <span className="text-xs text-ink-faint"> / {t.initial_budget}</span>
               </div>
             </div>
             <div className="mt-1 flex gap-1 text-[11px]">
@@ -702,14 +702,14 @@ function BudgetBoard({ state }: { state: AuctionState }) {
                 return (
                   <span
                     key={r}
-                    className={`rounded px-1.5 py-0.5 ${full ? 'bg-slate-200 text-slate-500' : 'bg-blue-50 text-blue-700'}`}
+                    className={`rounded px-1.5 py-0.5 ${full ? 'bg-surface-2 text-ink-faint' : 'bg-blue-50 text-blue-700'}`}
                     title={ROLE_LABEL[r]}
                   >
                     {ROLE_SHORT[r]} {s.filled}/{s.quota}
                   </span>
                 );
               })}
-              <span className="ml-auto text-slate-400">max {t.max_bid_any}</span>
+              <span className="ml-auto text-ink-faint">max {t.max_bid_any}</span>
             </div>
           </div>
         ))}
@@ -725,14 +725,14 @@ function FeedPanel({ state }: { state: AuctionState }) {
       <div className="mt-2 max-h-72 space-y-1 overflow-auto text-xs">
         {state.events.length ? (
           state.events.map((e) => (
-            <div key={e.id} className="flex items-baseline gap-2 border-b border-slate-100 py-1">
-              <span className="text-slate-400">{new Date(e.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</span>
+            <div key={e.id} className="flex items-baseline gap-2 border-b border-line py-1">
+              <span className="text-ink-faint">{new Date(e.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</span>
               <span>{eventLine(e.type, e.payload)}</span>
-              {e.actor ? <span className="ml-auto text-slate-400">{e.actor}</span> : null}
+              {e.actor ? <span className="ml-auto text-ink-faint">{e.actor}</span> : null}
             </div>
           ))
         ) : (
-          <div className="text-slate-500">Nessuna attività ancora.</div>
+          <div className="text-ink-faint">Nessuna attività ancora.</div>
         )}
       </div>
     </Card>

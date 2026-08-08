@@ -92,18 +92,18 @@ export default function LandingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,#dbeafe_0%,#eff6ff_45%,#f8fafc_100%)] text-slate-900">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,#dbeafe_0%,#eff6ff_45%,#f8fafc_100%)] text-ink">
       <div className="mx-auto max-w-6xl px-4 py-10 md:py-16">
         <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
           <Card className="relative overflow-hidden p-6 md:p-8">
-            <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-sky-100 blur-2xl" />
+            <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-accent/10 blur-2xl" />
             <div className="absolute -bottom-16 -left-16 h-56 w-56 rounded-full bg-indigo-100 blur-2xl" />
 
             <div className="relative space-y-5">
               <div className="flex items-center gap-3">
                 <img src={logo} alt="Vfoot logo" className="h-12 w-12 rounded-xl object-cover shadow-card" />
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vfoot Boosted</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Vfoot Boosted</div>
                   <div className="text-lg font-black">Il gioco sul calcio con i voti fatti da noi</div>
                 </div>
               </div>
@@ -114,7 +114,7 @@ export default function LandingPage() {
                 sul calcio.
               </h1>
 
-              <p className="max-w-2xl text-slate-600 md:text-lg">
+              <p className="max-w-2xl text-ink-soft md:text-lg">
                 Voti calcolati dai dati reali di ogni partita di Serie A, non copiati dai giornali.
                 Scegli come vivere la tua lega: alla maniera classica o con la modalità tattica a zone.
               </p>
@@ -139,23 +139,23 @@ export default function LandingPage() {
           <Card className="p-6 md:p-8">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Account</div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Account</div>
                 <div className="mt-1 text-xl font-black">Accedi a Vfoot</div>
               </div>
             </div>
 
-            <div className="mb-4 grid grid-cols-2 rounded-xl bg-slate-100 p-1 text-sm font-semibold">
+            <div className="mb-4 grid grid-cols-2 rounded-xl bg-surface-2 p-1 text-sm font-semibold">
               <button
                 type="button"
                 onClick={() => setMode('login')}
-                className={mode === 'login' ? 'rounded-lg bg-white py-2' : 'py-2 text-slate-600'}
+                className={mode === 'login' ? 'rounded-lg bg-surface py-2' : 'py-2 text-ink-soft'}
               >
                 Login
               </button>
               <button
                 type="button"
                 onClick={() => setMode('register')}
-                className={mode === 'register' ? 'rounded-lg bg-white py-2' : 'py-2 text-slate-600'}
+                className={mode === 'register' ? 'rounded-lg bg-surface py-2' : 'py-2 text-ink-soft'}
               >
                 Registrati
               </button>
@@ -163,48 +163,48 @@ export default function LandingPage() {
 
             <form onSubmit={onSubmit} className="space-y-3">
               <label className="block text-sm">
-                <div className="mb-1 font-semibold text-slate-700">Username</div>
+                <div className="mb-1 font-semibold text-ink-soft">Username</div>
                 <input
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-sky-200 focus:ring"
+                  className="w-full rounded-xl border border-line px-3 py-2 outline-none ring-accent/40 focus:ring"
                   placeholder="nomeutente"
                 />
               </label>
 
               {mode === 'register' ? (
                 <label className="block text-sm">
-                  <div className="mb-1 font-semibold text-slate-700">Email</div>
+                  <div className="mb-1 font-semibold text-ink-soft">Email</div>
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-sky-200 focus:ring"
+                    className="w-full rounded-xl border border-line px-3 py-2 outline-none ring-accent/40 focus:ring"
                     placeholder="tu@email.com"
                   />
-                  <div className="mt-1 text-xs text-slate-500">
+                  <div className="mt-1 text-xs text-ink-faint">
                     Ti invieremo un link per confermare l’indirizzo.
                   </div>
                 </label>
               ) : null}
 
               <label className="block text-sm">
-                <div className="mb-1 font-semibold text-slate-700">Password</div>
+                <div className="mb-1 font-semibold text-ink-soft">Password</div>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 pr-16 outline-none ring-sky-200 focus:ring"
+                    className="w-full rounded-xl border border-line px-3 py-2 pr-16 outline-none ring-accent/40 focus:ring"
                     placeholder="********"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
-                    className="absolute inset-y-0 right-0 flex items-center px-3 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-xs font-semibold text-ink-faint hover:text-ink"
                     aria-label={showPassword ? 'Nascondi password' : 'Mostra password'}
                   >
                     {showPassword ? 'Nascondi' : 'Mostra'}
@@ -214,27 +214,27 @@ export default function LandingPage() {
 
               {mode === 'register' ? (
                 <label className="block text-sm">
-                  <div className="mb-1 font-semibold text-slate-700">Conferma password</div>
+                  <div className="mb-1 font-semibold text-ink-soft">Conferma password</div>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={passwordConfirm}
                     onChange={(e) => setPasswordConfirm(e.target.value)}
                     required
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-sky-200 focus:ring"
+                    className="w-full rounded-xl border border-line px-3 py-2 outline-none ring-accent/40 focus:ring"
                     placeholder="********"
                   />
                 </label>
               ) : null}
 
-              {error ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</div> : null}
+              {error ? <div className="rounded-xl bg-bad-bg px-3 py-2 text-sm font-medium text-bad">{error}</div> : null}
               {notice ? (
-                <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+                <div className="rounded-xl bg-good-bg px-3 py-2 text-sm font-medium text-good">
                   {notice}
                 </div>
               ) : null}
 
               {unconfirmed ? (
-                <div className="space-y-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <div className="space-y-2 rounded-xl bg-warn-bg px-3 py-2 text-sm text-warn">
                   <div className="font-medium">
                     Non hai ricevuto l’email? Inserisci il tuo indirizzo e te la rimandiamo.
                   </div>
@@ -242,14 +242,14 @@ export default function LandingPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full rounded-lg border border-amber-300 px-3 py-1.5 outline-none"
+                    className="w-full rounded-lg border border-warn/40 px-3 py-1.5 outline-none"
                     placeholder="tu@email.com"
                   />
                   <button
                     type="button"
                     onClick={onResend}
                     disabled={!email}
-                    className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    className="rounded-lg bg-warn px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                   >
                     Rimanda l’email di conferma
                   </button>
@@ -262,10 +262,10 @@ export default function LandingPage() {
             </form>
 
             <div className="mt-4">
-              <div className="mb-3 flex items-center gap-3 text-xs text-slate-400">
-                <div className="h-px flex-1 bg-slate-200" />
+              <div className="mb-3 flex items-center gap-3 text-xs text-ink-faint">
+                <div className="h-px flex-1 bg-surface-2" />
                 oppure
-                <div className="h-px flex-1 bg-slate-200" />
+                <div className="h-px flex-1 bg-surface-2" />
               </div>
               <GoogleSignInButton
                 onCredential={onGoogleCredential}
@@ -291,12 +291,12 @@ function Feature({
   tone?: 'green' | 'slate';
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/80 p-3">
+    <div className="rounded-xl border border-line bg-surface/80 p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-black">{title}</div>
         {tag ? <Badge tone={tone ?? 'slate'}>{tag}</Badge> : null}
       </div>
-      <div className="mt-1 text-xs text-slate-600">{text}</div>
+      <div className="mt-1 text-xs text-ink-soft">{text}</div>
     </div>
   );
 }

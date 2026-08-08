@@ -115,7 +115,7 @@ export default function MarketPage() {
     [history, sessionId],
   );
 
-  if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per vedere il mercato.</div>;
+  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega per vedere il mercato.</div>;
 
   const session = data?.session ?? null;
   const isClassic = (data?.mode ?? auction?.mode) === 'classic';
@@ -124,12 +124,12 @@ export default function MarketPage() {
 
   return (
     <div className="space-y-4">
-      {error && <Card className="border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</Card>}
+      {error && <Card className="border border-bad/40 bg-bad-bg p-3 text-sm text-bad">{error}</Card>}
 
       {!isClassic ? (
         <Card className="p-4">
           <SectionTitle>Mercato</SectionTitle>
-          <div className="mt-2 text-sm text-slate-600">
+          <div className="mt-2 text-sm text-ink-soft">
             Il mercato a offerte è disponibile solo per le leghe in <b>modalità classic</b>.
           </div>
         </Card>
@@ -161,7 +161,7 @@ export default function MarketPage() {
         <Card className="p-4">
           <button className="flex w-full items-center justify-between" onClick={() => setShowHistory((v) => !v)}>
             <SectionTitle>Storico sessioni ({pastSessions.length})</SectionTitle>
-            <span className="text-xs text-slate-500">{showHistory ? 'nascondi' : 'mostra'}</span>
+            <span className="text-xs text-ink-faint">{showHistory ? 'nascondi' : 'mostra'}</span>
           </button>
           {showHistory && <HistoryList sessions={pastSessions} />}
         </Card>
@@ -177,13 +177,13 @@ function NoSessionCard({ isAdmin, auction }: { isAdmin: boolean; auction: Active
   return (
     <Card className="p-4">
       <SectionTitle>Mercato di riparazione</SectionTitle>
-      <div className="mt-2 text-sm text-slate-600">
+      <div className="mt-2 text-sm text-ink-soft">
         Nessuna sessione di mercato aperta.{' '}
         {liveAuction && (
-          <>C’è un’asta in corso: <Link to="/auction" className="font-semibold text-slate-900 underline">entra nella sala asta →</Link></>
+          <>C’è un’asta in corso: <Link to="/auction" className="font-semibold text-ink underline">entra nella sala asta →</Link></>
         )}
       </div>
-      <div className="mt-2 text-sm text-slate-500">
+      <div className="mt-2 text-sm text-ink-faint">
         {isAdmin
           ? <>Apri una sessione dalla scheda <b>Mercato</b> in <Link to="/league-admin?tab=market" className="underline">Gestione lega</Link>.</>
           : 'Quando l’admin apre una sessione potrai fare offerte sugli svincolati.'}
@@ -206,13 +206,13 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
             <SectionTitle>{s.name}</SectionTitle>
             <Badge tone={SESSION_TONE[s.status]}>{SESSION_LABEL[s.status]}</Badge>
           </div>
-          <div className="mt-1 text-sm text-slate-600">
+          <div className="mt-1 text-sm text-ink-soft">
             {s.opens_at && <>Aperta il {stamp(s.opens_at)}{' · '}</>}
             Recupero: <b>{recoveryText(s.credit_recovery_mode, s.fixed_recovery_amount)}</b>
             {' · '}
             {!s.closes_at ? 'chiusura indefinita'
               : closingSoon ? (
-                <b className="text-amber-600">
+                <b className="text-warn">
                   chiude tra <span className="tabular-nums">{countdown(s.closes_at, nowMs)}</span>
                 </b>
               ) : `chiude il ${new Date(s.closes_at).toLocaleString('it-IT')}`}
@@ -220,15 +220,15 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
           {s.closes_at && (
             // La regola che rende sensato rilanciare sul filo: va detta, o la
             // scopre solo chi per caso e' collegato al momento giusto.
-            <div className="mt-1 text-xs text-slate-500">
+            <div className="mt-1 text-xs text-ink-faint">
               Alla chiusura chi è in testa passa in validazione, anche senza aver compiuto 24 ore.
             </div>
           )}
           {data.my_budget && (
             <>
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-700">
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-soft">
                 <span>Hai <b>{inWords(data.my_budget.remaining)}</b></span>
-                <span className="text-slate-500">
+                <span className="text-ink-faint">
                   impegnati in offerte: {price(data.my_budget.reserved)}
                 </span>
                 <span>disponibili: <b>{price(data.my_budget.available)}</b></span>
@@ -236,7 +236,7 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
               {/* Dove si spende è l'unico posto in cui vale la pena presentare la
                   moneta: qui la si vede per la prima volta, e da qui in poi il
                   simbolo accanto ai numeri si spiega da sé. */}
-              <div className="mt-1 text-xs text-slate-500">
+              <div className="mt-1 text-xs text-ink-faint">
                 I crediti della lega si chiamano <b>{CURRENCY_NAME_PLURAL}</b> e si scrivono{' '}
                 <b className="font-mono">{CURRENCY_SYMBOL}</b> — <b className="font-mono">{price(25)}</b>{' '}
                 sono venticinque {CURRENCY_NAME_PLURAL}.
@@ -249,11 +249,11 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
             `tab=league`, cioè in cima alle impostazioni della lega, con la
             sessione da gestire due schermate più in basso. */}
         {isAdmin && (
-          <Link to="/league-admin?tab=market" className="text-xs text-slate-500 underline">Gestisci sessione →</Link>
+          <Link to="/league-admin?tab=market" className="text-xs text-ink-faint underline">Gestisci sessione →</Link>
         )}
       </div>
       {s.status === 'suspended' && (
-        <div className="mt-2 text-sm text-amber-600">Sessione sospesa: le offerte sono temporaneamente bloccate.</div>
+        <div className="mt-2 text-sm text-warn">Sessione sospesa: le offerte sono temporaneamente bloccate.</div>
       )}
     </Card>
   );
@@ -316,17 +316,17 @@ function OfferPanel({
             <Badge tone="blue">{target.role}</Badge>
             <b>{target.name}</b>
             {target.leading && (
-              <span className="text-slate-500">
+              <span className="text-ink-faint">
                 · in testa {target.leading.team_name} a <b>{target.leading.amount}</b> ·{' '}
                 <OfferDeadline deadlineAt={target.leading.deadline_at} sessionClosesAt={data.session?.closes_at} nowMs={nowMs} />
               </span>
             )}
             {target.locked && <Badge tone="amber">in definizione</Badge>}
-            <button className="text-xs text-slate-500 underline" onClick={onClearTarget}>cambia giocatore</button>
+            <button className="text-xs text-ink-faint underline" onClick={onClearTarget}>cambia giocatore</button>
           </div>
           <label className="block text-sm">
-            <span className="text-slate-600">Svincola (stesso ruolo)</span>
-            <select className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            <span className="text-ink-soft">Svincola (stesso ruolo)</span>
+            <select className="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm"
               value={releaseId ?? ''} onChange={(e) => setReleaseId(e.target.value ? Number(e.target.value) : null)}>
               <option value="">— scegli —</option>
               {releaseOptions.map((p) => (
@@ -336,20 +336,20 @@ function OfferPanel({
               ))}
             </select>
             {releaseOptions.length === 0 && (
-              <span className="mt-1 block text-xs text-amber-600">Nessun {target.role} svincolabile nella tua rosa.</span>
+              <span className="mt-1 block text-xs text-warn">Nessun {target.role} svincolabile nella tua rosa.</span>
             )}
           </label>
           <div className="flex flex-wrap items-end gap-3">
             <label className="block text-sm">
-              <span className="text-slate-600">Offerta (in {CURRENCY_NAME_PLURAL})</span>
+              <span className="text-ink-soft">Offerta (in {CURRENCY_NAME_PLURAL})</span>
               <input type="number" min={minAmount} max={maxAmount}
-                className="mt-1 w-32 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                className="mt-1 w-32 rounded-xl border border-line px-3 py-2 text-sm"
                 value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
             </label>
-            <div className="text-sm text-slate-600">
+            <div className="text-sm text-ink-soft">
               Tetto: <b>{release ? maxAmount : '—'}</b>
-              {release && <span className="text-slate-500"> ({available} disp. + {release.recovery} recupero)</span>}
-              {target.leading && <span className="text-slate-500"> · minimo rilancio {minAmount}</span>}
+              {release && <span className="text-ink-faint"> ({available} disp. + {release.recovery} recupero)</span>}
+              {target.leading && <span className="text-ink-faint"> · minimo rilancio {minAmount}</span>}
             </div>
           </div>
           <div className="flex gap-2">
@@ -372,17 +372,17 @@ function MyOffersCard({ offers, nowMs, closesAt }: {
   return (
     <Card className="p-4">
       <SectionTitle>Le mie offerte</SectionTitle>
-      <div className="mt-2 divide-y divide-slate-100">
+      <div className="mt-2 divide-y divide-line">
         {offers.map((o) => (
           <div key={o.offer_id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
             <div>
               <Badge tone="blue">{o.role}</Badge>{' '}
-              <b>{o.target_name}</b> <span className="text-slate-500">← svincoli {o.release_name}</span>
+              <b>{o.target_name}</b> <span className="text-ink-faint">← svincoli {o.release_name}</span>
             </div>
             <div className="flex items-center gap-3">
-              <span>{o.amount} cr <span className="text-slate-400">(recupero {o.recovery})</span></span>
+              <span>{o.amount} cr <span className="text-ink-faint">(recupero {o.recovery})</span></span>
               {o.status === 'leading' && (
-                <span className="text-slate-500">
+                <span className="text-ink-faint">
                   <OfferDeadline deadlineAt={o.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} />
                 </span>
               )}
@@ -410,8 +410,8 @@ function FreeAgentRow({
       <div className="min-w-0">
         <Badge tone="blue">{f.role}</Badge> <b>{f.name}</b>
         {f.leading && (
-          <span className="ml-2 text-slate-500">
-            in testa {f.leading.mine ? <b className="text-emerald-700">tu</b> : f.leading.team_name} a <b>{f.leading.amount}</b>
+          <span className="ml-2 text-ink-faint">
+            in testa {f.leading.mine ? <b className="text-good">tu</b> : f.leading.team_name} a <b>{f.leading.amount}</b>
             {' · '}<OfferDeadline deadlineAt={f.leading.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} />
           </span>
         )}
@@ -455,14 +455,14 @@ function LiveContestsCard({
     <Card className="p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <SectionTitle>Offerte in corso ({contests.length})</SectionTitle>
-        {mine > 0 && <span className="text-xs text-slate-500">sei in testa su {mine}</span>}
+        {mine > 0 && <span className="text-xs text-ink-faint">sei in testa su {mine}</span>}
       </div>
       {contests.length === 0 ? (
-        <div className="mt-2 text-sm text-slate-500">
+        <div className="mt-2 text-sm text-ink-faint">
           Nessuna offerta aperta. Cerca uno svincolato qui sotto per aprire la prima.
         </div>
       ) : (
-        <div className="mt-2 divide-y divide-slate-100">
+        <div className="mt-2 divide-y divide-line">
           {contests.map((f) => (
             <FreeAgentRow key={f.player_id} f={f} nowMs={nowMs} closesAt={data.session?.closes_at}
                     canOffer={canOffer} onPick={onPick} />
@@ -483,18 +483,18 @@ function ClosedOffersCard({ offers }: { offers: MarketOfferRow[] }) {
     <Card className="p-4">
       <button className="flex w-full items-baseline justify-between" onClick={() => setOpen((v) => !v)}>
         <SectionTitle>Offerte concluse ({offers.length})</SectionTitle>
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-ink-faint">
           {settled.length} acquisti{offers.length > 5 && (open ? ' · mostra meno' : ' · mostra tutte')}
         </span>
       </button>
-      <div className="mt-2 divide-y divide-slate-100">
+      <div className="mt-2 divide-y divide-line">
         {shown.map((o) => (
           <div key={o.offer_id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
             <div className="min-w-0">
               <Badge tone="blue">{o.role}</Badge> <b>{o.target_name}</b>
-              <span className="ml-2 text-slate-500">
+              <span className="ml-2 text-ink-faint">
                 {o.status === 'settled' ? 'a' : 'offerto da'} {o.team_name}
-                <span className="text-slate-400"> · svincolato {o.release_name}</span>
+                <span className="text-ink-faint"> · svincolato {o.release_name}</span>
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -549,9 +549,9 @@ function FreeAgentSearch({
     <>
       <div className="flex flex-wrap gap-2">
         <input autoComplete="off" placeholder="Nome del giocatore…"
-          className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+          className="min-w-0 flex-1 rounded-xl border border-line px-3 py-2 text-sm"
           value={q} onChange={(e) => setQ(e.target.value)} />
-        <select className="rounded-xl border border-slate-200 px-2 py-2 text-sm"
+        <select className="rounded-xl border border-line px-2 py-2 text-sm"
           value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
           <option value="">Tutti i ruoli</option>
           {ROLE_ORDER.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
@@ -562,26 +562,26 @@ function FreeAgentSearch({
       </div>
 
       {!searching ? (
-        <div className="mt-3 text-sm text-slate-500">
+        <div className="mt-3 text-sm text-ink-faint">
           {freeAgents.length} svincolati disponibili. {emptyHint}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="mt-3 text-sm text-slate-500">
+        <div className="mt-3 text-sm text-ink-faint">
           Nessuno svincolato corrisponde. Chi è già in una rosa non compare qui.
         </div>
       ) : (
         <div className="mt-3 space-y-4">
-          <div className="text-xs text-slate-400">{filtered.length} risultati</div>
+          <div className="text-xs text-ink-faint">{filtered.length} risultati</div>
           {ROLE_ORDER.filter((r) => byRole.has(r)).map((r) => (
             <div key={r}>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{ROLE_LABEL[r]}</div>
-              <div className="mt-1 divide-y divide-slate-100">
+              <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">{ROLE_LABEL[r]}</div>
+              <div className="mt-1 divide-y divide-line">
                 {byRole.get(r)!.slice(0, 30).map((f) => (
                   <FreeAgentRow key={f.player_id} f={f} nowMs={nowMs} closesAt={data.session?.closes_at}
                     canOffer={canOffer} onPick={onPick} />
                 ))}
                 {byRole.get(r)!.length > 30 && (
-                  <div className="py-2 text-xs text-slate-400">…e altri {byRole.get(r)!.length - 30}. Affina la ricerca.</div>
+                  <div className="py-2 text-xs text-ink-faint">…e altri {byRole.get(r)!.length - 30}. Affina la ricerca.</div>
                 )}
               </div>
             </div>
@@ -653,34 +653,34 @@ function HistorySession({ s }: { s: MarketSessionHistory }) {
   const [open, setOpen] = useState(false);
   const settled = s.offers.filter((o) => o.status === 'settled');
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200">
+    <div className="overflow-hidden rounded-xl border border-line">
       <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}
-        className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-left hover:bg-slate-50">
+        className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-left hover:bg-surface-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <b>{s.name}</b>
             <Badge tone={SESSION_TONE[s.status]}>{SESSION_LABEL[s.status]}</Badge>
           </div>
-          <div className="mt-0.5 text-xs text-slate-500">{sessionSpan(s)}</div>
+          <div className="mt-0.5 text-xs text-ink-faint">{sessionSpan(s)}</div>
         </div>
-        <div className="flex shrink-0 items-center gap-2 text-xs text-slate-500">
-          <span>{s.offers.length} offerte · <b className="text-slate-700">{settled.length}</b> acquisti</span>
-          <span aria-hidden className="text-slate-400">{open ? '▾' : '▸'}</span>
+        <div className="flex shrink-0 items-center gap-2 text-xs text-ink-faint">
+          <span>{s.offers.length} offerte · <b className="text-ink-soft">{settled.length}</b> acquisti</span>
+          <span aria-hidden className="text-ink-faint">{open ? '▾' : '▸'}</span>
         </div>
       </button>
       {open && (
-        <div className="border-t border-slate-100 px-3 py-2">
-          <div className="text-xs text-slate-500">
+        <div className="border-t border-line px-3 py-2">
+          <div className="text-xs text-ink-faint">
             Recupero: {recoveryText(s.credit_recovery_mode, s.fixed_recovery_amount)}
           </div>
           {s.offers.length === 0 ? (
-            <div className="mt-1 text-xs text-slate-400">Nessuna offerta in questa sessione.</div>
+            <div className="mt-1 text-xs text-ink-faint">Nessuna offerta in questa sessione.</div>
           ) : (
-            <div className="mt-1 divide-y divide-slate-100">
+            <div className="mt-1 divide-y divide-line">
               {s.offers.map((o) => (
                 <div key={o.offer_id} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-xs">
                   <span>
-                    <b>{o.target_name}</b> <span className="text-slate-400">← {o.team_name} / {o.release_name}</span>
+                    <b>{o.target_name}</b> <span className="text-ink-faint">← {o.team_name} / {o.release_name}</span>
                   </span>
                   <span className="flex items-center gap-2">
                     {o.amount} cr <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>

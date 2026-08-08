@@ -14,9 +14,9 @@ export default function SquadPage() {
   );
   const [exporting, setExporting] = useState(false);
 
-  if (!selectedLeagueId) return <div className="text-sm text-slate-500">Seleziona una lega per vedere la rosa.</div>;
-  if (loading) return <div className="text-sm text-slate-500">Caricamento rosa…</div>;
-  if (error || !data) return <div className="text-sm text-red-600">Errore: {error?.message ?? '…'}</div>;
+  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega per vedere la rosa.</div>;
+  if (loading) return <div className="text-sm text-ink-faint">Caricamento rosa…</div>;
+  if (error || !data) return <div className="text-sm text-bad">Errore: {error?.message ?? '…'}</div>;
 
   return (
     <div className="space-y-4">

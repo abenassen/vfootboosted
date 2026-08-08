@@ -81,16 +81,16 @@ export default function DecisionsPage() {
   const open = useMemo(() => data?.decisions.filter((d) => d.status === 'open') ?? [], [data]);
   const resolved = useMemo(() => data?.decisions.filter((d) => d.status !== 'open') ?? [], [data]);
 
-  if (leagueId == null) return <div className="text-sm text-slate-500">Seleziona una lega.</div>;
-  if (loading && !data) return <div className="text-sm text-slate-500">Caricamento decisioni…</div>;
+  if (leagueId == null) return <div className="text-sm text-ink-faint">Seleziona una lega.</div>;
+  if (loading && !data) return <div className="text-sm text-ink-faint">Caricamento decisioni…</div>;
 
   return (
     <div className="space-y-4">
       {data?.blocked_reason ? (
-        <Card className="border-l-4 border-amber-500 bg-amber-50 p-4">
+        <Card className="border-l-4 border-warn bg-warn-bg p-4">
           {/* Not "market blocked": the market is open, these players are not. */}
-          <div className="text-sm font-bold text-amber-900">Giocatori in attesa di un ruolo</div>
-          <div className="mt-1 text-sm text-amber-800">{data.blocked_reason}</div>
+          <div className="text-sm font-bold text-warn">Giocatori in attesa di un ruolo</div>
+          <div className="mt-1 text-sm text-warn">{data.blocked_reason}</div>
           {data.is_admin ? (
             <Button
               size="sm"
@@ -102,7 +102,7 @@ export default function DecisionsPage() {
               {busy === 'all' ? 'Applico…' : 'Accetta tutte le proposte'}
             </Button>
           ) : (
-            <div className="mt-2 text-xs text-amber-700">
+            <div className="mt-2 text-xs text-warn">
               Le disambiguazioni spettano all'amministratore della lega.
             </div>
           )}
@@ -110,7 +110,7 @@ export default function DecisionsPage() {
       ) : null}
 
       {error ? (
-        <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
+        <div className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{error}</div>
       ) : null}
 
       <Card className="p-4">
@@ -127,7 +127,7 @@ export default function DecisionsPage() {
                 that can move without an import is `compute_classic_roles`, a
                 manual command, and whoever runs it has `manage.py
                 freeze_league_listone --league N` on the same shell. */}
-            <label className="flex items-center gap-2 text-xs text-slate-500">
+            <label className="flex items-center gap-2 text-xs text-ink-faint">
               <input
                 type="checkbox"
                 checked={showResolved}
@@ -138,7 +138,7 @@ export default function DecisionsPage() {
           </div>
         </div>
         {open.length === 0 ? (
-          <div className="mt-3 text-sm text-slate-500">
+          <div className="mt-3 text-sm text-ink-faint">
             Nessuna decisione in sospeso.
           </div>
         ) : (
@@ -164,7 +164,7 @@ export default function DecisionsPage() {
           <div className="mt-2 divide-y text-sm">
             {resolved.map((d) => (
               <div key={d.id} className="flex items-center justify-between py-2">
-                <span className="text-slate-700">{d.title}</span>
+                <span className="text-ink-soft">{d.title}</span>
                 <Badge tone="slate">
                   {d.options.find((o) => o.value === d.outcome)?.label ?? d.outcome}
                 </Badge>
@@ -196,16 +196,16 @@ function DecisionRow({
   return (
     <div className="py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-slate-800">{d.title}</span>
+        <span className="font-semibold text-ink">{d.title}</span>
         {/* Per PLAYER, not per league — same wording as the banner above, which
             says in as many words that the market is open and he is not. */}
         {d.blocks_market ? <Badge tone="amber">non acquistabile</Badge> : null}
         {d.consultation_open ? <Badge tone="green">consultazione aperta</Badge> : null}
       </div>
-      {d.question ? <div className="mt-0.5 text-sm text-slate-600">{d.question}</div> : null}
+      {d.question ? <div className="mt-0.5 text-sm text-ink-soft">{d.question}</div> : null}
       {/* Why we are asking. A queue that says "decide" without saying why reads as
           an obstacle rather than as a question. */}
-      {d.rationale ? <div className="mt-1 text-xs text-slate-500">{d.rationale}</div> : null}
+      {d.rationale ? <div className="mt-1 text-xs text-ink-faint">{d.rationale}</div> : null}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {d.options.map((o) => {
@@ -218,8 +218,8 @@ function DecisionRow({
               onClick={() => setChoice(o.value)}
               className={`rounded-xl border px-3 py-1.5 text-sm font-semibold ${
                 selected
-                  ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  ? 'border-line bg-ink text-paper'
+                  : 'border-line bg-surface text-ink-soft hover:bg-surface-2'
               }`}
             >
               {o.label}
@@ -251,7 +251,7 @@ function DecisionRow({
           </>
         ) : null}
         {d.votes_total > 0 ? (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-ink-faint">
             {d.votes_total} pareri · non vincolanti, decide l'amministratore
           </span>
         ) : null}

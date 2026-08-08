@@ -92,12 +92,12 @@ export function MatchDetail({
           {selectedPlayer != null ? (
             <button
               onClick={() => setSelectedPlayer(null)}
-              className="text-[11px] font-semibold text-slate-500 hover:text-slate-700"
+              className="text-[11px] font-semibold text-ink-faint hover:text-ink-soft"
             >
               ✕ deseleziona giocatore
             </button>
           ) : (
-            <span className="text-[11px] text-slate-400">clicca una zona, o un giocatore in basso</span>
+            <span className="text-[11px] text-ink-faint">clicca una zona, o un giocatore in basso</span>
           )}
         </div>
         <div className="mt-3 grid gap-4 md:grid-cols-[minmax(240px,300px)_1fr]">
@@ -108,16 +108,16 @@ export function MatchDetail({
               onSelectZone={(z) => setSelectedZone(z)}
               highlightZones={highlightZones}
             />
-            <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-500">
+            <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-ink-faint">
               <span className="flex items-center gap-1">
-                <span className="h-3 w-3 rounded bg-red-500" /> {data.home_team}
+                <span className="h-3 w-3 rounded bg-bad" /> {data.home_team}
               </span>
               <span className="flex items-center gap-1">
                 <span className="h-3 w-3 rounded bg-blue-600" /> {data.away_team}
               </span>
               {highlightZones ? (
                 <span className="flex items-center gap-1">
-                  <span className="h-3 w-3 rounded ring-2 ring-amber-300" /> zone del giocatore
+                  <span className="h-3 w-3 rounded ring-2 ring-warn/40" /> zone del giocatore
                 </span>
               ) : null}
             </div>
@@ -128,16 +128,16 @@ export function MatchDetail({
 
       <Card className="p-4">
         <SectionTitle>Formazioni · clicca un giocatore per vederne le zone</SectionTitle>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-faint">
           <span>Barra: spessore = impatto, lunghezza = minuti.</span>
           <span className="flex items-center gap-1">
-            <span className="h-2 w-3 rounded-full bg-emerald-500" /> positivo
+            <span className="h-2 w-3 rounded-full bg-good" /> positivo
           </span>
           <span className="flex items-center gap-1">
-            <span className="h-2 w-3 rounded-full bg-rose-500" /> negativo
+            <span className="h-2 w-3 rounded-full bg-bad" /> negativo
           </span>
           <span className="flex items-center gap-1">
-            <span className="h-2 w-3 rounded-full bg-slate-200" /> scoperto
+            <span className="h-2 w-3 rounded-full bg-surface-2" /> scoperto
           </span>
         </div>
         <div className="mt-3 grid gap-6 sm:grid-cols-2">

@@ -354,7 +354,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
 
   return (
     <div className="space-y-4">
-      {msg ? <Card className="p-3 text-sm text-slate-700">{msg}</Card> : null}
+      {msg ? <Card className="p-3 text-sm text-ink-soft">{msg}</Card> : null}
 
       {/* LA LEGA È FINITA: da qui in poi la home apre sull'albo d'oro.
           Non è un blocco in più fra gli altri, è un cambio di domanda. Finché si
@@ -368,20 +368,24 @@ export default function LeagueHome({ competitions }: { competitions: Competition
       {queue.length || awaitingMds.length ? (
         <Card
           className={clsx(
-            'border-l-4 p-4',
-            queue.length ? 'border-emerald-500 bg-emerald-50' : 'border-amber-500 bg-amber-50',
+            'relative overflow-hidden p-4 pl-5',
+            queue.length ? 'bg-good-bg' : 'bg-warn-bg',
           )}
         >
+          <span
+            className={clsx('absolute inset-y-0 left-0 w-1.5', queue.length ? 'bg-good' : 'bg-warn')}
+            aria-hidden
+          />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               {queue.length ? (
                 <>
-                  <div className="text-sm font-bold text-emerald-900">
+                  <div className="text-sm font-bold text-good">
                     {queue.length === 1
                       ? `La giornata ${queue[0].real_matchday} è finita`
                       : `Ci sono ${queue.length} giornate da chiudere`}
                   </div>
-                  <div className="text-xs text-emerald-800">
+                  <div className="text-xs text-good">
                     {isAdmin
                       ? 'Tutte le partite reali sono concluse: puoi calcolare i punteggi.'
                       : `In attesa che l'amministratore chiuda ${
@@ -394,12 +398,12 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                 </>
               ) : (
                 <>
-                  <div className="text-sm font-bold text-amber-900">
+                  <div className="text-sm font-bold text-warn">
                     {awaitingMds.length === 1
                       ? `Giornata ${awaitingMds[0].real_matchday} in attesa di recupero`
                       : `Giornate ${awaitingMds.map((m) => m.real_matchday).join(', ')} in attesa di recupero`}
                   </div>
-                  <div className="text-xs text-amber-800">
+                  <div className="text-xs text-warn">
                     La lega è andata avanti: {awaitingMds.length === 1 ? 'verrà conteggiata' : 'verranno conteggiate'}{' '}
                     quando le partite rinviate saranno giocate.
                     {awaitingMds[0]?.awaiting_reason ? ` (${awaitingMds[0].awaiting_reason})` : ''}
@@ -420,7 +424,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
           {/* Arrears AND a parked matchday can coexist: the second line keeps the
               parked one visible instead of letting the queue hide it. */}
           {queue.length && awaitingMds.length ? (
-            <div className="mt-2 text-xs text-emerald-800">
+            <div className="mt-2 text-xs text-good">
               In attesa di recupero: giornata {awaitingMds.map((m) => m.real_matchday).join(', ')}.
             </div>
           ) : null}
@@ -428,7 +432,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
               round is normal; a competition that cannot be drawn because of it is
               not, and it stays stuck without a single message anywhere. */}
           {blockedPhases.length ? (
-            <div className="mt-2 rounded-lg border border-slate-300 bg-white/70 p-2 text-xs text-slate-700">
+            <div className="mt-2 rounded-lg border border-line bg-surface p-2 text-xs text-ink-soft">
               <div className="font-semibold">
                 {blockedPhases.length === 1
                   ? 'Una fase è ferma in attesa di queste giornate:'
@@ -442,11 +446,11 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                     </b>{' '}
                     — {d.rule_text}
                     {d.at_risk ? (
-                      <span className="ml-1 font-semibold text-amber-700">
+                      <span className="ml-1 font-semibold text-warn">
                         (le sue giornate sono già passate: verrà spostata più avanti)
                       </span>
                     ) : d.target_matchday != null ? (
-                      <span className="text-slate-500"> · in calendario alla giornata {d.target_matchday}</span>
+                      <span className="text-ink-faint"> · in calendario alla giornata {d.target_matchday}</span>
                     ) : null}
                   </li>
                 ))}
@@ -455,7 +459,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
           ) : null}
         </Card>
       ) : fieldableMd ? (
-        <div className="px-1 text-xs text-slate-500">
+        <div className="px-1 text-xs text-ink-faint">
           {playingMd
             ? `Si gioca la giornata ${playingMd.real_matchday} · prossima da schierare: la ${fieldableMd.real_matchday}`
             : `Prossima giornata da schierare: la ${fieldableMd.real_matchday}`}
@@ -467,14 +471,14 @@ export default function LeagueHome({ competitions }: { competitions: Competition
           about, unlike a permission flag that is on from the day the league is
           created. */}
       {auction?.auction_id ? (
-        <Card className="border-2 border-green-300 bg-green-50 p-4">
+        <Card className="border-2 border-good/40 bg-good-bg p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="flex items-center gap-2">
                 <Badge tone="green">Live</Badge>
                 <span className="font-bold">Asta in corso</span>
               </div>
-              <div className="mt-1 text-sm text-slate-600">
+              <div className="mt-1 text-sm text-ink-soft">
                 {auction.is_admin
                   ? 'Sei il banditore: entra per chiamare i giocatori e aggiudicare.'
                   : 'Entra per seguire l’asta e rilanciare in tempo reale.'}
@@ -486,11 +490,12 @@ export default function LeagueHome({ competitions }: { competitions: Competition
           </div>
         </Card>
       ) : marketSession ? (
-        <Card className="border-l-4 border-sky-500 bg-sky-50 p-4">
+        <Card className="relative overflow-hidden bg-accent/10 p-4 pl-5">
+        <span className="absolute inset-y-0 left-0 w-1.5 bg-accent" aria-hidden />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="text-sm font-bold text-sky-900">Mercato aperto</div>
-              <div className="text-xs text-sky-800">Puoi fare offerte sugli svincolati.</div>
+              <div className="text-sm font-bold text-accent">Mercato aperto</div>
+              <div className="text-xs text-accent">Puoi fare offerte sugli svincolati.</div>
             </div>
             <Link to="/market">
               <Button size="sm">Vai al mercato →</Button>
@@ -508,10 +513,10 @@ export default function LeagueHome({ competitions }: { competitions: Competition
           className={clsx(
             'border-2 p-4',
             openPhase === 'playing'
-              ? 'border-violet-200 bg-violet-50/60'
+              ? 'border-live/35 bg-live/10'
               : openPhase === 'final'
-              ? 'border-emerald-200 bg-emerald-50/50'
-              : 'border-slate-200',
+              ? 'border-good/40 bg-good-bg'
+              : 'border-line',
           )}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -520,14 +525,14 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                 className={clsx(
                   'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white',
                   openPhase === 'playing'
-                    ? 'bg-violet-600'
+                    ? 'bg-live'
                     : openPhase === 'final'
-                    ? 'bg-emerald-600'
-                    : 'bg-slate-500',
+                    ? 'bg-good'
+                    : 'bg-ink-faint',
                 )}
               >
                 {openPhase === 'playing' ? (
-                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-surface" />
                 ) : null}
                 {openPhase === 'playing'
                   ? 'Si gioca'
@@ -537,7 +542,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
               </span>
               <SectionTitle className="!mb-0">Giornata {openMd?.real_matchday}</SectionTitle>
             </div>
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[11px] text-ink-faint">
               {openPhase === 'playing'
                 ? 'I voti si aggiornano mentre si gioca e restano provvisori fino a fine partita.'
                 : openPhase === 'final'
@@ -552,12 +557,12 @@ export default function LeagueHome({ competitions }: { competitions: Competition
               <Link
                 key={f.fixture_id}
                 to={`/matches/${f.fixture_id}`}
-                className="block rounded-xl border border-slate-200 bg-white p-3 transition hover:border-slate-300 hover:shadow-sm"
+                className="block rounded-xl border border-line bg-surface p-3 transition hover:border-line hover:shadow-sm"
               >
                 <div
                   className={clsx(
                     'text-[11px] font-bold uppercase tracking-wide',
-                    compColorById.get(f.competition_id)?.text700 ?? 'text-slate-500',
+                    compColorById.get(f.competition_id)?.text700 ?? 'text-ink-faint',
                   )}
                 >
                   {compName.get(f.competition_id) ?? 'Competizione'}
@@ -566,13 +571,13 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                   <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
                   <span className="truncate">{f.home_team.name}</span>
                   {/* The running score, which is the whole reason to look. */}
-                  <span className="shrink-0 font-mono tabular-nums text-slate-700">
+                  <span className="shrink-0 font-mono tabular-nums text-ink-soft">
                     {f.score ? `${Math.round(f.score.home_total)}–${Math.round(f.score.away_total)}` : 'vs'}
                   </span>
                   <span className="truncate">{f.away_team.name}</span>
                   <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
                 </div>
-                <div className="mt-1.5 text-[11px] font-semibold text-slate-500">
+                <div className="mt-1.5 text-[11px] font-semibold text-ink-faint">
                   {openPhase === 'playing' ? 'Segui i voti in diretta →' : 'Apri il tabellino →'}
                 </div>
               </Link>
@@ -585,8 +590,8 @@ export default function LeagueHome({ competitions }: { competitions: Competition
               mancava bisognava aprire il calendario per una cosa che il server
               stava già calcolando. */}
           {otherOpenFixtures.length ? (
-            <div className="mt-4 border-t border-slate-100 pt-3">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+            <div className="mt-4 border-t border-line pt-3">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">
                 Le altre partite della giornata
               </div>
               <div className="mt-1.5 grid gap-1 md:grid-cols-2">
@@ -610,14 +615,14 @@ export default function LeagueHome({ competitions }: { competitions: Competition
           <SectionTitle>{nextByCompetition.length > 1 ? 'Le tue prossime partite' : 'La tua prossima partita'}</SectionTitle>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             {nextByCompetition.map((f) => (
-              <div key={f.fixture_id} className="rounded-xl border border-slate-200 p-3">
+              <div key={f.fixture_id} className="rounded-xl border border-line p-3">
                 {/* Which competition, on the shortcut itself: with a championship
                     and a cup running together, "Imposta formazione" alone does
                     not say which team sheet you are about to fill. */}
                 <div
                   className={clsx(
                     'text-[11px] font-bold uppercase tracking-wide',
-                    compColorById.get(f.competition_id)?.text700 ?? 'text-slate-500',
+                    compColorById.get(f.competition_id)?.text700 ?? 'text-ink-faint',
                   )}
                 >
                   {compName.get(f.competition_id) ?? 'Competizione'}
@@ -625,26 +630,26 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                 <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
                   <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
                   <span className="truncate">{f.home_team.name}</span>
-                  <span className="text-slate-400">vs</span>
+                  <span className="text-ink-faint">vs</span>
                   <span className="truncate">{f.away_team.name}</span>
                   <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
                 </div>
                 {/* Same wording as the results below, from the same function: the
                     two blocks sit one above the other and had no business naming a
                     round two different ways. */}
-                <div className="mt-1 text-xs text-slate-500">{roundLabel(f)}</div>
+                <div className="mt-1 text-xs text-ink-faint">{roundLabel(f)}</div>
                 {f.can_set_lineup ? (
                   <Link
                     to={`/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`}
                     className={clsx(
                       'mt-2 inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90',
-                      compColorById.get(f.competition_id)?.bg700 ?? 'bg-slate-900',
+                      compColorById.get(f.competition_id)?.bg700 ?? 'bg-ink',
                     )}
                   >
                     Formazione · {compName.get(f.competition_id) ?? ''}
                   </Link>
                 ) : (
-                  <div className="mt-2 text-[11px] text-slate-400">
+                  <div className="mt-2 text-[11px] text-ink-faint">
                     La formazione si imposta quando hai una rosa.
                   </div>
                 )}
@@ -672,19 +677,19 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                 <li key={t.key}>
                   <Link
                     to={t.to}
-                    className="flex items-start gap-2 rounded-lg px-1 py-1 text-sm hover:bg-slate-50"
+                    className="flex items-start gap-2 rounded-lg px-1 py-1 text-sm hover:bg-surface-2"
                   >
                     <span className="mt-0.5 shrink-0" aria-hidden>{t.icon}</span>
                     <span className="min-w-0">
-                      <span className={clsx('block font-semibold', t.className ?? 'text-slate-700')}>{t.text}</span>
-                      {t.detail ? <span className="block text-xs text-slate-500">{t.detail}</span> : null}
+                      <span className={clsx('block font-semibold', t.className ?? 'text-ink-soft')}>{t.text}</span>
+                      {t.detail ? <span className="block text-xs text-ink-faint">{t.detail}</span> : null}
                     </span>
                   </Link>
                 </li>
               ))}
             </ul>
           ) : (
-            <div className="mt-2 text-sm text-slate-500">Sei in pari: niente che aspetti te.</div>
+            <div className="mt-2 text-sm text-ink-faint">Sei in pari: niente che aspetti te.</div>
           )}
         </Card>
 
@@ -725,11 +730,11 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                     key={`${a.kind}-${i}`}
                     className={
                       'flex items-start gap-2 text-sm ' +
-                      (isPrize || isEnd ? 'rounded-lg bg-amber-50 px-2 py-1.5' : '') +
+                      (isPrize || isEnd ? 'rounded-lg bg-warn-bg px-2 py-1.5' : '') +
                       // In evidenza: il server l'ha già messa in cima, qui si dice
                       // PERCHÉ ci sta. Senza il bordo una notizia fuori ordine
                       // cronologico sembra un elenco che ha sbagliato a ordinare.
-                      (a.pinned ? ' border-l-2 border-amber-400 pl-2' : '')
+                      (a.pinned ? ' border-l-2 border-warn pl-2' : '')
                     }
                   >
                     {/* A prize carries its OWN trophy inside the text — the one the
@@ -743,18 +748,18 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                       <span
                         className={
                           'block truncate ' +
-                          (isPrize ? 'font-semibold text-amber-900' : isEnd ? 'text-amber-900' : 'text-slate-700')
+                          (isPrize ? 'font-semibold text-warn' : isEnd ? 'text-warn' : 'text-ink-soft')
                         }
                       >
                         {a.text}
                       </span>
                       {a.pinned ? (
-                        <span className="mt-0.5 inline-block rounded bg-amber-200/70 px-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
+                        <span className="mt-0.5 inline-block rounded bg-warn/25 px-1.5 text-[10px] font-bold uppercase tracking-wide text-warn">
                           in evidenza
                         </span>
                       ) : null}
                       {a.detail ? (
-                        <span className={'block text-xs ' + (isPrize || isEnd ? 'text-amber-700' : 'text-slate-400')}>
+                        <span className={'block text-xs ' + (isPrize || isEnd ? 'text-warn' : 'text-ink-faint')}>
                           {a.detail}
                         </span>
                       ) : null}
@@ -764,7 +769,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
               })}
             </ul>
           ) : (
-            <div className="mt-2 text-sm text-slate-500">
+            <div className="mt-2 text-sm text-ink-faint">
               Ancora niente da raccontare: acquisti, decisioni e giornate concluse compaiono qui.
             </div>
           )}
@@ -823,10 +828,11 @@ function LeagueTrophyCase({
   }, [board.awards]);
 
   return (
-    <Card className="border-l-4 border-amber-400 bg-gradient-to-b from-amber-50/80 to-white p-4">
+    <Card className="relative overflow-hidden bg-gradient-to-b from-warn-bg to-surface p-4 pl-5">
+      <span className="absolute inset-y-0 left-0 w-1.5 bg-warn" aria-hidden />
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <SectionTitle className="!mb-0 text-amber-900">🏆 Albo d'oro della lega</SectionTitle>
-        <span className="text-[11px] text-amber-700">
+        <SectionTitle className="!mb-0 text-warn">🏆 Albo d'oro della lega</SectionTitle>
+        <span className="text-[11px] text-warn">
           Stagione conclusa
           {board.finished_at ? ` il ${new Date(board.finished_at).toLocaleDateString('it-IT')}` : ''}
           {` · ${board.competitions_total} ${
@@ -838,8 +844,8 @@ function LeagueTrophyCase({
       {byCompetition.length ? (
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {byCompetition.map((comp) => (
-            <div key={comp.name} className="rounded-xl border border-amber-200 bg-white/70 p-3">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
+            <div key={comp.name} className="rounded-xl border border-warn/40 bg-surface p-3">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-warn">
                 {comp.name}
               </div>
               <ul className="mt-1.5 space-y-1.5">
@@ -849,8 +855,8 @@ function LeagueTrophyCase({
                       {a.icon}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-slate-900">{a.name}</span>
-                      <span className="block truncate text-[11px] text-slate-500">{a.condition_label}</span>
+                      <span className="block truncate text-sm font-semibold text-ink">{a.name}</span>
+                      <span className="block truncate text-[11px] text-ink-faint">{a.condition_label}</span>
                       <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
                         {a.winners.map((w) => (
                           <span key={w.team_id} className="flex items-center gap-1">
@@ -859,8 +865,8 @@ function LeagueTrophyCase({
                               className={clsx(
                                 'truncate text-xs',
                                 w.name && w.name === myTeamName
-                                  ? 'font-bold text-amber-900'
-                                  : 'text-slate-700',
+                                  ? 'font-bold text-warn'
+                                  : 'text-ink-soft',
                               )}
                             >
                               {w.name}
@@ -879,7 +885,7 @@ function LeagueTrophyCase({
         // Finita senza trofei: nessuna competizione aveva premi dichiarati. Va
         // detto, perché una bacheca vuota sotto "stagione conclusa" sembra un
         // caricamento rimasto a metà.
-        <div className="mt-2 text-sm text-amber-800">
+        <div className="mt-2 text-sm text-warn">
           La stagione è finita, ma nessuna competizione aveva premi da assegnare.
         </div>
       )}
@@ -1001,14 +1007,16 @@ function CompetitionBlock({
   const standingsTo = `/standings?competition=${competition.competition_id}`;
 
   return (
-    <Card className={clsx('border-l-4 p-4', color.border600)}>
+    <Card className="relative overflow-hidden p-4 pl-5">
+      {/* la firma della competizione, a filo del bordo sinistro */}
+      <span className={clsx('absolute inset-y-0 left-0 w-1.5', color.bg700)} aria-hidden />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <SectionTitle className={clsx('!mb-0', color.text700)}>{competition.name}</SectionTitle>
           <span
             className={clsx(
               'inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold',
-              color.bg50,
+              color.tint,
               color.text800,
             )}
           >
@@ -1018,7 +1026,7 @@ function CompetitionBlock({
         {/* CON la competizione addosso. Senza, tutti e tre i blocchi portavano
             all'ultima competizione guardata — cioè quasi sempre al campionato — e
             il link sembrava sbagliato invece che privo di contesto. */}
-        <Link to={calendarTo} className="text-xs font-semibold text-slate-500 hover:text-slate-800">
+        <Link to={calendarTo} className="text-xs font-semibold text-ink-faint hover:text-ink">
           Calendario →
         </Link>
       </div>
@@ -1031,17 +1039,17 @@ function CompetitionBlock({
         <div
           className={clsx(
             'mt-3 rounded-xl border p-2',
-            openMoving ? 'border-violet-200 bg-violet-50/50' : 'border-emerald-200 bg-emerald-50/40',
+            openMoving ? 'border-live/35 bg-live/10' : 'border-good/40 bg-good-bg',
           )}
         >
           <div className="flex items-center gap-1.5">
             {openMoving ? (
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-600" />
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" />
             ) : null}
             <span
               className={clsx(
                 'text-[11px] font-bold uppercase tracking-wide',
-                openMoving ? 'text-violet-700' : 'text-emerald-700',
+                openMoving ? 'text-live' : 'text-good',
               )}
             >
               Giornata {openMatchday} · {openMoving ? 'in corso' : 'da concludere'}
@@ -1052,7 +1060,7 @@ function CompetitionBlock({
               <MiniFixture key={f.fixture_id} f={f} />
             ))}
           </div>
-          <div className={clsx('mt-1 text-[11px]', openMoving ? 'text-violet-700/80' : 'text-emerald-700/80')}>
+          <div className={clsx('mt-1 text-[11px]', openMoving ? 'text-live' : 'text-good')}>
             {openMoving
               ? 'Punteggi provvisori: diventano definitivi quando la giornata viene conclusa.'
               : 'Le partite sono finite: i punteggi si fissano con la conclusione della giornata.'}
@@ -1067,7 +1075,7 @@ function CompetitionBlock({
           {tables.map((s) => (
             <div key={s.name}>
               {tables.length > 1 ? (
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{s.name}</div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">{s.name}</div>
               ) : null}
               {/* Where you stand, IN THIS TABLE. It used to sit in the league's
                   identity card, which could only ever show one competition's
@@ -1075,16 +1083,20 @@ function CompetitionBlock({
                   competitions, or two groups, "1ª · 36 pt" is simply not a
                   statement about a league. Here the name is one line above it. */}
               <MyStanding rows={s.standings ?? []} myTeamName={myTeamName} color={color} />
-              <ol className="mt-1 divide-y text-sm">
+              <ol className="mt-1 divide-y divide-line text-sm">
                 {(s.standings ?? []).slice(0, 5).map((row) => (
                   <li
                     key={row.team_id}
-                    className={`flex items-center justify-between py-1.5 ${
-                      row.team === myTeamName ? 'font-bold text-slate-900' : 'text-slate-600'
-                    }`}
+                    // La tua riga in verde tenue: è lo stesso modo in cui la
+                    // classifica completa dice «questo sei tu», e le due liste
+                    // parlano della stessa squadra.
+                    className={clsx(
+                      'flex items-center justify-between rounded-lg px-1.5 py-1.5',
+                      row.team === myTeamName ? 'bg-brand/10 font-bold text-ink' : 'text-ink-soft',
+                    )}
                   >
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="w-4 text-right text-xs text-slate-400">{row.rank}</span>
+                      <span className="w-4 text-right text-xs text-ink-faint">{row.rank}</span>
                       <Crest descriptor={row.crest} teamName={row.team} size={20} />
                       <span className="truncate">{row.team}</span>
                       {/* Una partita ancora da finire dentro questi punti. Il
@@ -1093,7 +1105,7 @@ function CompetitionBlock({
                           numero fermo, e distinguerli è metà dell'informazione. */}
                       {row.provisional ? (
                         <span
-                          className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-violet-600"
+                          className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-live"
                           title="Partita in corso: questi punti possono ancora cambiare"
                         />
                       ) : null}
@@ -1103,7 +1115,7 @@ function CompetitionBlock({
                         classifica conta anche il provvisorio quel caso non è più
                         l'eccezione di metà settimana: è la domenica pomeriggio. */}
                     <span className="flex shrink-0 items-baseline gap-2">
-                      <span className="hidden text-[11px] tabular-nums text-slate-400 sm:inline">
+                      <span className="hidden text-[11px] tabular-nums text-ink-faint sm:inline">
                         {row.played}g · {row.wins}V {row.draws}N {row.losses}P
                       </span>
                       <span className="tabular-nums">{row.points}</span>
@@ -1114,7 +1126,7 @@ function CompetitionBlock({
               {(s.standings?.length ?? 0) > 5 ? (
                 <Link
                   to={standingsTo}
-                  className="mt-1 inline-block text-xs font-semibold text-slate-500 hover:text-slate-800"
+                  className="mt-1 inline-block text-xs font-semibold text-ink-faint hover:text-ink"
                 >
                   Classifica completa →
                 </Link>
@@ -1137,7 +1149,7 @@ function CompetitionBlock({
           fixtures={shownPhase}
         />
       ) : openFixtures.length || upcoming.length ? null : (
-        <div className="mt-2 text-sm text-slate-500">Non è ancora cominciata.</div>
+        <div className="mt-2 text-sm text-ink-faint">Non è ancora cominciata.</div>
       )}
 
       {/* What is still to come and has no teams yet. A line, not a card: the detail
@@ -1147,15 +1159,15 @@ function CompetitionBlock({
         <Link
           key={s.stage_id}
           to={calendarTo}
-          className="mt-2 block rounded-xl border border-dashed border-slate-300 px-3 py-2 hover:border-slate-400"
+          className="mt-2 block rounded-xl border border-dashed border-line px-3 py-2 hover:border-ink-faint"
         >
           <div className="flex items-baseline justify-between gap-2">
             <span className={clsx('text-sm font-semibold', color.text700)}>{s.name}</span>
-            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-ink-faint">
               da definire
             </span>
           </div>
-          <div className="text-xs text-slate-500">{s.rule_text || 'Partecipanti da sorteggiare'}</div>
+          <div className="text-xs text-ink-faint">{s.rule_text || 'Partecipanti da sorteggiare'}</div>
         </Link>
       ))}
     </Card>
@@ -1177,14 +1189,14 @@ function PlayingNow({ label, fixtures }: { label: string; fixtures: LeagueFixtur
   const matchday = waiting.map((f) => f.real_matchday).find((m) => typeof m === 'number');
   return (
     <div className="mt-3">
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">{label}</div>
       <div className="mt-1.5 space-y-1">
         {fixtures.slice(0, 4).map((f) => (
           <MiniFixture key={f.fixture_id} f={f} />
         ))}
       </div>
       {waiting.length ? (
-        <div className="mt-1.5 text-xs text-slate-500">
+        <div className="mt-1.5 text-xs text-ink-faint">
           {waiting.length === pending.length && pending.length === 1
             ? 'Giocata: il risultato arriva con la conclusione'
             : 'I risultati arrivano con la conclusione'}
@@ -1214,7 +1226,7 @@ function MyStanding({
   // spectator. Saying nothing is the right amount.
   if (!me) return null;
   return (
-    <div className={clsx('mt-1 rounded-lg px-2 py-1 text-xs font-semibold', color.bg50, color.text800)}>
+    <div className={clsx('mt-1 rounded-lg px-2 py-1 text-xs font-semibold', color.tint, color.text700)}>
       {me.rank}ª · {me.points} pt
       <span className="font-normal">
         {' '}
@@ -1273,7 +1285,7 @@ function MiniFixture({
   const moving = pending && f.score_provisional;
   const row = (
     <div
-      className={`rounded-lg px-2 py-1 ${f.is_user_involved ? 'bg-slate-100 font-semibold' : ''}`}
+      className={`rounded-lg px-2 py-1 ${f.is_user_involved ? 'bg-surface-2 font-semibold' : ''}`}
     >
       {competition || when ? (
         <div className="flex items-baseline justify-between gap-2">
@@ -1281,7 +1293,7 @@ function MiniFixture({
             <span
               className={clsx(
                 'truncate text-[10px] font-bold uppercase tracking-wide',
-                competitionClass ?? 'text-slate-400',
+                competitionClass ?? 'text-ink-faint',
               )}
             >
               {competition}
@@ -1290,7 +1302,7 @@ function MiniFixture({
             <span />
           )}
           {when ? (
-            <span className="shrink-0 text-[10px] font-medium text-slate-400">{roundLabel(f)}</span>
+            <span className="shrink-0 text-[10px] font-medium text-ink-faint">{roundLabel(f)}</span>
           ) : null}
         </div>
       ) : null}
@@ -1302,7 +1314,7 @@ function MiniFixture({
         <span
           className={clsx(
             'shrink-0 tabular-nums',
-            moving ? 'font-bold text-violet-700' : pending ? 'font-semibold text-slate-600' : 'text-slate-500',
+            moving ? 'font-bold text-live' : pending ? 'font-semibold text-ink-soft' : 'text-ink-faint',
           )}
           title={
             moving
@@ -1325,7 +1337,7 @@ function MiniFixture({
           deciso questa sfida. Su un 1-1 la home mostrava il risultato e basta:
           la coppa risultava assegnata e la card non diceva a chi né perché. */}
       {f.advanced_team_id && f.advanced_reason ? (
-        <div className="mt-0.5 text-[10px] leading-snug text-slate-500">
+        <div className="mt-0.5 text-[10px] leading-snug text-ink-faint">
           passa {f.advanced_team_id === f.home_team.team_id ? f.home_team.name : f.away_team.name}
           {f.advanced_reason === 'punteggio'
             ? `: gol pari, punteggio più alto${
@@ -1371,7 +1383,7 @@ function Participants({ detail, myTeamName }: { detail: LeagueDetail; myTeamName
             <div
               key={t.team_id}
               className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${
-                mine ? 'border-slate-300 bg-slate-50' : 'border-slate-100'
+                mine ? 'border-line bg-surface-2' : 'border-line'
               }`}
             >
               {/* Lo stemma appartiene alla squadra, quindi segue il suo link. */}
@@ -1381,16 +1393,16 @@ function Participants({ detail, myTeamName }: { detail: LeagueDetail; myTeamName
               <span className="min-w-0 flex-1">
                 <Link
                   to={mine ? '/squad' : `/teams/${t.team_id}`}
-                  className="block truncate text-sm font-semibold text-slate-800 hover:underline"
+                  className="block truncate text-sm font-semibold text-ink hover:underline"
                 >
                   {t.name}
                   {mine ? (
-                    <span className="ml-1.5 text-[10px] font-bold uppercase text-emerald-600">la tua</span>
+                    <span className="ml-1.5 text-[10px] font-bold uppercase text-good">la tua</span>
                   ) : null}
                 </Link>
                 <Link
                   to={`/fantallenatori/${t.manager_user_id}`}
-                  className="block truncate text-xs text-slate-500 hover:text-slate-800 hover:underline"
+                  className="block truncate text-xs text-ink-faint hover:text-ink hover:underline"
                 >
                   {t.manager_username}
                 </Link>

@@ -13,7 +13,7 @@ import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import type { CompetitionItem, CompetitionRoundRow, CompetitionStageItem, LeagueDetail } from '../types/league';
 
-const inputCls = 'w-full rounded-xl border border-slate-200 px-3 py-2 text-sm';
+const inputCls = 'w-full rounded-xl border border-line px-3 py-2 text-sm';
 
 /**
  * The manual builder, for shapes the three templates do not cover.
@@ -123,11 +123,11 @@ export default function CompetitionAdvancedPage() {
     }
   }
 
-  if (!selectedLeagueId) return <div className="p-6 text-sm text-slate-500">Seleziona una lega.</div>;
+  if (!selectedLeagueId) return <div className="p-6 text-sm text-ink-faint">Seleziona una lega.</div>;
   if (!isAdmin) {
     return (
       <div className="mx-auto max-w-2xl p-6">
-        <Card className="p-6 text-sm text-slate-600">Solo gli admin della lega possono costruire competizioni.</Card>
+        <Card className="p-6 text-sm text-ink-soft">Solo gli admin della lega possono costruire competizioni.</Card>
       </div>
     );
   }
@@ -138,15 +138,15 @@ export default function CompetitionAdvancedPage() {
     <div className="mx-auto max-w-3xl space-y-4 p-4 pb-24 sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-slate-900">Costruzione avanzata</h1>
-          <p className="text-sm text-slate-500">Per formule che i tre formati guidati non coprono.</p>
+          <h1 className="text-xl font-bold text-ink">Costruzione avanzata</h1>
+          <p className="text-sm text-ink-faint">Per formule che i tre formati guidati non coprono.</p>
         </div>
-        <Link to="/league-admin?tab=league" className="shrink-0 text-sm text-slate-500 hover:text-slate-900">
+        <Link to="/league-admin?tab=league" className="shrink-0 text-sm text-ink-faint hover:text-ink">
           ✕ Chiudi
         </Link>
       </div>
 
-      <Card className="border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+      <Card className="border border-line bg-surface-2 p-4 text-xs text-ink-soft">
         Qui si assembla una competizione turno per turno: crei il contenitore, poi ogni turno, poi da dove ne arrivano i
         partecipanti. Calendario e premi si sistemano dopo, dalla pagina della competizione. Se ti serve un campionato,
         una coppa o un girone con playoff, il{' '}
@@ -156,8 +156,8 @@ export default function CompetitionAdvancedPage() {
         fa tutto in una volta.
       </Card>
 
-      {msg ? <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700">{msg}</div> : null}
-      {error ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+      {msg ? <div className="rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink-soft">{msg}</div> : null}
+      {error ? <div className="rounded-xl bg-bad-bg px-3 py-2 text-sm text-bad">{error}</div> : null}
 
       {/* 1. the container */}
       <Card className="p-4 sm:p-5">
@@ -207,9 +207,9 @@ export default function CompetitionAdvancedPage() {
             <SectionTitle>2 · I turni di «{comp.name}»</SectionTitle>
             <div className="mt-2 space-y-1.5">
               {stages.map((s) => (
-                <div key={s.stage_id} className="flex items-start justify-between gap-2 rounded-xl border border-slate-200 p-3">
+                <div key={s.stage_id} className="flex items-start justify-between gap-2 rounded-xl border border-line p-3">
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-slate-900">
+                    <div className="truncate text-sm font-semibold text-ink">
                       #{s.order_index} {s.name}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -217,12 +217,12 @@ export default function CompetitionAdvancedPage() {
                         {s.stage_type === 'knockout' ? 'Eliminazione diretta' : 'Tutti contro tutti'}
                       </Badge>
                       {s.legs > 1 ? <Badge tone="slate">{s.legs} tornate</Badge> : null}
-                      <span className="text-[11px] text-slate-500">
+                      <span className="text-[11px] text-ink-faint">
                         giornate {s.round_offset + 1}–{s.round_offset + s.planned_rounds}
                       </span>
                     </div>
                     {s.rules_in.length ? (
-                      <div className="mt-1 text-[11px] text-slate-500">
+                      <div className="mt-1 text-[11px] text-ink-faint">
                         da:{' '}
                         {s.rules_in
                           .map(
@@ -242,7 +242,7 @@ export default function CompetitionAdvancedPage() {
                     ) : null}
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
-                    <span className="text-[11px] text-slate-500">
+                    <span className="text-[11px] text-ink-faint">
                       {s.participants.length || s.expected_participants} sq.
                     </span>
                     <Button
@@ -263,11 +263,11 @@ export default function CompetitionAdvancedPage() {
                   </div>
                 </div>
               ))}
-              {!stages.length ? <div className="text-sm text-slate-500">Nessun turno: aggiungine uno qui sotto.</div> : null}
+              {!stages.length ? <div className="text-sm text-ink-faint">Nessun turno: aggiungine uno qui sotto.</div> : null}
             </div>
 
-            <div className="mt-4 space-y-3 rounded-xl border border-dashed border-slate-300 p-3">
-              <div className="text-xs font-semibold text-slate-500">Nuovo turno</div>
+            <div className="mt-4 space-y-3 rounded-xl border border-dashed border-line p-3">
+              <div className="text-xs font-semibold text-ink-faint">Nuovo turno</div>
               <input
                 className={inputCls}
                 placeholder="Nome del turno (es. Girone A, Semifinali)"
@@ -287,13 +287,13 @@ export default function CompetitionAdvancedPage() {
                   onChange={(e) => setStageOrder(Math.max(1, Number(e.target.value) || 1))}
                 />
               </div>
-              <div className="text-[11px] text-slate-400">
+              <div className="text-[11px] text-ink-faint">
                 Turni con lo stesso ordine si giocano in parallelo (gironi affiancati) e condividono le giornate; un
                 ordine più alto viene dopo.
               </div>
               {stageType === 'round_robin' ? (
                 <div>
-                  <div className="text-xs font-semibold text-slate-500">Tornate</div>
+                  <div className="text-xs font-semibold text-ink-faint">Tornate</div>
                   <div className="mt-1 grid grid-cols-5 gap-1.5">
                     {[1, 2, 3, 4, 5].map((n) => (
                       <button
@@ -303,8 +303,8 @@ export default function CompetitionAdvancedPage() {
                         className={
                           'rounded-xl border px-2 py-2 text-sm font-semibold ' +
                           (stageLegs === n
-                            ? 'border-slate-900 bg-slate-900 text-white'
-                            : 'border-slate-200 bg-white text-slate-600')
+                            ? 'border-line bg-ink text-paper'
+                            : 'border-line bg-surface text-ink-soft')
                         }
                       >
                         {n}
@@ -314,14 +314,14 @@ export default function CompetitionAdvancedPage() {
                 </div>
               ) : null}
 
-              <div className="inline-flex rounded-xl bg-slate-100 p-1">
+              <div className="inline-flex rounded-xl bg-surface-2 p-1">
                 <button
                   type="button"
                   onClick={() => setStageSource('teams')}
                   className={
                     stageSource === 'teams'
-                      ? 'rounded-lg bg-white px-3 py-1.5 text-xs font-semibold'
-                      : 'px-3 py-1.5 text-xs font-semibold text-slate-600'
+                      ? 'rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold'
+                      : 'px-3 py-1.5 text-xs font-semibold text-ink-soft'
                   }
                 >
                   Squadre scelte
@@ -331,8 +331,8 @@ export default function CompetitionAdvancedPage() {
                   onClick={() => setStageSource('derived')}
                   className={
                     stageSource === 'derived'
-                      ? 'rounded-lg bg-white px-3 py-1.5 text-xs font-semibold'
-                      : 'px-3 py-1.5 text-xs font-semibold text-slate-600'
+                      ? 'rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold'
+                      : 'px-3 py-1.5 text-xs font-semibold text-ink-soft'
                   }
                 >
                   Qualificate
@@ -354,7 +354,7 @@ export default function CompetitionAdvancedPage() {
                         }
                         className={
                           'truncate rounded-lg border px-2 py-1.5 text-left text-xs ' +
-                          (on ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600')
+                          (on ? 'border-line bg-ink text-paper' : 'border-line bg-surface text-ink-soft')
                         }
                       >
                         {t.name}
@@ -364,7 +364,7 @@ export default function CompetitionAdvancedPage() {
                 </div>
               ) : (
                 <div>
-                  <span className="text-xs font-semibold text-slate-500">Quante squadre attese</span>
+                  <span className="text-xs font-semibold text-ink-faint">Quante squadre attese</span>
                   <input
                     type="number"
                     min={2}
@@ -372,7 +372,7 @@ export default function CompetitionAdvancedPage() {
                     value={stageExpected}
                     onChange={(e) => setStageExpected(Math.max(2, Number(e.target.value) || 2))}
                   />
-                  <div className="mt-1 text-[11px] text-slate-400">
+                  <div className="mt-1 text-[11px] text-ink-faint">
                     Serve a calcolare le giornate — e quindi il calendario — prima ancora di sapere chi ci giocherà. Le
                     regole di qualificazione si aggiungono al passo 3.
                   </div>
@@ -406,13 +406,13 @@ export default function CompetitionAdvancedPage() {
           {/* 3. qualification rules */}
           <Card className="p-4 sm:p-5">
             <SectionTitle>3 · Da dove arrivano i partecipanti</SectionTitle>
-            <div className="mt-1 text-xs text-slate-500">
+            <div className="mt-1 text-xs text-ink-faint">
               Un turno può essere alimentato dalla classifica o dai risultati di un altro turno, anche di un'altra
               competizione della lega.
             </div>
             <div className="mt-3 space-y-2">
               <div>
-                <span className="text-xs font-semibold text-slate-500">Turno da riempire</span>
+                <span className="text-xs font-semibold text-ink-faint">Turno da riempire</span>
                 <select
                   className={inputCls + ' mt-1'}
                   value={ruleTargetId ?? ''}
@@ -427,7 +427,7 @@ export default function CompetitionAdvancedPage() {
                 </select>
               </div>
               <div>
-                <span className="text-xs font-semibold text-slate-500">Sorgente</span>
+                <span className="text-xs font-semibold text-ink-faint">Sorgente</span>
                 <select className={inputCls + ' mt-1'} value={ruleSource} onChange={(e) => setRuleSource(e.target.value)}>
                   <option value="">Seleziona…</option>
                   {sourceRounds.map((r) => (
@@ -438,7 +438,7 @@ export default function CompetitionAdvancedPage() {
                 </select>
               </div>
               <div>
-                <span className="text-xs font-semibold text-slate-500">Criterio</span>
+                <span className="text-xs font-semibold text-ink-faint">Criterio</span>
                 <select className={inputCls + ' mt-1'} value={ruleMode} onChange={(e) => setRuleMode(e.target.value as typeof ruleMode)}>
                   <option value="table_range">Posizione in classifica</option>
                   <option value="winners">Chi vince</option>
@@ -448,7 +448,7 @@ export default function CompetitionAdvancedPage() {
               {ruleMode === 'table_range' ? (
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <span className="text-xs font-semibold text-slate-500">Dalla posizione</span>
+                    <span className="text-xs font-semibold text-ink-faint">Dalla posizione</span>
                     <input
                       type="number"
                       min={1}
@@ -458,7 +458,7 @@ export default function CompetitionAdvancedPage() {
                     />
                   </div>
                   <div>
-                    <span className="text-xs font-semibold text-slate-500">Alla posizione</span>
+                    <span className="text-xs font-semibold text-ink-faint">Alla posizione</span>
                     <input
                       type="number"
                       min={1}
@@ -500,7 +500,7 @@ export default function CompetitionAdvancedPage() {
 
           <Card className="p-4 sm:p-5">
             <SectionTitle>4 · Calendario e premi</SectionTitle>
-            <div className="mt-1 text-xs text-slate-500">
+            <div className="mt-1 text-xs text-ink-faint">
               Quando la struttura ti soddisfa, le giornate e i premi si sistemano nella pagina della competizione.
             </div>
             <div className="mt-3">

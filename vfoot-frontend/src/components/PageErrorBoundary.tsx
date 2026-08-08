@@ -41,12 +41,12 @@ export class PageErrorBoundary extends Component<
       <Card className="p-6 text-center">
         <div className="text-3xl">⚠️</div>
         <div className="mt-2 font-bold">Questa pagina si è interrotta</div>
-        <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">
+        <p className="mx-auto mt-1 max-w-md text-sm text-ink-soft">
           Il resto dell&apos;applicazione funziona: puoi cambiare pagina dal menu. Se
           succede di nuovo sulla stessa pagina, è un difetto da segnalare — il
           dettaglio tecnico è qui sotto.
         </p>
-        <p className="mx-auto mt-3 max-w-md break-words rounded bg-slate-100 px-3 py-2 text-left font-mono text-[11px] text-slate-600">
+        <p className="mx-auto mt-3 max-w-md break-words rounded bg-surface-2 px-3 py-2 text-left font-mono text-[11px] text-ink-soft">
           {error.message || String(error)}
         </p>
         <Button className="mt-4" size="sm" onClick={() => window.location.reload()}>

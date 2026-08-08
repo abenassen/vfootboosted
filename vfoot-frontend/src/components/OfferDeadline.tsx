@@ -19,7 +19,7 @@ export function OfferDeadline({
   // passa in validazione, 24 ore compiute o no. Quindi non e' un avvertimento
   // ma il vero conto alla rovescia — l'ultimo istante utile per rilanciare.
   return (
-    <span className="text-amber-600"
+    <span className="text-warn"
       title="Il mercato chiude prima delle 24 ore: chi è in testa alla chiusura passa in validazione.">
       il mercato chiude tra <span className="tabular-nums">{text}</span>
     </span>
