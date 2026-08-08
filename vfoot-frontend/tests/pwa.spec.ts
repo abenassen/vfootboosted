@@ -173,10 +173,19 @@ test.describe('@pwa PWA', () => {
   });
 });
 
-test.describe('@pwa invito a installare', () => {
-  /** The banner is the only invitation an iPhone user will ever get, so its
-   *  presence, its dismissal and the memory of that dismissal are behaviour, not
-   *  decoration.
+test.describe('@pwa inviti in Home', () => {
+  /** Home carries two DIFFERENT invitations, and which of the two appears is the
+   *  decision this block exists to hold still (see SetupBanner): on iPhone
+   *  installing is the only road to notifications, so the install invite comes
+   *  first; everywhere else push works from the browser tab, so proposing an
+   *  installation would ask for a step nobody needs while staying silent about the
+   *  one that matters.
+   *
+   *  NOT covered here: the notifications face. It only appears when the server has
+   *  VAPID keys, and the mock provider answers `enabled: false` on purpose ("le
+   *  notifiche push richiedono il backend reale"), so under the mock there is
+   *  nothing to show it with. That face is exercised against a dev server that has
+   *  keys — vfoot-sim generates its own; see docs/PWA_TESTING.md.
    *
    *  Signed in through the MOCK provider (`?api=mock`, same trick as the GUI smoke
    *  test): Home is behind auth, and borrowing the real backend would make a
@@ -201,26 +210,18 @@ test.describe('@pwa invito a installare', () => {
 
   /** Located by the close button's accessible name, not by the marketing copy:
    *  the wording is meant to be tuned, and a test that breaks on a comma teaches
-   *  people to stop reading failures. */
-  const banner = (page: import('@playwright/test').Page) =>
+   *  people to stop reading failures. Each face carries its own name (see Frame in
+   *  SetupBanner), so "which invitation is this" is a question the DOM answers. */
+  const installInvite = (page: import('@playwright/test').Page) =>
     page.getByRole('button', { name: "Chiudi l'invito a installare" });
 
-  test('compare in Home e si può chiudere per sempre', async ({ page }) => {
-    await signInMock(page);
-    await expect(banner(page)).toBeVisible();
+  /** Home has really rendered. An "invito assente" assertion would otherwise pass
+   *  just as well on a page that failed to render at all, which is the wrong green:
+   *  absence only means something once there is something for it to be absent from. */
+  const homeLoaded = (page: import('@playwright/test').Page) =>
+    page.getByText('Benvenuto in Vfoot Boosted');
 
-    await banner(page).click();
-    await expect(banner(page)).toBeHidden();
-
-    // Remembered: an invitation that returns every visit is an advert.
-    await page.goto('/home?api=mock');
-    await expect(banner(page)).toBeHidden();
-    expect(await page.evaluate(() => localStorage.getItem('vfoot_install_banner_dismissed'))).toBe(
-      '1',
-    );
-  });
-
-  test('su iPhone spiega i passaggi invece di offrire un bottone', async ({ browser }) => {
+  test("su iPhone l'invito spiega i passaggi, e la chiusura si ricorda", async ({ browser }) => {
     // Safari has no install prompt at all, so the steps ARE the feature. Emulating
     // the user agent exercises our branch; it says nothing about whether push works
     // on a real iPhone, which needs a real iPhone.
@@ -232,16 +233,35 @@ test.describe('@pwa invito a installare', () => {
     const page = await ctx.newPage();
     await signInMock(page);
 
-    await expect(banner(page)).toBeVisible();
-    await expect(page.getByText("Su iPhone è l'unico modo per ricevere le notifiche.")).toBeVisible();
+    await expect(installInvite(page)).toBeVisible();
+    // A button here would be a promise we cannot keep: there is no prompt to replay.
     await expect(page.getByRole('button', { name: 'Installa', exact: true })).toHaveCount(0);
-
     await page.getByRole('button', { name: 'Come si fa su iPhone' }).click();
-    await expect(page.getByText('«Aggiungi alla schermata Home»')).toBeVisible();
+    await expect(page.getByText('\u00abAggiungi alla schermata Home\u00bb')).toBeVisible();
+
+    await installInvite(page).click();
+    await expect(installInvite(page)).toHaveCount(0);
+
+    // Remembered: an invitation that returns every visit is an advert.
+    await page.goto('/home?api=mock');
+    await expect(homeLoaded(page)).toBeVisible();
+    await expect(installInvite(page)).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('vfoot_install_banner_dismissed'))).toBe(
+      '1',
+    );
     await ctx.close();
   });
 
-  test('installata, l\u2019invito non compare', async ({ browser }) => {
+  test("fuori da iOS l'installazione non viene proposta in Home", async ({ page }) => {
+    // Tested because it is a REMOVAL, and removals come back by accident. Where push
+    // works from the tab, Home asks for the permission and for nothing else; the
+    // installation stays in Profilo, as the convenience it is.
+    await signInMock(page);
+    await expect(homeLoaded(page)).toBeVisible();
+    await expect(installInvite(page)).toHaveCount(0);
+  });
+
+  test("installata, l'invito a installare non compare", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await ctx.newPage();
     // display-mode: standalone is how the app knows it was launched from the icon;
@@ -255,7 +275,7 @@ test.describe('@pwa invito a installare', () => {
           : real(q)) as typeof window.matchMedia;
     });
     await signInMock(page);
-    await expect(banner(page)).toHaveCount(0);
+    await expect(installInvite(page)).toHaveCount(0);
     await ctx.close();
   });
 });

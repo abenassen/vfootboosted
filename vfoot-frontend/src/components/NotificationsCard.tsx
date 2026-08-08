@@ -78,7 +78,15 @@ export default function NotificationsCard() {
       ) : null}
 
       <div className="mt-4 border-t pt-3">
-        {!push.available ? (
+        {/* The order of these branches is the point. `available` starts false —
+            it has to, we have not asked the server yet — so putting its message
+            first meant that "sto ancora guardando" and "il server non ha le
+            chiavi" printed the same sentence, and a hook that never settled printed
+            it for ever: the one server whose keys were fine got blamed for the
+            worker's crash. Loading is not a diagnosis and must not read like one. */}
+        {!push.loaded ? (
+          <div className="text-sm text-slate-500">Controllo le notifiche…</div>
+        ) : !push.available ? (
           <div className="text-sm text-slate-500">
             Le notifiche push non sono attive su questo server. Gli avvisi arrivano per email.
           </div>

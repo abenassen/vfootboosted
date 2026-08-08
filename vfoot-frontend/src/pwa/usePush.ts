@@ -18,8 +18,41 @@ export type PushState = {
   /** Why we cannot offer it here (iOS in the browser, permission denied, …). */
   blocked: string | null;
   busy: boolean;
+  /** Has the first look settled? Until it has, every other field is a GUESS, and
+   *  the initial guess is the gloomiest one there is — so anything that puts a
+   *  reason on screen has to wait for this. */
+  loaded: boolean;
   error: string | null;
 };
+
+/** How long to wait for the service worker before calling it absent.
+ *
+ *  `navigator.serviceWorker.ready` is a promise that only ever RESOLVES: when the
+ *  worker fails to install there is no rejection and no timeout, it simply stays
+ *  pending for the life of the page. That is not hypothetical — a throw at the top
+ *  of sw.ts left this hook waiting for ever, so the state never moved off its
+ *  initial values and the profile page announced that the SERVER had no keys, with
+ *  the keys sitting in the config it had just fetched. A silence has to be turned
+ *  into an answer before anything can be reported about it.
+ *
+ *  Generous on purpose: on a first visit the registration is still in flight (we
+ *  register after the first render), and a worker that arrives late is normal.
+ */
+const READY_TIMEOUT_MS = 6000;
+
+const NO_WORKER =
+  'Le notifiche non sono disponibili in questa copia dell\'app: il componente che le '
+  + 'riceve non si è avviato. Prova a ricaricare la pagina; se il messaggio resta, '
+  + 'è un problema nostro, non tuo.';
+
+async function readyRegistration(): Promise<ServiceWorkerRegistration | null> {
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), READY_TIMEOUT_MS);
+    }),
+  ]);
+}
 
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   // The VAPID public key travels as base64url without padding; the browser wants
@@ -59,27 +92,39 @@ export function usePush() {
     subscribed: false,
     blocked: null,
     busy: true,
+    loaded: false,
     error: null,
   });
 
   const refresh = useCallback(async () => {
-    const blocked = pushBlockedReason();
+    let blocked = pushBlockedReason();
     try {
       const cfg = await getPushConfig();
       let subscribed = false;
       if (cfg.enabled && supportsPush() && !blocked) {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        // A subscription signed for a key we no longer hold is not a subscription:
-        // reporting it as one is how the profile page came to promise notifications
-        // that the push service was rejecting. Saying "not subscribed" puts the
-        // Attiva button back, and pressing it repairs the whole thing — with no
-        // permission prompt, since that was granted long ago.
-        subscribed = sub !== null && keyMatches(sub, cfg.public_key ?? '');
+        const reg = await readyRegistration();
+        if (!reg) {
+          // Three situations used to arrive here as one sentence about the server,
+          // and they have three different remedies: the admin generates keys, a
+          // developer fixes the worker, and the third one — "still looking" — needs
+          // nobody. Naming this one as OURS is the difference between a reader who
+          // reloads and a reader who goes hunting for a key that was already there.
+          blocked = NO_WORKER;
+        } else {
+          const sub = await reg.pushManager.getSubscription();
+          // A subscription signed for a key we no longer hold is not a subscription:
+          // reporting it as one is how the profile page came to promise notifications
+          // that the push service was rejecting. Saying "not subscribed" puts the
+          // Attiva button back, and pressing it repairs the whole thing — with no
+          // permission prompt, since that was granted long ago.
+          subscribed = sub !== null && keyMatches(sub, cfg.public_key ?? '');
+        }
       }
-      setState({ available: cfg.enabled, subscribed, blocked, busy: false, error: null });
+      setState({ available: cfg.enabled, subscribed, blocked, busy: false, loaded: true,
+                 error: null });
     } catch {
-      setState({ available: false, subscribed: false, blocked, busy: false, error: null });
+      setState({ available: false, subscribed: false, blocked, busy: false, loaded: true,
+                 error: null });
     }
   }, []);
 
@@ -126,7 +171,10 @@ export function usePush() {
       const cfg = await getPushConfig();
       if (!cfg.enabled || !cfg.public_key) throw new Error('Notifiche non configurate sul server.');
 
-      const reg = await navigator.serviceWorker.ready;
+      // Same guarded wait as in `refresh`: without it a missing worker turned the
+      // press of a button into a spinner that never came back.
+      const reg = await readyRegistration();
+      if (!reg) throw new Error(NO_WORKER);
       let existing = await reg.pushManager.getSubscription();
       if (existing && !keyMatches(existing, cfg.public_key)) {
         // Reusing it would re-save an endpoint that answers 403 for ever, and the
@@ -160,7 +208,8 @@ export function usePush() {
   const disable = useCallback(async () => {
     setState((s) => ({ ...s, busy: true, error: null }));
     try {
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await readyRegistration();
+      if (!reg) throw new Error(NO_WORKER);
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
         // Tell our server FIRST: if the browser-side unsubscribe succeeded and

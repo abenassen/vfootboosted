@@ -19,28 +19,45 @@ declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
 };
 
-precacheAndRoute(self.__WB_MANIFEST || []);
+// Injected by the build — and EMPTY under `npm run dev`, where Vite serves every
+// file fresh and there is nothing to precache. That difference is what makes the
+// offline route below conditional.
+const manifest = self.__WB_MANIFEST || [];
+
+precacheAndRoute(manifest);
 cleanupOutdatedCaches();
 
 // Every client-side route has to resolve to the one shell we precached.
 // Without this the precache only answers for the exact URLs in it: `/` worked
 // and `/home` — the manifest's start_url, i.e. what the INSTALLED APP OPENS —
 // died on the browser's offline page. Measured before adding this.
-registerRoute(
-  new NavigationRoute(createHandlerBoundToURL('/index.html'), {
-    // A navigation to these must reach the server, not be answered with the SPA:
-    // /api and /ws are the backend, /admin is Django's own UI, /static its assets.
-    // (Fetches from the app carry mode:"cors" and never match a NavigationRoute
-    // anyway — this is about someone typing the URL or following a link.)
-    //
-    // mobile-frame.html is a real FILE in public/, not a client route, so answering
-    // it with the shell gets the app's own 404 — and only on localhost, where the
-    // worker is registered, which makes it look like the preview tool is broken on
-    // one machine and fine on another.
-    denylist: [/^\/api\//, /^\/admin\//, /^\/ws\//, /^\/static\//, /^\/media\//,
-               /^\/mobile-frame\.html/],
-  }),
-);
+//
+// Only when there IS a precache, and the `if` is not defensive tidiness:
+// `createHandlerBoundToURL` THROWS ('non-precached-url') when handed a URL that
+// was not precached, which is exactly the dev case. A throw HERE is not a feature
+// quietly missing — it happens while the worker is still evaluating, so the browser
+// discards the WHOLE script, `push` and `notificationclick` included. That is how
+// `npm run dev` ended up with no worker at all and no notification able to arrive,
+// while the app blamed the server for having no VAPID keys. In dev the shell comes
+// from the dev server anyway: an offline fallback for a server that is always there
+// is the one thing we lose, and we lose nothing.
+if (manifest.length) {
+  registerRoute(
+    new NavigationRoute(createHandlerBoundToURL('/index.html'), {
+      // A navigation to these must reach the server, not be answered with the SPA:
+      // /api and /ws are the backend, /admin is Django's own UI, /static its assets.
+      // (Fetches from the app carry mode:"cors" and never match a NavigationRoute
+      // anyway — this is about someone typing the URL or following a link.)
+      //
+      // mobile-frame.html is a real FILE in public/, not a client route, so answering
+      // it with the shell gets the app's own 404 — and only on localhost, where the
+      // worker is registered, which makes it look like the preview tool is broken on
+      // one machine and fine on another.
+      denylist: [/^\/api\//, /^\/admin\//, /^\/ws\//, /^\/static\//, /^\/media\//,
+                 /^\/mobile-frame\.html/],
+    }),
+  );
+}
 
 // The page asks for this once the user has accepted the update prompt. Without
 // it a new deploy sits in "waiting" until every tab closes — which on a phone

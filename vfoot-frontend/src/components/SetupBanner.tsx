@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button, Card } from './ui';
 import IosInstallSteps from './IosInstallSteps';
 import { isIOS, isStandalone } from '../pwa/install';
@@ -52,8 +52,13 @@ function remember(key: string): void {
   }
 }
 
-function Frame({ title, onClose, children }: {
+/** `closeLabel` is not decoration: the two faces are two different invitations, and
+ *  a screen reader (or a test) hearing "Chiudi" twice cannot tell which one it is
+ *  looking at. Named per face, the accessible name identifies the banner without
+ *  depending on the marketing copy above it, which is meant to be tuned. */
+function Frame({ title, closeLabel, onClose, children }: {
   title: string;
+  closeLabel: string;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -61,7 +66,7 @@ function Frame({ title, onClose, children }: {
     <Card className="border-l-4 border-sky-500 bg-sky-50 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 text-sm font-bold text-sky-900">{title}</div>
-        <button type="button" onClick={onClose} aria-label="Chiudi"
+        <button type="button" onClick={onClose} aria-label={closeLabel}
           className="shrink-0 rounded-lg px-2 py-1 text-sky-700 hover:bg-sky-100">
           ✕
         </button>
@@ -76,12 +81,7 @@ export default function SetupBanner() {
   const [dismissedInstall, setDismissedInstall] = useState(() => wasDismissed(DISMISSED_INSTALL));
   const [dismissedPush, setDismissedPush] = useState(() => wasDismissed(DISMISSED_PUSH));
   const [showSteps, setShowSteps] = useState(false);
-  // usePush parte occupato: senza questo il banner delle notifiche lampeggerebbe
-  // a ogni caricamento, prima ancora di sapere se serve.
-  const [ready, setReady] = useState(false);
   const ios = isIOS();
-
-  useEffect(() => { if (!push.busy) setReady(true); }, [push.busy]);
 
   // 1. Su iPhone senza app installata non c'e' altro da proporre: il permesso
   //    per le notifiche non e' nemmeno raggiungibile da Safari.
@@ -89,6 +89,7 @@ export default function SetupBanner() {
     if (dismissedInstall) return null;
     return (
       <Frame title="📲 Tieni Vfoot sul telefono"
+        closeLabel="Chiudi l'invito a installare"
         onClose={() => { setDismissedInstall(true); remember(DISMISSED_INSTALL); }}>
         {/* Di proposito non un elenco di funzioni: cio' di cui l'app avvisa
             crescera' (mercato, asta, giornate), e un testo che elenca quelle di
@@ -114,9 +115,15 @@ export default function SetupBanner() {
   }
 
   // 2. Ovunque altro (e su iPhone dall'app installata): manca solo il permesso.
-  if (!ready || dismissedPush || !push.available || push.subscribed || push.blocked) return null;
+  //    `loaded` e non `busy`: prima di sapere se serve, questo banner non esiste --
+  //    altrimenti lampeggerebbe a ogni caricamento -- ma `busy` torna vero anche
+  //    mentre l'iscrizione e' in corso, e li' il banner deve RESTARE, col suo
+  //    bottone occupato e la riga dei venti secondi.
+  if (!push.loaded || dismissedPush || !push.available || push.subscribed || push.blocked)
+    return null;
   return (
     <Frame title="🔔 Ci sei quasi: attiva le notifiche"
+      closeLabel="Chiudi l'invito alle notifiche"
       onClose={() => { setDismissedPush(true); remember(DISMISSED_PUSH); }}>
       <div className="mt-1 text-sm text-sky-800">
         {isStandalone()
