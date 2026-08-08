@@ -17,9 +17,17 @@ import type { HonourItem } from '../types/league';
  *  Nome e stemma di ogni riga sono quelli CONGELATI all'assegnazione (vedi
  *  services/honours): ribattezzare la propria squadra non riscrive il passato.
  *
- *  Silent when empty for anyone but the owner — telling a visitor "questo
- *  fantallenatore non ha mai vinto niente" is a taunt, not information. On your
- *  own page the empty state is the point: it says where the trophies will go.
+ *  C'È SEMPRE, anche vuoto, e anche sulla scheda di un altro. Prima spariva per
+ *  chi non aveva ancora vinto niente, per non dire a un visitatore "questo
+ *  fantallenatore non ha mai vinto niente" — che è uno sfottò, non
+ *  un'informazione. Ma l'effetto era peggiore della cosa che evitava: sulla
+ *  propria scheda l'albo d'oro c'era e sulle altre no, quindi la stessa pagina
+ *  aveva due forme diverse e sembrava un pezzo mancante invece di una bacheca
+ *  vuota. E prima che una competizione finisca sono vuote TUTTE, cioè la sezione
+ *  non esisteva per nessuno proprio quando la si stava cercando.
+ *
+ *  Il tono risolve la cosa meglio della sparizione: di un avversario si dice che
+ *  la bacheca è vuota, non che non ha mai vinto niente.
  */
 export default function HonoursBoard({
   userId,
@@ -43,8 +51,8 @@ export default function HonoursBoard({
     };
   }, [userId]);
 
+  // Solo mentre si carica: un attimo di niente, non una sezione che non c'è.
   if (awards === null) return null;
-  if (!awards.length && !own) return null;
 
   return (
     <Card className="p-4">
@@ -99,7 +107,9 @@ export default function HonoursBoard({
         </ul>
       ) : (
         <div className="mt-2 text-sm text-slate-500">
-          {name ? `${name} non ha` : 'Non hai'} ancora vinto niente: i premi delle competizioni concluse finiscono qui.
+          {own
+            ? 'Bacheca vuota: i premi delle competizioni concluse finiscono qui.'
+            : `Bacheca vuota${name ? ` di ${name}` : ''}: i premi delle competizioni concluse finiscono qui.`}
         </div>
       )}
     </Card>

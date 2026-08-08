@@ -14,7 +14,12 @@ LA CATENA, IN ORDINE
    una differenza che il punteggio vede e i gol no. Dove il tabellino non c'è
    (una lega aura, che segna dal risultato reale) questo passo non aggiunge nulla
    e si scende al terzo.
-3. **La squadra di casa**, quella dell'ULTIMA gara della sfida — il ritorno, dove
+3. **I rigori**, quando sono stati battuti: li scrive la conclusione della
+   giornata (``settle_shootouts``) sulla gara che ha chiuso la sfida, e qui si
+   LEGGONO soltanto. Una serie è deterministica, quindi rigiocarla a ogni
+   apertura del tabellone darebbe sempre lo stesso esito, e la scriverebbe
+   nessuno: la sfida si decide una volta, il tabellone si apre molte.
+4. **La squadra di casa**, quella dell'ULTIMA gara della sfida — il ritorno, dove
    si gioca in casa per convenzione di chi ha fatto meglio prima. È l'ultima
    spiaggia e capita raramente, ma esiste per una ragione precisa: senza, un
    tabellone può restare BLOCCATO per sempre. Prima di questo modulo era proprio

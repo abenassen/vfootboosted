@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { getLeagueFixtures } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
-import { useCompetitionContext } from '../league/CompetitionContext';
+import { useCompetitionContext, useCompetitionFromQuery } from '../league/CompetitionContext';
 import { competitionFormatLabel } from '../league/competitionFormat';
 import { Badge, Card, SectionTitle } from '../components/ui';
 import Crest from '../components/Crest';
@@ -61,6 +61,8 @@ const isTerminal = (b: CompetitionBlocker | null | undefined) => b?.kind === 'se
 export default function MatchesPage() {
   const { selectedLeagueId, selectedLeague } = useLeagueContext();
   const { selectedCompetitionId, selectedCompetition } = useCompetitionContext();
+  // Arrivare qui DA una competizione la seleziona: vedi useCompetitionFromQuery.
+  useCompetitionFromQuery();
   const [fixtures, setFixtures] = useState<LeagueFixtureItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

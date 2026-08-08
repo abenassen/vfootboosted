@@ -419,6 +419,42 @@ export interface LeagueActivityItem {
   detail: string | null;
   team_id: number | null;
   crest: string | null;
+  /** Notizia che merita di essere vista anche da chi apre l'app dopo giorni. Un
+   *  premio lo è da sé; il flag esiste per notizia, non per tipo. */
+  important?: boolean;
+  /** In evidenza ADESSO: importante e ancora fresca. La precedenza scade da sola
+   *  (v. NEWS_PIN_DAYS lato server), così una notizia in cima non diventa
+   *  l'arredamento su cui si smette di posare gli occhi. */
+  pinned?: boolean;
+}
+
+/** L'albo d'oro di UNA lega, e se la lega è finita. */
+export interface LeagueHonoursBoard {
+  /** Ogni competizione della lega è chiusa: non c'è più niente da giocare. */
+  is_over: boolean;
+  competitions_total: number;
+  competitions_finished: number;
+  finished_at: string | null;
+  awards: LeagueAwardItem[];
+}
+
+export interface LeagueAwardItem {
+  prize_id: number;
+  name: string;
+  icon: string;
+  condition_label: string;
+  competition_id: number;
+  competition_name: string;
+  competition_format: string;
+  winners: { team_id: number; name: string | null; crest: string }[];
+  at: string | null;
+}
+
+export async function getLeagueHonours(leagueId: number): Promise<LeagueHonoursBoard> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/honours`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
 }
 
 /** Recent goings-on in the league, newest first. */

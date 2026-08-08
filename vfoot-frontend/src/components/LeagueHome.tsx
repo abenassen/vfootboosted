@@ -10,7 +10,12 @@ import {
   getLeagueMatchdays,
 } from '../api';
 // Not re-exported by the api facade, same as in MarketPage.
-import { getMarketActive, type LeagueActivityItem } from '../api/backend';
+import {
+  getLeagueHonours,
+  getMarketActive,
+  type LeagueActivityItem,
+  type LeagueHonoursBoard,
+} from '../api/backend';
 import type { MarketSessionInfo } from '../types/market';
 import clsx from 'clsx';
 import { useLeagueContext } from '../league/LeagueContext';
@@ -23,6 +28,7 @@ import Crest from './Crest';
 import type {
   ActiveAuctionInfo,
   CompetitionItem,
+  CompetitionSection,
   CompetitionStructure,
   LeagueDetail,
   LeagueFixtureItem,
@@ -71,6 +77,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   const [structures, setStructures] = useState<Record<number, CompetitionStructure>>({});
   const [matchdays, setMatchdays] = useState<LeagueMatchdayItem[]>([]);
   const [activity, setActivity] = useState<LeagueActivityItem[]>([]);
+  const [honours, setHonours] = useState<LeagueHonoursBoard | null>(null);
   const [auction, setAuction] = useState<ActiveAuctionInfo | null>(null);
   const [marketSession, setMarketSession] = useState<MarketSessionInfo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -87,6 +94,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     void getLeagueFixtures(selectedLeagueId).then((f) => alive && setFixtures(f)).catch(() => {});
     void getLeagueMatchdays(selectedLeagueId).then((m) => alive && setMatchdays(m)).catch(() => {});
     void getLeagueActivity(selectedLeagueId, 5).then((a) => alive && setActivity(a)).catch(() => {});
+    void getLeagueHonours(selectedLeagueId).then((h) => alive && setHonours(h)).catch(() => {});
     void getActiveAuction(selectedLeagueId).then((a) => alive && setAuction(a)).catch(() => {});
     void getMarketActive(selectedLeagueId)
       .then((m) => alive && setMarketSession(m.session))
@@ -300,6 +308,19 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     );
   }, [fixtures, openMd]);
 
+  // TUTTE le altre partite della giornata aperta. La tua resta in evidenza sopra
+  // — è quella per cui si apre l'app — ma finché c'era solo quella la domanda
+  // successiva, "e gli altri?", non aveva risposta da nessuna parte: il
+  // punteggio degli avversari esiste ed era già calcolato, semplicemente non
+  // veniva mostrato. In ordine di competizione, così un campionato e una coppa
+  // giocate lo stesso giorno non si mescolano.
+  const otherOpenFixtures = useMemo(() => {
+    if (!openMd) return [];
+    return fixtures
+      .filter((f) => !f.is_user_involved && f.real_matchday === openMd.real_matchday)
+      .sort((a, b) => a.competition_id - b.competition_id || a.round_no - b.round_no);
+  }, [fixtures, openMd]);
+
   // Close the whole arrears queue in order, stopping at the first one that needs a
   // decision (a team without a lineup) — that conversation lives in Gestione lega.
   const concludeQueue = () => {
@@ -334,6 +355,15 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   return (
     <div className="space-y-4">
       {msg ? <Card className="p-3 text-sm text-slate-700">{msg}</Card> : null}
+
+      {/* LA LEGA È FINITA: da qui in poi la home apre sull'albo d'oro.
+          Non è un blocco in più fra gli altri, è un cambio di domanda. Finché si
+          gioca la home risponde a "cosa devo fare adesso"; quando non c'è più
+          niente da giocare quella domanda non ha più risposta — le prossime
+          partite sono zero, la giornata da schierare non esiste — e l'unica cosa
+          che resta da dire è com'è andata. Perciò sta in cima e ci resta: per una
+          lega conclusa questa È la home. */}
+      {honours?.is_over ? <LeagueTrophyCase board={honours} myTeamName={myTeamName} /> : null}
 
       {queue.length || awaitingMds.length ? (
         <Card
@@ -548,6 +578,29 @@ export default function LeagueHome({ competitions }: { competitions: Competition
               </Link>
             ))}
           </div>
+
+          {/* E gli altri. La propria partita sta sopra, grande; il resto della
+              giornata sta qui, compatto, perché la domanda è diversa — non
+              "come sto andando" ma "come sta andando la giornata" — e finché
+              mancava bisognava aprire il calendario per una cosa che il server
+              stava già calcolando. */}
+          {otherOpenFixtures.length ? (
+            <div className="mt-4 border-t border-slate-100 pt-3">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                Le altre partite della giornata
+              </div>
+              <div className="mt-1.5 grid gap-1 md:grid-cols-2">
+                {otherOpenFixtures.map((f) => (
+                  <MiniFixture
+                    key={f.fixture_id}
+                    f={f}
+                    competition={compName.get(f.competition_id)}
+                    competitionClass={compColorById.get(f.competition_id)?.text700}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
         </Card>
       ) : null}
 
@@ -601,6 +654,13 @@ export default function LeagueHome({ competitions }: { competitions: Competition
         </Card>
       ) : null}
 
+      {/* A LEGA CONCLUSA questa fascia sparisce tutta: sono le tre domande di una
+          stagione in corso — cosa devi fare, com'è andata la tua ultima partita,
+          cosa è successo in giro — e quando non c'è più niente da giocare nessuna
+          delle tre ha una risposta. «Da fare» direbbe per sempre «sei in pari»,
+          gli ultimi risultati sarebbero quelli di maggio, e le news
+          racconterebbero i premi che stanno già nella bacheca qui sopra. */}
+      {honours?.is_over ? null : (
       <div className="grid gap-4 lg:grid-cols-2">
         {/* 2 — what is waiting for YOU. Beside the news, because one is what the
             league did and the other is what it is waiting on you to do. */}
@@ -631,7 +691,10 @@ export default function LeagueHome({ competitions }: { competitions: Competition
         {/* 3 — how the last ones went */}
         {lastResults.length ? (
           <Card className="p-4">
-            <SectionTitle>Ultimi risultati</SectionTitle>
+            {/* DELLA TUA SQUADRA, detto nel titolo: la lista è filtrata su di te
+                (vedi `mine`), e un titolo generico prometteva i risultati della
+                lega — che stanno nei blocchi delle competizioni. */}
+            <SectionTitle>Ultimi risultati della tua squadra</SectionTitle>
             <div className="mt-2 space-y-1">
               {lastResults.map((f) => (
                 <MiniFixture
@@ -662,7 +725,11 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                     key={`${a.kind}-${i}`}
                     className={
                       'flex items-start gap-2 text-sm ' +
-                      (isPrize || isEnd ? 'rounded-lg bg-amber-50 px-2 py-1.5' : '')
+                      (isPrize || isEnd ? 'rounded-lg bg-amber-50 px-2 py-1.5' : '') +
+                      // In evidenza: il server l'ha già messa in cima, qui si dice
+                      // PERCHÉ ci sta. Senza il bordo una notizia fuori ordine
+                      // cronologico sembra un elenco che ha sbagliato a ordinare.
+                      (a.pinned ? ' border-l-2 border-amber-400 pl-2' : '')
                     }
                   >
                     {/* A prize carries its OWN trophy inside the text — the one the
@@ -681,6 +748,11 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                       >
                         {a.text}
                       </span>
+                      {a.pinned ? (
+                        <span className="mt-0.5 inline-block rounded bg-amber-200/70 px-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
+                          in evidenza
+                        </span>
+                      ) : null}
                       {a.detail ? (
                         <span className={'block text-xs ' + (isPrize || isEnd ? 'text-amber-700' : 'text-slate-400')}>
                           {a.detail}
@@ -698,6 +770,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
           )}
         </Card>
       </div>
+      )}
 
       {/* 4 — everything else */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -713,6 +786,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
             fixtures={fixtures.filter((f) => f.competition_id === c.competition_id)}
             structure={structures[c.competition_id] ?? null}
             myTeamName={myTeamName}
+            openMatchday={openMd?.real_matchday ?? null}
           />
         ))}
       </div>
@@ -722,6 +796,109 @@ export default function LeagueHome({ competitions }: { competitions: Competition
   );
 }
 
+/** La bacheca della lega: tutto quello che è stato vinto, quando non c'è più
+ *  niente da vincere.
+ *
+ *  Raggruppata per COMPETIZIONE e non per premio: "chi ha vinto il campionato" e
+ *  "chi ha fatto più gol nel campionato" sono due risposte sulla stessa stagione,
+ *  e in un elenco piatto di sei trofei nessuno ritrova più il torneo che li ha
+ *  assegnati. La propria squadra in grassetto: in una bacheca la prima cosa che
+ *  si cerca è sé stessi.
+ */
+function LeagueTrophyCase({
+  board,
+  myTeamName,
+}: {
+  board: LeagueHonoursBoard;
+  myTeamName: string | null;
+}) {
+  const byCompetition = useMemo(() => {
+    const out = new Map<number, { name: string; awards: LeagueHonoursBoard['awards'] }>();
+    for (const a of board.awards) {
+      const row = out.get(a.competition_id) ?? { name: a.competition_name, awards: [] };
+      row.awards.push(a);
+      out.set(a.competition_id, row);
+    }
+    return [...out.values()];
+  }, [board.awards]);
+
+  return (
+    <Card className="border-l-4 border-amber-400 bg-gradient-to-b from-amber-50/80 to-white p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <SectionTitle className="!mb-0 text-amber-900">🏆 Albo d'oro della lega</SectionTitle>
+        <span className="text-[11px] text-amber-700">
+          Stagione conclusa
+          {board.finished_at ? ` il ${new Date(board.finished_at).toLocaleDateString('it-IT')}` : ''}
+          {` · ${board.competitions_total} ${
+            board.competitions_total === 1 ? 'competizione' : 'competizioni'
+          }`}
+        </span>
+      </div>
+
+      {byCompetition.length ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {byCompetition.map((comp) => (
+            <div key={comp.name} className="rounded-xl border border-amber-200 bg-white/70 p-3">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
+                {comp.name}
+              </div>
+              <ul className="mt-1.5 space-y-1.5">
+                {comp.awards.map((a) => (
+                  <li key={a.prize_id} className="flex items-start gap-2">
+                    <span className="text-xl leading-none" aria-hidden>
+                      {a.icon}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-slate-900">{a.name}</span>
+                      <span className="block truncate text-[11px] text-slate-500">{a.condition_label}</span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                        {a.winners.map((w) => (
+                          <span key={w.team_id} className="flex items-center gap-1">
+                            <Crest descriptor={w.crest} teamName={w.name ?? ''} size={18} />
+                            <span
+                              className={clsx(
+                                'truncate text-xs',
+                                w.name && w.name === myTeamName
+                                  ? 'font-bold text-amber-900'
+                                  : 'text-slate-700',
+                              )}
+                            >
+                              {w.name}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      ) : (
+        // Finita senza trofei: nessuna competizione aveva premi dichiarati. Va
+        // detto, perché una bacheca vuota sotto "stagione conclusa" sembra un
+        // caricamento rimasto a metà.
+        <div className="mt-2 text-sm text-amber-800">
+          La stagione è finita, ma nessuna competizione aveva premi da assegnare.
+        </div>
+      )}
+    </Card>
+  );
+}
+
+const sectionFixtures = (s: CompetitionSection) => (s.rounds ?? []).flatMap((r) => r.fixtures);
+
+/** La competizione è ARRIVATA a questa fase?
+ *
+ *  La prova cambia col tipo, e non è un dettaglio: una fase a girone porta la
+ *  classifica e non i turni, una a eliminazione porta i turni e non la classifica
+ *  (il backend serve solo ciò che quella forma sa dire). Chiedere le partite a
+ *  tutte e due faceva risultare "non ancora cominciato" un campionato alla
+ *  trentaseiesima giornata. */
+const sectionDrawn = (s: CompetitionSection) =>
+  s.type === 'round_robin' ? (s.standings?.length ?? 0) > 0 : sectionFixtures(s).length > 0;
+
 /** One competition: how it stands, and the round being played. */
 function CompetitionBlock({
   competition,
@@ -729,12 +906,15 @@ function CompetitionBlock({
   fixtures,
   structure,
   myTeamName,
+  openMatchday,
 }: {
   competition: CompetitionItem;
   color: CompColor;
   fixtures: LeagueFixtureItem[];
   structure: CompetitionStructure | null;
   myTeamName: string | null;
+  /** La giornata cominciata e non ancora conclusa, se ce n'è una. */
+  openMatchday: number | null;
 }) {
   const round = useMemo(() => {
     const rounds = [...new Set(fixtures.map((f) => f.round_no))].sort((a, b) => a - b);
@@ -746,11 +926,79 @@ function CompetitionBlock({
 
   const shown = fixtures.filter((f) => f.round_no === round);
   const started = fixtures.some((f) => f.status === 'finished');
-  const tables = (structure?.sections ?? []).filter((s) => s.type === 'round_robin');
+
+  // QUESTA competizione, in questo momento. Il blocco raccontava soltanto la fase
+  // — la classifica, o il turno disegnato — e per tutta la giornata in corso
+  // restava identico a com'era il venerdì: la coppa che si stava giocando
+  // proprio adesso non compariva da nessuna parte, e l'unico posto dove i
+  // punteggi si muovevano era il pannello della propria partita.
+  const openFixtures = useMemo(
+    () =>
+      openMatchday == null
+        ? []
+        : fixtures.filter((f) => f.real_matchday === openMatchday && f.status !== 'finished'),
+    [fixtures, openMatchday],
+  );
+  // Si sta ancora giocando, o è tutto finito e manca solo il conteggio.
+  const openMoving = openFixtures.some((f) => f.score_provisional);
+
+  // DOVE LA COMPETIZIONE SI TROVA ADESSO, che non è la stessa cosa di "che forma
+  // ha". Questa card mostrava le classifiche ogni volta che ne esisteva una, e
+  // per una coppa a gironi quella condizione resta vera per sempre: a finale
+  // giocata continuava a mostrare i gironi di novembre, cioè l'unica parte del
+  // torneo che di sicuro non interessa più.
+  //
+  // Le fasi PARALLELE — i due gironi, che si giocano insieme — condividono
+  // l'ordine e restano un gruppo solo: durante i gironi si vogliono entrambe le
+  // classifiche, non l'ultima delle due.
+  const phases = useMemo(() => {
+    const sections = [...(structure?.sections ?? [])].sort((a, b) => a.order - b.order);
+    const groups: CompetitionSection[][] = [];
+    for (const s of sections) {
+      const last = groups[groups.length - 1];
+      if (last && last[0].order === s.order) last.push(s);
+      else groups.push([s]);
+    }
+    return groups;
+  }, [structure]);
+
+  // L'ultima fase SORTEGGIATA: una fase senza partite non è ancora cominciata e
+  // vive in `upcoming`, dove è dichiarata come da definire.
+  const current = useMemo(() => {
+    const drawn = phases.filter((g) => g.some(sectionDrawn));
+    return drawn[drawn.length - 1] ?? null;
+  }, [phases]);
+
+  // Le classifiche solo se la fase corrente è un girone: dopo, la classifica del
+  // girone è storia e la si legge dalla pagina della competizione.
+  const tables = current && current[0].type === 'round_robin' ? current : [];
+
+  // Il turno della fase corrente, quando è a eliminazione: l'ultimo disegnato.
+  const knockoutRound = useMemo(() => {
+    if (!current || current[0].type === 'round_robin') return null;
+    const rounds = current
+      .flatMap((s) => s.rounds ?? [])
+      .filter((r) => r.fixtures.length)
+      .sort((a, b) => a.round_no - b.round_no);
+    return rounds[rounds.length - 1] ?? null;
+  }, [current]);
+
+  // Il quadro d'insieme non ripete ciò che è già scritto sopra. Senza questo, la
+  // finale di coppa compariva due volte nella stessa card — una come "si gioca
+  // adesso" e una come turno della fase corrente, che in una coppa arrivata in
+  // fondo sono la stessa partita.
+  const upstairs = new Set(openFixtures.map((f) => f.fixture_id));
+  const knockoutPhase = (knockoutRound?.fixtures ?? []).filter((f) => !upstairs.has(f.fixture_id));
+  const shownPhase = shown.filter((f) => !upstairs.has(f.fixture_id));
+
   // What this competition still has to come but cannot name yet. Without it a cup
   // whose semifinals are in the books reads as over: the final has no fixtures, so
   // there was nothing on this card to say it exists.
   const upcoming = (competition.stage_plan ?? []).filter((s) => s.pending);
+
+  // Le due scorciatoie, con la competizione addosso: vedi useCompetitionFromQuery.
+  const calendarTo = `/matches?competition=${competition.competition_id}`;
+  const standingsTo = `/standings?competition=${competition.competition_id}`;
 
   return (
     <Card className={clsx('border-l-4 p-4', color.border600)}>
@@ -767,10 +1015,50 @@ function CompetitionBlock({
             {competitionFormatLabel(competition)}
           </span>
         </div>
-        <Link to="/matches" className="text-xs font-semibold text-slate-500 hover:text-slate-800">
+        {/* CON la competizione addosso. Senza, tutti e tre i blocchi portavano
+            all'ultima competizione guardata — cioè quasi sempre al campionato — e
+            il link sembrava sbagliato invece che privo di contesto. */}
+        <Link to={calendarTo} className="text-xs font-semibold text-slate-500 hover:text-slate-800">
           Calendario →
         </Link>
       </div>
+
+      {/* Quello che sta succedendo ADESSO, sopra a tutto: se questa competizione
+          gioca nella giornata aperta, le sue partite stanno qui col punteggio che
+          si muove. Sotto resta il quadro d'insieme — la classifica, o il turno
+          della fase — che è la domanda dell'altro momento della settimana. */}
+      {openFixtures.length ? (
+        <div
+          className={clsx(
+            'mt-3 rounded-xl border p-2',
+            openMoving ? 'border-violet-200 bg-violet-50/50' : 'border-emerald-200 bg-emerald-50/40',
+          )}
+        >
+          <div className="flex items-center gap-1.5">
+            {openMoving ? (
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-600" />
+            ) : null}
+            <span
+              className={clsx(
+                'text-[11px] font-bold uppercase tracking-wide',
+                openMoving ? 'text-violet-700' : 'text-emerald-700',
+              )}
+            >
+              Giornata {openMatchday} · {openMoving ? 'in corso' : 'da concludere'}
+            </span>
+          </div>
+          <div className="mt-1.5 space-y-1">
+            {openFixtures.slice(0, 5).map((f) => (
+              <MiniFixture key={f.fixture_id} f={f} />
+            ))}
+          </div>
+          <div className={clsx('mt-1 text-[11px]', openMoving ? 'text-violet-700/80' : 'text-emerald-700/80')}>
+            {openMoving
+              ? 'Punteggi provvisori: diventano definitivi quando la giornata viene conclusa.'
+              : 'Le partite sono finite: i punteggi si fissano con la conclusione della giornata.'}
+          </div>
+        </div>
+      ) : null}
 
       {/* A competition that has not started has nothing to report: a table of
           zeros is not a standing. */}
@@ -799,14 +1087,33 @@ function CompetitionBlock({
                       <span className="w-4 text-right text-xs text-slate-400">{row.rank}</span>
                       <Crest descriptor={row.crest} teamName={row.team} size={20} />
                       <span className="truncate">{row.team}</span>
+                      {/* Una partita ancora da finire dentro questi punti. Il
+                          pallino è sulla RIGA e non sulla tabella perché è vero
+                          di qualcuno e non di tutti: chi ha già giocato ha un
+                          numero fermo, e distinguerli è metà dell'informazione. */}
+                      {row.provisional ? (
+                        <span
+                          className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-violet-600"
+                          title="Partita in corso: questi punti possono ancora cambiare"
+                        />
+                      ) : null}
                     </span>
-                    <span className="tabular-nums">{row.points}</span>
+                    {/* G V N P accanto ai punti. Senza, due squadre a 41 sembrano
+                        pari mentre una ha una partita in meno — e appena la
+                        classifica conta anche il provvisorio quel caso non è più
+                        l'eccezione di metà settimana: è la domenica pomeriggio. */}
+                    <span className="flex shrink-0 items-baseline gap-2">
+                      <span className="hidden text-[11px] tabular-nums text-slate-400 sm:inline">
+                        {row.played}g · {row.wins}V {row.draws}N {row.losses}P
+                      </span>
+                      <span className="tabular-nums">{row.points}</span>
+                    </span>
                   </li>
                 ))}
               </ol>
               {(s.standings?.length ?? 0) > 5 ? (
                 <Link
-                  to="/standings"
+                  to={standingsTo}
                   className="mt-1 inline-block text-xs font-semibold text-slate-500 hover:text-slate-800"
                 >
                   Classifica completa →
@@ -815,20 +1122,21 @@ function CompetitionBlock({
             </div>
           ))}
         </div>
-      ) : shown.length ? (
-        <div className="mt-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            {new Set(shown.map((f) => f.stage_name)).size === 1
-              ? shown[0]?.round_label ?? `Turno ${round}`
-              : `Turno ${round}`}
-          </div>
-          <div className="mt-1.5 space-y-1">
-            {shown.slice(0, 4).map((f) => (
-              <MiniFixture key={f.fixture_id} f={f} />
-            ))}
-          </div>
-        </div>
-      ) : upcoming.length ? null : (
+      ) : knockoutPhase.length ? (
+        <PlayingNow
+          label={knockoutRound?.label || `Turno ${knockoutRound?.round_no ?? round}`}
+          fixtures={knockoutPhase}
+        />
+      ) : shownPhase.length ? (
+        <PlayingNow
+          label={
+            new Set(shownPhase.map((f) => f.stage_name)).size === 1
+              ? shownPhase[0]?.round_label ?? `Turno ${round}`
+              : `Turno ${round}`
+          }
+          fixtures={shownPhase}
+        />
+      ) : openFixtures.length || upcoming.length ? null : (
         <div className="mt-2 text-sm text-slate-500">Non è ancora cominciata.</div>
       )}
 
@@ -838,7 +1146,7 @@ function CompetitionBlock({
       {upcoming.map((s) => (
         <Link
           key={s.stage_id}
-          to="/matches"
+          to={calendarTo}
           className="mt-2 block rounded-xl border border-dashed border-slate-300 px-3 py-2 hover:border-slate-400"
         >
           <div className="flex items-baseline justify-between gap-2">
@@ -851,6 +1159,39 @@ function CompetitionBlock({
         </Link>
       ))}
     </Card>
+  );
+}
+
+/** Le partite di una fase, e — se non hanno ancora un risultato — PERCHÉ.
+ *
+ *  La riga in fondo esiste per una domanda che la card faceva nascere e non
+ *  sapeva chiudere: una finale disegnata, giocata sul campo vero, e nessun
+ *  punteggio accanto. Non è un guasto ed è il modello a due orologi in azione —
+ *  il calendario ha finito, il registro no — ma senza dirlo la card sembra
+ *  semplicemente rotta. Il numero della giornata è quello che l'admin deve
+ *  concludere, cioè l'azione che fa comparire i risultati.
+ */
+function PlayingNow({ label, fixtures }: { label: string; fixtures: LeagueFixtureItem[] }) {
+  const pending = fixtures.filter((f) => f.status !== 'finished');
+  const waiting = pending.filter((f) => f.phase === 'current' || f.phase === 'awaiting');
+  const matchday = waiting.map((f) => f.real_matchday).find((m) => typeof m === 'number');
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-1.5 space-y-1">
+        {fixtures.slice(0, 4).map((f) => (
+          <MiniFixture key={f.fixture_id} f={f} />
+        ))}
+      </div>
+      {waiting.length ? (
+        <div className="mt-1.5 text-xs text-slate-500">
+          {waiting.length === pending.length && pending.length === 1
+            ? 'Giocata: il risultato arriva con la conclusione'
+            : 'I risultati arrivano con la conclusione'}
+          {typeof matchday === 'number' ? ` della giornata ${matchday}` : ''}.
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -917,7 +1258,19 @@ function MiniFixture({
    *  whether a result was from yesterday or from November. */
   when?: boolean;
 }) {
+  // Il punteggio c'è anche mentre si gioca (il server lo calcola per tutta la
+  // giornata aperta, non solo per la tua partita) e questa riga lo buttava via:
+  // chiedeva `status === 'finished'`, che diventa vero solo alla CONCLUSIONE, e
+  // così per tutta la domenica ogni blocco diceva "vs" mentre il tabellino
+  // dietro mostrava 68-72. Ora si mostra, e si dice che è provvisorio.
   const finished = f.status === 'finished' && f.score;
+  // Non conclusa ma un punteggio ce l'ha. `score_provisional` distingue i due
+  // modi di esserlo, e non è pignoleria: a metà partita il numero cambierà
+  // ancora, a partite vere finite non cambierà più e manca solo il clic
+  // dell'admin. Dirli allo stesso modo renderebbe sospetto un risultato che è
+  // ormai fermo.
+  const pending = !finished && f.score;
+  const moving = pending && f.score_provisional;
   const row = (
     <div
       className={`rounded-lg px-2 py-1 ${f.is_user_involved ? 'bg-slate-100 font-semibold' : ''}`}
@@ -946,14 +1299,47 @@ function MiniFixture({
           <span className="truncate">{f.home_team.name}</span>
           <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={18} />
         </span>
-        <span className="shrink-0 tabular-nums text-slate-500">
-          {finished ? `${Math.round(f.score!.home_total)}–${Math.round(f.score!.away_total)}` : 'vs'}
+        <span
+          className={clsx(
+            'shrink-0 tabular-nums',
+            moving ? 'font-bold text-violet-700' : pending ? 'font-semibold text-slate-600' : 'text-slate-500',
+          )}
+          title={
+            moving
+              ? 'Punteggio provvisorio: si sta ancora giocando'
+              : pending
+                ? 'In attesa della conclusione della giornata'
+                : undefined
+          }
+        >
+          {finished || pending
+            ? `${Math.round(f.score!.home_total)}–${Math.round(f.score!.away_total)}`
+            : 'vs'}
         </span>
         <span className="flex flex-1 items-center gap-1.5 truncate">
           <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={18} />
           <span className="truncate">{f.away_team.name}</span>
         </span>
       </div>
+      {/* Chi è passato, e per quale gradino della catena — SOLO quello che ha
+          deciso questa sfida. Su un 1-1 la home mostrava il risultato e basta:
+          la coppa risultava assegnata e la card non diceva a chi né perché. */}
+      {f.advanced_team_id && f.advanced_reason ? (
+        <div className="mt-0.5 text-[10px] leading-snug text-slate-500">
+          passa {f.advanced_team_id === f.home_team.team_id ? f.home_team.name : f.away_team.name}
+          {f.advanced_reason === 'punteggio'
+            ? `: gol pari, punteggio più alto${
+                f.totals ? ` ${f.totals.home.toFixed(1)}–${f.totals.away.toFixed(1)}` : ''
+              }`
+            : f.advanced_reason === 'rigori'
+              ? `: gol e punteggi pari, ai rigori${
+                  f.shootout ? ` ${f.shootout.home_goals}-${f.shootout.away_goals}` : ''
+                }`
+              : f.advanced_reason === 'fattore campo'
+                ? ': tutto pari, era in casa nell’ultima gara'
+                : ''}
+        </div>
+      ) : null}
     </div>
   );
   return f.has_detail ? (

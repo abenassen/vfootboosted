@@ -37,6 +37,7 @@ from vfoot.api.league_views import (
     CompetitionResolveDependenciesView,
     LeagueDetailView,
     LeagueActivityView,
+    LeagueHonoursView,
     ManagerHonoursView,
     ManagerProfileView,
     LeagueMyTeamView,
@@ -128,6 +129,9 @@ urlpatterns = [
     path("leagues/<int:league_id>", LeagueDetailView.as_view(), name="league-detail"),
     path("leagues/<int:league_id>/team", LeagueMyTeamView.as_view(), name="league-my-team"),
     path("leagues/<int:league_id>/activity", LeagueActivityView.as_view(), name="league-activity"),
+    # L'albo d'oro DI QUESTA LEGA (quello del fantallenatore sta sotto
+    # /managers, perche' attraversa le leghe e non appartiene a nessuna).
+    path("leagues/<int:league_id>/honours", LeagueHonoursView.as_view(), name="league-honours"),
     # Not under a league: an albo d'oro belongs to the manager and spans every
     # league he has played in. Same for the profile card that carries it — see
     # _visible_leagues for who may read whose.

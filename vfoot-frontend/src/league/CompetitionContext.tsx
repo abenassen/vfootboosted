@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { getCompetitions } from '../api';
 import type { CompetitionItem } from '../types/league';
 import { useLeagueContext } from './LeagueContext';
@@ -86,4 +87,40 @@ export function useCompetitionContext() {
   const ctx = useContext(CompetitionContext);
   if (!ctx) throw new Error('useCompetitionContext must be used within CompetitionProvider');
   return ctx;
+}
+
+/** Lascia che un LINK scelga la competizione, con `?competition=<id>`.
+ *
+ *  Le pagine del menu (Partite, Classifica) mostrano la competizione SELEZIONATA,
+ *  e finché quella si cambiava solo dallo switcher ogni scorciatoia che ci
+ *  arrivava mostrava l'ultima guardata: da tre blocchi diversi della home si
+ *  finiva tutti e tre sullo stesso calendario, quello del campionato, e il link
+ *  sembrava rotto quando invece era la pagina a non sapere da dove si veniva.
+ *
+ *  Nell'URL e non in un `onClick`, perché un indirizzo deve portare dove dice:
+ *  ricaricare la pagina, aprirla in una scheda nuova o mandarla a un altro
+ *  fantallenatore deve mostrare la stessa cosa. È anche la convenzione che la
+ *  formazione usa già (`/squad/formation?competition=…`).
+ *
+ *  Il parametro si CONSUMA: la selezione ormai è nel contesto e vale anche per le
+ *  altre pagine, e lasciarlo nell'indirizzo avrebbe reso lo switcher inefficace
+ *  finché non si cambiava pagina — si sceglieva un'altra competizione e questo
+ *  effetto la riportava indietro.
+ */
+export function useCompetitionFromQuery() {
+  const { selectedCompetitionId, setSelectedCompetitionId, competitions } = useCompetitionContext();
+  const [params, setParams] = useSearchParams();
+  const wanted = Number(params.get('competition'));
+
+  useEffect(() => {
+    if (!Number.isFinite(wanted) || !wanted) return;
+    // Solo quando è una competizione DI QUESTA lega: le competizioni arrivano
+    // dopo il primo render, e agire prima avrebbe selezionato un id che il
+    // contesto avrebbe poi scartato, lasciando la pagina vuota.
+    if (!competitions.some((c) => c.competition_id === wanted)) return;
+    if (wanted !== selectedCompetitionId) setSelectedCompetitionId(wanted);
+    const next = new URLSearchParams(params);
+    next.delete('competition');
+    setParams(next, { replace: true });
+  }, [wanted, competitions, selectedCompetitionId, setSelectedCompetitionId, params, setParams]);
 }

@@ -115,7 +115,7 @@ export default function NotificationsCard() {
                 : /* Not a feature list: what we notify about will grow, and copy
                      that enumerates today's features ages badly. */
                   push.subscribed
-                  ? 'Ti avviseremo di quello che succede nella tua lega e ti riguarda.'
+                  ? 'Ti avviseremo di quello che succede nella tua lega e che ti riguarda.'
                   : 'Solo quello che ti riguarda: niente avvisi inutili.'}
             </span>
           </div>

@@ -652,6 +652,11 @@ export interface LeagueFixtureItem {
   home_team: { team_id: number; name: string; crest?: string | null };
   away_team: { team_id: number; name: string; crest?: string | null };
   score: { home_total: number; away_total: number } | null;
+  /** I PUNTEGGI delle due formazioni — la somma dei fantavoto — che non sono i
+   *  gol: sono il primo spareggio di un turno secco, quindi il numero che decide
+   *  chi passa quando una sfida finisce in parità. Assente finché non c'è un
+   *  tabellino. */
+  totals?: { home: number; away: number } | null;
   /** The score above is a PARTIAL one: the round has begun, nobody has counted it,
    *  and some real match behind it has not settled. Distinguishes "0-0 because it
    *  has not started" from "0-0 at the twentieth minute" — the same two numbers. */
@@ -761,4 +766,7 @@ export interface LeagueStandingRow {
   goal_diff: number;
   points: number;
   avg_score_for: number;
+  /** Questa riga conta una partita ancora da finire: i punti possono cambiare
+   *  prima che la giornata venga conclusa. */
+  provisional?: boolean;
 }

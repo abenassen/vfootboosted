@@ -20,6 +20,10 @@ export interface StandingRowVM {
   points: number;
   avgScore?: number;
   highlight?: boolean;
+  /** Dentro questi numeri c'è una partita ancora da finire. Non è una proprietà
+   *  della tabella ma della RIGA: nella stessa classifica chi ha già giocato ha
+   *  un numero fermo e chi è in campo no, e sono due cose diverse da leggere. */
+  provisional?: boolean;
 }
 
 export function StandingsTable({
@@ -87,14 +91,16 @@ export function StandingsTable({
                 </span>
               </td>
               <td className="pr-2 font-semibold text-slate-900">
-                {showCrest ? (
-                  <span className="flex items-center gap-2">
-                    <Crest descriptor={s.crest} teamName={s.name} size={22} />
-                    <span className="truncate">{s.name}</span>
-                  </span>
-                ) : (
-                  s.name
-                )}
+                <span className="flex items-center gap-2">
+                  {showCrest ? <Crest descriptor={s.crest} teamName={s.name} size={22} /> : null}
+                  <span className="truncate">{s.name}</span>
+                  {s.provisional ? (
+                    <span
+                      className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-violet-600"
+                      title="Partita in corso: questi numeri possono ancora cambiare"
+                    />
+                  ) : null}
+                </span>
               </td>
               <td className="px-1 text-center text-slate-600">{s.played}</td>
               <td className="px-1 text-center text-slate-600">{s.wins}</td>

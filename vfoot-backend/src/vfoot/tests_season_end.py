@@ -31,6 +31,7 @@ from rest_framework.test import APIClient
 
 from realdata.models import Competition, CompetitionSeason, Match, Season, Team, TeamSeason
 from vfoot.models import (
+    AwardedPrize,
     CompetitionPrize,
     CompetitionStage,
     FantasyCompetition,
@@ -40,6 +41,7 @@ from vfoot.models import (
     FantasyTeam,
     LeagueMembership,
 )
+from vfoot.api import league_views
 from vfoot.services import honours
 from vfoot.services.competition_prizes import prize_winner_team_ids
 
@@ -449,6 +451,72 @@ class SeasonEndTests(TestCase):
                       .first().concluded_at)
         self.assertEqual(scudetto["at"], last_round.isoformat())
 
+    def test_un_premio_e_una_notizia_in_evidenza_e_sta_in_cima(self):
+        """Il flag lo accende il premio da sé, e la precedenza si vede nell'ordine.
+
+        Non basta che il campo esista: quello che si è chiesto è che la notizia
+        SALGA. Qui il premio è datato come la giornata che l'ha deciso — quindi a
+        pari data con la conclusione — e deve comunque uscire prima.
+        """
+        self._championship()
+        self._play_the_season()
+        feed = self.client.get(f"/api/v1/leagues/{self.league.id}/activity?limit=50").json()
+
+        premi = [i for i in feed if i["kind"] == "premio"]
+        self.assertTrue(premi, "la stagione ha assegnato qualcosa")
+        self.assertTrue(all(i["important"] for i in premi), "un premio è importante da sé")
+        self.assertTrue(all(i["pinned"] for i in premi), "ed è fresco, quindi in evidenza")
+        self.assertFalse(any(i["important"] for i in feed if i["kind"] == "giornata"),
+                         "una giornata conclusa è cronaca, non un annuncio")
+        self.assertEqual([i["kind"] for i in feed[:len(premi)]], ["premio"] * len(premi),
+                         "le notizie in evidenza aprono il blocco")
+
+    def test_l_evidenza_scade_da_sola(self):
+        """Passati i giorni, la notizia torna al suo posto nella cronologia.
+
+        La prova è sull'ordine, non sul campo: una precedenza che non scade
+        trasforma la notizia in arredamento, e il blocco news smette di
+        raccontare la lega.
+        """
+        self._championship()
+        self._play_the_season()
+        vecchio = timezone.now() - timedelta(days=league_views.NEWS_PIN_DAYS + 1)
+        AwardedPrize.objects.all().update(awarded_at=vecchio)
+        FantasyMatchday.objects.filter(league=self.league).update(concluded_at=vecchio)
+
+        feed = self.client.get(f"/api/v1/leagues/{self.league.id}/activity?limit=50").json()
+        premi = [i for i in feed if i["kind"] == "premio"]
+        self.assertTrue(premi)
+        self.assertTrue(all(i["important"] for i in premi), "resta importante")
+        self.assertFalse(any(i["pinned"] for i in premi), "ma non più in evidenza")
+
+    def test_l_albo_della_lega_dice_quando_non_c_e_piu_niente_da_giocare(self):
+        """``is_over`` non è "l'ultima giornata è stata conclusa" ma "ogni
+        competizione è chiusa": un campionato può finire settimane prima della
+        coppa che gli corre accanto, e la bacheca di fine lega non deve aprirsi
+        mentre c'è ancora una finale da giocare."""
+        self._championship()
+        self._cup()
+        url = f"/api/v1/leagues/{self.league.id}/honours"
+
+        board = self.client.get(url).json()
+        self.assertFalse(board["is_over"], "non si è ancora giocato niente")
+        self.assertEqual(board["awards"], [])
+
+        self._conclude_next()                      # la prima giornata soltanto
+        self.assertFalse(self.client.get(url).json()["is_over"])
+
+        self._play_the_season()
+        board = self.client.get(url).json()
+        self.assertTrue(board["is_over"])
+        self.assertEqual(board["competitions_finished"], board["competitions_total"])
+        self.assertIsNotNone(board["finished_at"])
+        premi = {a["name"]: [w["name"] for w in a["winners"]] for a in board["awards"]}
+        self.assertEqual(premi["Scudetto"], ["Alpha"])
+        self.assertEqual(premi["Coppa"], ["Alpha"])
+        # Ogni premio sa da quale competizione viene: la bacheca li raggruppa così.
+        self.assertEqual({a["competition_name"] for a in board["awards"]}, {"Campionato", "Coppa"})
+
     def test_an_undecided_prize_is_not_news(self):
         self._championship()
         self._conclude_next()
@@ -534,6 +602,49 @@ class SeasonEndTests(TestCase):
         self.assertNotIn(self._names([7])[0],
                          self._prize(comp, "Attacco spuntato")["winner_team_names"])
         self.assertEqual(self._prize(comp, "Bomber")["winner_team_names"], self._names([7]))
+
+    def test_riaprire_l_ultima_giornata_ritira_il_trofeo(self):
+        """Il verso opposto della conclusione, e quello che marcisce in silenzio.
+
+        Una simulazione che torna indietro (o una conclusione annullata) rimette
+        da giocare la partita che decideva tutto. Se la competizione restasse
+        ``done`` col suo trofeo in bacheca, la lega direbbe due cose incompatibili
+        — campionato vinto e ultima giornata da contare — e la conclusione vera,
+        quando arrivasse, non annuncerebbe piu' niente: per la banca dati non ci
+        sarebbe piu' niente da chiudere.
+        """
+        comp = self._championship()
+        self._play_the_season()
+        self.assertEqual(self._prize(comp, "Scudetto")["winner_team_names"], ["Alpha"])
+
+        ultima = FantasyFixture.objects.filter(competition=comp).order_by("-round_no").first()
+        ultima.status = FantasyFixture.STATUS_SCHEDULED
+        ultima.save(update_fields=["status"])
+
+        riaperte = honours.reopen_incomplete(self.league)
+        self.assertEqual([c["competition"].id for c in riaperte], [comp.id])
+        self.assertTrue(riaperte[0]["removed"], "dice quali trofei ha ritirato")
+
+        comp.refresh_from_db()
+        self.assertEqual(comp.status, FantasyCompetition.STATUS_ACTIVE)
+        self.assertIsNone(comp.completed_at)
+        self.assertEqual(self._prize(comp, "Scudetto")["winner_team_ids"], [])
+
+        # E rigiocandola si riassegna: la riapertura toglie un fatto, non la regola.
+        ultima.status = FantasyFixture.STATUS_FINISHED
+        ultima.save(update_fields=["status"])
+        honours.review_league(self.league)
+        self.assertEqual(self._prize(comp, "Scudetto")["winner_team_names"], ["Alpha"])
+
+    def test_una_competizione_ancora_in_corso_non_viene_toccata(self):
+        """``reopen_incomplete`` guarda TUTTE le competizioni della lega, e la
+        maggior parte non ha niente da riaprire: non essere finita non è la stessa
+        cosa che essere stata disfatta, e una coppa a meta' tabellone non deve
+        comparire nell'elenco di cio' che e' cambiato."""
+        self._championship()
+        self._cup()
+        self._conclude_next()                     # una giornata sola
+        self.assertEqual(honours.reopen_incomplete(self.league), [])
 
     def _give_goals_to_the_last_team(self, comp):
         """All'ultima squadra viene accreditata una valanga di gol mai segnati."""

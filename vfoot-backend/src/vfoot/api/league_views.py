@@ -12,6 +12,7 @@ from django.db.models import Count, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
@@ -123,7 +124,7 @@ from vfoot.services.player_ratings import (
 )
 from vfoot.services.match_resolver import matchday_fixtures_by_team
 from vfoot.services import (
-    honours, knockout, lineup_deadline, lineup_repair, matchday_state,
+    currency, honours, knockout, lineup_deadline, lineup_repair, matchday_state,
 )
 
 log = logging.getLogger(__name__)
@@ -430,8 +431,16 @@ def _real_signings(league, limit: int) -> list[dict]:
     return out
 
 
+# Per quanti giorni una notizia importante tiene la cima del blocco. Cinque: un
+# fine settimana e i giorni intorno, cioè il tempo che passa fra due aperture
+# dell'app di chi non la guarda tutti i giorni. Più a lungo e la notizia diventa
+# lo sfondo su cui si smette di posare gli occhi.
+NEWS_PIN_DAYS = 5
+
+
 class LeagueActivityView(APIView):
-    """What has happened in the league lately, newest first.
+    """What has happened in the league lately, newest first — salvo ciò che è IN
+    EVIDENZA, che sta in cima finché è fresco (v. NEWS_PIN_DAYS).
 
     Merged from the records that already exist rather than from a new event table:
     a roster slot knows when it was acquired, a decision when it was settled, a
@@ -458,7 +467,7 @@ class LeagueActivityView(APIView):
                 "kind": "acquisto",
                 "at": slot.acquired_at.isoformat() if slot.acquired_at else None,
                 "text": f"{slot.player.short_name or slot.player.full_name} → {slot.team.name}",
-                "detail": f"{slot.purchase_price} crediti" if slot.purchase_price else None,
+                "detail": currency.amount(slot.purchase_price) if slot.purchase_price else None,
                 "team_id": slot.team_id,
                 "crest": slot.team.crest,
             })
@@ -524,10 +533,75 @@ class LeagueActivityView(APIView):
                 "crest": winners[0]["crest"] if len(winners) == 1 else None,
             })
 
+        # IN EVIDENZA, ma non per sempre. Una notizia importante che restasse in
+        # cima finché non la si archivia diventa arredamento: la si smette di
+        # leggere dopo il secondo giorno e da lì in poi occupa il posto delle
+        # notizie vere. Quindi la precedenza SCADE, ed è la data della notizia a
+        # farla scadere — non una lettura, che nessuno registra.
+        #
+        # Il flag è per notizia e non per tipo, così un giorno lo si potrà
+        # accendere a mano su una qualsiasi; oggi lo accende da sé solo un premio,
+        # che è l'unica cosa che questa lega produce e che si aspetta davvero.
+        now = timezone.now()
+        for item in items:
+            item.setdefault("important", item["kind"] == "premio")
+            at = parse_datetime(item["at"]) if item["at"] else None
+            item["pinned"] = bool(
+                item["important"] and at is not None
+                and (now - at) <= timedelta(days=NEWS_PIN_DAYS)
+            )
+
         # Undated rows (older data, or a field never filled) sink rather than
         # jumping to the top of a feed sorted by a missing value.
-        items.sort(key=lambda i: i["at"] or "", reverse=True)
+        items.sort(key=lambda i: (i["pinned"], i["at"] or ""), reverse=True)
         return Response(items[:limit])
+
+
+class LeagueHonoursView(APIView):
+    """L'albo d'oro DELLA LEGA, e se la lega è finita.
+
+    Diverso da quello del fantallenatore, che attraversa le leghe: qui la domanda
+    è "come è andata questa stagione, in questa lega", e la risposta ha senso di
+    esistere tutta insieme solo quando non c'è più niente da giocare.
+
+    ``is_over`` è la condizione che vale la pena spiegare: non "l'ultima giornata
+    è stata conclusa" — un campionato può finire settimane prima di una coppa che
+    gli corre accanto — ma OGNI competizione della lega è chiusa. È la stessa
+    bandiera che scrive ``honours.complete_competition``, quindi non può dire di
+    sì mentre un tabellone ha ancora una finale da giocare.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+
+        total = league.competitions.count()
+        board = honours.league_honours(league)
+        finished = board["finished"]
+        ends = [row["at"] for row in finished if row["at"]]
+        return Response({
+            "is_over": bool(total and len(finished) == total),
+            "competitions_total": total,
+            "competitions_finished": len(finished),
+            # Quando è finita l'ULTIMA: la data della fine della lega.
+            "finished_at": max(ends).isoformat() if ends else None,
+            "awards": [{
+                "prize_id": a["prize"].id,
+                "name": a["prize"].name,
+                "icon": a["prize"].icon or "🏆",
+                "condition_label": describe_condition(a["prize"]),
+                "competition_id": a["competition"].id,
+                "competition_name": a["competition"].name,
+                "competition_format": a["competition"].format,
+                # Identità CONGELATA all'assegnazione, come ovunque nell'albo:
+                # ribattezzare la squadra non riscrive le coppe già vinte.
+                "winners": a["winners"],
+                "at": a["at"].isoformat() if a["at"] else None,
+            } for a in board["awards"]],
+        })
 
 
 def _visible_leagues(viewer, manager) -> list[int] | None:
@@ -2437,6 +2511,14 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         # status, because "0-0 because it has not started" and "0-0 at the
         # twentieth minute" are the same two numbers.
         "score_provisional": bool(live and live["provisional"]) if not played else False,
+        # I PUNTEGGI, che non sono i gol: la somma dei fantavoto delle due
+        # formazioni. Servono perché sono il primo spareggio di un turno secco
+        # (v. services/knockout) e quindi il NUMERO che decide chi passa quando
+        # una finale finisce in parità — dirlo senza mostrarlo lasciava «passa ai
+        # punteggi» come un verdetto senza prova. Solo dove il tabellino c'è: una
+        # lega aura non li ha, e lì lo spareggio scende al gradino dopo.
+        "totals": ({"home": detail.vfoot_home, "away": detail.vfoot_away}
+                   if (detail := getattr(fx, "detail", None)) is not None else None),
         "is_user_involved": mine,
         # Whether a lineup can be set for THIS fixture, decided here rather than in
         # the UI: it also depends on the roster, which the calendar does not load.
@@ -2469,7 +2551,13 @@ class LeagueFixturesView(APIView):
 
         qs = (
             FantasyFixture.objects.filter(competition__league=league)
-            .select_related("competition", "stage", "fantasy_matchday", "home_team", "away_team")
+            # `detail` INCLUSO: la riga porta i punteggi di squadra, e senza
+            # caricarlo qui ognuna delle duecento righe del calendario se lo
+            # sarebbe andato a prendere da sola. `payload` resta fuori — sono due
+            # numeri, non il referto di venticinque giocatori.
+            .select_related("competition", "stage", "fantasy_matchday", "home_team",
+                            "away_team", "detail")
+            .defer("detail__payload")
             .order_by("-kickoff", "-id")
         )
         competition_id = request.query_params.get("competition_id")
@@ -4168,30 +4256,52 @@ class AuctionCloseSessionView(APIView):
         return Response({"auction_id": session.id, "status": session.status})
 
 
-def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:
-    """Ranked standings from a list of FINISHED fixtures (with .detail prefetched)."""
+def _compute_standings(fixtures, pw: int, pd: int, pl: int,
+                       live_totals: dict | None = None) -> list[dict]:
+    """Ranked standings (fixtures with .detail prefetched).
+
+    LE PARTITE IN CORSO CONTANO, quando ``live_totals`` le porta. Una classifica
+    che si fermava all'ultima giornata conclusa dava, per tutta la domenica, la
+    risposta sbagliata alla sola domanda che le si fa in quel momento — "come sta
+    andando" — e la dava accanto a un calendario che i punteggi provvisori li
+    mostrava già: due risposte alla stessa domanda, e nessuna delle due marcata.
+    Le righe toccate escono con ``provisional`` acceso, perché "sesto a 41" e
+    "sesto a 41 con una partita da finire" non sono la stessa frase.
+
+    Senza ``live_totals`` il conto è quello di prima, sulle sole partite chiuse:
+    è ciò che serve a chi la classifica la vuole definitiva (un premio, un
+    verdetto), e resta il comportamento predefinito.
+    """
     rows: dict[int, dict] = {}
     names: dict[int, str] = {}
     crests: dict[int, str] = {}
 
     def row(team_id: int) -> dict:
         return rows.setdefault(
-            team_id, {"pts": 0, "played": 0, "w": 0, "d": 0, "l": 0, "gf": 0.0, "ga": 0.0, "score_sum": 0.0}
+            team_id, {"pts": 0, "played": 0, "w": 0, "d": 0, "l": 0, "gf": 0.0, "ga": 0.0,
+                      "score_sum": 0.0, "scored": 0, "live": False}
         )
 
     for fx in fixtures:
+        played = fx.status == FantasyFixture.STATUS_FINISHED
+        live = None if played else (live_totals or {}).get(fx.id)
+        if not played and live is None:
+            continue
+        hs, as_ = ((fx.home_total, fx.away_total) if played
+                   else (live["home_total"], live["away_total"]))
         names[fx.home_team_id] = fx.home_team.name
         names[fx.away_team_id] = fx.away_team.name
         crests[fx.home_team_id] = fx.home_team.crest
         crests[fx.away_team_id] = fx.away_team.crest
         h, a = row(fx.home_team_id), row(fx.away_team_id)
-        hs, as_ = fx.home_total, fx.away_total
         h["played"] += 1
         a["played"] += 1
         h["gf"] += hs
         h["ga"] += as_
         a["gf"] += as_
         a["ga"] += hs
+        if not played:
+            h["live"] = a["live"] = True
         if hs > as_:
             h["pts"] += pw; a["pts"] += pl; h["w"] += 1; a["l"] += 1
         elif hs < as_:
@@ -4202,6 +4312,8 @@ def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:
         if detail is not None:
             h["score_sum"] += detail.vfoot_home
             a["score_sum"] += detail.vfoot_away
+            h["scored"] += 1
+            a["scored"] += 1
 
     ranked = sorted(rows.items(), key=lambda kv: (kv[1]["pts"], kv[1]["gf"] - kv[1]["ga"], kv[1]["gf"]), reverse=True)
     return [
@@ -4211,7 +4323,12 @@ def _compute_standings(fixtures, pw: int, pd: int, pl: int) -> list[dict]:
             "played": r["played"], "wins": r["w"], "draws": r["d"], "losses": r["l"],
             "goals_for": int(r["gf"]), "goals_against": int(r["ga"]),
             "goal_diff": int(r["gf"] - r["ga"]), "points": r["pts"],
-            "avg_score_for": round(r["score_sum"] / r["played"], 3) if r["played"] else 0.0,
+            # La media sulle partite che un tabellino ce l'hanno: una in corso non
+            # ne ha ancora uno, e dividerla per le giocate abbassava la media di
+            # tutti appena cominciava la giornata.
+            "avg_score_for": round(r["score_sum"] / r["scored"], 3) if r["scored"] else 0.0,
+            # Questa riga contiene una partita ancora da finire.
+            "provisional": r["live"],
         }
         for i, (tid, r) in enumerate(ranked)
     ]
@@ -4260,7 +4377,7 @@ def _highlighted_ranks(stage) -> tuple[list[int], list[int]]:
 
 
 def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, pl,
-             stage=None, awaiting_mds=None, locked_mds=None) -> dict:
+             stage=None, awaiting_mds=None, locked_mds=None, live_totals=None) -> dict:
     """One results section: a standings table (round-robin) or a bracket (knockout)."""
     fixtures = list(fixtures)
     prize_ranks, qualify_ranks = _highlighted_ranks(stage)
@@ -4282,7 +4399,7 @@ def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, 
             rows = []
             for f in fs:
                 row = _serialize_fixture_row(f, my_team_id, current_md, False,
-                                             awaiting_mds, locked_mds)
+                                             awaiting_mds, locked_mds, live_totals)
                 winner = next((tid for tid in (f.home_team_id, f.away_team_id)
                                if tid in passed), None)
                 row["advanced_team_id"] = winner
@@ -4304,8 +4421,10 @@ def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, 
             })
         base["rounds"] = rounds
     else:
-        finished = [f for f in fixtures if f.status == FantasyFixture.STATUS_FINISHED]
-        standings = _compute_standings(finished, pw, pd, pl)
+        # Tutte le partite, non solo le finite: quelle in corso entrano in
+        # classifica se ``live_totals`` ha un punteggio per loro (vedi
+        # _compute_standings), e senza cambiano niente.
+        standings = _compute_standings(fixtures, pw, pd, pl, live_totals)
         # Before the first match there are no finished fixtures, so the table came
         # back empty and a group showed its name over nothing — for a group stage
         # that reads as "the draw failed", when in fact nobody has played yet.
@@ -4321,7 +4440,7 @@ def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, 
                     "rank": i + 1, "team_id": tid, "team": name, "crest": crest,
                     "played": 0, "wins": 0, "draws": 0, "losses": 0,
                     "goals_for": 0, "goals_against": 0, "goal_diff": 0, "points": 0,
-                    "avg_score_for": 0.0,
+                    "avg_score_for": 0.0, "provisional": False,
                 }
                 # Alphabetical: with everyone on zero any other order would suggest
                 # a ranking that does not exist yet.
@@ -4360,19 +4479,27 @@ class CompetitionStructureView(APIView):
         awaiting_mds = {md.real_matchday for md in matchday_state.awaiting_matchdays(league)}
         locked_mds = (matchday_state.locked_matchdays(league.reference_season_id)
                       if league.reference_season_id else set())
+        # I punteggi provvisori della competizione, in un colpo solo: `_live_totals`
+        # tiene un solo scorer per giornata, e chiederli fase per fase avrebbe
+        # rifatto quel lavoro per ogni girone.
+        live_totals = _live_totals(
+            league, list(comp.fixtures.select_related("fantasy_matchday")), locked_mds)
+
         stages = list(comp.stages.order_by("order_index", "id"))
         if stages:
             sections = [
                 _section(s.name, s.stage_type, s.order_index,
                          s.fixtures.select_related(*rel).defer(*defer), my_team_id, current_md, pw, pd, pl,
-                         stage=s, awaiting_mds=awaiting_mds, locked_mds=locked_mds)
+                         stage=s, awaiting_mds=awaiting_mds, locked_mds=locked_mds,
+                         live_totals=live_totals)
                 for s in stages
             ]
         else:
             sections = [
                 _section(comp.name, comp.competition_type, 1,
                          comp.fixtures.select_related(*rel).defer(*defer), my_team_id, current_md, pw, pd, pl,
-                         awaiting_mds=awaiting_mds, locked_mds=locked_mds)
+                         awaiting_mds=awaiting_mds, locked_mds=locked_mds,
+                         live_totals=live_totals)
             ]
         return Response({
             "competition_id": comp.id, "name": comp.name,
@@ -4400,83 +4527,23 @@ class LeagueStandingsView(APIView):
             comp = main_competition(league)
         pw, pd, pl = (comp.points_win, comp.points_draw, comp.points_loss) if comp else (3, 1, 0)
 
-        fixtures = (
-            FantasyFixture.objects.filter(status=FantasyFixture.STATUS_FINISHED)
-            .filter(competition=comp if comp else None)
-            .select_related("home_team", "away_team", "detail")
+        # LA STESSA FUNZIONE della vista struttura, non una seconda copia. Erano
+        # due conti identici scritti a mano in due punti, con un commento che
+        # chiedeva di cambiarli insieme: la prima colonna aggiunta a uno solo dei
+        # due sarebbe stata il bug che quel commento temeva, e i punteggi
+        # provvisori sarebbero stati esattamente quella colonna.
+        fixtures = list(
+            FantasyFixture.objects
+            .filter(competition=comp)
+            .select_related("fantasy_matchday", "home_team", "away_team", "detail")
             # Stessa ragione della vista struttura: della `detail` servono due
             # numeri, non il referto intero.
             .defer("detail__payload")
-        ) if comp else FantasyFixture.objects.none()
-        rows: dict[int, dict] = {}
-        names: dict[int, str] = {}
-        # NOTE: this whole block duplicates _compute_standings() above, crest map
-        # included. Adding a column to one and not the other is exactly the bug
-        # this comment exists to prevent — change both, or merge them.
-        crests: dict[int, str] = {}
-
-        def row(team_id: int) -> dict:
-            return rows.setdefault(
-                team_id,
-                {"pts": 0, "played": 0, "w": 0, "d": 0, "l": 0, "gf": 0.0, "ga": 0.0, "score_sum": 0.0},
-            )
-
-        for fx in fixtures:
-            names[fx.home_team_id] = fx.home_team.name
-            names[fx.away_team_id] = fx.away_team.name
-            crests[fx.home_team_id] = fx.home_team.crest
-            crests[fx.away_team_id] = fx.away_team.crest
-            h, a = row(fx.home_team_id), row(fx.away_team_id)
-            hs, as_ = fx.home_total, fx.away_total
-            h["played"] += 1
-            a["played"] += 1
-            h["gf"] += hs
-            h["ga"] += as_
-            a["gf"] += as_
-            a["ga"] += hs
-            if hs > as_:
-                h["pts"] += pw
-                a["pts"] += pl
-                h["w"] += 1
-                a["l"] += 1
-            elif hs < as_:
-                a["pts"] += pw
-                h["pts"] += pl
-                a["w"] += 1
-                h["l"] += 1
-            else:
-                h["pts"] += pd
-                a["pts"] += pd
-                h["d"] += 1
-                a["d"] += 1
-            detail = getattr(fx, "detail", None)
-            if detail is not None:
-                h["score_sum"] += detail.vfoot_home
-                a["score_sum"] += detail.vfoot_away
-
-        ranked = sorted(
-            rows.items(),
-            key=lambda kv: (kv[1]["pts"], kv[1]["gf"] - kv[1]["ga"], kv[1]["gf"]),
-            reverse=True,
-        )
-        standings = [
-            {
-                "rank": i + 1,
-                "team_id": tid,
-                "team": names.get(tid, str(tid)),
-                "crest": crests.get(tid, ""),
-                "played": r["played"],
-                "wins": r["w"],
-                "draws": r["d"],
-                "losses": r["l"],
-                "goals_for": int(r["gf"]),
-                "goals_against": int(r["ga"]),
-                "goal_diff": int(r["gf"] - r["ga"]),
-                "points": r["pts"],
-                "avg_score_for": round(r["score_sum"] / r["played"], 3) if r["played"] else 0.0,
-            }
-            for i, (tid, r) in enumerate(ranked)
-        ]
+        ) if comp else []
+        locked_mds = (matchday_state.locked_matchdays(league.reference_season_id)
+                      if league.reference_season_id else set())
+        standings = _compute_standings(
+            fixtures, pw, pd, pl, _live_totals(league, fixtures, locked_mds))
         return Response({"competition_id": comp.id if comp else None, "standings": standings})
 
 
@@ -4747,6 +4814,11 @@ class LeagueTeamLineupView(APIView):
                     "starts": p.get("starts", 0),
                     "avg_minutes": p.get("avg_minutes", 0.0),
                     "minutes_label": p.get("minutes_label", "unknown"),
+                    # Le ultime giornate: sono la base del tag, e servono a schermo
+                    # per mostrarla invece di chiedere fiducia.
+                    "recent_appearances": p.get("recent_appearances", 0),
+                    "recent_avg_minutes": p.get("recent_avg_minutes", 0.0),
+                    "recent_window": p.get("recent_window", 0),
                     "real_team": real_team.get(s.player_id),
                     "form": p.get("form", 0.0),
                     "stats_season": str(stats_cs) if stats_cs is not None else None,
