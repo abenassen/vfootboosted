@@ -5,6 +5,9 @@
 #
 #     ./vfoot-sim              avvia (scenario predefinito, g22-live)
 #     ./vfoot-sim napoli-inter avvia su un altro scenario
+#     ./vfoot-sim fine-stagione  l'ultima giornata di Serie A: campionato e coppe
+#                                giocati fino in fondo, l'ultima giornata da
+#                                concludere e i premi ancora da assegnare
 #     ./vfoot-sim --at 2027-01-31T21:15:00+01:00
 #     ./vfoot-sim status       che cosa gira, con che orologio
 #     ./vfoot-sim stop         ferma tutto quello che ha avviato

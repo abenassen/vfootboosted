@@ -166,6 +166,47 @@ def review_league(league) -> list[dict]:
     return out
 
 
+def reopen_incomplete(league) -> list[dict]:
+    """Il contrario di ``complete_competition``, per le competizioni in cui è
+    tornato ad esserci del calcio da giocare.
+
+    Serve quando una giornata viene RIAPERTA — una simulazione che torna indietro,
+    una rettifica che annulla una conclusione. Riaprire la giornata da sola non
+    basta: la finale che si giocava lì torna da giocare, ma la coppa restava
+    ``done`` con il suo trofeo in bacheca, e il risultato era una lega in cui il
+    campionato risultava vinto con l'ultima giornata ancora da contare — e in cui
+    la conclusione finale non annunciava più niente, perché per la banca dati non
+    c'era più niente da chiudere.
+
+    La prova è la stessa di ``is_complete``: si guarda se c'è ancora del calcio,
+    non che cosa dice la bandiera. Restituisce, per ogni competizione riaperta,
+    i premi che ha dovuto ritirare — perché anche togliere un trofeo è una cosa
+    che va DETTA, non fatta di nascosto.
+    """
+    out = []
+    for comp in FantasyCompetition.objects.filter(league=league).prefetch_related("prizes"):
+        fixtures = competition_fixtures(comp)
+        if is_complete(comp, fixtures):
+            continue
+        for stage in CompetitionStage.objects.filter(competition=comp,
+                                                     status=CompetitionStage.STATUS_DONE):
+            own = [fx for fx in fixtures if fx.stage_id == stage.id]
+            if not own or any(fx.status != FantasyFixture.STATUS_FINISHED for fx in own):
+                stage.status = CompetitionStage.STATUS_ACTIVE
+                stage.save(update_fields=["status"])
+        removed = sorted(AwardedPrize.objects.filter(prize__competition=comp)
+                         .values_list("team_id", flat=True))
+        AwardedPrize.objects.filter(prize__competition=comp).delete()
+        was_done = comp.status == FantasyCompetition.STATUS_DONE or comp.completed_at
+        if was_done:
+            comp.status = FantasyCompetition.STATUS_ACTIVE
+            comp.completed_at = None
+            comp.save(update_fields=["status", "completed_at"])
+        if was_done or removed:
+            out.append({"competition": comp, "removed": removed})
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Le letture: adesso sono query.                                               #
 # --------------------------------------------------------------------------- #

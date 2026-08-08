@@ -40,6 +40,7 @@ from realdata.models import (
     CompetitionSeason, Match, MatchAppearance, MatchDisciplinaryEvent, Player,
 )
 from vfoot.models import (
+    CompetitionPrize,
     CompetitionStage,
     CompetitionStageParticipant,
     CompetitionTeam,
@@ -55,6 +56,7 @@ from vfoot.models import (
     LeaguePlayerRole,
     SavedLineupSnapshot,
 )
+from vfoot.services import honours
 from vfoot.services.classic_rating import build_reference
 from vfoot.services.classic_pagella import get_role_averages, pagella_for_match
 from vfoot.services.defense_bonus import compute_defense_bonus
@@ -111,8 +113,18 @@ class Command(BaseCommand):
                 d = json.load(open(f"{CACHE}/api_v1_event_{m.external_id}_lineups.json"))
             except (FileNotFoundError, ValueError):
                 continue
+            # Un file che c'e' e dice ``null``: e' la risposta del provider per una
+            # partita di cui non aveva ancora pubblicato le distinte, e nella cache
+            # ce ne sono otto. Non e' un errore da segnalare — e' una partita senza
+            # distinta, come quelle il cui file non esiste — ma senza questa riga
+            # basta uno di quegli otto perche' il seed di una stagione intera muoia
+            # a meta'. Lo stesso vale per un lato nullo dentro un file buono:
+            # ``get(side, {})`` restituirebbe il None che c'e' scritto, non il
+            # default.
+            if not isinstance(d, dict):
+                continue
             for side in (SIDE_HOME, SIDE_AWAY):
-                for pl in d.get(side, {}).get("players", []):
+                for pl in (d.get(side) or {}).get("players") or []:
                     pid = ext_to_pid.get(str((pl.get("player") or {}).get("id")))
                     if pid is None:
                         continue
@@ -377,7 +389,25 @@ class Command(BaseCommand):
         competition = FantasyCompetition.objects.create(
             league=league, name=str(opts["competition_name"]),
             competition_type=FantasyCompetition.TYPE_ROUND_ROBIN,
+            format=FantasyCompetition.FORMAT_LEAGUE,
             status=FantasyCompetition.STATUS_DONE)
+        # Che cosa si vince. Senza queste righe la lega seminata gioca una stagione
+        # intera e non assegna niente: l'albo d'oro nasce vuoto, e la conclusione
+        # dell'ultima giornata e' un clic uguale agli altri trentacinque. Sono le
+        # tre famiglie di condizione insieme — la classifica, il fondo classifica,
+        # il record — perche' una lega demo serve anche a vedere che esistono.
+        CompetitionPrize.objects.create(
+            competition=competition, name="Scudetto", icon="🏆",
+            condition_type=CompetitionPrize.CONDITION_FINAL_TABLE_RANGE,
+            rank_from=1, rank_to=1)
+        CompetitionPrize.objects.create(
+            competition=competition, name="Miglior attacco", icon="⚽",
+            condition_type=CompetitionPrize.CONDITION_STAT_TOP,
+            stat=CompetitionPrize.STAT_GOALS_FOR)
+        CompetitionPrize.objects.create(
+            competition=competition, name="Cucchiaio di legno", icon="🥄",
+            condition_type=CompetitionPrize.CONDITION_FINAL_TABLE_RANGE,
+            rank_from=team_count, rank_to=team_count)
 
         now = timezone.now()
         n_rounds = 9 * cycles
@@ -476,11 +506,19 @@ class Command(BaseCommand):
             gfx, gchamp = self._build_group_cup(league, teams)
             cup_msg = f" + Coppa Classic ({cfx} fx, {champ}) + Coppa Gironi ({gfx} fx, {gchamp})"
 
+        # La stagione qui nasce gia' giocata e gia' conclusa, quindi l'albo d'oro
+        # nasce con lei: assegnare i premi al seed e' l'unico modo perche' una lega
+        # demo apra su una storia completa invece che su tre competizioni finite e
+        # nessun vincitore. Stessa funzione della rettifica, quindi idempotente.
+        awarded = honours.review_league(league)
+        award_msg = f" {len(awarded)} premi assegnati." if awarded else ""
+
         sample = self._depth_chart(squads[0], MODULES[0])[0]
         assert is_legal_classic([ROLE_TO_LINEUP[p["role"]] for p in sample]), "illegal demo XI"
         self.stdout.write(self.style.SUCCESS(
             f"Seeded classic league '{league.name}' (id {league.id}) owned by {owner.username}: "
-            f"{team_count} teams, {len(real_matchdays)} matchdays, {n_fixtures} fixtures{cup_msg}. "
+            f"{team_count} teams, {len(real_matchdays)} matchdays, {n_fixtures} fixtures{cup_msg}."
+            f"{award_msg} "
             f"Open the frontend as '{owner.username}', team 'Demo Team 1'."))
 
     def _play_fixture(self, comp, stage_obj, rno, rm, home_id, away_id, stage_label=None):
@@ -546,6 +584,18 @@ class Command(BaseCommand):
                                               current[i + 1], stage_label=label))
                 n_fx += 1
             current = nxt
+            final_stage = stage_obj
+        # Ancorati alla FINALE, non alla competizione: "chi vince la coppa" letto
+        # su un tabellone sarebbe una classifica, e la classifica di una coppa la
+        # guida chi ha segnato di piu' nei quarti, non chi l'ha alzata.
+        CompetitionPrize.objects.create(
+            competition=cup, name="Coppa Classic", icon="🏆",
+            condition_type=CompetitionPrize.CONDITION_STAGE_WINNER,
+            source_stage=final_stage)
+        CompetitionPrize.objects.create(
+            competition=cup, name="Finalista", icon="🥈",
+            condition_type=CompetitionPrize.CONDITION_STAGE_LOSER,
+            source_stage=final_stage)
         return n_fx, tbi[current[0]].name
 
     def _build_group_cup(self, league, teams):
@@ -600,6 +650,13 @@ class Command(BaseCommand):
         # finale (round 2)
         champ = self._play_fixture(cup, ko, 2, 33, w1, w2, stage_label="Finale")
         n_fx += 3
+        # "Fase finale" tiene semifinali E finale: ``prize_winner_team_ids`` legge
+        # apposta l'ULTIMO turno della fase, quindi la coppa la alza chi ha vinto
+        # la finale e non anche i due semifinalisti.
+        CompetitionPrize.objects.create(
+            competition=cup, name="Coppa Gironi", icon="🏆",
+            condition_type=CompetitionPrize.CONDITION_STAGE_WINNER,
+            source_stage=ko)
         return n_fx, tbi[champ].name
 
     def _fixture_goals(self, comp, stage_obj, rno, rm, home_id, away_id):

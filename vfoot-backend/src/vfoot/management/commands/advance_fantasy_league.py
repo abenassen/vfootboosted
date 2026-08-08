@@ -10,9 +10,11 @@ WHAT IT DOES NOT DO, AND WHY THAT MATTERS
 It does not compute a single score itself. The lineups are written where the app
 writes them (``SavedLineupSnapshot``) and the conclusion goes through
 ``score_and_persist_matchday`` — the same function the admin's Concludi button
-calls — followed by the same stage resolution. So substitutions, the defence
-modifier, senza voto, the 66/+6 goal conversion and the cups advancing are all the
-product's own behaviour, not a re-implementation that could flatter it.
+calls — followed by the same stage resolution and the same review of the honours. So
+substitutions, the defence modifier, senza voto, the 66/+6 goal conversion, the cups
+advancing and the trophies being handed out are all the product's own behaviour, not
+a re-implementation that could flatter it. A cup won in March is dated March; a title
+the last round has not decided yet stays undecided.
 
 The one thing deliberately reproduced rather than reused is the CHOICE of the
 eleven, because there is no manager to ask. Each squad is ranked by market value
@@ -45,7 +47,7 @@ from vfoot.models import (
     LeaguePlayerRole,
     SavedLineupSnapshot,
 )
-from vfoot.services import matchday_state
+from vfoot.services import honours, matchday_state
 from vfoot.services.classic_matchday_scoring import score_and_persist_matchday
 from vfoot.services.classic_scoring import Ruleset
 from vfoot.services.competition_stages import resolve_pending_stages, resolve_stage
@@ -124,6 +126,10 @@ class Command(BaseCommand):
                 if md.real_matchday > conclude_through
                 and md.status == FantasyMatchday.STATUS_CONCLUDED]
         if not late:
+            # Non un'uscita: le competizioni si ricontrollano comunque, perche' un
+            # secondo `build` trova le giornate gia' riaperte dal primo e uscire
+            # qui lascerebbe in piedi proprio le bandiere che il primo aveva tolto.
+            self._reopen_competitions(league)
             return
         fixtures = FantasyFixture.objects.filter(fantasy_matchday__in=late)
         FantasyFixtureDetail.objects.filter(fixture__in=fixtures).delete()
@@ -140,6 +146,16 @@ class Command(BaseCommand):
             md.concluded_by = None
             md.save(update_fields=["status", "concluded_at", "concluded_by"])
         self.stdout.write(f"  rewound: {len(late)} matchdays reopened")
+        self._reopen_competitions(league)
+
+    def _reopen_competitions(self, league) -> None:
+        """Riporta indietro anche CIO' CHE LE GIORNATE AVEVANO CHIUSO: le fasi, le
+        competizioni, i premi. La regola sta in ``honours``, accanto a quella che
+        assegna: sono la stessa decisione presa nei due versi."""
+        for change in honours.reopen_incomplete(league):
+            self.stdout.write(f"           reopened: {change['competition'].name}"
+                              + (f" ({len(change['removed'])} prizes un-awarded)"
+                                 if change["removed"] else ""))
 
     # -- squads ------------------------------------------------------------
     def _squads(self, league, teams) -> dict[int, dict[str, list[int]]]:
@@ -240,6 +256,7 @@ class Command(BaseCommand):
     def _conclude(self, league, matchdays, conclude_through: int, admin, redo: bool) -> None:
         ruleset = Ruleset.from_league(league)
         done = 0
+        trophies: list[str] = []
         for md in matchdays:
             if md.real_matchday > conclude_through:
                 continue
@@ -281,10 +298,23 @@ class Command(BaseCommand):
                 md.nudged_at = None
                 md.save(update_fields=["status", "concluded_at", "concluded_by",
                                        "awaiting_since", "awaiting_reason", "nudged_at"])
+                # DOPO il salvataggio, come nell'endpoint: un premio e' datato dal
+                # registro, e chiedendo prima si troverebbe la competizione finita
+                # e la sua data mancante. E' l'ultimo pezzo del "questo comando non
+                # calcola niente per conto suo": senza, una lega ricostruita
+                # arrivava in fondo alla stagione con l'albo d'oro vuoto, e la
+                # coppa vinta a marzo non risultava vinta da nessuno.
+                for change in honours.review_league(league):
+                    won = ", ".join(t.name for t in FantasyTeam.objects.filter(
+                        id__in=change["added"]))
+                    trophies.append(f"{change['prize'].icon or '🏆'} "
+                                    f"{change['prize'].name}: {won}")
             done += 1
             self.stdout.write(f"  matchday {md.real_matchday:2d}: "
                               f"{result['updated']} fixtures scored")
         self.stdout.write(f"  concluded: {done} matchdays")
+        for line in trophies:
+            self.stdout.write(f"    assegnato  {line}")
 
     def _advance_stages(self, league, stage_ids) -> None:
         """Close finished stages and fill whatever they unlock — the same two steps

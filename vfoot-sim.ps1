@@ -3,6 +3,8 @@
 
     .\vfoot-sim.ps1              avvia (scenario predefinito, g22-live)
     .\vfoot-sim.ps1 g22-pre      avvia su un altro scenario
+    .\vfoot-sim.ps1 fine-stagione  ultima giornata di Serie A: tutto giocato,
+                                   l'ultima giornata da concludere, premi da assegnare
     .\vfoot-sim.ps1 --at 2027-01-31T21:15:00+01:00
     .\vfoot-sim.ps1 status       che cosa gira, con che orologio
     .\vfoot-sim.ps1 stop         ferma tutto quello che ha avviato
