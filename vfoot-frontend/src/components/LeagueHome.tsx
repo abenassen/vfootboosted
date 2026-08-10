@@ -202,9 +202,14 @@ export default function LeagueHome({ competitions }: { competitions: Competition
 
   const alerts = useDecisionAlerts(selectedLeagueId ?? null);
 
-  // What is waiting on the reader, from data already on the page. Derived rather
-  // than fetched: every item here is something the page already knows, so the
-  // block cannot claim a chore that does not exist.
+  // What is waiting on the reader BESIDES fielding a team. Derived rather than
+  // fetched: every item here is something the page already knows, so the block
+  // cannot claim a chore that does not exist.
+  //
+  // The lineups used to be listed here too, as one text line each. They are the
+  // reason the block exists — the one thing that comes back every week — so they
+  // are no longer a line in a list: «Da fare» renders the fixtures themselves,
+  // with a real button, and these are what follows underneath.
   const todo = useMemo(() => {
     const items: Array<{
       key: string;
@@ -214,18 +219,6 @@ export default function LeagueHome({ competitions }: { competitions: Competition
       to: string;
       className?: string;
     }> = [];
-
-    for (const f of nextByCompetition) {
-      if (!f.can_set_lineup) continue;
-      items.push({
-        key: `lineup-${f.fixture_id}`,
-        icon: '📋',
-        text: `Formazione · ${compName.get(f.competition_id) ?? ''}`,
-        detail: `${f.home_team.name} vs ${f.away_team.name}`,
-        to: `/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`,
-        className: compColorById.get(f.competition_id)?.text700,
-      });
-    }
 
     // The admin's number is his whole sign-off queue, a member's is only what he
     // was asked — the same distinction the menu badge makes.
@@ -241,7 +234,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
     }
 
     return items;
-  }, [nextByCompetition, compName, compColorById, alerts]);
+  }, [alerts]);
 
   // The two clocks, kept apart here exactly as they are on the server. What is
   // being played comes from the real calendar and moves on its own; what has been
@@ -609,76 +602,67 @@ export default function LeagueHome({ competitions }: { competitions: Competition
         </Card>
       ) : null}
 
-      {/* 1 — my next matches, and how to field a team for each */}
-      {nextByCompetition.length ? (
-        <Card className="p-4">
-          <SectionTitle>{nextByCompetition.length > 1 ? 'Le tue prossime partite' : 'La tua prossima partita'}</SectionTitle>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            {nextByCompetition.map((f) => (
-              <div key={f.fixture_id} className="rounded-xl border border-line p-3">
-                {/* Which competition, on the shortcut itself: with a championship
-                    and a cup running together, "Imposta formazione" alone does
-                    not say which team sheet you are about to fill. */}
-                <div
-                  className={clsx(
-                    'text-[11px] font-bold uppercase tracking-wide',
-                    compColorById.get(f.competition_id)?.text700 ?? 'text-ink-faint',
-                  )}
-                >
-                  {compName.get(f.competition_id) ?? 'Competizione'}
-                </div>
-                <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
-                  <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
-                  <span className="truncate">{f.home_team.name}</span>
-                  <span className="text-ink-faint">vs</span>
-                  <span className="truncate">{f.away_team.name}</span>
-                  <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
-                </div>
-                {/* Same wording as the results below, from the same function: the
-                    two blocks sit one above the other and had no business naming a
-                    round two different ways. */}
-                <div className="mt-1 text-xs text-ink-faint">{roundLabel(f)}</div>
-                {f.can_set_lineup ? (
-                  <Link
-                    to={`/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`}
-                    className={clsx(
-                      'mt-2 inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90',
-                      compColorById.get(f.competition_id)?.bg700 ?? 'bg-ink',
-                    )}
-                  >
-                    Formazione · {compName.get(f.competition_id) ?? ''}
-                  </Link>
-                ) : (
-                  <div className="mt-2 text-[11px] text-ink-faint">
-                    La formazione si imposta quando hai una rosa.
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : null}
+      {/* 1 — QUELLO CHE ASPETTA TE, e sta QUI: attaccato alla giornata aperta, e
+          primo di tutti quando non ce n'è una aperta — cioè esattamente prima che
+          la giornata cominci, quando schierare serve ancora a qualcosa.
 
-      {/* A LEGA CONCLUSA questa fascia sparisce tutta: sono le tre domande di una
-          stagione in corso — cosa devi fare, com'è andata la tua ultima partita,
-          cosa è successo in giro — e quando non c'è più niente da giocare nessuna
-          delle tre ha una risposta. «Da fare» direbbe per sempre «sei in pari»,
-          gli ultimi risultati sarebbero quelli di maggio, e le news
-          racconterebbero i premi che stanno già nella bacheca qui sopra. */}
+          Era in fondo, a milleduecento pixel dall'inizio su un telefono, e per di
+          più scritto due volte: un «Le tue prossime partite» con una pillola da
+          undici pixel e un «Da fare» che ripeteva le stesse parole con lo stesso
+          link. Una cosa sola si dice una volta sola, e la si dice dove si guarda. */}
       {honours?.is_over ? null : (
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* 2 — what is waiting for YOU. Beside the news, because one is what the
-            league did and the other is what it is waiting on you to do. */}
         <Card className="p-4">
           <SectionTitle>Da fare</SectionTitle>
+          {nextByCompetition.length ? (
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {nextByCompetition.map((f) => {
+                const cc = compColorById.get(f.competition_id);
+                return (
+                  <div key={f.fixture_id} className="rounded-xl border border-line p-3">
+                    {/* Which competition, on the shortcut itself: with a championship
+                        and a cup running together, "Imposta formazione" alone does
+                        not say which team sheet you are about to fill. */}
+                    <div className={clsx('text-[11px] font-bold uppercase tracking-wide', cc?.text700 ?? 'text-ink-faint')}>
+                      {compName.get(f.competition_id) ?? 'Competizione'}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                      <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
+                      <span className="truncate">{f.home_team.name}</span>
+                      <span className="text-ink-faint">vs</span>
+                      <span className="truncate">{f.away_team.name}</span>
+                      <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
+                    </div>
+                    {/* Same wording as the results below, from the same function: the
+                        two blocks sit one above the other and had no business naming a
+                        round two different ways. */}
+                    <div className="mt-1 text-xs text-ink-faint">{roundLabel(f)}</div>
+                    {f.can_set_lineup ? (
+                      <Link
+                        to={`/squad/formation?competition=${f.competition_id}&matchday=${f.real_matchday}`}
+                        className={clsx(
+                          // Un bersaglio da pollice, non una pillola da undici pixel:
+                          // è il gesto della settimana, e stava disegnato come una nota.
+                          'mt-2.5 flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-white shadow-card transition hover:opacity-90 active:scale-[0.99]',
+                          cc?.bg700 ?? 'bg-ink',
+                        )}
+                      >
+                        <span aria-hidden>📋</span> Schiera la formazione
+                      </Link>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-ink-faint">
+                        La formazione si imposta quando hai una rosa.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
           {todo.length ? (
-            <ul className="mt-2 space-y-1.5">
+            <ul className={clsx('space-y-1.5', nextByCompetition.length ? 'mt-3 border-t border-line pt-3' : 'mt-2')}>
               {todo.map((t) => (
                 <li key={t.key}>
-                  <Link
-                    to={t.to}
-                    className="flex items-start gap-2 rounded-lg px-1 py-1 text-sm hover:bg-surface-2"
-                  >
+                  <Link to={t.to} className="flex items-start gap-2 rounded-lg px-1 py-1 text-sm hover:bg-surface-2">
                     <span className="mt-0.5 shrink-0" aria-hidden>{t.icon}</span>
                     <span className="min-w-0">
                       <span className={clsx('block font-semibold', t.className ?? 'text-ink-soft')}>{t.text}</span>
@@ -688,12 +672,22 @@ export default function LeagueHome({ competitions }: { competitions: Competition
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : null}
+          {!nextByCompetition.length && !todo.length ? (
             <div className="mt-2 text-sm text-ink-faint">Sei in pari: niente che aspetti te.</div>
-          )}
+          ) : null}
         </Card>
+      )}
 
-        {/* 3 — how the last ones went */}
+      {/* A LEGA CONCLUSA questa fascia sparisce tutta: sono le due domande di una
+          stagione in corso — com'è andata la tua ultima partita, cosa è successo
+          in giro — e quando non c'è più niente da giocare nessuna delle due ha una
+          risposta. Gli ultimi risultati sarebbero quelli di maggio, e le news
+          racconterebbero i premi che stanno già nella bacheca qui sopra.
+          («Da fare» si è spostato in cima, sotto la giornata aperta.) */}
+      {honours?.is_over ? null : (
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* 2 — how the last ones went */}
         {lastResults.length ? (
           <Card className="p-4">
             {/* DELLA TUA SQUADRA, detto nel titolo: la lista è filtrata su di te

@@ -508,20 +508,38 @@ export default function LeagueAdminPage() {
               <div className="mt-3 space-y-2">
                 {leagues.map((l) => {
                   const active = l.league_id === selectedLeagueId;
+                  const team = l.team_name?.trim() || null;
                   return (
                     <div
                       key={l.league_id}
                       className={clsx(
                         'flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2',
-                        active ? 'border-line bg-surface-2' : 'border-line',
+                        active ? 'border-brand bg-brand/10' : 'border-line',
                       )}
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold text-ink">{l.name}</div>
-                        <div className="text-xs text-ink-faint">
-                          Squadra: {l.team_name?.trim() || 'non impostata'}
+                      {/* Lo stemma, che qui mancava: è la pagina che ELENCA le
+                          leghe, cioè l'unico posto in cui si confrontano fra
+                          loro, ed erano righe di solo testo. */}
+                      <Crest descriptor={l.team_crest} teamName={team} size={34} className={team ? undefined : 'opacity-40'} />
+                      {/* La riga intera cambia lega, non solo il bottone in
+                          fondo: su un telefono quel bottone era un bersaglio da
+                          sessanta pixel in una riga larga trecento, e restare
+                          sulla pagina dopo averla scelta è ciò che permette di
+                          vedere che la scelta ha fatto effetto. */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedLeagueId(l.league_id)}
+                        className="min-w-0 flex-1 text-left"
+                        aria-pressed={active}
+                      >
+                        <div className={clsx('truncate font-semibold', active ? 'text-brand-strong' : 'text-ink')}>
+                          {l.name}
                         </div>
-                      </div>
+                        <div className="text-xs text-ink-faint">
+                          Squadra: {team ?? 'non impostata'}
+                          {active ? ' · lega attiva' : ''}
+                        </div>
+                      </button>
                       <Badge tone={l.role === 'admin' ? 'green' : 'slate'}>
                         {l.role === 'admin' ? 'amministratore' : 'partecipante'}
                       </Badge>

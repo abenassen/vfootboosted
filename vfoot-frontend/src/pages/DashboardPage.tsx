@@ -4,6 +4,7 @@ import { Badge, Card, SectionTitle } from '../components/ui';
 import SetupBanner from '../components/SetupBanner';
 import Crest from '../components/Crest';
 import LeagueHome from '../components/LeagueHome';
+import CopyButton from '../components/CopyButton';
 import { useCompetitionContext } from '../league/CompetitionContext';
 
 // This page no longer fetches the standings or the fixtures. Both existed only to
@@ -12,7 +13,7 @@ import { useCompetitionContext } from '../league/CompetitionContext';
 // competition (see LeagueStandingsView: "the first round-robin, by id").
 export default function DashboardPage() {
   const { leagues, selectedLeagueId, selectedLeague } = useLeagueContext();
-  const { competitions } = useCompetitionContext();
+  const { competitions, loading: competitionsLoading } = useCompetitionContext();
 
   // No league => there is exactly ONE thing to do here, so the page is that one
   // thing and nothing else. The rest of the app is hidden from the menu too (see
@@ -59,7 +60,13 @@ export default function DashboardPage() {
           non fara' mai — ne' a installare, ne' ad accendere le notifiche — e sparisce
           per sempre una volta chiuso. */}
       <SetupBanner />
-      <Card className="vf-hero border-transparent p-4">
+      {/* SOLO DA TABLET IN SU. Su un telefono questa scheda dice, in ottantotto
+          pixel più il margine, le tre cose che l'intestazione della app scrive già
+          due centimetri più in alto: stemma, nome della lega, nome della squadra.
+          Là non costa niente perché la barra c'è comunque; qui stava davanti alla
+          cosa per cui si apre l'app. In largo invece la barra laterale non ripete
+          la squadra, e la scheda resta l'unica a dire chi sei in questa lega. */}
+      <Card className="vf-hero hidden border-transparent p-4 md:block">
         <div className="flex flex-wrap items-end justify-between gap-3">
           {/* Lo stemma, che qui mancava. È l'unica pagina della lega che diceva
               il nome della squadra senza mostrarla: la rosa ce l'ha, il
@@ -104,6 +111,61 @@ export default function DashboardPage() {
               when there is one. */}
         </div>
       </Card>
+
+      {/* UNA LEGA SENZA COMPETIZIONI HA UNA HOME BIANCA, e lo era per davvero:
+          `LeagueHome` si tira indietro quando non c'è niente da giocare — ha
+          ragione, è la vista delle competizioni — e la scheda con lo stemma qui
+          sopra non si vede più sul telefono. Restava il solo banner delle
+          notifiche, su una pagina che si intitola «Home lega».
+
+          Non è un caso raro né un errore: è come si presenta OGNI lega appena
+          creata, cioè il primo schermo che vede chi ne apre una. Quindi qui si
+          dice cosa manca e chi lo deve fare, che sono due risposte diverse a
+          seconda di chi guarda. */}
+      {!competitionsLoading && !competitions.length ? (
+        <Card className="border-l-4 border-accent bg-accent/10 p-4">
+          <div className="text-sm font-bold text-accent">🚧 Lega in costruzione</div>
+          <p className="mt-1 text-sm text-ink-soft">
+            <b>{selectedLeague?.name}</b> non ha ancora una competizione, e finché non ce n'è una non
+            c'è niente da giocare: calendario, classifica e formazione nascono tutti da lì.
+          </p>
+          {selectedLeague?.role === 'admin' ? (
+            <>
+              {/* L'ordine conta ed è una dipendenza vera, non una convenzione: il
+                  calendario si genera dalle squadre presenti in quel momento, per
+                  cui una competizione creata da soli nasce senza partite. È la
+                  stessa cosa che dice la checklist in Gestione lega, detta qui
+                  perché è qui che si arriva per primi. */}
+              <div className="mt-3 rounded-xl border border-line bg-surface p-3">
+                <div className="text-xs font-bold uppercase tracking-wide text-ink-faint">
+                  1 — Fai entrare gli altri
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <code className="rounded-lg bg-surface-2 px-2 py-1 font-mono text-sm font-bold text-ink">
+                    {selectedLeague.invite_code}
+                  </code>
+                  <CopyButton value={selectedLeague.invite_code} label="Copia il codice" />
+                </div>
+                <div className="mt-1.5 text-xs text-ink-faint">
+                  Prima loro, poi la competizione: il calendario si costruisce sulle squadre presenti
+                  quando lo generi, quindi creandola adesso resterebbe senza partite.
+                </div>
+              </div>
+              <Link
+                to="/league-admin?tab=league"
+                className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-bold text-white shadow-card hover:opacity-90 active:scale-[0.99]"
+              >
+                2 — Crea la competizione →
+              </Link>
+            </>
+          ) : (
+            <div className="mt-3 text-sm text-ink-faint">
+              La crea l'amministratore della lega. Appena c'è, questa pagina si riempie da sola —
+              nel frattempo il listone e il campionato di riferimento sono già consultabili dal menu.
+            </div>
+          )}
+        </Card>
+      ) : null}
 
       {/* Everything the old "Lega" page was for, and the part of it that was not
           a shortcut to somewhere else: what is being played right now in each

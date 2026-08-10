@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
-import { getTeamLineup, saveTeamLineup } from '../api';
+import { getLeagueMatchdays, getTeamLineup, saveTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import type {
@@ -283,6 +283,44 @@ export default function FormationPage() {
   // players kept inside their own role), so the page has nothing to preserve there.
   const [frozenSlots, setFrozenSlots] = useState<Map<number, number>>(new Map());
   const [allComps, setAllComps] = useState(false);
+  /** LA GIORNATA DA SCHIERARE, quando nessuno ne ha chiesta una.
+   *
+   *  Finché a questa pagina si arrivava solo da una scorciatoia — «Schiera la
+   *  formazione» sulla home, il link sul calendario — l'indirizzo portava sempre
+   *  la giornata giusta, e i due default che restavano sotto non li vedeva
+   *  nessuno: il server risponde `matchdays[0]`, la prima della stagione, e qui
+   *  si sceglieva quella di mezzo. Erano default da esplorazione, ottimi per
+   *  guardarsi una giornata qualunque a stagione ferma.
+   *
+   *  Adesso «Formazione» è una voce di menu, e una voce di menu si apre per fare
+   *  il lavoro di questa settimana: aprirla sulla diciannovesima, chiusa da mesi,
+   *  la rende una porta su un vicolo. `is_fieldable` è la stessa domanda che si
+   *  fa la home per dire «prossima da schierare», e la risposta è una sola per
+   *  tutta la lega. */
+  const [fieldableMd, setFieldableMd] = useState<number | null>(null);
+  // «Chiesto e ottenuto risposta», che non è «ne ho trovata una»: a stagione
+  // finita la risposta legittima è «nessuna», e va distinta dal non aver ancora
+  // chiesto — altrimenti la fetch qui sotto parte per prima, sceglie il default
+  // di ripiego, e quando la risposta arriva la giornata è ormai nell'indirizzo e
+  // non la corregge più nessuno.
+  const [fieldableAsked, setFieldableAsked] = useState(false);
+  useEffect(() => {
+    if (!selectedLeagueId) return;
+    let alive = true;
+    void getLeagueMatchdays(selectedLeagueId)
+      .then((mds) => {
+        if (!alive) return;
+        const md = mds.find((m) => m.is_fieldable) ?? null;
+        setFieldableMd(md ? md.real_matchday : null);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setFieldableAsked(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selectedLeagueId]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -361,6 +399,9 @@ export default function FormationPage() {
 
   useEffect(() => {
     if (!selectedLeagueId) return;
+    // Senza giornata nell'indirizzo la si sta per SCEGLIERE, e la si sceglie
+    // sapendo qual è quella da schierare.
+    if (matchday == null && !fieldableAsked) return;
     setLoading(true);
     setError(null);
     void getTeamLineup(selectedLeagueId, matchday, competition)
@@ -373,7 +414,13 @@ export default function FormationPage() {
             // La competizione del menu in alto vince su quella che il server
             // sceglierebbe da sé: è ciò che l'utente sta guardando.
             competition: competition ?? selectedCompetitionId ?? d.competition ?? undefined,
-            matchday: matchday ?? d.matchdays[Math.floor(d.matchdays.length / 2)] ?? d.matchday,
+            // La schierabile per prima; a stagione finita non ce n'è una, e
+            // allora si ricade sul vecchio default di metà stagione.
+            matchday:
+              matchday ??
+              (fieldableMd != null && d.matchdays.includes(fieldableMd) ? fieldableMd : undefined) ??
+              d.matchdays[Math.floor(d.matchdays.length / 2)] ??
+              d.matchday,
           });
           return;
         }
@@ -404,7 +451,7 @@ export default function FormationPage() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [selectedLeagueId, competition, matchday]);
+  }, [selectedLeagueId, competition, matchday, fieldableMd, fieldableAsked]);
 
   const byId = useMemo(() => new Map((ctx?.roster ?? []).map((p) => [p.player_id, p])), [ctx]);
   const gkStarters = useMemo(
