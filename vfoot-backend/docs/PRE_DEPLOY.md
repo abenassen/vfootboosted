@@ -36,36 +36,56 @@ inferito può essere cambiato**.
       il difetto era reale, ma la sua correzione non è stata validata su una lega
       intera, solo su una rosa.
 
-## 2. Confrontare i nostri ruoli col listone Fantacalcio 2026-27
+## 2. I nostri ruoli contro il listone Fantacalcio 2026-27 — FATTO
 
-Abbiamo un riferimento esterno per la **prossima** stagione:
-`Quotazioni_Fantacalcio_Stagione_2026_27.xlsx` in radice — 497 giocatori, 20
-squadre, colonna `R` col ruolo classico e `RM` col ruolo Mantra.
+`Quotazioni_Fantacalcio_Stagione_2026_27.xlsx` (in radice, non versionato) è la
+**stessa stagione che si andrà a giocare**: non è un anticipo su una stagione
+futura, sono due previsioni sullo stesso campionato. 497 giocatori, 20 squadre,
+colonna `R` col ruolo classico e `RM` col Mantra.
+
+Confronto eseguito il 10/08/2026, riusando il matcher di
+`voto_puro_discrepancies` (cognome + iniziale, indicizzato sulle squadre in cui
+il giocatore ha davvero giocato). 413 agganciati, 84 fuori — nuovi acquisti e
+Primavera, che nella nostra banca dati non hanno presenze.
+
+**Accordo 92,7% (383/413), 30 discrepanze.** Concentrate, non sparse:
 
 ```
-R  : P 60 · D 176 · C 174 · A 87
-RM : Por, Dc, Dd, Ds, B, E, M, C, T, W, A, Pc (anche multipli, es. "Dd;E")
+righe = loro, colonne = noi
+POR   0 · 0 · 0 · 0      porta: accordo perfetto, 60/60
+DIF   0 · 0 · 1 · 0
+CEN   0 · 3 · 0 · 21     ← ventuno CEN che per noi sono ATT
+ATT   0 · 0 · 5 · 0
 ```
 
-È l'occasione di misurare quanto la nostra inferenza si discosta da ciò che i
-fantallenatori si aspettano.
+Ventisei su trenta stanno sull'asse centrocampo↔attacco, e quasi tutte hanno un
+`RM` **ambiguo** (`W;A`, `T;A`, `W;T`): sono ali, che il Fantacalcio classico è
+costretto a schiacciare in una casella sola e che per convenzione mette a CEN.
 
-- [ ] Agganciare i nomi. Il foglio usa **cognome-prima con iniziale puntata**
-      («Martinez Jo.»), quindi vale il metodo già rodato: indicizzare su
-      `MatchAppearance` (chi ha davvero giocato per quella squadra), gestire le
-      traslitterazioni, e tenere da parte i non agganciati invece di buttarli.
-- [ ] Confrontare `R` con il nostro **`CurrentPlayerRole`** (layer 2, quello che
-      segna — non `classic_role_seed`, che è solo il seme Transfermarkt).
-- [ ] Produrre la matrice di confusione 4×4 e, soprattutto, **l'elenco nominale
-      dei disaccordi**: un numero aggregato non dice se sbagliamo sui panchinari
-      o sugli attaccanti che tutti conoscono.
-- [ ] Guardare i casi ambigui con `RM` multiplo (`Dd;E`, `W;A`, `C;T`): lì il
-      disaccordo con `R` è atteso e non è un nostro errore — è la ragione per cui
-      il Mantra esiste.
+Sui big il disaccordo è raro ma non nullo: 2 su 16 con Qt.A ≥ 20 — **Orsolini**
+(Qt.A 26) e **Pulisic** (25), entrambi `CEN` per loro e `ATT` per noi.
 
-**Nota**: il foglio è della stagione **2026-27**, che per noi è la stagione di
-riferimento simulata. Un disaccordo può voler dire che sbagliamo noi, oppure che
-il listone anticipa un ruolo che il campo non ha ancora confermato.
+**Bilancio dei reparti**: −18 CEN e +16 ATT rispetto a loro (−12% / +22%). Non
+compromette le rose: per 10 squadre 3-8-8-6 servono 80 CEN e ne abbiamo 138 sui
+soli agganciati, margine 1,7×. L'effetto è sui **prezzi d'asta**, non sulla
+legalità delle formazioni.
+
+**Non c'è una manopola per avvicinarsi**, e vale la pena saperlo prima di
+provarci: il ruolo lo prende la CATEGORIA k-means, non il giocatore, quindi si
+sposta un cluster intero o niente. `ROLE_MARGIN_REVIEW` non serve allo scopo —
+`needs_decision()` documenta che i discordanti sicuri (De Ketelaere, margine
+0,76) sono proprio quelli che un filtro sul margine non cattura.
+
+Quello che il sistema fa già: **15 dei 30 arrivano alla decisione dell'admin** —
+i non misurati (metodo `sofa`/`default`) più Berardi, che è misurato e in bilico
+(margine 0,21). I sicuri non ci arrivano, per scelta.
+
+- [ ] Guardare a mano gli otto casi dove il Mantra NON giustifica il disaccordo:
+      i cinque `ATT→CEN` (Berardi, De Ketelaere, Esposito Se., Ghedjemis,
+      Kvernadze) e i tre che coinvolgono la difesa.
+- [ ] Decidere se in coda di arbitraggio mostrare anche il ruolo del listone
+      accanto al nostro: sarebbe un dato in più per l'admin, senza toccare il
+      modello. È la strada meno invasiva, se si vuole convergere.
 
 ## 3. Migrazione e dati
 
