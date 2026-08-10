@@ -67,6 +67,7 @@ export function watchInstallPrompt(): void {
   window.addEventListener('appinstalled', () => {
     deferred = null;
     listeners.forEach((fn) => fn(false));
+    installedListeners.forEach((fn) => fn());
   });
 }
 
@@ -79,13 +80,30 @@ export function onInstallPromptChange(fn: (available: boolean) => void): () => v
   return () => listeners.delete(fn);
 }
 
-/** Show the captured prompt. Single-shot: the browser will not let us replay it. */
-export async function promptInstall(): Promise<boolean> {
-  if (!deferred) return false;
+/** Show the captured prompt and SAY HOW IT WENT. Single-shot: the browser will
+ *  not let us replay it.
+ *
+ *  The outcome used to be awaited and thrown away, which left the one moment the
+ *  user is waiting for an answer — «ho accettato, è andata?» — with nothing on
+ *  screen. The existing "App installata" line cannot fill that gap: it is gated on
+ *  `isStandalone()`, which is false in the browser tab where the button was
+ *  pressed and stays false there for ever. */
+export async function promptInstall(): Promise<'accepted' | 'dismissed' | 'unavailable'> {
+  if (!deferred) return 'unavailable';
   const e = deferred;
   deferred = null;
   listeners.forEach((fn) => fn(false));
   await e.prompt();
-  await e.userChoice;
-  return true;
+  const choice = (await e.userChoice) as { outcome?: string } | undefined;
+  return choice?.outcome === 'accepted' ? 'accepted' : 'dismissed';
+}
+
+const installedListeners = new Set<() => void>();
+
+/** Fires when the browser has finished installing. Separate from the outcome of
+ *  the prompt because the two are not the same event: accepting starts an install
+ *  that can still fail, and on some setups it completes as a plain shortcut. */
+export function onAppInstalled(fn: () => void): () => void {
+  installedListeners.add(fn);
+  return () => installedListeners.delete(fn);
 }

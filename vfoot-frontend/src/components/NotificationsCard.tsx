@@ -5,6 +5,7 @@ import {
   installPromptAvailable,
   isIOS,
   isStandalone,
+  onAppInstalled,
   onInstallPromptChange,
   promptInstall,
 } from '../pwa/install';
@@ -21,10 +22,18 @@ export default function NotificationsCard() {
   const push = usePush();
   const [canInstall, setCanInstall] = useState(installPromptAvailable());
   const [showIosSteps, setShowIosSteps] = useState(false);
-  const installed = isStandalone();
+  // Due domande diverse, e prima ne rispondevamo a una sola. `isStandalone()` dice
+  // «questa finestra È l'app», che nella scheda del browser da cui si preme il
+  // bottone è falso e resta falso: da lì l'installazione riuscita non aveva alcun
+  // riscontro, e la scheda continuava a offrirla come se non fosse successo nulla.
+  const [justInstalled, setJustInstalled] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const running = isStandalone();
   const ios = isIOS();
+  const installed = running || justInstalled;
 
   useEffect(() => onInstallPromptChange(setCanInstall), []);
+  useEffect(() => onAppInstalled(() => setJustInstalled(true)), []);
 
   return (
     <Card className="p-4">
@@ -51,7 +60,16 @@ export default function NotificationsCard() {
       {!installed && !ios ? (
         canInstall ? (
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Button size="sm" variant="secondary" onClick={() => void promptInstall()}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void promptInstall().then((r) => {
+                  if (r === 'accepted') setJustInstalled(true);
+                  else if (r === 'dismissed') setDismissed(true);
+                });
+              }}
+            >
               Installa l'app
             </Button>
             <span className="text-xs text-ink-faint">
@@ -71,9 +89,29 @@ export default function NotificationsCard() {
         )
       ) : null}
 
+      {dismissed && !installed ? (
+        <div className="mt-2 text-xs text-ink-faint">
+          Installazione annullata. Puoi rifarla dal menu del browser (⋮ → «Installa app»).
+        </div>
+      ) : null}
+
       {installed ? (
         <div className="mt-3 text-xs font-semibold text-good">
-          App installata su questo dispositivo.
+          {running
+            ? 'App installata su questo dispositivo.'
+            : 'App installata: la trovi fra le applicazioni del telefono.'}
+        </div>
+      ) : null}
+
+      {/* Detto SOLO a chi ha appena installato e sta ancora guardando la scheda del
+          browser: se l'icona apre una pagina con la barra dell'indirizzo, non è un
+          difetto dell'app ma di dove la si sta provando — un'app a schermo intero
+          su Android la crea Chrome solo per un indirizzo HTTPS pubblico. In
+          produzione non capita; da un IP di rete in sviluppo capita sempre. */}
+      {justInstalled && !running && location.protocol !== 'https:' ? (
+        <div className="mt-1 text-xs text-ink-faint">
+          Su un indirizzo non HTTPS l'icona apre comunque dentro il browser: è un
+          limite di questo indirizzo di prova, non dell'app.
         </div>
       ) : null}
 

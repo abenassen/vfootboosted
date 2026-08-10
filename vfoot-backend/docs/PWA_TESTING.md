@@ -111,15 +111,109 @@ ripiego:
 1. Sul telefono: Impostazioni → Opzioni sviluppatore → Debug USB.
 2. Collega il cavo, poi `adb devices` (autorizza il popup sul telefono).
 3. `adb reverse tcp:5173 tcp:5173` e `adb reverse tcp:8000 tcp:8000` — così
-   `localhost:5173` sul telefono è il tuo dev server. **Non è una scorciatoia, è
-   l'unico modo**: misurato, su `http://192.168.1.223:5173` il browser riporta
-   `isSecureContext=false` e **`navigator.serviceWorker` non esiste affatto** —
-   quindi niente worker, niente installazione, niente push, niente offline. Solo
-   `localhost`/`127.0.0.1` sono esentati dal requisito HTTPS.
+   `localhost:5173` sul telefono è il tuo dev server. Non è una scorciatoia: è il
+   modo di aggirare il requisito che segue. Misurato, su
+   `http://192.168.1.223:5173` il browser riporta `isSecureContext=false` e
+   **`navigator.serviceWorker` non esiste affatto** — quindi niente worker,
+   niente installazione, niente push, niente offline. Solo `localhost`/`127.0.0.1`
+   sono esentati dal requisito HTTPS.
 4. Su Chrome desktop apri `chrome://inspect`, il telefono compare con le sue
    schede: hai console, rete e pannello Application del dispositivo reale.
 
-Da lì il banner d'installazione arriva da sé (Android emette
+### Senza cavo: hotspot del telefono + eccezione in Chrome
+
+Il cavo non è obbligatorio, e nemmeno la rete di casa. Il requisito vero non è
+*passare da `localhost`*, è **essere un contesto sicuro** — e Chrome lo concede a
+un'origine dichiarata a mano. Da qui la via dell'hotspot, che è quella buona
+quando si è fuori casa o non si ha il cavo dietro:
+
+```bash
+./vfoot-sim --lan          # anche: build --lan, reset --lan, resume --lan
+```
+
+Il portatile si collega all'hotspot del telefono, e `--lan` apre il banco all'IP
+che il portatile ha su quella rete. I due server ascoltavano già su `0.0.0.0`, ma
+mancavano tre cose, e nessuna delle tre lo dice chiaramente quando manca:
+
+| Cosa manca | Come si manifesta |
+|---|---|
+| L'IP non è in `ALLOWED_HOSTS` | Django risponde **400**, e sembra un server rotto |
+| `http://<ip>:5173` non è fra le origini CORS | Le chiamate falliscono solo nella console |
+| `VITE_API_BASE_URL` resta `localhost:8000` | **Il caso peggiore**: dal telefono `localhost` è il telefono. L'app si apre, sembra viva, e non ha dati |
+
+`--lan` le esporta insieme, perché due su tre non servono a niente. Non tocca
+`.env.local`: le variabili di processo vincono su quelle del file (verificato su
+Vite 5.4). Lo stesso knob copre il WebSocket dei voti live — `socketUrl()` deriva
+da `VITE_API_BASE_URL`.
+
+Poi, **una volta sola sul telefono**, l'eccezione che dà il contesto sicuro:
+
+1. `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
+2. nella casella: `http://<ip-del-portatile>:5173` (lo stampa `--lan`)
+3. il menu a fianco su **Enabled**, poi **Relaunch**
+
+Da lì è un contesto sicuro a tutti gli effetti: worker, `beforeinstallprompt`,
+push e offline si comportano come in produzione.
+
+> **L'INSTALLAZIONE NO, e va saputo prima di provarla.** Il flag concede le API di
+> un contesto sicuro; **non** rende l'origine un HTTPS agli occhi di Chrome. Su
+> Android un'app a schermo intero è un **WebAPK**, e Chrome lo fa generare a un
+> servizio Google che deve poter **raggiungere il manifest da internet**: un
+> `http://10.x.x.x:5173` non è raggiungibile e non è HTTPS, quindi il WebAPK non
+> si può fare. L'installazione riesce lo stesso, ma **degrada a scorciatoia**:
+> l'icona compare fra le applicazioni e, aprendola, la pagina si apre dentro
+> Chrome **con la barra dell'indirizzo** — cioè non in `display: standalone`.
+>
+> Il sintomo è confondente perché sembra un manifest sbagliato. Non lo è: si
+> riconosce da `pwa-check.html` aperto **dall'icona installata**, dove «Aperta come
+> app installata» resta *no*. E siccome quel controllo è quello che l'app stessa
+> usa per sapere se è installata, il bottone «Installa l'app» resta offerto:
+> premerlo di nuovo rifà la stessa scorciatoia, senza altro effetto.
+>
+> Quindi da un IP di rete si prova tutto tranne la modalità a schermo intero.
+> Per quella serve un'origine HTTPS pubblica (produzione, o un tunnel), oppure
+> `adb reverse`: da `http://localhost:5173` Chrome tratta l'origine come sicura
+> *per davvero*, e il WebAPK lo genera.
+
+**Che l'eccezione abbia funzionato si controlla in un'occhiata**, dal telefono:
+
+```
+http://<ip-del-portatile>:5173/pwa-check.html
+```
+
+Una fascia verde o rossa e il motivo, poi riga per riga: contesto sicuro, service
+worker, API push e notifiche, permesso, se è aperta come app installata, se il
+worker dell'app è registrato e se sta già guidando la pagina. Il bottone in fondo
+fa mostrare una notifica **dal worker** (`registration.showNotification`, la stessa
+strada delle push vere), che è la prova che il permesso da solo non dà.
+
+Sta in `public/` per due ragioni, entrambe necessarie: il contesto sicuro è una
+proprietà dell'**origine**, quindi la verifica deve arrivare dalla stessa origine
+che si sta provando; e non chiede di accedere, perché quando il contesto non è
+sicuro l'app può non arrivare nemmeno alla schermata d'accesso — che è esattamente
+il caso da misurare. Come `mobile-frame.html` è un file vero e non una rotta della
+SPA, quindi è nella denylist della `NavigationRoute` in `src/sw.ts`: senza, il
+worker le risponderebbe con la shell e la pagina che serve a interrogare il worker
+finirebbe sul 404 dell'app.
+
+Vale anche in produzione (`vfoot.it/pwa-check.html`): è la pagina da mandare al
+membro della lega con l'iPhone quando dice che le notifiche non gli arrivano.
+
+**L'IP è l'identità dell'app, non un dettaglio di collegamento.** Vedi più sotto:
+una PWA appartiene alla sua origine. Se il DHCP dell'hotspot assegna un altro IP,
+`http://<altro-ip>:5173` è un'**altra app** — l'icona vecchia resta sul telefono e
+non riceve più niente, e il flag va rifatto per la nuova origine. Per questo
+`--lan` stampa l'IP a ogni avvio invece di ricordarlo da qualche parte; per
+fissarlo, `VFOOT_LAN_IP=<ip> ./vfoot-sim --lan`.
+
+Un frontend già acceso da un avvio **senza** `--lan` non viene riavviato, e resta
+sul vecchio `localhost:8000` — `VITE_API_BASE_URL` si fissa quando Vite parte.
+Perciò `--lan` non si fida di ciò che ha esportato: chiede al frontend acceso quale
+base URL sta davvero servendo, e se è quella sbagliata lo dice invece di stampare
+l'indirizzo per il telefono come se andasse tutto bene.
+
+Per entrambe le strade — cavo o hotspot — il banner d'installazione arriva da sé
+(Android emette
 `beforeinstallprompt`, che intercettiamo per mostrarlo dal nostro bottone in
 Profilo → Notifiche e installazione). Le push funzionano **anche senza
 installare**: su Android è iOS l'eccezione, non la regola.
@@ -222,3 +316,6 @@ codice, ricostruisci e ricarica. Deve comparire la fascia in basso.
 | 404/410 dal servizio push | Installazione sparita. `push_channel` cancella la riga da sé. |
 | Consegna riuscita, notifica assente | Dispositivo offline (il messaggio resta in coda) o permesso revocato a livello di sistema operativo. |
 | Il service worker non si registra in `npm run dev` | Percorso sbagliato: in sviluppo è `/dev-sw.js?dev-sw`, non `/sw.js`. |
+| Overlay rosso `Failed to resolve import "…"` dal telefono | Un `git pull` che aggiunge una libreria non la installa: manca `npm install`. `--lan` lo dice all'avvio confrontando `package-lock.json` con `node_modules/.package-lock.json`, così te ne accorgi dal portatile e non dall'altra parte della stanza. |
+| L'app installata su Android si apre con la barra dell'indirizzo | Origine `http://`: Chrome non può generare il WebAPK e l'installazione degrada a scorciatoia. Non è il manifest. Serve HTTPS pubblico o `adb reverse` — vedi il riquadro nel livello 3. |
+| Il bottone «Installa l'app» resta anche dopo aver installato | Stessa causa: l'app si riconosce installata da `display-mode: standalone`, che su una scorciatoia è falso. Premerlo di nuovo rifà la stessa scorciatoia e nient'altro. |

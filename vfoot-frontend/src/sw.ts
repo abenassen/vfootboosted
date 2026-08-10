@@ -52,9 +52,11 @@ if (manifest.length) {
       // mobile-frame.html is a real FILE in public/, not a client route, so answering
       // it with the shell gets the app's own 404 — and only on localhost, where the
       // worker is registered, which makes it look like the preview tool is broken on
-      // one machine and fine on another.
+      // one machine and fine on another. pwa-check.html is the same kind of file, and
+      // failing that way would be worse: it is the page you open precisely when you
+      // suspect the worker, so the worker eating it would answer the question wrong.
       denylist: [/^\/api\//, /^\/admin\//, /^\/ws\//, /^\/static\//, /^\/media\//,
-                 /^\/mobile-frame\.html/],
+                 /^\/mobile-frame\.html/, /^\/pwa-check\.html/],
     }),
   );
 }

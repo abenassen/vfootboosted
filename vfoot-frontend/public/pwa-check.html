@@ -1,0 +1,174 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vfoot — controllo PWA</title>
+<!--
+  Una pagina di DIAGNOSI, non una pagina dell'app: sta in public/ ed e' servita
+  com'e', senza React e senza rete. Serve a rispondere in un'occhiata alla domanda
+  che si fa dal telefono -- "l'eccezione in Chrome ha funzionato?" -- che altrimenti
+  si risponde solo collegando il cavo e aprendo chrome://inspect.
+
+  Perche' proprio qui e non nell'app: il contesto sicuro e' una proprieta'
+  dell'ORIGINE, quindi la verifica deve arrivare dalla stessa origine che si sta
+  provando. E perche' senza login: se il contesto non e' sicuro l'app puo' non
+  arrivare nemmeno a mostrare la schermata d'accesso, ed e' proprio il caso che
+  interessa misurare.
+
+  Non registra nulla e non tocca niente: legge e basta, tranne i due bottoni in
+  fondo, che sono espliciti.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; padding: 20px 16px 40px;
+    font: 16px/1.5 system-ui, -apple-system, sans-serif;
+    background: #0f1115; color: #e6e8ee;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .origin {
+    font: 13px/1.4 ui-monospace, Menlo, monospace; color: #8b93a7;
+    word-break: break-all; margin-bottom: 18px;
+  }
+  .verdict {
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 18px;
+    font-weight: 700; font-size: 17px;
+  }
+  .verdict.ok  { background: #12351f; color: #6ee7a0; border: 1px solid #1f6b3d; }
+  .verdict.bad { background: #3a1618; color: #ff8f8f; border: 1px solid #7d2b2f; }
+  .verdict small { display: block; font-weight: 400; font-size: 14px; margin-top: 6px; color: inherit; opacity: .85; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 11px 0; border-bottom: 1px solid #232733;
+  }
+  .dot { font-size: 15px; line-height: 1; flex: 0 0 auto; }
+  .k { flex: 1 1 auto; }
+  .k b { display: block; font-weight: 600; }
+  .k span { display: block; font-size: 13px; color: #8b93a7; }
+  .v { font: 13px ui-monospace, Menlo, monospace; color: #b9c0d0; text-align: right; flex: 0 0 auto; }
+  .actions { margin-top: 22px; display: flex; flex-direction: column; gap: 10px; }
+  button {
+    font: 600 15px system-ui, sans-serif; padding: 13px; border-radius: 10px;
+    border: 1px solid #2b3242; background: #191d27; color: #e6e8ee;
+  }
+  button:disabled { opacity: .45; }
+  #out { margin-top: 12px; font-size: 14px; color: #8b93a7; min-height: 1.5em; }
+  @media (prefers-color-scheme: light) {
+    body { background: #f7f8fa; color: #14161c; }
+    .origin, .k span, .v, #out { color: #5d6577; }
+    li { border-bottom-color: #e3e6ec; }
+    button { background: #fff; border-color: #d3d8e2; color: #14161c; }
+  }
+</style>
+
+<h1>Controllo PWA</h1>
+<div class="origin" id="origin"></div>
+<div class="verdict" id="verdict">…</div>
+<ul id="list"></ul>
+
+<div class="actions">
+  <button id="btn-notify" disabled>Prova una notifica</button>
+  <button id="btn-reload">Ricontrolla</button>
+</div>
+<div id="out"></div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  $('origin').textContent = location.origin;
+
+  // Il contesto sicuro e' la RADICE: senza, tutto il resto e' falso di conseguenza
+  // e non ha senso leggerlo come un guasto a se'.
+  var secure = window.isSecureContext === true;
+  var hasSW = 'serviceWorker' in navigator;
+  var hasPush = 'PushManager' in window;
+  var hasNotif = 'Notification' in window;
+  var standalone = window.matchMedia('(display-mode: standalone)').matches ||
+                   window.navigator.standalone === true;
+
+  var rows = [
+    ['Contesto sicuro', 'isSecureContext — se e\' no, l\'eccezione in Chrome non e\' attiva su QUESTA origine', secure, String(secure)],
+    ['Service worker disponibile', 'navigator.serviceWorker', hasSW, hasSW ? 'presente' : 'assente'],
+    ['API push', 'PushManager', hasPush, hasPush ? 'presente' : 'assente'],
+    ['API notifiche', 'Notification', hasNotif, hasNotif ? 'presente' : 'assente'],
+    // "default" (mai chiesto) e' grigio, "denied" e' rosso: il primo e' lo stato
+    // normale di chi arriva qui la prima volta, il secondo e' un rifiuto che non si
+    // puo' piu' richiedere dalla pagina e va tolto dalle impostazioni del sito.
+    ['Permesso notifiche', 'concesso solo dopo che lo si chiede',
+      !hasNotif ? false : (Notification.permission === 'granted' ? true
+                          : (Notification.permission === 'default' ? null : false)),
+      hasNotif ? Notification.permission : 'n/d'],
+    // Grigio e non rosso: provare da una scheda del browser e' il caso normale, e
+    // segnarlo in rosso manderebbe a cercare un guasto che non c'e'.
+    ['Aperta come app installata', 'display-mode: standalone', standalone ? true : null,
+      standalone ? 'si' : 'no (scheda del browser)'],
+  ];
+
+  function render(extra) {
+    var all = rows.concat(extra || []);
+    $('list').innerHTML = all.map(function (r) {
+      // Il pallino grigio, e non rosso, per cio' che e' solo "non ancora": un
+      // permesso mai chiesto e una app non installata non sono guasti, e
+      // segnarli in rosso manderebbe a cercare un problema che non c'e'.
+      var dot = r[2] === true ? '🟢' : (r[2] === null ? '⚪️' : '🔴');
+      return '<li><span class="dot">' + dot + '</span><span class="k"><b>' + r[0] +
+             '</b><span>' + r[1] + '</span></span><span class="v">' + r[3] + '</span></li>';
+    }).join('');
+
+    var v = $('verdict');
+    if (!secure) {
+      v.className = 'verdict bad';
+      v.innerHTML = 'CONTESTO NON SICURO' +
+        '<small>Niente service worker, quindi niente installazione, niente push e ' +
+        'niente offline. In chrome://flags/#unsafely-treat-insecure-origin-as-secure ' +
+        'dev\'essere scritta esattamente <b>' + location.origin + '</b>, su Enabled, ' +
+        'e Chrome va riavviato con Relaunch.</small>';
+    } else {
+      v.className = 'verdict ok';
+      v.innerHTML = 'CONTESTO SICURO' +
+        '<small>L\'eccezione funziona: worker, installazione e push sono disponibili ' +
+        'su questa origine.</small>';
+    }
+  }
+
+  render();
+
+  // Lo stato del worker dell'app: registrato non vuol dire che stia gia' guidando
+  // la pagina -- al primo caricamento prende il controllo solo dopo un reload, ed
+  // e' la differenza che fa sembrare l'offline rotto quando non lo e'.
+  if (hasSW) {
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      var controlled = !!navigator.serviceWorker.controller;
+      render([
+        ['Worker dell\'app registrato', 'lo registra l\'app, non questa pagina',
+          regs.length > 0, regs.length + ' registrazion' + (regs.length === 1 ? 'e' : 'i')],
+        ['Worker che guida la pagina', 'al primo giro serve un reload',
+          controlled ? true : null, controlled ? 'si' : 'non ancora'],
+      ]);
+      if (regs.length && hasNotif) $('btn-notify').disabled = false;
+    }).catch(function (e) { $('out').textContent = 'lettura registrazioni fallita: ' + e; });
+  }
+
+  // La prova vera: non "il permesso c'e'", ma il worker che DISEGNA una notifica.
+  // Passa dalla registration e non da new Notification(), perche' su Android e' la
+  // sola strada che funziona anche a app installata -- ed e' quella che usiamo noi.
+  $('btn-notify').addEventListener('click', function () {
+    $('out').textContent = 'chiedo il permesso…';
+    Notification.requestPermission().then(function (p) {
+      if (p !== 'granted') { $('out').textContent = 'permesso: ' + p + ' — niente da mostrare.'; render(); return; }
+      return navigator.serviceWorker.ready.then(function (reg) {
+        return reg.showNotification('Vfoot — prova', {
+          body: 'Se leggi questa, il worker sa mostrare le notifiche.',
+          tag: 'vfoot-pwa-check',
+        });
+      }).then(function () {
+        $('out').textContent = 'notifica inviata al worker: guarda le notifiche del telefono.';
+        rows[4][2] = true; rows[4][3] = 'granted';
+        render();
+      });
+    }).catch(function (e) { $('out').textContent = 'errore: ' + e; });
+  });
+
+  $('btn-reload').addEventListener('click', function () { location.reload(); });
+})();
+</script>
