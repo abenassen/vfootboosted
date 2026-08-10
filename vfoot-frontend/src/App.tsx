@@ -16,6 +16,8 @@ import CompetitionAdvancedPage from './pages/CompetitionAdvancedPage';
 import NotFoundPage from './pages/NotFoundPage';
 import LandingPage from './pages/LandingPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import NewPasswordPage from './pages/NewPasswordPage';
 import { useAuth } from './auth/AuthContext';
 import { LeagueProvider } from './league/LeagueContext';
 import { CompetitionProvider } from './league/CompetitionContext';
@@ -40,6 +42,8 @@ export default function App() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/verifica-email" element={<VerifyEmailPage />} />
+      <Route path="/recupera-password" element={<ForgotPasswordPage />} />
+      <Route path="/nuova-password" element={<NewPasswordPage />} />
       <Route
         element={
           <RequireAuth>

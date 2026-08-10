@@ -5,11 +5,14 @@ from datetime import datetime, timezone
 from django.db import transaction
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from vfoot.api.data_builders import build_lineup_context
@@ -19,6 +22,8 @@ from vfoot.api.serializers import (
     LoginSerializer,
     MatchesQuerySerializer,
     PasswordChangeSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     ProfileUpdateSerializer,
     RegisterSerializer,
     ResendVerificationSerializer,
@@ -31,6 +36,11 @@ from vfoot.services.email_verification import (
     activate,
     send_verification_email,
     user_from_uid,
+)
+from vfoot.services.password_reset import (
+    reset_password,
+    send_password_reset_email,
+    token_generator,
 )
 from vfoot.services.google_auth import (
     GoogleAuthError,
@@ -111,6 +121,73 @@ class ResendVerificationView(APIView):
         # way to discover which addresses are registered.
         return Response({"detail": "Se l'indirizzo è registrato e in attesa di "
                                    "conferma, ti abbiamo inviato una nuova email."},
+                        status=status.HTTP_200_OK)
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [AllowAny]
+    # Anyone can make this endpoint send mail to an address they do not own, so it
+    # is rate-limited by IP. Without it, one script turns our sender into a way to
+    # flood someone's inbox — and burns the domain's reputation with it, which is
+    # the part that would not come back.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].strip().lower()
+
+        user = User.objects.filter(email__iexact=email).first()
+        if user is not None:
+            send_password_reset_email(user)
+        # Same answer either way, as in ResendVerificationView: saying "unknown
+        # address" would turn this into a way to discover who is registered.
+        return Response({"detail": "Se l'indirizzo è registrato, ti abbiamo "
+                                   "inviato un link per reimpostare la password."},
+                        status=status.HTTP_200_OK)
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = user_from_uid(data["uid"])
+        # One message for "no such uid" and for "bad token": they are the same
+        # event to whoever is allowed to be here — a link that does not work — and
+        # telling them apart would confirm that a user id exists.
+        invalid = Response({"detail": "Link non valido o scaduto. Chiedine uno nuovo."},
+                           status=status.HTTP_400_BAD_REQUEST)
+        # Checked HERE and again inside reset_password(), on purpose. This one is
+        # what stops a bad token from reaching the password rules at all — without
+        # it, "questa password è troppo comune" would be an answer given to someone
+        # holding no valid link, about an account they only guessed the id of. The
+        # one in the service is what keeps the service safe to call on its own.
+        # Nothing changes the user in between, so the two always agree.
+        if user is None or not token_generator.check_token(user, data["token"]):
+            return invalid
+
+        # Now that the uid is resolved, the password can be judged against its own
+        # user: "the same as your username" is only answerable here.
+        try:
+            validate_password(data["new_password"], user)
+        except DjangoValidationError as exc:
+            return Response({"new_password": list(exc.messages)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if not reset_password(user, data["token"], data["new_password"]):
+            return invalid
+
+        # Every existing token dies. A password reset is the one moment where we
+        # must assume the old session belonged to someone else — leaving it alive
+        # would let whoever prompted the reset keep the access it was meant to end.
+        Token.objects.filter(user=user).delete()
+        token = issue_token(user)
+        return Response({"token": token.key, "user": UserSerializer(user).data},
                         status=status.HTTP_200_OK)
 
 

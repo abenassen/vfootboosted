@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Badge, Button, Card } from '../components/ui';
 import { ApiError, googleSignIn, resendVerification } from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
@@ -210,6 +210,18 @@ export default function LandingPage() {
                     {showPassword ? 'Nascondi' : 'Mostra'}
                   </button>
                 </div>
+                {/* Solo in accesso: in registrazione non c'è ancora una password
+                    da recuperare, e l'offerta leggerebbe come un errore. */}
+                {mode === 'login' ? (
+                  <div className="mt-1.5 text-right">
+                    <Link
+                      to="/recupera-password"
+                      className="text-xs font-semibold text-ink-faint hover:text-ink hover:underline"
+                    >
+                      Password dimenticata?
+                    </Link>
+                  </div>
+                ) : null}
               </label>
 
               {mode === 'register' ? (

@@ -127,5 +127,27 @@ class ResendVerificationSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
 
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField(max_length=64)
+    token = serializers.CharField(max_length=128)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+    new_password_confirm = serializers.CharField(write_only=True, min_length=8)
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["new_password_confirm"]:
+            raise serializers.ValidationError(
+                {"new_password_confirm": "Passwords do not match."})
+        # validate_password is NOT called here: it is called by the view, which by
+        # then has resolved the uid and can pass the user. Running it here as well
+        # would only duplicate the weaker, user-less half of the same check — the
+        # similarity rules (password equal to your own username or email) need the
+        # user to mean anything.
+        return attrs
+
+
 class GoogleAuthSerializer(serializers.Serializer):
     credential = serializers.CharField(write_only=True)

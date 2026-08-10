@@ -110,6 +110,15 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
+    # No DEFAULT_THROTTLE_CLASSES: the rate below applies only to the views that
+    # ask for it by scope. A global default would also meter the live polling and
+    # the auction, where many requests in a minute are the normal shape.
+    "DEFAULT_THROTTLE_RATES": {
+        # Sending mail to an address the caller does not own, on demand. Generous
+        # for a person (a first try, a typo, a resend) and useless for a script.
+        # Counted per IP for anonymous callers, which is what these all are.
+        "password_reset": os.environ.get("DJANGO_PASSWORD_RESET_RATE", "5/hour"),
+    },
 }
 
 ROOT_URLCONF = 'config.urls'

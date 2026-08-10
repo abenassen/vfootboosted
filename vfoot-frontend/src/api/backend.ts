@@ -264,6 +264,25 @@ export async function resendVerification(email: string): Promise<{ detail: strin
   return (await parseJsonOrThrow(res)) as { detail: string };
 }
 
+export async function requestPasswordReset(email: string): Promise<{ detail: string }> {
+  const res = await jsonPost('/auth/password-reset', { email });
+  return (await parseJsonOrThrow(res)) as { detail: string };
+}
+
+export async function confirmPasswordReset(req: {
+  uid: string;
+  token: string;
+  new_password: string;
+  new_password_confirm: string;
+}): Promise<AuthResponse> {
+  const res = await jsonPost('/auth/password-reset/confirm', req);
+  const data = (await parseJsonOrThrow(res)) as AuthResponse;
+  // The reset ends signed in: the link already proved the address, and asking
+  // for the password just chosen would be asking twice for the same thing.
+  setToken(data.token);
+  return data;
+}
+
 export async function googleSignIn(credential: string): Promise<AuthResponse> {
   const res = await jsonPost('/auth/google', { credential });
   const data = (await parseJsonOrThrow(res)) as AuthResponse;
