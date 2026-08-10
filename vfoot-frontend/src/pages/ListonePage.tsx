@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getChampionshipPlayers, getLeagueDetail } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { foldedMatch } from '../utils/text';
@@ -38,6 +38,32 @@ export default function ListonePage() {
   const [ratedOnly, setRatedOnly] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
+
+  // Quanto della tabella si VEDE. La riga aperta sotto un giocatore ha colSpan su
+  // tutte le colonne, quindi è larga quanto la TABELLA — che su uno schermo stretto
+  // è più larga della finestra e scorre. Misurato su un telefono: tabella 504px in
+  // 325px visibili, cioè 179px di spiegazione scritti fuori dallo schermo, tagliati
+  // a metà parola. Il numero non si può scrivere in CSS (la cella non sa nulla del
+  // contenitore che scorre), quindi si misura, e si rimisura quando la finestra
+  // cambia — una rotazione del telefono lo sposta.
+  // Un ref-CALLBACK e non un useEffect su un ref normale: questa pagina esce
+  // presto («Caricamento listone…») e la tabella entra nel DOM solo dopo che i
+  // dati sono arrivati. Un effetto con dipendenze vuote gira su quel primo render,
+  // trova il ref ancora nullo e non riprova mai — la misura resta null e la
+  // larghezza non viene applicata, che è esattamente come questa correzione ha
+  // fallito la prima volta. Il callback invece scatta quando il nodo si attacca.
+  const [visibleWidth, setVisibleWidth] = useState<number | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const setScrollEl = useCallback((el: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (!el) return;
+    setVisibleWidth(el.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setVisibleWidth(el.clientWidth));
+    ro.observe(el);
+    observerRef.current = ro;
+  }, []);
 
   async function exportXlsx() {
     if (!selectedLeagueId || !data) return;
@@ -191,7 +217,7 @@ export default function ListonePage() {
       </Card>
 
       <Card className="p-2 sm:p-4">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={setScrollEl}>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-ink-faint">
@@ -211,6 +237,7 @@ export default function ListonePage() {
                   open={openId === p.player_id}
                   onToggle={() => setOpenId(openId === p.player_id ? null : p.player_id)}
                   seasons={{ current: data.current_season, previous: data.value_season }}
+                  visibleWidth={visibleWidth}
                 />
               ))}
             </tbody>
@@ -268,11 +295,13 @@ function PlayerRow({
   open,
   onToggle,
   seasons,
+  visibleWidth,
 }: {
   p: ChampionshipPlayer;
   open: boolean;
   onToggle: () => void;
   seasons: { current: string; previous: string | null };
+  visibleWidth: number | null;
 }) {
   return (
     <>
@@ -335,7 +364,7 @@ function PlayerRow({
         )}
       </td>
     </tr>
-    {open ? <ValueDetail p={p} seasons={seasons} /> : null}
+    {open ? <ValueDetail p={p} seasons={seasons} visibleWidth={visibleWidth} /> : null}
     </>
   );
 }
@@ -344,14 +373,25 @@ function PlayerRow({
 function ValueDetail({
   p,
   seasons,
+  visibleWidth,
 }: {
   p: ChampionshipPlayer;
   seasons: { current: string; previous: string | null };
+  visibleWidth: number | null;
 }) {
   const estimated = p.value_basis === 'stimato';
   return (
     <tr className="bg-surface-2">
-      <td colSpan={6} className="px-4 py-2 text-xs text-ink-soft">
+      {/* Il padding passa alla div interna: la cella resta larga quanto la tabella
+          (non si può fare altrimenti, è una cella), ma il contenuto si ancora al
+          bordo sinistro di ciò che si vede e prende quella larghezza. `sticky` e
+          non `fixed` perché deve restare dentro il flusso della riga e seguire lo
+          scorrimento verticale come tutto il resto. */}
+      <td colSpan={6} className="p-0">
+        <div
+          className="sticky left-0 px-4 py-2 text-xs text-ink-soft"
+          style={visibleWidth ? { width: visibleWidth } : undefined}
+        >
         {/* Who the player IS, before why he is worth what he is worth: the list
             can only show an abbreviated name and a role chip, so opening a row
             was the one place left to say the rest. */}
@@ -409,7 +449,8 @@ function ValueDetail({
               </li>
             </>
           )}
-        </ul>
+          </ul>
+        </div>
       </td>
     </tr>
   );
