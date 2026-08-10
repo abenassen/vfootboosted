@@ -180,6 +180,27 @@ def candidate_matches():
 CLOCK_DRIFT_TOLERANCE = timedelta(minutes=2)
 
 
+def data_high_water() -> datetime | None:
+    """The furthest instant the data has been played to — the latest stamp any match
+    carries — or None on a database nothing was ever imported into.
+
+    Both halves of "where are we" read this: the guard below, to compare it against
+    the clock, and the rig's ``resume``, to set the clock FROM it.
+
+    Worth saying why resume takes the data and not the clock. Nobody records the
+    clock a run was stopped at, and it would be the wrong number even if somebody
+    did: it sits up to one poll interval past the last import, so starting there
+    would skip the round that interval was owed. The stamps are the only account of
+    how far the season actually got, and the difference between the two is the
+    couple of minutes it is safe to re-play.
+    """
+    stamps = Match.objects.aggregate(
+        checked=Max("data_checked_at"),
+        imported=Max("data_imported_at"),
+        finished=Max("finished_at"))
+    return max((v for v in stamps.values() if v is not None), default=None)
+
+
 def clock_drift(now: datetime) -> timedelta | None:
     """How far the DATA sits ahead of ``now``, or None when it does not.
 
@@ -205,11 +226,7 @@ def clock_drift(now: datetime) -> timedelta | None:
     arrived at quietly — and the fix (``reset``, ``build``, or a clock put back)
     is a decision about which of the two is the real one to keep.
     """
-    stamps = Match.objects.aggregate(
-        checked=Max("data_checked_at"),
-        imported=Max("data_imported_at"),
-        finished=Max("finished_at"))
-    latest = max((v for v in stamps.values() if v is not None), default=None)
+    latest = data_high_water()
     if latest is None or latest - now <= CLOCK_DRIFT_TOLERANCE:
         return None
     return latest - now

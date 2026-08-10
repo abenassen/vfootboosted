@@ -108,6 +108,18 @@ class Scenario:
 # had been watching all afternoon.
 LEAGUE = "Lega Live · Serie A 2026/27"
 
+# Chi gestisce la squadra #1 e amministra la lega, quando non si dice altro. Lo
+# stesso predefinito di ``seed_classic_demo_league``, ripetuto qui perche' e' la
+# CHIAVE con cui la lega viene ritrovata: se i due valori divergessero, un avvio
+# non troverebbe la lega seminata dall'altro e ne farebbe una seconda.
+DEFAULT_OWNER = "andrea"
+
+# Quante giornate reali copre un ciclo di semina. Sta qui perche' e' il cambio fra
+# le due unita' che i due comandi usano: lo scenario conta in CICLI, la coppa e' fissata
+# a GIORNATE REALI, e senza la conversione le due cose si scoprono incompatibili solo
+# a semina avviata.
+ROUNDS_PER_CYCLE = 9
+
 SCENARIOS = {
     s.name: s for s in (
         Scenario(
@@ -206,6 +218,20 @@ class Command(BaseCommand):
                                  "generator or the seed changes; slow (minutes).")
         parser.add_argument("--check", action="store_true",
                             help="Rebuild nothing; just report the current state.")
+        parser.add_argument("--owner", default=DEFAULT_OWNER,
+                            help=f"Which user manages team #1 and administers the "
+                                 f"league (default: {DEFAULT_OWNER}). A league is "
+                                 f"identified by name AND owner, so two owners get "
+                                 f"two leagues rather than one ambiguous name.")
+        # Tri-state on purpose: None means "whatever the scenario says", which is
+        # what every existing invocation means and must keep meaning.
+        parser.add_argument("--cup", dest="cup", action="store_true", default=None,
+                            help="Seed the two cups as well as the championship, "
+                                 "whatever the scenario's default. Three competitions "
+                                 "instead of one, for testing what a league looks "
+                                 "like with a bracket and a group stage in it.")
+        parser.add_argument("--no-cup", dest="cup", action="store_false",
+                            help="Championship only, whatever the scenario's default.")
 
     def handle(self, *args, **o):
         if o["list"]:
@@ -227,7 +253,8 @@ class Command(BaseCommand):
         seed = o["seed"] if o["seed"] is not None else scenario.seed
 
         if o["check"]:
-            self._report(scenario, self._league(scenario, create=False), at)
+            self._report(scenario, self._league(scenario, create=False,
+                                                owner=o["owner"]), at)
             return
 
         self.stdout.write(self.style.MIGRATE_HEADING(
@@ -238,7 +265,7 @@ class Command(BaseCommand):
             call_command("simulate_sofascore_season", season=scenario.season_id,
                          through=scenario.through, now=at.isoformat(), seed=seed,
                          headline=scenario.headline, fresh=bool(o["fresh"]))
-        league = self._league(scenario, create=True)
+        league = self._league(scenario, create=True, owner=o["owner"], cup=o["cup"])
         # Everything the calendar has finished is concludable; the round still being
         # played is not. Derived from the clock rather than passed in, so a scenario
         # is defined by ITS INSTANT alone and cannot drift out of step with itself —
@@ -262,13 +289,21 @@ class Command(BaseCommand):
             f'    $env:VFOOT_FAKE_NOW = "{scenario.at if not o["at"] else at.isoformat()}"\n'
             "    .\\vfoot-dev.ps1 restart"))
 
-    def _league(self, scenario: Scenario, *, create: bool) -> FantasyLeague:
-        """The league this scenario plays in, by name and then by id.
+    def _league(self, scenario: Scenario, *, create: bool,
+                owner: str = DEFAULT_OWNER, cup: bool | None = None) -> FantasyLeague:
+        """The league this scenario plays in, by (name, owner) and then by id.
 
         By NAME first because an id belongs to the database that minted it, and a
         scenario is supposed to survive a reset. Seeded when it is not there, which
         is what makes the whole scenario reproducible from an empty database — and
         idempotent, so the second run costs nothing.
+
+        And by OWNER as well as by name, because that is the pair the seeder is
+        idempotent on: it wipes and rebuilds `name + owner`. Matching on the name
+        alone meant a second owner produced a SECOND league under the same name,
+        after which this lookup picked whichever sorted first — so `--owner mario`
+        seeded Mario's league and then handed you Andrea's, with nothing on screen
+        saying the two were different leagues.
 
         The check is not just "does a league exist": it must be classic, on THIS
         season, with rosters. Without the last one every squad silently fails to
@@ -276,35 +311,59 @@ class Command(BaseCommand):
         """
         found = None
         if scenario.league_name:
-            found = FantasyLeague.objects.filter(name=scenario.league_name).first()
-        if found is None and scenario.league_id:
+            found = FantasyLeague.objects.filter(
+                name=scenario.league_name, owner__username=owner).first()
+        # The id fallback is the pre-name behaviour, kept for a league that predates
+        # all of this — and it knows nothing about owners. So it applies only when
+        # no particular owner was asked for: with `--owner mario` it could hand back
+        # a league belonging to someone else, which is the exact confusion the pair
+        # above exists to end. Asking for an owner means asking for THAT owner.
+        if found is None and scenario.league_id and owner == DEFAULT_OWNER:
             found = FantasyLeague.objects.filter(id=scenario.league_id).first()
-        if found is not None and self._usable(found, scenario):
+        if found is not None and self._usable(found, scenario, cup):
             return found
         if not create or not scenario.league_name:
             raise CommandError(
-                f"No usable league for scenario {scenario.name!r}: it needs a "
-                f"CLASSIC league on season {scenario.season_id} with rosters. "
+                f"No usable league for scenario {scenario.name!r} owned by "
+                f"{owner!r}: it needs a CLASSIC league on season "
+                f"{scenario.season_id} with rosters. "
                 + (f"Found {found.id!r} but it does not qualify. "
                    if found is not None else "")
                 + "Seed one with `manage.py seed_classic_demo_league "
-                  f"--competition-season {scenario.season_id}`.")
+                  f"--competition-season {scenario.season_id} --owner {owner}`.")
 
+        want_cup = scenario.league_cup if cup is None else cup
+        cycles = self._cycles_for(scenario, want_cup)
         self.stdout.write(self.style.NOTICE(
-            f"  seeding the league '{scenario.league_name}' (first run here)…"))
+            f"  seeding the league '{scenario.league_name}' for {owner} "
+            f"({'championship + cups' if want_cup else 'championship only'}, "
+            f"{cycles} cycles)…"))
+        if cycles > scenario.league_rounds:
+            # Said out loud: the league you get is LONGER than this scenario's, and
+            # that is a visible difference — more rounds on the calendar — not an
+            # implementation detail. Better read here than noticed later as "why
+            # does this league run to matchday 36".
+            self.stdout.write(
+                f"    (the cups' last round is a real matchday the calendar has to "
+                f"reach, so {scenario.league_rounds} cycles became {cycles} — "
+                f"{ROUNDS_PER_CYCLE * cycles} matchdays)")
         call_command("seed_classic_demo_league",
                      league_name=scenario.league_name,
                      competition_season=scenario.season_id,
-                     cycles=scenario.league_rounds,
-                     no_cup=not scenario.league_cup)
-        league = FantasyLeague.objects.filter(name=scenario.league_name).first()
-        if league is None or not self._usable(league, scenario):
+                     cycles=cycles,
+                     owner=owner,
+                     no_cup=not want_cup)
+        league = FantasyLeague.objects.filter(
+            name=scenario.league_name, owner__username=owner).first()
+        if league is None or not self._usable(league, scenario, cup):
             raise CommandError(
-                f"Seeding '{scenario.league_name}' did not produce a usable league.")
+                f"Seeding '{scenario.league_name}' for {owner} did not produce a "
+                f"usable league.")
         return league
 
     @staticmethod
-    def _usable(league: FantasyLeague, scenario: Scenario) -> bool:
+    def _usable(league: FantasyLeague, scenario: Scenario,
+                cup: bool | None = None) -> bool:
         from vfoot.models import CompetitionPrize, FantasyRosterSlot
 
         if not (league.mode == FantasyLeague.MODE_CLASSIC
@@ -317,10 +376,34 @@ class Command(BaseCommand):
         # its season awarding nothing, which reads as "the honours are broken"
         # rather than "this league was built by an older command". Re-seeding is
         # the cheap half of the build, so the doubt is resolved by rebuilding.
-        if scenario.league_cup and not CompetitionPrize.objects.filter(
-                competition__league=league).exists():
+        #
+        # Judged on the cups ASKED FOR, not on the scenario's default: `--cup` on a
+        # league seeded without them found it perfectly usable and handed it back
+        # unchanged, so the flag did nothing and said nothing. Wanting cups where
+        # there are none is a reason to re-seed, which is exactly what returning
+        # False here does.
+        if (scenario.league_cup if cup is None else cup) and \
+                not CompetitionPrize.objects.filter(
+                    competition__league=league).exists():
             return False
         return True
+
+    @staticmethod
+    def _cycles_for(scenario: Scenario, want_cup: bool) -> int:
+        """Cycles to seed: enough for the calendar to reach the cup's last round.
+
+        The cup is pinned to REAL matchdays (24, 30, 36) while the league's calendar
+        is only as long as its cycles make it — nine rounds each. Ask for cups on a
+        three-cycle scenario and the calendar stops at 27, so the semi-final looks
+        for matchday 30 and the seed dies with `KeyError: 30`, five minutes into a
+        build, pointing at a dictionary lookup rather than at the mismatch.
+        """
+        from vfoot.management.commands.seed_classic_demo_league import CUP_ROUNDS
+
+        if not want_cup:
+            return scenario.league_rounds
+        needed = -(-max(rm for _, rm in CUP_ROUNDS) // ROUNDS_PER_CYCLE)
+        return max(scenario.league_rounds, needed)
 
     def _conclude_through(self, scenario: Scenario, league: FantasyLeague, at) -> int:
         """The last round the ledger has counted: everything the calendar has

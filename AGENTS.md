@@ -292,7 +292,24 @@ Agents must NEVER:
     -   `POST /api/v1/auth/login`
     -   `GET /api/v1/auth/me`
     -   `POST /api/v1/auth/logout`
+    -   `POST /api/v1/auth/password-reset` and `.../confirm`
 -   Protected endpoints require token auth (`TokenAuthentication`).
+-   **Links sent by email carry NO stored token.** Registration and password
+    recovery both derive it from user state, so it burns itself: the reset hash
+    covers the current password, the confirmation hash covers `is_active`. Nothing
+    to persist, expire or clean up — and nothing that can be forgotten either.
+    Two consequences worth knowing before debugging one: `last_login` is in the
+    reset hash and `issue_token()` writes it, so **an ordinary sign-in invalidates
+    a pending reset link**; and a successful reset also confirms an account that
+    never was, because opening a link sent to that address proves exactly what the
+    confirmation email proves. Full write-up in
+    `vfoot-backend/docs/PASSWORD_RECOVERY.md`.
+-   **The rig PRINTS email instead of sending it.** The dev `.env` points at the
+    real Brevo relay, so trying registration or recovery from `./vfoot-sim` would
+    send real mail to whatever address is typed into the form — and a made-up one
+    bounces, which is the number a relay uses to decide whether you are a serious
+    sender, on the same domain the real notifications go out from. Opt back in
+    deliberately with `VFOOT_SIM_REAL_EMAIL=1`, towards an address that exists.
 -   Overcrowding rule and ±10% duel modifier are enforced in backend
     duel logic.
 -   `realdata` now supports feature-first ingestion with:
@@ -476,10 +493,27 @@ Agents must NEVER:
         open page, with no error anywhere;
     -   plus the tick itself and the VAPID keys for the push.
     `./vfoot-sim build <scenario>` the first time on a machine, `./vfoot-sim
-    <scenario>` after that; `status` / `stop` / `reset`. The script's own header
-    explains each choice where it makes it. Not knowing it existed once cost an
+    <scenario>` after that; `status` / `stop` / `reset` / `resume`. The script's
+    own header explains each choice where it makes it. Not knowing it existed once cost an
     hour of measuring production's cadence and reporting it as the rig's, on an
     environment that could not have shown a WebSocket update at all.
+-   **To open the rig to a PHONE, `--lan` — and it is three settings, not one.**
+    Both servers already listen on `0.0.0.0`, so the reflex is to just hand out the
+    laptop's IP; that fails three ways, and the third is silent. Django answers
+    **400** to a Host outside `ALLOWED_HOSTS`; the browser blocks the calls because
+    `http://<ip>:5173` is not a CORS origin; and `VITE_API_BASE_URL` stays
+    `localhost:8000`, which ON THE PHONE is the phone — an app that opens, looks
+    alive and has no data. `./vfoot-sim --lan` exports all three (the last one also
+    fixes the live WebSocket: `socketUrl()` derives from it) and prints the phone's
+    URL. It does NOT restart a frontend that is already up, so it asks that
+    frontend which base URL it is actually serving instead of trusting what it
+    exported. Plain HTTP on a LAN IP is not a secure context — `navigator.
+    serviceWorker` does not exist at all — so the phone needs Chrome's
+    `#unsafely-treat-insecure-origin-as-secure` for that origin, once; the script
+    prints the line to paste. That is the no-cable alternative to `adb reverse`.
+    A PWA belongs to its ORIGIN: if DHCP hands out a different IP, that is a
+    different app, with its own installation and its own push subscription. Pin it
+    with `VFOOT_LAN_IP=<ip>`. Full write-up in `vfoot-backend/docs/PWA_TESTING.md`.
 -   **A plain start moves the CLOCK and not the DATA, and only one of the two
     directions is safe.** Data behind the clock the tick simply catches up on.
     Data AHEAD of it — a `./vfoot-sim <scenario>` over a database a previous run
@@ -495,6 +529,13 @@ Agents must NEVER:
     the right two clocks). It reports and never corrects — quietly ignoring a
     future stamp would let a rewound clock re-play a match over data it already
     wrote. The fix is `reset` (seconds, from the snapshot) or `build` (minutes).
+    And after a `stop` you usually want neither, because both RESTART the evening:
+    `./vfoot-sim resume` takes its clock from `data_high_water()` — the furthest
+    stamp any match carries, plus a minute — so the season carries on from where it
+    got to. Not from the clock the run was stopped at: nobody records it, and it
+    sits up to one poll interval past the last import, so resuming there would skip
+    the round that interval was owed. `resume` neither leaves nor consumes a
+    snapshot; to return to MID-evening more than once, `build --at <instant>`.
 -   Manual equivalents, if you need them:
     -   `cd vfoot-backend/src && ../.venv/bin/python manage.py runserver localhost:8000 --noreload`
     -   `cd vfoot-frontend && npm run dev -- --host localhost --port 5173`

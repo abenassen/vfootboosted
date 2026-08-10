@@ -26,6 +26,7 @@ from realdata.services.match_scheduler import (
     LIVE_POLL_WINDOW,
     _in_live_window,
     clock_drift,
+    data_high_water,
     human_gap,
     plan_tick,
 )
@@ -274,10 +275,12 @@ class _TickDBTests(TestCase):
         self.away_ts = TeamSeason.objects.create(competition_season=self.cs, team=away)
 
     def _match(self, **kw):
+        # setdefault and not a positional default: a test that needs TWO matches has
+        # to be able to tell them apart, and the id is the only thing that does it.
+        kw.setdefault("external_id", "999")
         return Match.objects.create(
             competition_season=self.cs, home_team=self.home_ts,
-            away_team=self.away_ts, external_source=calendar_sync.PROVIDER,
-            external_id="999", **kw)
+            away_team=self.away_ts, external_source=calendar_sync.PROVIDER, **kw)
 
     def _tick(self, iso):
         call_command("tick", "--now", iso, stdout=StringIO())
@@ -373,6 +376,44 @@ class ClockBehindTheDataTests(_TickDBTests):
 
     def test_an_empty_database_has_no_opinion(self):
         self.assertIsNone(clock_drift(self.LIVE_AT))
+
+
+class DataHighWaterTests(_TickDBTests):
+    """Where `resume` gets its clock: how far the season was actually played, which
+    is a question about the stamps and not about anybody's clock."""
+
+    AT = datetime(2026, 8, 22, 20, 45, tzinfo=UTC)
+
+    def test_nothing_imported_has_no_high_water(self):
+        self._match(status=Match.STATUS_SCHEDULED, kickoff=self.AT)
+        self.assertIsNone(data_high_water())
+
+    def test_it_is_the_furthest_stamp_of_any_kind(self):
+        """Whichever of the three ran last — a full-time seen after the last round
+        is the ordinary case, and reading only data_checked_at would resume before
+        it and re-play the end of the match."""
+        self._match(status=Match.STATUS_FINISHED, kickoff=self.AT,
+                    data_checked_at=self.AT + timedelta(minutes=90),
+                    data_imported_at=self.AT + timedelta(minutes=88),
+                    finished_at=self.AT + timedelta(minutes=97))
+        self.assertEqual(data_high_water(), self.AT + timedelta(minutes=97))
+
+    def test_it_is_the_furthest_across_matches_not_the_last_one(self):
+        self._match(external_id="1", status=Match.STATUS_LIVE, kickoff=self.AT,
+                    data_checked_at=self.AT + timedelta(minutes=30))
+        self._match(external_id="2", status=Match.STATUS_LIVE, kickoff=self.AT,
+                    data_checked_at=self.AT + timedelta(minutes=10))
+        self.assertEqual(data_high_water(), self.AT + timedelta(minutes=30))
+
+    def test_resuming_a_minute_past_it_leaves_no_drift(self):
+        """The property the rig's `resume` rests on: the instant it computes is
+        always AFTER the data, so the guard has nothing to say."""
+        self._match(status=Match.STATUS_LIVE, kickoff=self.AT,
+                    data_checked_at=self.AT + timedelta(minutes=30, seconds=30))
+        top = data_high_water()
+        resume_at = (top + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        self.assertGreater(resume_at, top)
+        self.assertIsNone(clock_drift(resume_at))
 
 
 class HumanGapTests(SimpleTestCase):

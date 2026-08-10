@@ -13,6 +13,8 @@
 #     ./vfoot-sim stop         ferma tutto quello che ha avviato
 #     ./vfoot-sim build        ricostruisce lo stato dello scenario, poi avvia
 #     ./vfoot-sim reset        RIPORTA all'istante iniziale in pochi secondi
+#     ./vfoot-sim resume       RIPRENDE da dove la serata era arrivata
+#     ./vfoot-sim --lan        apre il banco AL TELEFONO sulla rete locale
 #
 #   PERCHE' ACCENDE ANCHE UN REDIS. In sviluppo, senza REDIS_URL, il layer dei
 #   canali e' quello in memoria, che NON fa fan-out fra processi. Il cron dei tick
@@ -44,6 +46,49 @@
 #
 #   L'istantanea e' per (scenario, istante): `reset` riporta esattamente al punto da
 #   cui quel `build` era partito, non a un generico "inizio".
+#
+#   RIPRENDERE NON E' RICOMINCIARE. `reset` torna all'INIZIO della serata, ed e' cio'
+#   che si vuole dopo aver sporcato una prova. Dopo uno `stop` di solito si vuole
+#   l'opposto -- continuare -- e un avvio semplice non lo fa: rimette l'orologio
+#   all'istante dello scenario mentre i dati sono avanti di quanto si e' guardato, che
+#   e' esattamente il caso che blocca tutto (vedi check_drift). Da qui `resume`, che
+#   l'orologio non lo prende dallo scenario ma DAI DATI: l'ultimo timbro che una
+#   partita porta, piu' un minuto.
+#
+#   Dai dati e non dall'orologio di quando si e' fermato -- che nessuno registra, e
+#   che sarebbe comunque il numero sbagliato: sta fino a un intervallo di polling
+#   oltre l'ultimo import, e ripartire di li' salterebbe il giro che quell'intervallo
+#   doveva. La differenza fra i due sono i due minuti che si possono rigiocare.
+#
+#   `resume` non lascia un'istantanea e non ne consuma: sposta solo l'orologio. Per
+#   poter tornare piu' volte a META' serata serve un `build --at <istante>`, che
+#   quella l'istantanea la crea.
+#
+#   PROVARE DAL TELEFONO: `--lan`. I due server ascoltano gia' su 0.0.0.0, ma un
+#   telefono che punta l'IP del portatile trova comunque tre porte chiuse in faccia,
+#   e nessuna delle tre dice chiaramente perche':
+#     - Django risponde 400 a un Host che non e' in ALLOWED_HOSTS;
+#     - il browser blocca le chiamate perche' `http://<ip>:5173` non e' fra le
+#       origini CORS;
+#     - e soprattutto il frontend continuerebbe a chiamare `localhost:8000`, che
+#       DAL TELEFONO e' il telefono stesso -- una app che sembra su ma e' vuota.
+#   `--lan` esporta le tre variabili insieme, perche' due su tre non servono a
+#   niente. Il terzo knob copre anche il WebSocket: `socketUrl()` deriva da
+#   VITE_API_BASE_URL, quindi i voti live arrivano senza una variabile in piu'.
+#
+#   L'IP NON E' UN DETTAGLIO: E' L'IDENTITA' DELL'APP. Una PWA appartiene alla sua
+#   origine -- service worker, cache, token in localStorage e iscrizione push sono
+#   tutti per-origine. Se il DHCP cambia l'IP del portatile, `http://<altro-ip>:5173`
+#   e' un'ALTRA app: l'icona vecchia resta sul telefono e non riceve piu' niente.
+#   Per questo l'IP viene stampato a ogni avvio invece di essere ricordato da
+#   qualche parte, e per questo si puo' fissare con VFOOT_LAN_IP=<ip>.
+#
+#   SERVE ANCORA UN PASSAGGIO SUL TELEFONO, una volta sola: senza HTTPS il browser
+#   NON considera `http://<ip>:5173` un contesto sicuro, e `navigator.serviceWorker`
+#   non esiste proprio -- niente worker, niente installazione, niente push, niente
+#   offline. Si sana da Chrome del telefono, con l'eccezione per quell'origine
+#   (chrome://flags, "Insecure origins treated as secure"): lo script stampa l'esatta
+#   riga da incollare. E' l'alternativa ad `adb reverse` del doc, e non vuole il cavo.
 #
 #   ACCELERARE SI CHIEDE. Di default il banco e' IDENTICO alla produzione: stessa
 #   cadenza (un giro ogni due minuti) e stessa forma (il passaggio pesante, quello
@@ -103,6 +148,18 @@ SNAPDIR="${XDG_CACHE_HOME:-$HOME/.cache}/vfoot-sim/snapshots"
 # --list` descrive. Cambiarli qui NON basta -- li' c'e' la definizione vera.
 SCENARIO="g22-live"
 AT=""
+# Acceso da --lan: apre il banco all'IP di rete del portatile, per provarlo dal
+# telefono. Spento, niente cambia -- il banco resta su localhost com'e' sempre stato.
+LAN=""
+LAN_IP="${VFOOT_LAN_IP:-}"
+# Chi possiede la lega dello scenario, e se ha anche le coppe. Valgono al momento
+# di SEMINARE, cioe' con `build`: un avvio semplice non ricostruisce niente, e una
+# lega gia' seminata non cambia proprietario perche' glielo si chiede all'avvio.
+OWNER=""
+CUP=""
+# Acceso da start_frontend quando il frontend riusato serve ancora la base URL di
+# localhost: l'indirizzo per il telefono c'e', ma non e' ancora buono.
+LAN_STALE=""
 # Acceso da start_redis quando un Redis non c'e' e non si puo' accendere: da li' in
 # poi il tick non e' piu' un processo a parte, ma un thread del server.
 TICK_IN_PROCESS=""
@@ -273,6 +330,23 @@ print(human_gap(d) if d else '')" 2>/dev/null | tail -1)
 }
 
 # --- avvio ----------------------------------------------------------------
+detect_lan_ip() {
+  # Gia' scelto a mano: si crede all'utente e non si va a cercare. E' anche l'unica
+  # via su una macchina con piu' interfacce plausibili (docker0, anbox0, una VPN),
+  # dove indovinare vuol dire indovinare male una volta su tre.
+  [ -n "$LAN_IP" ] && return 0
+  # L'IP con cui si esce, non "tutti gli IP": e' quello che il telefono puo'
+  # raggiungere, ed e' l'unico che la tabella di routing sa nominare da sola. Non
+  # apre connessioni -- 1.1.1.1 e' un pretesto per farsi dire da dove uscirebbe.
+  LAN_IP=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)
+  # Windows (Git Bash): niente `ip`. Qui la sorgente e' ipconfig, e si prende il
+  # primo IPv4 che non sia loopback.
+  [ -n "$LAN_IP" ] || LAN_IP=$(ipconfig 2>/dev/null \
+    | sed -n 's/.*IPv4[^:]*: *\([0-9.]*\).*/\1/p' | grep -v '^127\.' | head -1)
+  [ -n "$LAN_IP" ] || die "non riesco a capire l'IP di rete di questa macchina.
+  Dimmelo a mano:  VFOOT_LAN_IP=192.168.1.42 ./vfoot-sim --lan"
+}
+
 export_sim_env() {
   # L'istante: quello passato con --at, altrimenti quello dello scenario, letto
   # dalla sua definizione invece che duplicato qui.
@@ -284,6 +358,29 @@ export_sim_env() {
   [ -n "$AT" ] || die "scenario '$SCENARIO' sconosciuto (prova: $PY $MANAGE simulate_scenario --list)"
   export VFOOT_FAKE_NOW="$AT"
   export VFOOT_EGRESS_SIMULATED=true
+  # L'ALTRA uscita. Il .env di sviluppo punta al relay Brevo vero, quindi provare
+  # la registrazione o il recupero password dal banco manda posta VERA all'indirizzo
+  # che si e' scritto nel form -- e un indirizzo inventato rimbalza. I rimbalzi non
+  # si limitano a non arrivare: sono la misura con cui un relay decide se sei un
+  # mittente serio, e quella reputazione e' condivisa col dominio da cui scrivono le
+  # notifiche vere. Qui la posta si stampa e basta, com'e' gia' per lo scraping.
+  # Per provare la consegna davvero, una volta e verso un indirizzo che esiste:
+  #     VFOOT_SIM_REAL_EMAIL=1 ./vfoot-sim
+  if [ -z "${VFOOT_SIM_REAL_EMAIL:-}" ]; then
+    export DJANGO_EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+  fi
+  if [ -n "$LAN" ]; then
+    detect_lan_ip
+    # AGGIUNTI ai valori buoni, non sostituiti: il banco deve restare usabile dal
+    # portatile mentre il telefono lo guarda. Sostituirli spegnerebbe localhost, che
+    # e' l'origine da cui si sviluppa.
+    export DJANGO_ALLOWED_HOSTS="localhost,127.0.0.1,testserver,$LAN_IP"
+    export DJANGO_CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://$LAN_IP:$FRONT_PORT"
+    # La riga che fa la differenza fra un'app viva e un guscio vuoto. Vince sul
+    # .env.local (Vite antepone le variabili di processo a quelle del file), quindi
+    # non c'e' niente da modificare e niente da ricordare di rimettere a posto.
+    export VITE_API_BASE_URL="http://$LAN_IP:$BACK_PORT/api/v1"
+  fi
   # NESSUNA cadenza forzata qui: il banco gira con la stessa di produzione (un
   # giro ogni due minuti, il passaggio pesante ogni quattro giri). Vedi la nota
   # ACCELERARE in cima.
@@ -300,12 +397,23 @@ start_backend() {
   # questa sessione ha fatto sembrare che il tick non stesse girando affatto, mentre
   # stava importando regolarmente. Il logging si scarica da solo ed e' per questo che
   # si vedeva solo lui: due meta' dello stesso log con due comportamenti diversi.
+  # Il log del giro PRECEDENTE si mette da parte invece di sovrascriverlo. Quando
+  # qualcosa si inchioda, la prima cosa che si fa e' riavviare -- e con la vecchia
+  # riga quel riavvio cancellava l'unica traccia di che cosa fosse successo. E'
+  # gia' costato una diagnosi: un server al 270% di CPU con ogni richiesta appesa,
+  # e nessun modo di sapere piu' quali richieste fossero in volo.
+  [ -f "$LOGDIR/backend.log" ] && mv -f "$LOGDIR/backend.log" "$LOGDIR/backend.log.1"
   ( cd "$REPO/vfoot-backend/src" \
     && nohup "$PY" -u manage.py runserver "0.0.0.0:$BACK_PORT" --noreload \
        > "$LOGDIR/backend.log" 2>&1 < /dev/null & echo $! >> "$PIDFILE" )
   wait_port "$BACK_PORT" 45 \
     || { tail -20 "$LOGDIR/backend.log" >&2; die "backend non partito"; }
   say "backend   http://localhost:$BACK_PORT  (anche dall'IP di rete, per il telefono)"
+  if [ -n "${VFOOT_SIM_REAL_EMAIL:-}" ]; then
+    printf '%s  email      ESCONO DAVVERO (relay vero): scrivi solo indirizzi che esistono%s\n' "$WARN" "$X"
+  else
+    say "email     stampate qui, non spedite  ($LOGDIR/backend.log)"
+  fi
 }
 
 start_ticks() {
@@ -326,9 +434,69 @@ start_ticks() {
   say "cron      un tick al minuto  ($LOGDIR/tick.log)"
 }
 
+# Che cosa sta DAVVERO servendo il frontend acceso, non cosa gli avremmo detto di
+# servire. VITE_API_BASE_URL si fissa all'avvio di Vite: un frontend gia' in piedi da
+# un avvio senza --lan continua a dire `localhost:8000`, e dal telefono quello e' il
+# telefono. E' il guaio peggiore dei tre perche' e' l'unico che non si vede -- l'app
+# si apre, si naviga, ed e' vuota -- e senza questo controllo lo script stampava
+# l'indirizzo per il telefono affermando che era tutto a posto.
+# 0 = giusto, 1 = sbagliato, 2 = non si e' potuto guardare (che non e' un verdetto).
+lan_base_url_ok() {
+  "$PY" - "$FRONT_PORT" "$LAN_IP" <<'EOF' 2>/dev/null
+import sys, urllib.request
+port, ip = sys.argv[1], sys.argv[2]
+try:
+    body = urllib.request.urlopen(
+        "http://127.0.0.1:%s/src/api/backend.ts" % port, timeout=8
+    ).read().decode("utf-8", "replace")
+except Exception:
+    sys.exit(2)
+sys.exit(0 if '"VITE_API_BASE_URL": "http://%s:' % ip in body else 1)
+EOF
+}
+
+# Le dipendenze installate sono piu' vecchie di quelle dichiarate? npm scrive
+# node_modules/.package-lock.json a ogni install, quindi il confronto e' fra due
+# timbri e non costa niente. Serve DOPO UN PULL: un commit che aggiunge una libreria
+# non la installa, e Vite se ne accorge solo quando qualcuno apre la pagina -- che
+# col telefono vuol dire accorgersene dall'altra parte della stanza, davanti a un
+# overlay rosso che parla di percorsi del portatile. E' successo con lucide-react.
+# Si avvisa e basta, non si installa: scaricare pacchetti e' un'azione di rete, e
+# chi sta lavorando sull'hotspot del telefono la paga a consumo.
+check_frontend_deps() {
+  local lock="$REPO/vfoot-frontend/package-lock.json"
+  local installed="$REPO/vfoot-frontend/node_modules/.package-lock.json"
+  if [ ! -d "$REPO/vfoot-frontend/node_modules" ]; then
+    printf '%s  le dipendenze del frontend non sono mai state installate:%s\n' "$WARN" "$X"
+    printf '%s      (cd vfoot-frontend && npm install)%s\n' "$DIM" "$X"
+    return 0
+  fi
+  [ -f "$lock" ] && [ -f "$installed" ] || return 0
+  if [ "$lock" -nt "$installed" ]; then
+    cat <<EOF
+${WARN}  package-lock.json e' piu' recente di cio' che c'e' in node_modules: dopo un
+  pull che aggiunge una libreria, la pagina si apre su un errore di import.${X}
+${DIM}      (cd vfoot-frontend && npm install)${X}
+EOF
+  fi
+}
+
 start_frontend() {
+  check_frontend_deps
   if port_busy "$FRONT_PORT"; then
     say "frontend  gia' in ascolto sulla $FRONT_PORT, lasciato com'e'"
+    if [ -n "$LAN" ]; then
+      lan_base_url_ok; case $? in
+        0) say "dal telefono  http://$LAN_IP:$FRONT_PORT" ;;
+        2) printf '%s  non ho potuto controllare che base URL serve: guardalo a mano%s\n' "$WARN" "$X" ;;
+        *) LAN_STALE=1; cat <<EOF
+${WARN}  ma NON per il telefono: quel frontend e' partito senza --lan e chiama ancora
+  localhost:8000 -- che dal telefono e' il telefono. L'app si aprirebbe viva e
+  vuota. Riavvialo:  ./vfoot-sim stop && ./vfoot-sim --lan${X}
+EOF
+           ;;
+      esac
+    fi
     return 0
   fi
   # Lasciata come traccia per `stop`: chiudere una porta che non abbiamo aperto
@@ -349,6 +517,34 @@ start_frontend() {
   wait_port "$FRONT_PORT" 45 \
     || { tail -20 "$LOGDIR/frontend.log" >&2; printf '%sfrontend non partito%s\n' "$WARN" "$X"; return 0; }
   say "frontend  http://localhost:$FRONT_PORT"
+  [ -n "$LAN" ] && say "dal telefono  http://$LAN_IP:$FRONT_PORT"
+  return 0
+}
+
+# Le istruzioni per il telefono, stampate a ogni avvio con --lan e non scritte in un
+# doc: contengono l'IP di OGGI, e un doc con dentro l'IP di ieri e' peggio di niente.
+say_phone_steps() {
+  # Il colore dice se l'indirizzo e' pronto o se sopra c'e' un guaio da sanare
+  # prima: stamparlo in verde dopo un avviso vorrebbe dire dare due risposte
+  # opposte alla stessa domanda, e la seconda e' quella che si ricorda.
+  if [ -n "$LAN_STALE" ]; then
+    printf '\n%sdal telefono%s  %shttp://%s:%s%s  %s(prima riavvia il frontend, vedi sopra)%s\n' \
+      "$BOLD" "$X" "$WARN" "$LAN_IP" "$FRONT_PORT" "$X" "$DIM" "$X"
+  else
+    printf '\n%sdal telefono%s  %shttp://%s:%s%s\n' "$BOLD" "$X" "$OK" "$LAN_IP" "$FRONT_PORT" "$X"
+  fi
+  cat <<EOF
+${DIM}  Una volta sola, su Chrome del telefono. Senza, la pagina si apre ma NON e' un
+  contesto sicuro: navigator.serviceWorker non esiste proprio, quindi niente
+  installazione, niente push, niente offline -- e nessun errore che lo dica.${X}
+    1. apri  ${BOLD}chrome://flags/#unsafely-treat-insecure-origin-as-secure${X}
+    2. incolla nella casella  ${BOLD}http://$LAN_IP:$FRONT_PORT${X}
+    3. il menu a fianco su ${BOLD}Enabled${X}, poi ${BOLD}Relaunch${X}
+${DIM}  Per sapere se ha funzionato, dal telefono:${X}
+    ${BOLD}http://$LAN_IP:$FRONT_PORT/pwa-check.html${X}
+${DIM}  Una riga verde o rossa e il motivo. E' servita dalla stessa origine perche' il
+  contesto sicuro e' una proprieta' dell'origine, e non chiede di accedere.${X}
+EOF
 }
 
 # --- comandi --------------------------------------------------------------
@@ -365,8 +561,10 @@ cmd_start() {
   start_backend
   start_ticks
   start_frontend
+  say_league
   printf '\n%sl orologio CAMMINA: da qui in poi il tempo passa come quello vero.%s\n' "$DIM" "$X"
   printf '%sper fermare tutto: ./vfoot-sim stop%s\n' "$DIM" "$X"
+  [ -n "$LAN" ] && say_phone_steps
   # Per ULTIMO, e non prima del backend: e' l'unica riga che chiede di fare
   # qualcosa, e sopra a mezza pagina di avvii sarebbe la prima a scorrere via.
   # Dopo un `build` o un `reset` non trova mai niente, e i due secondi che costa
@@ -377,11 +575,52 @@ cmd_start() {
 cmd_build() {
   export_sim_env
   printf '%sricostruisco lo scenario %s a %s%s\n' "$BOLD" "$SCENARIO" "$VFOOT_FAKE_NOW" "$X"
+  # Passate SOLO qui, e non a `start`: sono decisioni di semina. Una lega gia'
+  # seminata non cambia proprietario ne' guadagna una coppa perche' lo si chiede a
+  # un avvio, e accettare le opzioni li' vorrebbe dire lasciarle ignorare in
+  # silenzio -- il tipo di bugia che questo script esiste per non dire.
+  local extra=()
+  [ -n "$OWNER" ] && extra+=(--owner "$OWNER")
+  [ -n "$CUP" ] && extra+=(--cup)
   "$PY" "$MANAGE" simulate_scenario --scenario "$SCENARIO" --at "$VFOOT_FAKE_NOW" \
+    "${extra[@]}" \
     || die "ricostruzione fallita"
   # PRIMA di accendere: da qui in poi il cron scrive, e un'istantanea presa a
   # simulazione avviata conterrebbe gia' qualche minuto di serata giocata.
   save_snapshot
+  cmd_start
+}
+
+cmd_resume() {
+  # L'orologio dai DATI. La domanda non e' "che ora e'" ma "fin dove si e' giocato",
+  # quindi questo processo NON ha bisogno di un orologio simulato per rispondere: e'
+  # cio' che rompe l'uovo e la gallina, visto che l'istante da esportare e' proprio
+  # quello che stiamo cercando.
+  #
+  # Piu' un minuto, coi secondi azzerati: l'istante cosi' costruito e' sempre DOPO
+  # l'ultimo timbro (fra 1 e 60 secondi), che e' il verso innocuo. Prenderlo esatto
+  # o per difetto rimetterebbe l'orologio dentro i dati gia' scritti, cioe' nel
+  # guaio da cui `resume` esiste per uscire.
+  #
+  # Scritto nel fuso della Serie A e non in UTC: e' il fuso in cui sono scritti gli
+  # scenari e l'unico in cui l'ora letta corrisponde a quella che si vede a schermo.
+  # Se il sistema non ha le tabelle dei fusi si ripiega su UTC, che e' meno leggibile
+  # ma non e' mai ambiguo.
+  AT=$("$PY" "$MANAGE" shell -c "
+from datetime import timedelta, timezone as dt_timezone
+from realdata.services.match_scheduler import data_high_water
+top = data_high_water()
+if top:
+    try:
+        from zoneinfo import ZoneInfo
+        top = top.astimezone(ZoneInfo('Europe/Rome'))
+    except Exception:
+        pass
+    print((top + timedelta(minutes=1)).replace(second=0, microsecond=0).isoformat())" \
+    2>/dev/null | tail -1)
+  [ -n "$AT" ] || die "nessun timbro nella banca dati: non c'e' una serata da riprendere.
+  E' il caso di una banca dati mai importata -- serve un \`./vfoot-sim build\`."
+  printf '%sriprendo da dove la serata era arrivata%s\n' "$BOLD" "$X"
   cmd_start
 }
 
@@ -418,6 +657,50 @@ cmd_reset() {
   ( cd "$REPO/vfoot-backend/src" && "$PY" manage.py migrate --noinput >/dev/null ) \
     || die "migrazione dell istantanea fallita"
   cmd_start
+}
+
+# Con che utente si entra, e che cosa si trova dentro. Senza questa riga la lega
+# c'e' ma e' invisibile: si finisce a chiedersi se il banco l'abbia seminata, e la
+# risposta sta a tre query di distanza in una shell Django.
+say_league() {
+  # Dentro `src`, e non da dove capita: uno script passato per stdin mette in
+  # sys.path la cartella CORRENTE, non quella di manage.py, quindi dalla radice del
+  # repo `config.settings` non si importa. Cosi' e' gia' fallito una volta -- e in
+  # silenzio, perche' l'errore finiva in /dev/null insieme al resto: la funzione
+  # veniva chiamata, non stampava niente, e sembrava che la lega non ci fosse.
+  local out
+  out=$( cd "$REPO/vfoot-backend/src" && "$PY" - "$SCENARIO" <<'EOF' 2>&1
+import os, sys, django
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+django.setup()
+from vfoot.management.commands.simulate_scenario import SCENARIOS
+from vfoot.models import FantasyCompetition, FantasyLeague, FantasyTeam
+
+sc = SCENARIOS.get(sys.argv[1])
+if sc is None or not sc.league_name:
+    raise SystemExit(0)
+leagues = list(FantasyLeague.objects.filter(name=sc.league_name).select_related("owner"))
+if not leagues:
+    print("  lega     non ancora seminata: ./vfoot-sim build %s" % sys.argv[1])
+    raise SystemExit(0)
+for lg in leagues:
+    comps = list(FantasyCompetition.objects.filter(league=lg).values_list("name", flat=True))
+    print("  lega      %s  (id %d)" % (lg.name, lg.id))
+    print("  entra come  %s   squadra: %s" % (
+        lg.owner.username,
+        (FantasyTeam.objects.filter(league=lg, manager__user=lg.owner)
+         .values_list("name", flat=True).first() or "(nessuna)")))
+    print("  competizioni  %s" % (", ".join(comps) if comps else "(nessuna)"))
+EOF
+  )
+  # Un fallimento si DICE. Questa e' una riga informativa e non deve fermare un
+  # avvio, ma "non stampa niente" e "la lega non c'e'" devono restare due cose
+  # distinguibili a schermo, che e' precisamente cio' che prima non erano.
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out"
+  else
+    printf '%s  lega      non sono riuscito a leggerla dalla banca dati%s\n' "$DIM" "$X"
+  fi
 }
 
 cmd_status() {
@@ -505,7 +788,11 @@ EOF
 }
 
 usage() {
-  sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^#//;s/^ //'
+  # Fino alla riga che chiude l'elenco, non fino a un numero di riga fisso: l'elenco
+  # cresce, e il numero fisso non cresce con lui -- teneva fuori build, reset e
+  # resume, cioe' meta' dei comandi, senza che niente lo segnalasse.
+  awk 'NR>=3 { if ($0=="#" && seen) exit; if (/vfoot-sim/) seen=1
+               sub(/^#/,""); sub(/^ /,""); print }' "${BASH_SOURCE[0]}"
 }
 
 # --- argomenti ------------------------------------------------------------
@@ -513,16 +800,30 @@ CMD=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --at)   AT="${2:-}"; shift 2 ;;
+    --lan)  LAN=1; shift ;;
+    --owner) OWNER="${2:-}"; shift 2 ;;
+    --cup)  CUP=1; shift ;;
     -h|--help|help) usage; exit 0 ;;
-    start|stop|status|build|reset) CMD="$1"; shift ;;
+    start|stop|status|build|reset|resume) CMD="$1"; shift ;;
     *)      SCENARIO="$1"; shift ;;
   esac
 done
+
+# Chieste a un comando che NON semina: sarebbero ignorate, e in silenzio. Sono le
+# due opzioni che si danno pensando "adesso la lega diventa di jije", quindi
+# lasciarle caere senza dire niente e' il modo migliore per far credere di aver
+# fatto una cosa che non e' successa.
+if [ -n "$OWNER$CUP" ] && [ "${CMD:-start}" != "build" ]; then
+  die "--owner e --cup valgono solo quando si SEMINA, cioe' con \`build\`:
+  ./vfoot-sim build $SCENARIO${OWNER:+ --owner $OWNER}${CUP:+ --cup}
+  Un avvio non ricostruisce la lega, quindi non potrebbe cambiarne il proprietario."
+fi
 
 case "${CMD:-start}" in
   start)  cmd_start ;;
   build)  cmd_build ;;
   reset)  cmd_reset ;;
+  resume) cmd_resume ;;
   status) cmd_status ;;
   stop)   cmd_stop ;;
   *)      usage; exit 1 ;;
