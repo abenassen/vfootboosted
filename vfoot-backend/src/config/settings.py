@@ -171,6 +171,26 @@ if _DB_ENGINE == "sqlite":
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": os.environ.get("DB_NAME", str(BASE_DIR / "db.sqlite3")),
+            # WAL, perche' in sviluppo NON c'e' un solo processo: il server e il cron
+            # dei tick scrivono sulla stessa banca dati. Col journal classico (il
+            # predefinito) chi scrive prende un lucchetto ESCLUSIVO che blocca ogni
+            # lettore, quindi un giro di tick pesante ferma le pagine aperte -- e i
+            # thread bloccati saturano il pool ASGI, dopodiche' si accoda TUTTO,
+            # perfino /auth/me. Visto: server al 270% di CPU a ritentare, ogni
+            # richiesta appesa a tempo indefinito, e nessun errore da nessuna parte
+            # se non "database is locked" nel log del cron. In WAL i lettori non si
+            # fermano mai per un solo scrittore.
+            #
+            # `timeout` e' l'altra meta': senza, l'attesa di default e' di cinque
+            # secondi e una scrittura contesa muore invece di aspettare il suo turno.
+            #
+            # Vale solo qui: la produzione e' PostgreSQL (vedi il ramo sotto), che
+            # tutto questo non ce l'ha.
+            "OPTIONS": {
+                "timeout": 30,
+                "init_command": "PRAGMA journal_mode=WAL;"
+                                "PRAGMA synchronous=NORMAL;",
+            },
         }
     }
 else:

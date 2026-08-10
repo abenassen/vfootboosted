@@ -2,6 +2,12 @@
 **/__pycache__/
 *.py[cod]
 *.sqlite3
+# I due file di servizio del WAL. Compaiono da quando la banca dati di sviluppo e'
+# in journal_mode=WAL (vedi config/settings.py): sono stato transitorio della
+# connessione, non dati, e `*.sqlite3` da solo non li copre perche' il suffisso
+# viene DOPO l'estensione.
+*.sqlite3-wal
+*.sqlite3-shm
 .venv/
 
 # Node / frontend
