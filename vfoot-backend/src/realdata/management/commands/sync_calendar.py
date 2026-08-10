@@ -27,7 +27,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from django.utils import timezone as djtz
 
-from realdata.services import egress_client
+from realdata.services import egress_client, job_log
 from realdata.services.calendar_sync import (
     SERIE_A_TID,
     resolve_competition_season,
@@ -111,6 +111,10 @@ class Command(BaseCommand):
                                tournament_id=SERIE_A_TID)
 
     def handle(self, *args, **options):
+        with job_log.record("sync_calendar") as run:
+            self._sync(run, **options)
+
+    def _sync(self, run, **options):
         rounds = None
         if options["rounds"]:
             try:
@@ -142,14 +146,19 @@ class Command(BaseCommand):
                     logger=self.stdout.write)
                 if options["if_due"]:
                     due, why = sync_is_due(cs)
+                    run.note(why)
                     self.stdout.write(f"Due? {'yes' if due else 'no'} — {why}")
                     if not due:
+                        # Not owed: the row stays "quiet" (empty ``due``) on
+                        # purpose. Nineteen scatti out of twenty end here, and if
+                        # each left a busy row the interesting ones would drown.
                         return
                 if options["auto_rounds"]:
                     rounds = rounds_to_sync(cs)
                     if not rounds:
                         self.stdout.write("Nothing owed: no round left to sync.")
                         return
+            run.due(rounds=len(rounds) if rounds else 38)
 
             if options["egress"]:
                 self.stdout.write(
@@ -170,6 +179,16 @@ class Command(BaseCommand):
 
             report = sync_calendar(client, cs, season_id, rounds=rounds,
                                    logger=self.stdout.write)
+            # ``fixtures`` is the number that matters most here: a sync that reads
+            # the rounds it asked for and comes back with zero fixtures has found
+            # an empty answer, which the summary line renders as a cheerful
+            # "0 created, 0 updated" and looks like a day with no news.
+            run.did(fixtures=report.total, created=report.created,
+                    updated=report.updated, provisional=report.provisional,
+                    postponed=sum(1 for c in report.changes
+                                  if c.kind == "postponed"),
+                    kickoff_moves=sum(1 for c in report.changes
+                                      if c.kind == "kickoff"))
             if not options["offline"]:
                 # Only after a read that really went out: the stamp is what the
                 # next run measures "am I due?" from, so stamping an offline pass

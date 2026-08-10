@@ -28,6 +28,7 @@ questi file ne sono la copia versionata. L'ambiente (DB, SMTP, VAPID) arriva da
 | `vfoot-market` | ogni 90 s | `market_tick` | il mercato resta corretto ma **muto**: nessuno viene avvisato di una chiusura o di un sorpasso |
 | `vfoot-nudge` | 10:00 | `nudge_conclusions` | l'admin distratto non viene mai richiamato: classifica ferma finché non se ne accorge da solo |
 | `vfoot-backup` | 03:15 | `/usr/local/sbin/vfoot-backup` | **nessuna copia dei dati** fra un deploy e l'altro (**root**) |
+| `vfoot-health` | 07:30 | `health_report --mail --prune` | nessuno si accorge che uno degli altri sette ha smesso di girare, o che gira e non riporta piu' niente |
 
 Fuori da questa tabella, ma schedulato lo stesso: il rinnovo dei certificati TLS,
 che è il timer di sistema `certbot.timer` (vedi `DEPLOY.md`) — di nostro non ha
@@ -133,6 +134,7 @@ sudo -u vfoot /srv/vfoot-app/vfoot-backend/.venv/bin/python \
 sudo -u vfoot ... manage.py tick --dry-run
 sudo -u vfoot ... manage.py market_tick --dry-run
 sudo -u vfoot ... manage.py nudge_conclusions --dry-run
+sudo -u vfoot ... manage.py health_report        # legge e basta, non muta niente
 /usr/local/sbin/vfoot-backup --dry-run
 ```
 
@@ -156,6 +158,7 @@ Tre cose, nessuna delle quali opzionale:
 ## Quando qualcosa non torna
 
 ```sh
+python manage.py health_report         # il verdetto: cosa è rotto e perché
 systemctl list-timers 'vfoot-*'        # quando ha girato, quando rigira
 journalctl -u vfoot-tick --since today # cosa ha detto
 systemctl status vfoot-backup.service  # l'ultimo esito
@@ -163,5 +166,58 @@ systemctl status vfoot-backup.service  # l'ultimo esito
 
 Un `oneshot` che fallisce **non** ferma il timer: riproverà allo scatto successivo.
 Comodo per un errore passeggero (rete giù), infido per uno permanente — che resta
-a fallire in silenzio finché qualcuno non guarda. Il primo posto dove guardare, se
-un dato sembra fermo, è `list-timers`.
+a fallire in silenzio finché qualcuno non guarda. `vfoot-health` è quel qualcuno:
+guarda ogni mattina e scrive solo se c'è da scrivere.
+
+## Il registro delle esecuzioni, e perché non basta il journal
+
+Ogni job lascia una riga in `JobRun` (tabella `realdata_jobrun`): quando è partito,
+quanto è durato, com'è finito, e **due dizionari** — `due`, cioè quello che doveva
+fare, e `did`, cioè i numeri che ha portato a casa.
+
+I due insieme sono il punto. Il journal racconta bene una storia a un umano, e non
+sa distinguere le due righe che contano davvero:
+
+* un tick che non ha importato niente **perché non c'era niente da importare** —
+  mille volte al giorno, la normalità;
+* un tick che non ha importato niente **mentre c'erano tre partite in corso** —
+  l'egress a terra, e nessuno che se ne accorga fino a lunedì.
+
+Nel journal sono identiche. Nel registro, la prima ha `due` vuoto e la seconda no.
+Tutto ciò che `health_report` sa dire poggia su questa differenza.
+
+Il registro serve anche a prendere il guasto che **non somiglia a un guasto**: una
+pagina che risponde ancora e non contiene più quello che leggevamo. Il comando esce
+0, il journal dice «applied», e l'unico segno è un numero che si dimezza. Il
+controllo `*-collapsed` confronta l'ultima passata con la **mediana delle
+precedenti** — mai con una soglia fissa, perché il valore giusto per «giocatori
+visti dal polling Transfermarkt» è quello della settimana scorsa, e nessuna costante
+scritta oggi sopravvive a una stagione.
+
+Volume: il tick scrive ~1440 righe al giorno. `--prune` (che `vfoot-health` fa da
+sé) tiene 14 giorni le righe tranquille e 90 quelle che sono servite a qualcosa.
+
+## Il canarino sulla forma del dato
+
+`health_report` guarda anche i **byte** che l'egress ha appena scaricato, e chiede
+una cosa che l'importatore non può chiedere a sé stesso: le colonne su cui è
+costruito il voto puro ci sono ancora?
+
+È il presidio contro il guasto peggiore di tutti. SofaScore rinomina `duelWon` un
+martedì: la richiesta riesce, il JSON si legge, `.get("duelWon")` torna `None`, e in
+banca dati entra una stagione di giocatori senza duelli — con il voto puro, che è
+una somma pesata, che scivola verso il 6.0 per tutti. Nessun codice d'uscita lo
+vede, e nemmeno la suite di test, che gira su dati registrati col nome vecchio.
+
+Le soglie sono **misurate**, non scelte: sulle 600 partite di Serie A in
+`historical-data/`, 31 colonne compaiono in almeno il 99,5% delle partite, e
+nell'unione di due partite consecutive ci sono tutte e 31 in **599 finestre su
+599**. Per questo il canarino chiede due partite e non una (quattro partite su 600
+ne perdono una per puro caso), e per questo le quattordici colonne rare —
+`penaltySave` c'è nel 6% delle partite — sono deliberatamente fuori: la loro assenza
+è calcio, non un guasto.
+
+Quando una colonna sparisce, il rapporto la nomina, e nella riga sotto elenca le
+colonne **mai viste prima**. Se lo stesso giorno sparisce `duelWon` e compare
+`duelsWon`, non è una perdita: è un cambio di nome, e si sa già cosa correggere
+(`DISTRIBUTED_STAT_MAP` in `realdata/services/sofascore_adapter.py`).

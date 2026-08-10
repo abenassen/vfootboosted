@@ -226,6 +226,12 @@ Agents must NEVER:
 -   Break zone normalization.
 -   Remove overcrowding penalty.
 -   Change scoring constants (like 10%) without explicit approval.
+-   Add a column to `shape_canary.CORE_STAT_KEYS` without MEASURING it first
+    against `historical-data/serie-a/sofascore/cache` (it must appear in ≥99.5% of
+    matches). A key that is merely "obviously always there" — `penaltySave` looks
+    it, and shows up in 6% of matches — turns the canary into a monitor that cries
+    once a season, which is a monitor that gets switched off, taking the real
+    alarm with it.
 
 ------------------------------------------------------------------------
 

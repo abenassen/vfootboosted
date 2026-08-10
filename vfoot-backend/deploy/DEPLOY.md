@@ -267,6 +267,33 @@ ssh root@139.162.144.123 '
 Without the bridge both fail on every fire — `install.sh` skips enabling them
 until it is in place.
 
+### Sorveglianza — da accendere INSIEME al resto, non dopo
+
+`vfoot-health` (07:30) guarda ogni mattina se gli altri sette hanno davvero girato e
+se quello che riportano ha ancora senso, e manda una mail **solo se qualcosa non
+va**. Le prime settimane sono quelle in cui si rompe di più: accenderlo dopo
+significa non avere il registro proprio nei giorni in cui serve.
+
+Una riga nel `.env` prima di accenderlo, altrimenti il controllo gira e non ha a chi
+dirlo (lo segnala su stderr, quindi nel journal, ma nessuno lo legge):
+
+```sh
+VFOOT_HEALTH_EMAIL=abenassen@gmail.com     # più destinatari: separati da virgola
+```
+
+Provalo a mano prima, che è gratis:
+
+```sh
+sudo -u vfoot /srv/vfoot-app/vfoot-backend/.venv/bin/python \
+  /srv/vfoot-app/vfoot-backend/src/manage.py health_report
+```
+
+Cosa vede, e perché non è un `systemctl status` in salsa nostra, sta in
+`deploy/systemd/README.md` (sezioni «Il registro delle esecuzioni» e «Il canarino
+sulla forma del dato»). In breve: prende i due guasti che non hanno codice d'uscita
+— il job che ha smesso di scattare, e il job che scatta, riesce, e non riporta più
+niente perché la pagina che leggeva è cambiata.
+
 ### Enable at launch
 ```sh
 ssh root@139.162.144.123 'cd /srv/vfoot-app/vfoot-backend/deploy/systemd

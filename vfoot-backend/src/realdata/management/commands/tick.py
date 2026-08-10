@@ -29,7 +29,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone as djtz
 
 from realdata.models import Match
-from realdata.services import live_ingest
+from realdata.services import job_log, live_ingest
 from realdata.services.match_scheduler import (
     candidate_matches, clock_drift, human_gap, plan_tick,
 )
@@ -61,9 +61,24 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         now = self._resolve_now(options["now"])
         dry = options["dry_run"]
+        # The run is recorded whatever it does, including nothing: "the tick was
+        # alive and had nothing to do" and "the tick has not run since Friday" read
+        # identically in the journal and are opposite facts. See services/job_log.
+        with job_log.record("tick", dry_run=dry) as run:
+            self._tick(now, dry, run)
 
+    def _tick(self, now, dry, run) -> None:
         matches = list(candidate_matches())
         plan = plan_tick(now, matches)
+
+        # Stated from the PLAN, before acting: what follows is only readable next
+        # to it. Zero imports with zero due is a quiet Tuesday; zero imports with
+        # four live matches is the egress on the floor.
+        run.due(stamp_ft=len(plan.stamp_ft), live_round=len(plan.live_round),
+                live_heavy=len(plan.live_heavy),
+                final_check=len(plan.final_check),
+                final_confirm=len(plan.final_confirm))
+        run.did(candidates=len(matches))
 
         mode = "DRY-RUN" if dry else "APPLY"
         self.stdout.write(self.style.NOTICE(
@@ -76,6 +91,8 @@ class Command(BaseCommand):
         # too. See ``clock_drift`` for why the symptom is otherwise unreadable.
         drift = clock_drift(now)
         if drift is not None:
+            run.did(clock_drift_hours=round(drift.total_seconds() / 3600, 1))
+            run.note("la banca dati e' avanti all'orologio")
             self.stdout.write(self.style.WARNING(
                 f"  la banca dati e' AVANTI all'orologio di {human_gap(drift)}: "
                 f"porta timbri da un istante che deve ancora venire, e finche' "
@@ -106,6 +123,7 @@ class Command(BaseCommand):
                 m.save(update_fields=["finished_at"])
                 sent = live_updates.announce_full_time(m)
                 nudge |= live_updates.leagues_to_nudge(m)
+                run.did(stamped_ft=1, pushes=sent or 0)
                 if sent:
                     self.stdout.write(f"    push fine partita: {sent}")
 
@@ -124,6 +142,7 @@ class Command(BaseCommand):
                 continue
             before = live_updates.snapshot_events(m)
             if not live_ingest.live_round(m, heavy=heavy):
+                run.did(egress_blocked=1)
                 self.stdout.write(f"  [{label}] {m} — egress blocked; will retry")
                 continue
             m.data_checked_at = now
@@ -134,6 +153,7 @@ class Command(BaseCommand):
             m.save(update_fields=fields)
             events = live_updates.announce_events(m, before)
             nudge |= live_updates.leagues_to_nudge(m)
+            run.did(imported=1, heavy=1 if heavy else 0, pushes=events or 0)
             self.stdout.write(
                 f"  [{label}] {m} — {m.status} {m.home_goals}-{m.away_goals}"
                 + (f", push: {events}" if events else ""))
@@ -148,8 +168,10 @@ class Command(BaseCommand):
                 m.data_imported_at = now
                 m.save(update_fields=["data_checked_at", "data_imported_at"])
                 nudge |= live_updates.leagues_to_nudge(m)
+                run.did(imported=1, finalized=1)
                 self.stdout.write(f"  [final-check] {m} — imported (provisional)")
             else:
+                run.did(egress_blocked=1)
                 self.stdout.write(f"  [final-check] {m} — egress blocked; will retry")
 
         # 6) Finalization: +1h confirmation -> data_ready (official). The nudge here
@@ -165,12 +187,15 @@ class Command(BaseCommand):
                 m.save(update_fields=["data_checked_at", "data_imported_at",
                                       "data_ready"])
                 nudge |= live_updates.leagues_to_nudge(m)
+                run.did(imported=1, promoted=1)
                 self.stdout.write(f"  [final-confirm] {m} — data_ready")
             else:
+                run.did(egress_blocked=1)
                 self.stdout.write(f"  [final-confirm] {m} — egress blocked; will retry")
 
         if nudge:
             live_updates.broadcast_leagues(nudge)
+            run.did(leagues_nudged=len(nudge))
             self.stdout.write(f"  {len(nudge)} leghe avvisate")
 
         if not dry:

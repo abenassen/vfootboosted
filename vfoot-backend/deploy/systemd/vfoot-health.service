@@ -1,0 +1,19 @@
+[Unit]
+Description=Vfoot controllo di salute (job schedulati, dati raccolti, forma del dato)
+[Service]
+Type=oneshot
+User=vfoot
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+# --mail manda posta SOLO quando qualcosa non va (destinatario: VFOOT_HEALTH_EMAIL
+# nel .env). Un "va tutto bene" quotidiano insegna a cancellare il messaggio senza
+# leggerlo, che e' esattamente lo stato da cui stiamo uscendo.
+#
+# --prune tiene il registro alla sua misura: le righe tranquille (nessun debito,
+# nessun errore) durano 14 giorni, le altre 90. Il tick da solo ne scrive ~1440 al
+# giorno.
+#
+# NIENTE --strict: un'unita' perennemente "failed" perche' il pool egress e' basso
+# smette di essere letta come un allarme nel giro di due giorni. La notizia la porta
+# la mail; l'esito dell'unita' resta 0 e il rapporto sta nel journal.
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py health_report \
+  --mail --prune

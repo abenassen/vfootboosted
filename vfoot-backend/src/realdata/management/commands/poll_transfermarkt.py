@@ -40,6 +40,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from realdata.management.commands.import_transfermarkt_squads import PROVIDER_SOFASCORE
 from realdata.models import CompetitionSeason, TeamSeason
+from realdata.services import job_log
 from realdata.services.scrape_transfermarkt_squads import TM
 
 
@@ -104,9 +105,14 @@ class Command(BaseCommand):
         return derived
 
     def handle(self, *args, **opts):
+        with job_log.record("poll_transfermarkt", dry_run=opts["dry_run"]) as run:
+            self._poll(run, **opts)
+
+    def _poll(self, run, **opts):
         cs = self._resolve_season(opts["competition_season"])
         tm_season = self._tm_season(cs, opts["season"])
         expected = TeamSeason.objects.filter(competition_season=cs).count()
+        run.due(clubs=expected)
         self.stdout.write(self.style.NOTICE(
             f"poll_transfermarkt: {opts['competition']} {tm_season} "
             f"-> {cs} (id={cs.id}), {expected} teams expected"))
@@ -115,7 +121,13 @@ class Command(BaseCommand):
         out = tmp / opts["competition"] / str(tm_season)
         out.mkdir(parents=True, exist_ok=True)
         try:
-            scraped, failed = self._scrape(out, opts["competition"], tm_season, opts)
+            scraped, failed, players = self._scrape(
+                out, opts["competition"], tm_season, opts)
+            # ``players`` is the column that catches the silent break: Transfermarkt
+            # can serve a page that is still a page and no longer a squad, and the
+            # club then counts as scraped with an empty roster. Clubs stay at 20,
+            # players drop to zero, and only the second number says so.
+            run.did(clubs_scraped=scraped, clubs_failed=failed, players=players)
             if scraped == 0:
                 raise CommandError("Scraped 0 clubs — TM unreachable or blocked. "
                                    "Nothing imported.")
@@ -125,6 +137,8 @@ class Command(BaseCommand):
             # (transient failure) would otherwise mass-close its players' stints.
             all_present = (failed == 0 and expected and scraped == expected)
             if not all_present:
+                run.note(f"scrape incompleto ({scraped}/{expected} club): "
+                         f"partenze non applicate")
                 self.stdout.write(self.style.WARNING(
                     f"Incomplete scrape ({scraped}/{expected} clubs, {failed} "
                     f"failed): closing departures is DISABLED this run to avoid "
@@ -146,11 +160,12 @@ class Command(BaseCommand):
             else:
                 shutil.rmtree(tmp, ignore_errors=True)
 
-    def _scrape(self, out: Path, competition: str, season: int, opts) -> tuple[int, int]:
-        """Fresh scrape into `out`. Returns (clubs_scraped, clubs_failed)."""
+    def _scrape(self, out: Path, competition: str, season: int,
+                opts) -> tuple[int, int, int]:
+        """Fresh scrape into `out`. Returns (clubs_scraped, clubs_failed, players)."""
         tm = TM(out, min_delay=opts["delay"], jitter=opts["jitter"],
                 logger=self.stdout.write)
-        scraped = failed = 0
+        scraped = failed = players = 0
         try:
             clubs = tm.clubs(competition, season)
             self.stdout.write(f"{len(clubs)} clubs listed.")
@@ -169,8 +184,9 @@ class Command(BaseCommand):
                     {"club": club, "players": roster}, ensure_ascii=False, indent=2))
                 tmp.replace(f)
                 scraped += 1
+                players += len(roster)
                 self.stdout.write(f"  [{i}/{len(clubs)}] {club['name']}: "
                                   f"{len(roster)} players")
         finally:
             tm.close()
-        return scraped, failed
+        return scraped, failed, players

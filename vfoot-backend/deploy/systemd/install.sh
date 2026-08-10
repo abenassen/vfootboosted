@@ -20,7 +20,7 @@ BACKUP_SRC="$HERE/../backup/vfoot-backup"
 BACKUP_DST=/usr/local/sbin/vfoot-backup
 
 # L'inventario. Aggiungere un job = una riga qui + i due file dell'unita'.
-ALL_UNITS=(tick calendar tm-poll egress-refill market nudge backup)
+ALL_UNITS=(tick calendar tm-poll egress-refill market nudge backup health)
 
 DRY=""
 ENABLE=()

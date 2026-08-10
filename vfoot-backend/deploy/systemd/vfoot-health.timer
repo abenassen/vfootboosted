@@ -1,0 +1,14 @@
+[Unit]
+Description=Controlla una volta al giorno che i job automatici stiano davvero girando
+[Timer]
+# Le 07:30: dopo il backup delle 03:15 e prima che qualcuno cominci a giocare,
+# cosi' la mail — se arriva — riguarda una notte gia' finita e c'e' tutto il giorno
+# per rimediare. In giornata di gara i guasti li prende comunque il canarino alla
+# passata successiva; questo e' il controllo di fondo, non la sorveglianza live.
+OnCalendar=*-*-* 07:30:00
+RandomizedDelaySec=10m
+# Persistent: se il server era spento all'ora giusta, il controllo si fa appena
+# torna. E' il caso in cui serve di piu'.
+Persistent=true
+[Install]
+WantedBy=timers.target

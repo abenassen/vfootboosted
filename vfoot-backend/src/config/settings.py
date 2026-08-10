@@ -389,6 +389,12 @@ EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "15"))
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL",
                                     "Vfoot Boosted <no-reply@vfoot.it>")
 
+# Where `health_report --mail` sends the news that something in the unattended
+# half of the system is broken (comma-separated). Empty = no mail, which is the
+# right default everywhere except the server: it means a developer running the
+# command by hand never posts an alarm to anybody.
+VFOOT_HEALTH_EMAIL = os.environ.get("VFOOT_HEALTH_EMAIL", "")
+
 # Confirmation links point at the SPA, which then calls the verify endpoint.
 VFOOT_FRONTEND_BASE_URL = os.environ.get("VFOOT_FRONTEND_BASE_URL",
                                          "http://localhost:5173")

@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db import models
 from django.utils import timezone
 
@@ -411,6 +413,90 @@ class DataIngestionManifest(models.Model):
             models.Index(fields=["provider", "data_version"]),
             models.Index(fields=["imported_at"]),
         ]
+
+
+class JobRun(models.Model):
+    """One run of a scheduled job: what it was DUE to do, and what it DID.
+
+    WHY THIS EXISTS, given that systemd already logs to the journal. Because the
+    failure this is here to catch does not look like a failure. A scraper whose
+    provider renamed a field still exits 0: the import runs, the journal says
+    "applied", and what enters the database is a season of players with no stats
+    and a voto puro flattened onto 6.0 for everybody. Exit codes see none of it;
+    neither does a human reading the journal, because there is nothing to read.
+
+    So the row carries NUMBERS, not an outcome — how many matches were seen, how
+    many players updated, how many requests the egress made. A count that halves
+    overnight is a signal; "success" is not.
+
+    ``due`` is the half that is easy to forget and is the whole point. A tick that
+    imported nothing is normal a thousand times a day and an alarm on a Sunday at
+    18:00 — and the two are the same journal line. The tick already computes its
+    plan before acting (``match_scheduler.plan_tick``), so it knows which of the two
+    it is; this is where that knowledge is written down instead of thrown away.
+    Everything ``health_report`` can say rests on the pair being recorded together.
+
+    Append-only, one row per run, pruned by ``health_report --prune``. The tick
+    alone writes ~1440 rows a day: uninteresting ones (nothing due, no error) are
+    kept 14 days, the rest 90 — see ``prune``.
+    """
+
+    job = models.CharField(max_length=40, help_text="tick, sync_calendar, ...")
+    started_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    # None is not "unknown": it is a run that started and never wrote its own
+    # ending — killed, OOM, the machine rebooted mid-run. Distinguishing that from
+    # an orderly failure matters, so it is a third state and not a default of False.
+    ok = models.BooleanField(null=True, blank=True)
+    dry_run = models.BooleanField(default=False)
+    due = models.JSONField(default=dict, blank=True)
+    did = models.JSONField(default=dict, blank=True)
+    note = models.CharField(max_length=300, blank=True, default="")
+    error = models.TextField(blank=True, default="")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["job", "-started_at"]),
+            models.Index(fields=["-started_at"]),
+        ]
+
+    def __str__(self) -> str:
+        state = {True: "ok", False: "FAILED", None: "interrupted"}[self.ok]
+        return f"{self.job} @ {self.started_at:%Y-%m-%d %H:%M} [{state}]"
+
+    @property
+    def seconds(self) -> float | None:
+        if not self.finished_at:
+            return None
+        return (self.finished_at - self.started_at).total_seconds()
+
+    @property
+    def idle(self) -> bool:
+        """True when the run had nothing to do — the boring majority of ticks.
+
+        Not the same as ``did`` being empty: a run that WAS owed something and
+        produced nothing is the interesting case, and must never be pruned as if it
+        were quiet."""
+        return not self.due and not self.error and self.ok is True
+
+    @classmethod
+    def prune(cls, *, keep_idle_days: int = 14, keep_days: int = 90) -> int:
+        """Drop old rows. Returns how many went.
+
+        Two ages on purpose. The quiet rows are what makes the table big and they
+        stop being worth anything within days: they only ever answer "was the timer
+        alive on the 3rd of March". A run that failed, or that was owed work, is
+        evidence — that one is kept long enough to see a pattern across a couple of
+        months, which is exactly the reading a human (or the maintenance agent)
+        does after the second time something goes wrong.
+        """
+        now = timezone.now()
+        gone = cls.objects.filter(
+            started_at__lt=now - timedelta(days=keep_idle_days),
+            ok=True, due={}, error="").delete()[0]
+        gone += cls.objects.filter(
+            started_at__lt=now - timedelta(days=keep_days)).delete()[0]
+        return gone
 
 
 class PlayerZoneFeature(models.Model):
