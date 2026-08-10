@@ -169,6 +169,83 @@ def recompute_round_layout(competition: FantasyCompetition) -> dict:
     return {"competition_id": competition.id, "stages": len(stages), "fixtures_shifted": shifted}
 
 
+def _stage_name_is_noise(stage_names: list[str], competition_name: str, stage_count: int) -> bool:
+    """Does naming the stage tell the reader anything the competition has not?
+
+    Twice it does not, and both reached the screen as "CAMPIONATO … Campionato":
+
+    * a competition with ONE stage. The stage IS the competition — everything in it
+      belongs to that phase — so its name is the competition's said a second time,
+      whatever the two happen to be called. And every league built from the UI is in
+      this case, because ``build_league_graph`` names its single stage "Campionato";
+    * a stage named after its own competition, however many stages there are.
+
+    When the name goes, the NUMBER comes back, and that is the point of suppressing
+    it: with the name printed in its place, fourteen rounds of one stage all read
+    "Campionato" and nothing on the row said whether it was the third or the twelfth.
+    """
+    if not stage_names or stage_count <= 1:
+        return True
+    return (len(stage_names) == 1
+            and stage_names[0].strip().casefold() == (competition_name or "").strip().casefold())
+
+
+def round_label(*, competition_name: str, stage_names: list[str], stage_type: str,
+                round_no: int, local_round: int, local_rounds: int,
+                stage_count: int, legs: int = 1) -> str:
+    """What a round is CALLED — the one function that decides it.
+
+    It used to be decided twice: here for the calendar, and again in the fixture
+    serializer as ``fx.stage.name if fx.stage_id else f"Turno {n}"``. The two agreed
+    on a cup, where a stage is one round and "Semifinali" is the whole answer, and
+    parted company everywhere else — the short version keeps the stage name in place
+    of the number however many rounds the stage spans.
+
+    TURNO is the competition's own count and GIORNATA the real Serie A one; this
+    function only ever says the first. The second is added by whoever displays it,
+    because only some views have it.
+    """
+    if _stage_name_is_noise(stage_names, competition_name, stage_count):
+        return f"Turno {round_no}"
+    label = " / ".join(stage_names)
+    if stage_type == CompetitionStage.TYPE_KNOCKOUT and legs == 2:
+        # Una sfida sola giocata due volte: "Semifinali · turno 2" suonerebbe come
+        # un secondo turno.
+        #
+        # Il discriminante è LEGS e non "la fase dura due turni", che è quello che
+        # c'era e che è vero solo per le fasi costruite dalla procedura guidata —
+        # lì un turno di coppa è una fase a sé, quindi `planned_rounds` È il numero
+        # di gare (v. planned_rounds_for). Una fase che tiene DENTRO un tabellone
+        # dura due turni perché sono semifinale e finale: la "Fase finale" della
+        # Coppa Gironi, che si leggeva "andata" e "ritorno" essendo due sfide
+        # diverse fra squadre diverse.
+        return f"{label} · {'andata' if local_round == 1 else 'ritorno'}"
+    if local_rounds > 1:
+        return f"{label} · turno {local_round}"
+    return label
+
+
+def fixture_round_label(fixture, stage_count: int) -> str:
+    """``round_label`` for a single fixture.
+
+    ``stage_count`` is asked for and never counted here: this runs once per row of
+    the league's results list, which is what the home page draws, and a count of its
+    own would be a query per fixture. The callers hold it already — one aggregate for
+    the whole response, or the stage list they were iterating anyway.
+    """
+    stage = fixture.stage if fixture.stage_id else None
+    return round_label(
+        competition_name=fixture.competition.name,
+        stage_names=[stage.name] if stage else [],
+        stage_type=stage.stage_type if stage else "",
+        round_no=fixture.round_no,
+        local_round=(fixture.round_no - (stage.round_offset or 0)) if stage else fixture.round_no,
+        local_rounds=(stage.planned_rounds or 0) if stage else 0,
+        stage_count=stage_count,
+        legs=stage_legs(stage) if stage else 1,
+    )
+
+
 def competition_round_rows(competition: FantasyCompetition) -> list[dict]:
     """Every round of the competition, in order, said in the user's terms.
 
@@ -193,6 +270,7 @@ def competition_round_rows(competition: FantasyCompetition) -> list[dict]:
                 "stage_type": stage.stage_type,
                 "local_round": local,
                 "local_rounds": span,
+                "legs": stage_legs(stage),
             }
 
     if not rows:
@@ -205,23 +283,31 @@ def competition_round_rows(competition: FantasyCompetition) -> list[dict]:
                 "stage_type": competition.competition_type,
                 "local_round": rno,
                 "local_rounds": 0,
+                "legs": 1,
             }
 
     out = []
     for rno in sorted(rows):
         row = rows[rno]
-        stage_label = " / ".join(row.pop("stage_names"))
-        if row["stage_type"] == CompetitionStage.TYPE_KNOCKOUT and row["local_rounds"] == 2:
-            # Due turni di una fase a eliminazione sono una sfida sola giocata due
-            # volte: "Semifinali · turno 2" suonerebbe come un secondo turno.
-            row["label"] = f"{stage_label} · {'andata' if row['local_round'] == 1 else 'ritorno'}"
-        elif row["local_rounds"] > 1:
-            # TURNO: è il conto interno della fase. "Giornata" è riservata a
-            # quella del campionato vero, che qui è un altro numero.
-            row["label"] = f"{stage_label} · turno {row['local_round']}"
-        else:
-            row["label"] = stage_label
-        row["stage_name"] = stage_label
+        names = row.pop("stage_names")
+        row["label"] = round_label(
+            competition_name=competition.name,
+            stage_names=names,
+            stage_type=row["stage_type"],
+            round_no=row["round_no"],
+            local_round=row["local_round"],
+            local_rounds=row["local_rounds"],
+            legs=row.pop("legs"),
+            # The flat fallback above borrows the COMPETITION's name to fill the
+            # column; zero stages is the truth, and what makes that borrowed name
+            # register as the repetition it is.
+            stage_count=len(stages),
+        )
+        # Left as the stage's own name even when the label drops it: this is the
+        # field that says WHICH stage a round belongs to, and the rule picker reads
+        # it to group rounds. Only the human-facing `label` is subject to the
+        # noise rule.
+        row["stage_name"] = " / ".join(names)
         out.append(row)
     return out
 

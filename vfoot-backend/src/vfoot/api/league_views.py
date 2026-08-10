@@ -101,6 +101,7 @@ from vfoot.services.competition_stages import (
     MAX_LEGS,
     build_default_stage_graph,
     competition_round_rows,
+    fixture_round_label,
     recompute_round_layout,
     resolve_pending_stages,
     resolve_stage,
@@ -2463,7 +2464,12 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
                            my_roster_ready: bool = False, awaiting_mds: set[int] | None = None,
                            locked_mds: set[int] | None = None,
                            live_totals: dict | None = None,
-                           closed_mds: set[int] | None = None) -> dict:
+                           closed_mds: set[int] | None = None,
+                           *, stage_count: int) -> dict:
+    # `stage_count` è obbligatorio e senza valore predefinito apposta: serve solo a
+    # `round_label`, e qualunque predefinito sarebbe una scommessa sulla forma della
+    # competizione — sbagliarla non darebbe un errore ma un'etichetta plausibile e
+    # falsa. Chi chiama ce l'ha gia' in mano; chi lo dimentica se ne accorge subito.
     mine = bool(my_team_id and (fx.home_team_id == my_team_id or fx.away_team_id == my_team_id))
     played = fx.status == FantasyFixture.STATUS_FINISHED
     real_md = fx.fantasy_matchday.real_matchday if fx.fantasy_matchday_id else None
@@ -2485,9 +2491,13 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         # quella del campionato vero. Sono due orologi e vogliono due parole: qui
         # c'era scritto "Giornata", e una riga di risultato finiva per leggersi
         # "Giornata 21 · giornata 21" — il conto interno della competizione
-        # chiamato col nome del calendario su cui è giocato. Il nome di una fase
-        # scelto dall'admin ("Semifinali") batte comunque il numero.
-        "round_label": fx.stage.name if fx.stage_id else f"Turno {fx.round_no}",
+        # chiamato col nome del calendario su cui è giocato.
+        #
+        # E poi c'era scritto `fx.stage.name if fx.stage_id else ...`, che sul
+        # campionato di una lega vera dava "CAMPIONATO CLASSIC … Campionato":
+        # il nome della fase al posto del numero, per tutti i turni della fase.
+        # Adesso la regola sta in un posto solo, con quella del calendario.
+        "round_label": fixture_round_label(fx, stage_count),
         "fantasy_matchday_id": fx.fantasy_matchday_id,
         "real_matchday": fx.fantasy_matchday.real_matchday if fx.fantasy_matchday_id else None,
         "round_no": fx.round_no,
@@ -2573,10 +2583,19 @@ class LeagueFixturesView(APIView):
         # One query for the whole calendar, not one per fixture.
         my_roster_ready = bool(my_team_id) and FantasyRosterSlot.objects.filter(
             team_id=my_team_id, released_at__isnull=True).exists()
+        # Quante fasi ha ogni competizione: serve a decidere se il nome della fase
+        # aggiunge qualcosa al nome del turno. UNA query per l'intera risposta — una
+        # lega ha una manciata di competizioni — e non una per partita: questa è la
+        # lista che disegna la home, ed è già costata cara una volta.
+        stage_counts = dict(
+            CompetitionStage.objects.filter(competition__league=league)
+            .values("competition_id").annotate(n=Count("id"))
+            .values_list("competition_id", "n"))
         rows = list(qs[:200])
         live_totals = _live_totals(league, rows, locked_mds)
         items = [_serialize_fixture_row(fx, my_team_id, current_real_md, my_roster_ready,
-                                        awaiting_mds, locked_mds, live_totals, closed_mds)
+                                        awaiting_mds, locked_mds, live_totals, closed_mds,
+                                        stage_count=stage_counts.get(fx.competition_id, 0))
                  for fx in rows]
         return Response(items)
 
@@ -4377,7 +4396,8 @@ def _highlighted_ranks(stage) -> tuple[list[int], list[int]]:
 
 
 def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, pl,
-             stage=None, awaiting_mds=None, locked_mds=None, live_totals=None) -> dict:
+             stage=None, awaiting_mds=None, locked_mds=None, live_totals=None,
+             stage_count: int = 0) -> dict:
     """One results section: a standings table (round-robin) or a bracket (knockout)."""
     fixtures = list(fixtures)
     prize_ranks, qualify_ranks = _highlighted_ranks(stage)
@@ -4399,7 +4419,8 @@ def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, 
             rows = []
             for f in fs:
                 row = _serialize_fixture_row(f, my_team_id, current_md, False,
-                                             awaiting_mds, locked_mds, live_totals)
+                                             awaiting_mds, locked_mds, live_totals,
+                                             stage_count=stage_count)
                 winner = next((tid for tid in (f.home_team_id, f.away_team_id)
                                if tid in passed), None)
                 row["advanced_team_id"] = winner
@@ -4491,7 +4512,9 @@ class CompetitionStructureView(APIView):
                 _section(s.name, s.stage_type, s.order_index,
                          s.fixtures.select_related(*rel).defer(*defer), my_team_id, current_md, pw, pd, pl,
                          stage=s, awaiting_mds=awaiting_mds, locked_mds=locked_mds,
-                         live_totals=live_totals)
+                         live_totals=live_totals,
+                         # Gia' in mano: nessuna query in piu' per contarle.
+                         stage_count=len(stages))
                 for s in stages
             ]
         else:
@@ -4499,7 +4522,7 @@ class CompetitionStructureView(APIView):
                 _section(comp.name, comp.competition_type, 1,
                          comp.fixtures.select_related(*rel).defer(*defer), my_team_id, current_md, pw, pd, pl,
                          awaiting_mds=awaiting_mds, locked_mds=locked_mds,
-                         live_totals=live_totals)
+                         live_totals=live_totals, stage_count=0)
             ]
         return Response({
             "competition_id": comp.id, "name": comp.name,
