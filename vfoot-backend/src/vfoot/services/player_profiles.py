@@ -9,10 +9,12 @@ concerns (the materialised league is historical)."""
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict
 
-from django.db.models import Max
+from django.core.cache import cache
+from django.db.models import Case, F, FloatField, Max, Sum, Value, When
 
 from realdata.models import Match, MatchAppearance, PlayerZoneFeature
 from realdata.services.sofascore_adapter import METHOD_UNPLACED
@@ -55,24 +57,75 @@ def average_column(footprint: dict[str, float]) -> float:
     return round(total, 3)
 
 
-def player_footprints(player_ids: list[int], as_of_matchday: int | None = None) -> dict[int, dict[str, float]]:
+def _who(player_ids) -> str:
+    """Impronta dell'INSIEME dei giocatori, indipendente dall'ordine: due chiamate
+    con la stessa rosa in ordine diverso devono trovare la stessa voce, altrimenti
+    la cache si riempie di copie della stessa risposta."""
+    return hashlib.sha1(",".join(str(i) for i in sorted(player_ids)).encode()).hexdigest()[:12]
+
+
+def _data_fp(competition_season_id: int | None) -> str:
+    """Impronta dei DATI, cioè la parte che rende la cache sicura invece che
+    pericolosa: cambia appena una partita finita viene reimportata, e con essa
+    cambia la chiave. Stesso mestiere e stessa funzione che usa classic_pagella."""
+    from vfoot.services.classic_pagella import data_version
+
+    return data_version(competition_season_id) if competition_season_id else "-"
+
+
+def _footprint_cache_key(player_ids, as_of_matchday, competition_season_id) -> str:
+    return (f"vfoot:player_footprints:{competition_season_id or '-'}:{as_of_matchday}"
+            f":{_data_fp(competition_season_id)}:{_who(player_ids)}")
+
+
+def player_footprints(player_ids: list[int], as_of_matchday: int | None = None,
+                      competition_season_id: int | None = None) -> dict[int, dict[str, float]]:
     """{player_id: {zone_key: presence_share}} from touches (sum=1). When
     as_of_matchday is given, only matches BEFORE it count (no leakage: you set a
-    lineup for matchday N knowing only matchdays < N)."""
+    lineup for matchday N knowing only matchdays < N).
+
+    ONE SEASON, the one the caller chose — the same season `player_form` and
+    `player_minutes` describe. Without it the cutoff was a matchday NUMBER compared
+    across every season at once, which produced a shape nobody would have asked
+    for: of the seasons before, matchdays 1-21 counted and 22-38 did not. Neither
+    "this year" nor "the whole career", just an artefact of comparing a number
+    without looking at which season it belonged to. Measured on one squad: 3728
+    rows from the current season and 3010 from the one before.
+
+    Summed BY THE DATABASE. The zone shares are a ratio, so the division has to
+    stay here, but the summing does not: it was 6738 rows crossing into Python to
+    produce a few hundred numbers, on every request.
+    """
+    ids = [int(p) for p in player_ids]
+    if not ids:
+        return {}
+
+    key = _footprint_cache_key(ids, as_of_matchday, competition_season_id)
+    hit = cache.get(key)
+    if hit is not None:
+        return {int(p): z for p, z in hit.items()}
+
     # A footprint is a claim about position, so the unplaced rows a live match's
     # light round writes are not part of it (see sofascore_adapter.METHOD_UNPLACED).
-    qs = (PlayerZoneFeature.objects.filter(feature_key="touches", player_id__in=player_ids)
+    qs = (PlayerZoneFeature.objects.filter(feature_key="touches", player_id__in=ids)
           .exclude(source_method=METHOD_UNPLACED))
+    if competition_season_id is not None:
+        qs = qs.filter(match__competition_season_id=competition_season_id)
     if as_of_matchday is not None:
         qs = qs.filter(match__matchday__lt=as_of_matchday)
-    raw: dict[int, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    for player_id, zone_key, value in qs.values_list("player_id", "zone_key", "value"):
-        raw[int(player_id)][str(zone_key)] += float(value or 0.0)
+
+    raw: dict[int, dict[str, float]] = defaultdict(dict)
+    for player_id, zone_key, total in (qs.values("player_id", "zone_key")
+                                       .annotate(total=Sum("value", output_field=FloatField()))
+                                       .values_list("player_id", "zone_key", "total")):
+        raw[int(player_id)][str(zone_key)] = float(total or 0.0)
+
     footprints: dict[int, dict[str, float]] = {}
     for player_id, zones in raw.items():
         total = sum(zones.values())
         if total > 0:
             footprints[player_id] = {z: round(v / total, 5) for z, v in zones.items()}
+    cache.set(key, footprints, None)
     return footprints
 
 
@@ -193,32 +246,97 @@ def minutes_label(avg_minutes: float, appearances: int, total_matches: int,
     return "low"
 
 
+def _form_cache_key(player_ids, params, scales, as_of_matchday, window,
+                    competition_season_id) -> str:
+    """Chiave che cambia da sé quando cambia una qualunque delle cose da cui il
+    risultato dipende: i giocatori, la finestra, i PESI e i DATI.
+
+    L'ultimo pezzo e' quello che rende la cache sicura, ed e' lo stesso mestiere
+    che fa ``classic_pagella.data_version``: conta le partite finite della stagione
+    e il loro ultimo timbro, quindi si sposta appena una partita passata viene
+    reimportata. Una chiave che non lo contenesse servirebbe numeri vecchi senza
+    dire niente -- il modo esatto in cui il listone si e' gia' rotto una volta.
+    """
+    weights = repr((sorted((k, params[k]) for k in params),
+                    sorted((k, scales[k]) for k in scales))).encode()
+    fp = hashlib.sha1(weights).hexdigest()[:12]
+    return (f"vfoot:player_form:{competition_season_id or '-'}:{as_of_matchday}"
+            f":{window}:{fp}:{_data_fp(competition_season_id)}:{_who(player_ids)}")
+
+
 def player_form(
     player_ids: list[int],
     params: dict[str, float],
     scales: dict[str, float],
     as_of_matchday: int | None = None,
     window: int = 6,
+    competition_season_id: int | None = None,
 ) -> dict[int, float]:
     """Expected per-match contribution from RECENT form: the calibration-weighted
     net value (Σ param·value/scale over zones & features) of each player's last
     `window` matchdays before the cutoff, averaged per match. Errors carry their
-    negative weight, so a sloppy spell drags the number down."""
-    qs = PlayerZoneFeature.objects.filter(player_id__in=player_ids)
+    negative weight, so a sloppy spell drags the number down.
+
+    ONE SEASON, the one the caller chose. Without `competition_season_id` the
+    window is a matchday RANGE and nothing else, so "the last six matchdays"
+    silently included matchdays 16-21 of the season before as well — measured, 45%
+    of the rows read, and 17 form values out of 23 wrong because of it. Which
+    season to describe is already decided upstream (the lineup view falls back to
+    the previous one when the current has not started); `player_minutes` has always
+    honoured that decision, and this simply stops being the one that ignores it.
+
+    Summed BY THE DATABASE, not in Python. The old shape pulled every zone-feature
+    row of every player — 34k rows to produce two dozen numbers — and that cost is
+    paid per request: alone it is 60ms, but five concurrent requests took 2.8s,
+    forty times worse per request rather than five, because the row conversion
+    holds the GIL while SQLite pages thrash. Aggregating leaves 196 rows.
+    """
+    ids = [int(p) for p in player_ids]
+    if not ids:
+        return {}
+
+    key = _form_cache_key(ids, params, scales, as_of_matchday, window,
+                          competition_season_id)
+    hit = cache.get(key)
+    if hit is not None:
+        # Le chiavi tornano dal JSON come stringhe: rimesse a int, altrimenti il
+        # chiamante trova un dizionario che a lui sembra vuoto.
+        return {int(k): v for k, v in hit.items()}
+
+    # Solo le feature che hanno UN PESO E UNA SCALA: sono 14 su 46, e le altre 32
+    # venivano lette, trasferite e buttate via dall'`if w and s`.
+    usable = [k for k in params if params.get(k) and scales.get(k)]
+    if not usable:
+        return {}
+
+    qs = PlayerZoneFeature.objects.filter(player_id__in=ids, feature_key__in=usable)
+    if competition_season_id is not None:
+        qs = qs.filter(match__competition_season_id=competition_season_id)
     if as_of_matchday is not None:
-        qs = qs.filter(match__matchday__lt=as_of_matchday, match__matchday__gte=as_of_matchday - window)
-    per_player_match: dict[tuple[int, int], float] = defaultdict(float)
-    for player_id, match_id, feature_key, value in qs.values_list(
-        "player_id", "match_id", "feature_key", "value"
-    ):
-        w = params.get(feature_key)
-        s = scales.get(feature_key)
-        if w and s:
-            per_player_match[(int(player_id), int(match_id))] += w * (float(value or 0.0) / s)
+        qs = qs.filter(match__matchday__lt=as_of_matchday,
+                       match__matchday__gte=as_of_matchday - window)
+
+    # Due CASE, e non un peso gia' diviso: cosi' l'aritmetica resta w * (value / s),
+    # nello stesso ordine di prima. Precalcolare w/s sposterebbe l'ultima cifra, e
+    # su un numero che alimenta i voti non e' una liberta' da prendersi in silenzio.
+    w_case = Case(*[When(feature_key=k, then=Value(float(params[k]))) for k in usable],
+                  output_field=FloatField())
+    s_case = Case(*[When(feature_key=k, then=Value(float(scales[k]))) for k in usable],
+                  output_field=FloatField())
+    rows = (qs.annotate(_w=w_case, _s=s_case)
+              .values("player_id", "match_id")
+              .annotate(total=Sum(F("_w") * (F("value") / F("_s")),
+                                  output_field=FloatField()))
+              .values_list("player_id", "match_id", "total"))
+
     by_player: dict[int, list[float]] = defaultdict(list)
-    for (pid, _mid), contribution in per_player_match.items():
-        by_player[pid].append(contribution)
-    return {pid: round(sum(cs) / len(cs), 3) for pid, cs in by_player.items() if cs}
+    for pid, _mid, total in rows:
+        by_player[int(pid)].append(float(total or 0.0))
+    out = {pid: round(sum(cs) / len(cs), 3) for pid, cs in by_player.items() if cs}
+    # Senza scadenza, come le altre cache di questo progetto: a farla decadere e'
+    # la chiave, non l'orologio.
+    cache.set(key, out, None)
+    return out
 
 
 def player_profiles(
@@ -233,11 +351,16 @@ def player_profiles(
     (when params/scales given) recent-form expected contribution. With
     as_of_matchday everything is computed from matches before that matchday only."""
     ids = [int(pid) for pid in player_ids]
-    footprints = player_footprints(ids, as_of_matchday=as_of_matchday)
+    footprints = player_footprints(ids, as_of_matchday=as_of_matchday,
+                                   competition_season_id=competition_season_id)
     minutes = player_minutes(ids, as_of_matchday=as_of_matchday,
                              competition_season_id=competition_season_id)
     form = (
-        player_form(ids, params, scales, as_of_matchday=as_of_matchday)
+        player_form(ids, params, scales, as_of_matchday=as_of_matchday,
+                    # La stessa stagione che riceve player_minutes. Passarla a una
+                    # sola delle due e' cio' che faceva leggere alla forma anche
+                    # l'anno prima, mentre l'impiego guardava solo quest'anno.
+                    competition_season_id=competition_season_id)
         if params and scales
         else {}
     )
