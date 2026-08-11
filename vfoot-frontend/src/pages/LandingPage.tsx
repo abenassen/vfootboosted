@@ -94,7 +94,11 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,#dbeafe_0%,#eff6ff_45%,#f8fafc_100%)] text-ink">
       <div className="mx-auto max-w-6xl px-4 py-10 md:py-16">
-        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        {/* `[&>*]:min-w-0`: una cella di griglia non scende sotto la larghezza
+            minima del proprio contenuto, e su un telefono da 390 le due schede
+            restavano larghe 370 dentro una colonna da 343 — la pagina di
+            benvenuto, la prima che si vede, si trascinava di lato. */}
+        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] [&>*]:min-w-0">
           <Card className="relative overflow-hidden p-6 md:p-8">
             <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-accent/10 blur-2xl" />
             <div className="absolute -bottom-16 -left-16 h-56 w-56 rounded-full bg-indigo-100 blur-2xl" />

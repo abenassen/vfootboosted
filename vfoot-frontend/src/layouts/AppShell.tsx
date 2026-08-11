@@ -143,6 +143,9 @@ function usePageTitle(pathname: string) {
     if (pathname.startsWith('/listone')) return 'Listone';
     if (pathname.startsWith('/market')) return 'Mercato';
     if (pathname.startsWith('/decisioni')) return 'Decisioni';
+    // Mancava, e la sala d'asta si intestava «Vfoot»: il ripiego pensato per una
+    // pagina senza nome, su una pagina che ce l'ha scritto in mezzo allo schermo.
+    if (pathname.startsWith('/auction')) return 'Asta';
     return 'Vfoot';
   }, [pathname]);
 }
@@ -287,14 +290,25 @@ export default function AppShell() {
         ? refCompetition
         : baseTitle;
 
-  const isUserAdmin = location.pathname.startsWith('/league-admin') && location.search.includes('tab=user');
+  // La pagina si apre sulla scheda «Le mie leghe», quindi e' l'indirizzo a dover
+  // dire quando NON e' quella. Prima chiedeva il contrario (tab=user esplicito),
+  // e un /league-admin nudo — la voce di menu, il ritorno dalla creazione di una
+  // lega — si intestava «Gestione lega» sopra l'elenco delle leghe.
+  const adminTab = new URLSearchParams(location.search).get('tab') ?? '';
+  const isUserAdmin =
+    location.pathname.startsWith('/league-admin') &&
+    !['league', 'roster', 'competitions', 'matchdays', 'auction', 'market'].includes(adminTab);
   // Only the mobile header shows a page title (no sidebar there to say where you
   // are). It has to match the words used in the menu and on the page itself.
   const mobileTitle = location.pathname.startsWith('/league-admin')
     ? isUserAdmin
       ? 'Le mie leghe'
       : 'Gestione lega'
-    : title;
+    : // Chi non è in nessuna lega vedeva «Home lega» sopra un invito a crearne
+      // una: il titolo nominava la cosa che ancora non esiste.
+      location.pathname.startsWith('/home') && !selectedLeague
+      ? 'Vfoot'
+      : title;
 
   const navItemClass = (active: boolean, scope: 'league' | 'competition') =>
     clsx(

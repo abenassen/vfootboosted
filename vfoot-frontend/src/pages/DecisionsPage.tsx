@@ -8,6 +8,7 @@ import {
   voteLeagueDecision,
 } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
+import { DECISIONS_CHANGED } from '../league/useDecisionAlerts';
 import type { LeagueDecision, LeagueDecisionsResponse } from '../types/decisions';
 
 /** Five minutes. See the poll effect for why it is minutes and not seconds. */
@@ -70,6 +71,11 @@ export default function DecisionsPage() {
     try {
       await fn();
       await load();
+      // Il numerino sulla voce di menu vive in un altro albero (la navigazione),
+      // e si rinfrescava solo per push, per ritorno in primo piano o al giro di
+      // sondaggio: chi decideva qui vedeva la coda svuotarsi e il badge restare
+      // a 17. Questo e' l'unico posto che sa che e' cambiata.
+      window.dispatchEvent(new CustomEvent(DECISIONS_CHANGED, { detail: { leagueId } }));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Operazione non riuscita.');
@@ -252,7 +258,8 @@ function DecisionRow({
         ) : null}
         {d.votes_total > 0 ? (
           <span className="text-xs text-ink-faint">
-            {d.votes_total} pareri · non vincolanti, decide l'amministratore
+            {d.votes_total} {d.votes_total === 1 ? 'parere' : 'pareri'} · non vincolanti, decide
+            l'amministratore
           </span>
         ) : null}
       </div>

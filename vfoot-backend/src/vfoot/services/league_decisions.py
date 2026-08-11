@@ -35,16 +35,16 @@ ROLE_OPTIONS = [{"value": r, "label": l} for r, l in ROLE_LABELS.items()
 
 METHOD_REASON = {
     CurrentPlayerRole.METHOD_DEFAULT:
-        "Nessun dato sufficiente sulla stagione precedente: il ruolo e' un default "
+        "Nessun dato sufficiente sulla stagione precedente: il ruolo è un default "
         "posizionale, non una misura.",
     CurrentPlayerRole.METHOD_UNKNOWN:
-        "Non abbiamo ne' dati di gioco ne' una posizione affidabile.",
+        "Non abbiamo né dati di gioco né una posizione affidabile.",
     CurrentPlayerRole.METHOD_TM:
         "Posizione del provider ambigua e nessun dato di gioco per scioglierla.",
     CurrentPlayerRole.METHOD_SOFA:
         "Posizione del provider ambigua e minutaggio troppo scarso per misurare come "
         "gioca: il ruolo viene dalla sola casella in distinta, che su ali e trequartisti "
-        "indovina poco piu' di una volta su due.",
+        "indovina poco più di una volta su due.",
 }
 
 
@@ -76,7 +76,7 @@ def decision_rationale(row) -> str:
         near = f"{row.role_boundary * 100:.0f}%"
         return (f"Posizione del provider ambigua e profilo sul confine{style}: dal "
                 f"gruppo di un altro ruolo dista quasi quanto dal proprio ({near}), "
-                f"quindi la misura c'e' ma da sola non lo colloca.")
+                f"quindi la misura c'è ma da sola non lo colloca.")
     return METHOD_REASON.get(row.method, "")
 
 
@@ -295,8 +295,14 @@ def undecided_notice(league) -> str | None:
     n = blocking_decisions(league).count()
     if not n:
         return None
+    # L'ultimo rimasto e' il caso piu' comune di tutti — si svuota la coda e ne
+    # resta uno in consultazione — ed e' proprio li' che si leggeva "1 giocatori
+    # attendono".
+    if n == 1:
+        return ("Un giocatore attende una decisione sul ruolo e non è "
+                "disponibile in asta o a roster finché non è presa.")
     return (f"{n} giocatori attendono una decisione sul ruolo e non sono "
-            "disponibili in asta o a roster finche' non e' presa.")
+            "disponibili in asta o a roster finché non è presa.")
 
 
 def unavailable_players(league, player_ids) -> list:

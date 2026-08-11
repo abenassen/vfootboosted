@@ -31,6 +31,12 @@ const POLL_MS = 5 * 60 * 1000;
 /** Server-side tag prefix for the "new roles to decide" push (league_decisions). */
 const DECISION_TAG = 'decisions-';
 
+/** Evento di finestra emesso dalla pagina Decisioni quando la coda cambia per
+ * mano dell'utente. I tre canali qui sopra guardano tutti FUORI dall'app — una
+ * push, un ritorno in primo piano, l'orologio — e nessuno si accorgeva della
+ * cosa piu' ovvia: che a decidere fosse stato chi sta guardando il badge. */
+export const DECISIONS_CHANGED = 'vfoot:decisions-changed';
+
 const EMPTY = { attention: 0, blocking: 0, isAdmin: false };
 
 export function useDecisionAlerts(leagueId: number | null) {
@@ -69,6 +75,12 @@ export function useDecisionAlerts(leagueId: number | null) {
     };
     document.addEventListener('visibilitychange', onVisible);
 
+    const onLocalChange = (e: Event) => {
+      const id = (e as CustomEvent<{ leagueId: number | null }>).detail?.leagueId;
+      if (id == null || id === leagueId) void read();
+    };
+    window.addEventListener(DECISIONS_CHANGED, onLocalChange);
+
     const poll = window.setInterval(() => {
       if (!document.hidden) void read();
     }, POLL_MS);
@@ -77,6 +89,7 @@ export function useDecisionAlerts(leagueId: number | null) {
       cancelled = true;
       navigator.serviceWorker?.removeEventListener('message', onMessage);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener(DECISIONS_CHANGED, onLocalChange);
       window.clearInterval(poll);
     };
   }, [leagueId]);

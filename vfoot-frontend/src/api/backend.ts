@@ -349,7 +349,22 @@ export async function logout(): Promise<void> {
     });
   } finally {
     setToken(null);
+    forgetSelections();
   }
+}
+
+/** Quale lega e quale competizione si stava guardando. Sopravvivevano al logout,
+ * e sono di chi esce, non del browser: sullo stesso computer — due amici, o un
+ * telefono passato di mano — il secondo entrava e la prima pagina gli chiedeva
+ * il dettaglio della lega del primo, cioe' un «Not a member of this league» in
+ * rosso su una lega di cui non sa niente. */
+function forgetSelections(): void {
+  if (typeof window === 'undefined') return;
+  const store = window.localStorage;
+  const doomed = Object.keys(store).filter(
+    (k) => k === 'vfoot_selected_league_id' || k.startsWith('vfoot_selected_competition_'),
+  );
+  doomed.forEach((k) => store.removeItem(k));
 }
 
 export async function getLineupContext(): Promise<LineupContextResponse> {
@@ -411,7 +426,9 @@ export async function createLeague(req: CreateLeagueRequest): Promise<{ league_i
   return parseJsonOrThrow(res);
 }
 
-export async function joinLeague(req: JoinLeagueRequest): Promise<{ league_id: number; team_id: number }> {
+export async function joinLeague(
+  req: JoinLeagueRequest,
+): Promise<{ league_id: number; team_id: number; name: string }> {
   const res = await fetch(`${baseUrl()}/leagues/join`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },

@@ -53,7 +53,7 @@ type AdminTab = 'user' | 'league';
 type LeagueTab = 'roster' | 'competitions' | 'matchdays' | 'auction' | 'market';
 
 export default function LeagueAdminPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const { leagues, selectedLeagueId, selectedLeague, setSelectedLeagueId, refreshLeagues } = useLeagueContext();
   const isAdmin = selectedLeague?.role === 'admin';
@@ -218,6 +218,21 @@ export default function LeagueAdminPage() {
   async function loadMatchdays(leagueId: number) {
     const items = await getLeagueMatchdays(leagueId);
     setMatchdays(items);
+  }
+
+  // Cambiare scheda cambia anche l'indirizzo: la barra in cima ne ricava il
+  // titolo della pagina, e senza questo passaggio diceva «Le mie leghe» mentre
+  // sotto c'era la gestione della lega appena creata.
+  function goToTab(tab: AdminTab) {
+    setActiveTab(tab);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', tab);
+        return next;
+      },
+      { replace: true },
+    );
   }
 
   useEffect(() => {
@@ -571,7 +586,7 @@ export default function LeagueAdminPage() {
                         variant={active ? 'primary' : 'secondary'}
                         onClick={() => {
                           setSelectedLeagueId(l.league_id);
-                          setActiveTab('league');
+                          goToTab('league');
                         }}
                       >
                         {l.role === 'admin' ? 'Gestisci' : 'Apri'}
@@ -610,7 +625,7 @@ export default function LeagueAdminPage() {
                     setSelectedLeagueId(res.league_id);
                     // The vote-affecting rules live in Gestione lega, so send the new
                     // admin straight there instead of leaving them on the create form.
-                    setActiveTab('league');
+                    goToTab('league');
                   });
                 }}
               >
@@ -642,11 +657,17 @@ export default function LeagueAdminPage() {
                       <label
                         key={value}
                         className={clsx(
-                          'rounded-xl border-2 border-line p-3 transition',
+                          'rounded-xl border-2 p-3 transition',
                           locked
-                            ? 'cursor-not-allowed bg-surface-2/60 opacity-60'
-                            : 'cursor-pointer hover:border-line',
-                          createMode === value && !locked ? 'bg-surface-2' : null,
+                            ? 'cursor-not-allowed border-line bg-surface-2/60 opacity-60'
+                            : 'cursor-pointer',
+                          // La scelta si deve VEDERE: prima selezionato e non
+                          // selezionato differivano di un grigio su bianco.
+                          !locked && createMode === value
+                            ? 'border-brand bg-brand/10'
+                            : !locked
+                              ? 'border-line hover:border-brand/40'
+                              : null,
                         )}
                       >
                         <div className="flex flex-wrap items-center gap-2">
@@ -722,8 +743,13 @@ export default function LeagueAdminPage() {
                 onSubmit={(e: FormEvent) => {
                   e.preventDefault();
                   void run(async () => {
+                    const team = joinTeam;
                     const res = await joinLeague({ invite_code: joinCode, team_name: joinTeam });
-                    setMsg('Join completato');
+                    // «Join completato» diceva in inglese, e a meta': in una lega
+                    // non si entra e basta, ci si entra CON una squadra, ed e'
+                    // l'unica cosa che chi ha appena compilato il modulo vuole
+                    // vedere confermata.
+                    setMsg(`Sei entrato in «${res.name}» con ${team}.`);
                     setJoinCode('');
                     setJoinTeam('');
                     await refreshLeagues();
@@ -731,15 +757,18 @@ export default function LeagueAdminPage() {
                   });
                 }}
               >
+                {/* «Invite code» e «Join» erano le uniche due parole inglesi in
+                    pagina, e nominavano la stessa cosa che il riquadro accanto
+                    chiama gia' «codice invito». */}
                 <label className="block text-sm font-medium text-ink-soft">
-                  Invite code <span className="text-bad">*</span>
-                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Invite code" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} required />
+                  Codice invito <span className="text-bad">*</span>
+                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="es. Wo2FqVF2" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} required />
                 </label>
                 <label className="block text-sm font-medium text-ink-soft">
-                  Nome squadra <span className="text-bad">*</span>
-                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Nome squadra" value={joinTeam} onChange={(e) => setJoinTeam(e.target.value)} required />
+                  Nome tua squadra <span className="text-bad">*</span>
+                  <input className="mt-1 w-full rounded-xl border px-3 py-2 font-normal" placeholder="Nome tua squadra" value={joinTeam} onChange={(e) => setJoinTeam(e.target.value)} required />
                 </label>
-                <Button type="submit" disabled={busy}>Join</Button>
+                <Button type="submit" disabled={busy}>Entra nella lega</Button>
               </form>
             </Card>
           </div>

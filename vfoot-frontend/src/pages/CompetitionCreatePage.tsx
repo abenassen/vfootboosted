@@ -107,19 +107,27 @@ function ChoiceCard({
   onClick: () => void;
 }) {
   return (
+    // La scelta fatta e quella non fatta avevano lo stesso bordo e due bianchi
+    // che differiscono del due per cento: sul telefono, dopo aver toccato
+    // «Campionato», niente diceva che fosse stato toccato. Bordo di marca e una
+    // spunta — e aria-pressed, che e' come lo dice a chi non guarda lo schermo.
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={
         'flex w-full items-start gap-3 rounded-2xl border-2 p-4 text-left transition ' +
-        (active ? 'border-line bg-surface-2 shadow-card' : 'border-line bg-surface hover:border-line')
+        (active
+          ? 'border-brand bg-brand/10 shadow-card'
+          : 'border-line bg-surface hover:border-brand/40')
       }
     >
       <span className="text-2xl leading-none">{emoji}</span>
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block text-sm font-bold text-ink">{title}</span>
         <span className="mt-0.5 block text-xs text-ink-faint">{blurb}</span>
       </span>
+      {active ? <span className="text-sm font-bold text-brand-strong">✓</span> : null}
     </button>
   );
 }

@@ -175,9 +175,14 @@ export default function AuctionRoomPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SectionTitle className="!mb-0">{state?.name ?? 'Asta'}</SectionTitle>
         <div className="flex items-center gap-2 text-xs">
-          <Badge tone={socketStatus === 'open' ? 'green' : socketStatus === 'connecting' ? 'amber' : 'red'}>
-            {socketStatus === 'open' ? 'Live' : socketStatus === 'connecting' ? 'Connessione…' : 'Offline'}
-          </Badge>
+          {/* Il pallino del collegamento serve finche' c'e' qualcosa da seguire:
+              accanto a «Chiusa», un «Live» verde diceva il contrario di quello
+              che significa (la presa e' attaccata, non l'asta e' in corso). */}
+          {state?.status === 'closed' ? null : (
+            <Badge tone={socketStatus === 'open' ? 'green' : socketStatus === 'connecting' ? 'amber' : 'red'}>
+              {socketStatus === 'open' ? 'Live' : socketStatus === 'connecting' ? 'Connessione…' : 'Offline'}
+            </Badge>
+          )}
           {state ? (
             <Badge tone="blue">
               {state.pool_remaining}/{state.pool_total} in lista
@@ -271,12 +276,25 @@ function CurrentPlayerPanel({
     setAssignTeam(nom && nom.top_bidder_team_id ? nom.top_bidder_team_id : '');
   }, [nom?.nomination_id, nom?.min_next_bid, nom?.top_bid, nom?.top_bidder_team_id]);
 
+  // «Per conto di» torna su me stesso a ogni nuova chiamata. Restava sull'ultima
+  // squadra per cui il banditore aveva rilanciato, e la chiamata dopo il tasto
+  // Rilancia — che si legge come «offro io» — offriva per un altro.
+  useEffect(() => {
+    setOnBehalf('');
+  }, [nom?.nomination_id]);
+
   if (!nom) {
+    const closed = state.status === 'closed';
     return (
       <Card className="p-4">
         <SectionTitle>In chiamata</SectionTitle>
         <div className="mt-2 text-sm text-ink-faint">
-          Nessun giocatore in chiamata. {isAdmin ? 'Chiama un giocatore dai controlli qui sotto.' : 'In attesa dell’amministratore.'}
+          {closed
+            ? // A sessione chiusa non si chiama piu' nessuno, e i controlli del
+              // banditore non sono nemmeno in pagina: invitare a usarli era un
+              // rimando al nulla.
+              'Asta chiusa: le rose sono quelle qui sotto. Nessuna chiamata in corso.'
+            : `Nessun giocatore in chiamata. ${isAdmin ? 'Chiama un giocatore dai controlli qui sotto.' : 'In attesa dell’amministratore.'}`}
         </div>
       </Card>
     );
