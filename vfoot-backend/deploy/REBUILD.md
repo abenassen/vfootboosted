@@ -620,9 +620,21 @@ sudo -u vfoot ../.venv/bin/python manage.py health_report --json | head -40
 
 **La Serie A 2026-27 comincia il 22/08/2026**, e un'asta si fa prima della prima
 giornata, non dopo. Contando all'indietro da lì: serve il sito aperto, i membri
-avvisati, la lega creata e la coda dei ruoli smaltita (17 decisioni) **con
-qualche giorno di margine per l'asta**. È questo a dettare quando togliere il
-503, non la lunghezza di questo documento.
+avvisati, la lega creata e la sua coda dei ruoli smaltita **con qualche giorno di
+margine per l'asta**. È questo a dettare quando togliere il 503, non la lunghezza
+di questo documento.
+
+Attenzione a **di chi** è quel lavoro: la coda dei ruoli non è del gestore del
+sito ed è **per lega**. `players_needing_decision` parte dalla rosa della lega e
+sottrae ciò che è già risolto *in quella lega* (`LeagueDecision` e
+`LeaguePlayerRole` sono entrambi filtrati per `league`), quindi non esiste una
+coda globale da smaltire prima di riaprire: ogni admin di lega risponde alla
+propria, quando crea la lega, e la risposta di uno non vale per gli altri. Il
+numero misurato l'11/08/2026 — **17 giocatori** — è la previsione di quanti ne
+troverà *una* lega creata oggi sulle rose 26-27, non un totale da dividere.
+
+Il che sposta anche la scadenza: quelle decisioni non bloccano il 503, bloccano
+l'asta di ciascuna lega.
 
 Ed è anche il primo deploy che porta l'asta online in produzione: girerà per la
 prima volta davanti a delle persone.
