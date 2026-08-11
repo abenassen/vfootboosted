@@ -475,6 +475,50 @@ GK_PER90_WEIGHTS = {
 }
 GK_WEIGHTS = {**GK_TOTAL_WEIGHTS, **GK_PER90_WEIGHTS}
 
+# --- L'AUTOGOL DI UN COMPAGNO, dal punto di vista del portiere ----------------
+# ``gk_goals_prevented`` arriva dal provider come "xGOT dei tiri affrontati meno i
+# gol subiti", e i gol subiti includono gli autogol. Un pallone messo dentro da un
+# proprio difensore non è un tiro affrontato: non entra nella somma a credito, ma
+# pesa per intero a debito. Il risultato è che l'autogol costa al portiere un'unità
+# intera nella misura che pesa il 60% del suo canale — cioè lo accusiamo di un gol
+# su cui poteva poco, o niente.
+#
+# Il caso che l'ha portato alla luce (Inter-Verona 1-1, 37ª giornata 2025-26):
+# Montipò para 5 tiri su 6, l'unico gol è l'autogol di Edmundsson su corner, e il
+# campo del provider vale 0.642 (xGOT delle sue parate) − 1 = −0.358, a fronte di
+# un autogol il cui xGOT è 0.915 — un pallone che nessun portiere prende. Voto 6.0
+# contro il 7.5 di entrambe le pagelle e il 7.4 del rating SofaScore.
+#
+# LA CORREZIONE non è esentare il portiere: un retropassaggio che lui liscia è un
+# autogol del difensore e una papera sua. È restituire all'autogol la sua
+# DIFFICOLTÀ, come per qualsiasi altro pallone che finisce in porta — che è la
+# regola del modello anche in positivo (un gol vale per come è stato calciato, un
+# rigore parato per quanto era difficile).
+#
+# Dove l'xGOT dell'autogol c'è si usa quello, e i casi si graduano da soli: 0.915
+# per Montipò (voto 6.0 -> 6.5), mentre l'autogol da 0.468 di Napoli-Cremonese
+# lascia Audero a 6.0, perché quel pallone si parava.
+#
+# IL DEFAULT esiste perché su 22 autogol del 2025-26 l'xGOT c'è solo in 2: il
+# provider non attribuisce un valore post-tiro a un autogol (e nessun xG a nessuno
+# dei 22 — probabilmente non lo considera un tiro). 0.834 è l'xGOT MEDIANO di un
+# gol da occasione chiara (xG > 0.3, n=349), scelto su tre argomenti:
+#   * tutti gli autogol misurati sono eventi da distanza ravvicinata, dove la
+#     mediana dei gol veri sale (0.663 nella fascia più vicina alla porta contro
+#     0.626 in generale);
+#   * un tiro che arriva da un compagno è più difficile a parità di xGOT, perché il
+#     portiere non se lo aspetta — non lo possiamo misurare, ma spinge nella stessa
+#     direzione, quindi si sta all'estremo alto della forbice difendibile invece di
+#     inventare un premio;
+#   * NON 1.0: la neutralizzazione completa dichiarerebbe il portiere estraneo per
+#     definizione. Con 0.834 gli resta addosso un residuo di 0.166 — e quando è
+#     davvero colpevole paga già altrove, con ``errors_led_to_goal`` a −0.60 (che
+#     nelle 23 presenze con autogol dei compagni si accende una volta sola).
+# Misurato: 0.834 muove 20 delle 22 presenze, +0.45 di voto in media; 1.0 ne
+# muoverebbe 20 con +0.48. Fra le due cambia UNA presenza su ventidue, quindi la
+# scelta è di principio e non di numeri.
+OWN_GOAL_KEEPER_XGOT_DEFAULT = 0.834
+
 # How many shots ON TARGET a keeper must face before we trust the reading of his
 # match in full. Below it his deviation from 6 is scaled down in proportion, exactly
 # as few minutes already shrink an outfielder's.
@@ -620,6 +664,45 @@ MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distributi
 RESULT_MITIGATION_K = 0.15
 RESULT_MITIGATION_BASE = 0.40
 RESULT_MITIGATION_CAP = 1.0
+# QUANTA PARTE dello scostamento dal 6 il risultato può cancellare, al massimo.
+# Il tetto sopra è in punti di voto; questo è una quota, e serve a due cose che il
+# solo cap non copriva.
+#
+# 1. BASE + K·|scarto| arriva esattamente a 1.00 a QUATTRO gol di differenza, cioè
+#    cancellava il 100% dello scostamento: in una partita da 4+ gol nessuno poteva
+#    prendere più di 6.0, qualunque cosa avesse fatto. In stagione 2025-26 sono 45
+#    presenze inchiodate esattamente sul 6.0 — fra cui Moreo, due gol nel 6-2
+#    dell'Inter, voto grezzo 6.876 e mitigazione −0.876 (pagelle 7.5 entrambe,
+#    rating a eventi 8.7). «In una disfatta nessuno ha giocato bene» è il
+#    ragionamento collettivo da cui il resto del modello si tiene lontano
+#    deliberatamente — v. l'esposizione, che addebita per zona e non alla difesa.
+#
+# 2. Oltre i quattro gol la severità SUPERAVA 1 (1.15 a cinque, 1.30 a sei) e la
+#    correzione scavalcava il centro: un 6.876 a −5 diventava 5.876, cioè una buona
+#    prestazione in una disfatta finiva SOTTO il neutro, e specularmente un voto
+#    basso in una vittoria larga finiva sopra. Contraddiceva l'invariante dichiarato
+#    dal meccanismo ("sempre verso il 6, mai oltre"): mordeva su 7 presenze e su
+#    nessuna cambiava il voto mostrato (l'eccesso stava sotto il mezzo punto
+#    dell'arrotondamento), quindi era un difetto latente. Con una quota < 1 non può
+#    più accadere per costruzione.
+#
+# 0.70 misurato sulle 834 presenze con almeno 3 gol di scarto appaiate ai due fogli:
+# MAE 0.384 -> 0.385 contro la Redazione (bias +0.082 -> +0.084), invariato contro
+# lo Statistico. Cioè non costa NIENTE in accordo — mentre togliere la mitigazione
+# del tutto lo peggiora netto (0.411), per cui il meccanismo si guadagna il posto e
+# solo la sua ampiezza era una scelta non fatta.
+#
+# QUANTO PESA DAVVERO, misurato e non stimato: sulle 6.866 presenze di movimento con
+# un risultato non di parità il tetto cambia **5 voti** (4 in su di mezzo punto, 1 in
+# giù: un voto basso in una vittoria larga che prima veniva rialzato di più). Le "45
+# presenze inchiodate sul 6.0" non si riaprono quasi tutte, perché la maggior parte
+# aveva un grezzo già vicino al 6 e l'arrotondamento le riporta lì comunque: quello
+# che cambia sono i casi con uno scostamento vero, cioè Moreo (6.876 grezzo, da 6.0 a
+# 6.5). Un tetto a 0.85 non ne avrebbe mosso nessuno. Il valore di questa modifica
+# sta quindi nel principio e nell'invariante che ripristina, non nel numero di voti
+# che sposta — e il benchmark lo conferma: divergenze 595 -> 596, tutto il resto
+# identico alla terza cifra.
+RESULT_MITIGATION_MAX_SHARE = 0.70
 
 # --- Red-card performance adjustment (v2 stage 3) ----------------------------
 # A sending-off is a PERFORMANCE fact the base vote must reflect, over and above
@@ -1245,6 +1328,7 @@ def _per_match_player_totals(match_ids):
         return {}
     _merge_shot_detail(out, sorted(covered))
     _merge_defensive_value(out, sorted(covered))
+    _merge_own_goal_relief(out, sorted(covered))
     return out
 
 
@@ -1310,6 +1394,69 @@ def _merge_defensive_value(out: dict, match_ids) -> None:
         log.warning("%s present on only %d of %d appearances over 15 minutes — the "
                     "defensive proxy is degraded and defender votes with it.",
                     DEFENSIVE_VALUE_SOURCE, seen, eligible)
+
+
+def own_goal_shots(match_ids) -> dict:
+    """{(match_id, conceding_side): [(minute, xgot)]} for the own goals of a match.
+
+    Identified exactly as ``_merge_shot_detail`` does — a goal-shot whose
+    ``team_side`` is not the scorer's own side — so the two readings of the same
+    event cannot drift apart. The side returned is the one that CONCEDED it (the
+    scorer's own), which is the side whose keeper the relief belongs to.
+    """
+    sides = {(a["match_id"], a["player_id"]): a["side"]
+             for a in MatchAppearance.objects.filter(match_id__in=match_ids)
+             .values("match_id", "player_id", "side")}
+    out: dict[tuple, list] = defaultdict(list)
+    for mid, pid, ts, minute, xgot in (MatchShot.objects
+                                       .filter(match_id__in=match_ids, is_goal=True)
+                                       .values_list("match_id", "player_id", "team_side",
+                                                    "minute", "xgot")):
+        own = sides.get((mid, pid))
+        if own is None or own == ts:
+            continue                     # a real goal for the side it counts for
+        out[(mid, own)].append((minute, xgot or 0.0))
+    return out
+
+
+def _merge_own_goal_relief(out: dict, match_ids) -> None:
+    """Give the keeper back the DIFFICULTY of an own goal scored by his own side.
+
+    See OWN_GOAL_KEEPER_XGOT_DEFAULT for why, and why the credit is the own goal's
+    own xGOT rather than a blanket exemption. Added to ``gk_goals_prevented``, which
+    is where the provider charged the goal in the first place.
+
+    Gated on the pitch, like the sending-off drop: a keeper who came on after the
+    own goal must not collect a credit for a goal that was already in. Whoever was
+    in goal at that minute gets it — with a substitution in between, each of the two
+    answers only for what happened on his watch.
+    """
+    own_goals = own_goal_shots(match_ids)
+    if not own_goals:
+        return
+    keepers = set(Player.objects.filter(is_goalkeeper=True).values_list("id", flat=True))
+    minutes = _minutes_map(match_ids)
+    apps = {(a["match_id"], a["player_id"]): (a["side"], a["is_starter"])
+            for a in MatchAppearance.objects.filter(match_id__in=match_ids)
+            .values("match_id", "player_id", "side", "is_starter")}
+    windows = on_pitch_windows(match_ids, minutes, apps)
+    for (mid, side), goals in own_goals.items():
+        for (m2, pid), (side2, _starter) in apps.items():
+            if m2 != mid or side2 != side or pid not in keepers:
+                continue
+            key = (mid, pid)
+            # A keeper with no zone features at all is a match we cannot score (see
+            # the note in ``_per_match_player_totals``): materialising a row holding
+            # only this credit would invent a scoreable player out of nothing.
+            if key not in out:
+                continue
+            lo, hi = windows.get(key, (0.0, 0.0))
+            credit = sum(xgot if xgot else OWN_GOAL_KEEPER_XGOT_DEFAULT
+                         for minute, xgot in goals
+                         if minute is not None and lo <= minute <= hi)
+            if credit:
+                out[key]["gk_goals_prevented"] = (
+                    out[key].get("gk_goals_prevented", 0.0) + credit)
 
 
 def _fallback_window(minutes: int, is_starter: bool) -> tuple[float, float]:
@@ -1750,21 +1897,29 @@ def _vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
 def result_mitigation(raw_vote: float, gd_on: int,
                       k: float = RESULT_MITIGATION_K,
                       base: float = RESULT_MITIGATION_BASE,
-                      cap: float = RESULT_MITIGATION_CAP) -> float:
+                      cap: float = RESULT_MITIGATION_CAP,
+                      max_share: float = RESULT_MITIGATION_MAX_SHARE) -> float:
     """Divergence-only nudge toward the on-pitch result (see RESULT_MITIGATION_K).
 
     Fires only for a high vote (>6) in a net defeat (gd_on<0) — pulled DOWN — or a
     low vote (<6) in a net win (gd_on>0) — pulled UP; an aligned vote gets neither,
     so the nudge always moves TOWARD 6 and never inflates. The result severity is
     ``base + k·|gd_on|``: the discrete ``base`` marks that it IS a defeat/win (fires
-    on the first goal), ``k`` weights each further goal of margin. Clamped to ±cap."""
+    on the first goal), ``k`` weights each further goal of margin.
+
+    TWO limits, and they answer different questions (see RESULT_MITIGATION_MAX_SHARE):
+    ``max_share`` is the largest FRACTION of the divergence the result may erase —
+    which is also what keeps the nudge on this side of 6, whatever the margin — and
+    ``cap`` is the largest absolute drop in vote points.
+    """
     over = max(0.0, raw_vote - VOTE_CENTER)   # only a high vote is tempered in a loss
     under = max(0.0, VOTE_CENTER - raw_vote)  # only a low vote is lifted in a win
+    if gd_on == 0:
+        return 0.0
+    severity = min(max_share, base + k * abs(gd_on))
     if gd_on < 0:
-        return max(-cap, -over * (base + k * (-gd_on)))
-    if gd_on > 0:
-        return min(cap, under * (base + k * gd_on))
-    return 0.0
+        return max(-cap, -over * severity)
+    return min(cap, under * severity)
 
 
 def voto_puro_for_match(match, reference: dict,

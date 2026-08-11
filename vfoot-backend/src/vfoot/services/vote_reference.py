@@ -62,6 +62,10 @@ def weights_fingerprint() -> str:
         "spread_k": cr.VOTE_SPREAD_K, "center": cr.VOTE_CENTER,
         "extrap_floor": cr.EXTRAP_FLOOR_MINUTES, "shrinkage": cr.SHRINKAGE_MINUTES,
         "min_ref": cr.MIN_MINUTES_REFERENCE,
+        # Changes what a keeper's goals-prevented IS when his side scored an own
+        # goal, hence the mean and spread of the keeper index: a reference computed
+        # under a different default scores those votes on the wrong scale.
+        "own_goal_keeper_default": cr.OWN_GOAL_KEEPER_XGOT_DEFAULT,
     }
     blob = json.dumps(payload, sort_keys=True).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
@@ -76,7 +80,18 @@ def weights_fingerprint() -> str:
 #   2 -> 3: the listone now scores through voto_puro_for_match, so it also gets
 #           the keeper evidence damping, the sending-off / own-goal / missed-penalty
 #           drops, the result mitigation and the decisive-event rated override.
-SCORING_CODE_VERSION = 3
+#   3 -> 4: a keeper's goals-prevented no longer swallows a team-mate's own goal as
+#           if he had been beaten by a shot — it is credited with the own goal's own
+#           difficulty (``_merge_own_goal_relief``). The new default constant is in
+#           the fingerprint too; this bump is what invalidates the CACHED votes of
+#           the 22 keeper appearances a season that the change moves.
+#   4 -> 5: the result mitigation can no longer erase the WHOLE divergence from 6
+#           (RESULT_MITIGATION_MAX_SHARE): at four goals of margin it used to pin
+#           every divergent vote to exactly 6.0, and past four it crossed the centre.
+#           The post-index constants now key the scoring fingerprint below, so a
+#           future change to them invalidates caches on its own — this bump covers
+#           the one that introduced them.
+SCORING_CODE_VERSION = 5
 
 
 def scoring_fingerprint() -> str:
@@ -106,6 +121,20 @@ def scoring_fingerprint() -> str:
         "gates": [cr.MIN_MINUTES_RATED, cr.MIN_TOUCHES_RATED,
                   cr.ALWAYS_RATED_MINUTES],
         "gk_evidence": cr.GK_EVIDENCE_FULL,
+        # Le correzioni APPLICATE DOPO l'indice: mitigazione del risultato, rosso,
+        # autogol, rigore sbagliato. Non stanno nel fingerprint dei pesi perché non
+        # entrano nella calibrazione — l'indice non le vede, quindi la reference
+        # resterebbe valida — ma i VOTI li cambiano, e questa è la chiave di chi li
+        # mette in cache. Senza, ritoccare la mitigazione lasciava in giro i voti
+        # calcolati prima senza che nessuna chiave si muovesse.
+        "post_index": [cr.RESULT_MITIGATION_K, cr.RESULT_MITIGATION_BASE,
+                       cr.RESULT_MITIGATION_CAP, cr.RESULT_MITIGATION_MAX_SHARE,
+                       cr.RED_CARD_K, sorted(cr.RED_CARD_SEVERITY.items()),
+                       sorted(cr.RED_CARD_FIXED.items()),
+                       cr.OWN_GOAL_VOTE_DEFLECTION, cr.OWN_GOAL_VOTE_SOLO,
+                       cr.OWN_GOAL_VOTE_FLAT,
+                       cr.PENALTY_MISSED_VOTE_RELEVANT,
+                       cr.PENALTY_MISSED_VOTE_IRRELEVANT],
     }
     blob = json.dumps(payload, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:16]

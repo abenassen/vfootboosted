@@ -11,7 +11,8 @@ from __future__ import annotations
 from django.test import SimpleTestCase
 
 from vfoot.services.classic_rating import (
-    RESULT_MITIGATION_CAP, red_card_penalty, result_mitigation,
+    RESULT_MITIGATION_CAP, RESULT_MITIGATION_MAX_SHARE, red_card_penalty,
+    result_mitigation,
 )
 
 
@@ -38,6 +39,31 @@ class ResultMitigationTests(SimpleTestCase):
         # the sign), a win only push a low vote up.
         self.assertLessEqual(8.0 + result_mitigation(8.0, -5), 8.0)
         self.assertGreaterEqual(4.0 + result_mitigation(4.0, 5), 4.0)
+
+    def test_it_never_crosses_the_centre_at_any_margin(self):
+        """L'invariante dichiarato dal meccanismo, e per un periodo NON vero: con
+        BASE+K·|scarto| oltre 1 (da cinque gol in su) un 6.876 finiva a 5.876, cioè
+        una buona prestazione in una disfatta scendeva SOTTO il neutro. Ora la quota
+        massima lo impedisce per costruzione, a qualunque scarto."""
+        for gd in range(1, 10):
+            self.assertGreaterEqual(6.876 + result_mitigation(6.876, -gd), 6.0,
+                                    f"scarto -{gd}: scavalcato il 6 al ribasso")
+            self.assertLessEqual(5.2 + result_mitigation(5.2, gd), 6.0,
+                                 f"scarto +{gd}: scavalcato il 6 al rialzo")
+
+    def test_the_result_cannot_erase_the_whole_divergence(self):
+        """Il risultato tempera, non azzera: a quattro gol di scarto la severità
+        arrivava a 1.00 e inchiodava sul 6.0 chiunque divergesse (45 presenze nella
+        stagione 2025-26). Deve restare una quota dello scostamento."""
+        raw = 6.876
+        residuo = raw + result_mitigation(raw, -6) - 6.0
+        self.assertGreater(residuo, 0.2)
+        self.assertAlmostEqual(residuo, (raw - 6.0) * (1 - RESULT_MITIGATION_MAX_SHARE),
+                               places=6)
+
+    def test_the_share_stops_growing_once_capped(self):
+        """Oltre il tetto, un gol in più non toglie più niente."""
+        self.assertEqual(result_mitigation(6.5, -4), result_mitigation(6.5, -9))
 
     def test_the_nudge_is_capped(self):
         huge = result_mitigation(10.0, -9)  # would be -5.4 uncapped
