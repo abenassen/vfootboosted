@@ -507,6 +507,15 @@ function WhyThisVote({ why }: { why: NonNullable<ClassicPlayerLine['explanation'
         </div>
       </div>
       {why.note ? <div className="mt-1.5 text-[11px] text-ink-faint">{why.note}</div> : null}
+      {/* Il conto dice COME si compone questo voto; la guida dice PERCHE' le voci
+          pesano cosi' e perche' il numero non e' quello del giornale. La domanda
+          nasce qui, quindi la risposta si raggiunge da qui. */}
+      <Link
+        to="/voto-puro"
+        className="mt-1.5 inline-block text-[11px] font-semibold text-accent underline decoration-dotted"
+      >
+        Come nasce il voto puro, in generale →
+      </Link>
     </div>
   );
 }

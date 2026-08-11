@@ -32,7 +32,7 @@ function errMessage(err: unknown): string {
 }
 
 export default function ProfilePage() {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, logout } = useAuth();
 
   // Avatar
   const [avatar, setAvatar] = useState<AvatarOptions>(() => parseAvatar(user?.avatar) ?? DEFAULT_AVATAR);
@@ -251,6 +251,21 @@ export default function ProfilePage() {
           </Button>
           <BannerLine banner={pwBanner} />
         </form>
+      </Card>
+
+      {/* Uscire è una cosa che si fa al proprio account, e questa è la pagina del
+          proprio account: dal telefono ci si arriva toccando la faccia in alto,
+          che è il primo posto dove si va a cercarlo. Resta anche in «Altro». */}
+      <Card className="p-4">
+        <SectionTitle>Sessione</SectionTitle>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm text-ink-soft">
+            Sei entrato come <b>{user?.username}</b>.
+          </span>
+          <Button variant="secondary" onClick={() => void logout()}>
+            Esci
+          </Button>
+        </div>
       </Card>
     </div>
   );

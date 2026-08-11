@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 // per la classifica, l'urna per le decisioni. Le emoji le disegnano tre sistemi
 // operativi diversi, quindi la stessa barra aveva tre stili e tre spessori.
 import {
-  ArrowLeftRight, BarChart3, CalendarDays, CircleDot, ClipboardCheck, ClipboardList,
+  ArrowLeftRight, BarChart3, BookOpen, CalendarDays, CircleDot, ClipboardCheck, ClipboardList,
   Check, ChevronDown, Home, LayoutGrid, LogOut, MoreHorizontal, Settings, Shirt, UserRound, Vote, X,
   type LucideIcon,
 } from 'lucide-react';
@@ -60,6 +60,11 @@ const leagueNav: NavItem[] = [
   // Last, and after a separator: the real championship is what the league is
   // played ON, not a page you need to run it. Everything above is the league.
   { to: '/serie-a', label: 'Serie A', icon: CircleDot, scope: 'league', aside: true },
+  // E qui sotto la pagina che spiega da dove vengono i voti: si consulta una
+  // volta e non si torna, per cui sta fra le voci di lato e non fra quelle con
+  // cui si gioca. NON «Come si vota»: faceva credere che a votare fossero gli
+  // utenti, che e' proprio il contrario di quel che la pagina racconta.
+  { to: '/voto-puro', label: 'Voto spiegato', icon: BookOpen, scope: 'league', aside: true },
 ];
 
 /** LE PAGINE CHE UNA COMPETIZIONE PORTA CON SÉ — e sono diverse a seconda di
@@ -249,7 +254,14 @@ export default function AppShell() {
   // non si portano dietro un numero che nessuno vede: il loro totale finisce
   // ADDOSSO ad «Altro» — era esattamente il caso di «Decisioni», che è l'unica
   // voce con un contatore ed era la settima di nove, fuori dallo schermo.
-  const barItems = visibleNav.slice(0, MOBILE_SLOTS);
+  // Chi non è in nessuna lega non ha voci di lega, e la barra spariva del tutto —
+  // e con lei «Altro», che è dove stanno il profilo e il Logout. Da telefono, un
+  // account appena creato non aveva NESSUN modo di uscire. Due voci bastano: la
+  // home, dov'è l'invito a crearne una, e le proprie leghe.
+  const barItems = (visibleNav.length
+    ? visibleNav
+    : [HOME_ITEM, { to: USER_ADMIN_TO, label: 'Le mie leghe', icon: LayoutGrid, scope: 'league' as const }]
+  ).slice(0, MOBILE_SLOTS);
   const sheetItems = visibleNav.slice(MOBILE_SLOTS);
   const sheetBadge = sheetItems.reduce((n, it) => n + (it.badge ?? 0), 0);
   const sheetFlag = sheetItems.some((it) => it.flag);
@@ -681,15 +693,15 @@ export default function AppShell() {
               nessuno leggeva mai `env(safe-area-inset-bottom)`: in app installata
               su un telefono con la barra del gesto, le etichette finivano sotto
               l'indicatore di casa. */}
-          {visibleNav.length ? (
-            <div
-              className="md:hidden"
-              aria-hidden
-              style={{
-                height: `calc(env(safe-area-inset-bottom, 0px) + ${mobileBarBlock + 16}px)`,
-              }}
-            />
-          ) : null}
+          {/* Senza condizioni, come la barra: ora c'è sempre, e quello che le
+              finisce sotto resta illeggibile allo stesso modo. */}
+          <div
+            className="md:hidden"
+            aria-hidden
+            style={{
+              height: `calc(env(safe-area-inset-bottom, 0px) + ${mobileBarBlock + 16}px)`,
+            }}
+          />
         </main>
       </div>
 
@@ -876,10 +888,7 @@ export default function AppShell() {
           competizione col pollice e vedi il menu riscriversi due centimetri più
           in alto, invece che in cima alla pagina dove non si collega a niente. */}
       <div
-        className={clsx(
-          'md:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-line bg-surface',
-          visibleNav.length ? '' : 'hidden',
-        )}
+        className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-line bg-surface"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         {showCompetitionChips ? (
@@ -954,7 +963,11 @@ export default function AppShell() {
               </Link>
             );
           })}
-          {sheetItems.length ? (
+          {/* Sempre, anche quando non c'è nessuna pagina da nascondere: sotto le
+              voci di menu il foglio tiene l'account — profilo e Logout — che
+              esistono pure senza una lega. Prima appariva solo se avanzavano
+              voci, quindi spariva proprio a chi ha meno strada per uscire. */}
+          {
             <button
               type="button"
               onClick={() => setMoreOpen((o) => !o)}
@@ -980,7 +993,7 @@ export default function AppShell() {
               </span>
               <span className="w-full truncate text-center">Altro</span>
             </button>
-          ) : null}
+          }
         </div>
       </div>
     </div>

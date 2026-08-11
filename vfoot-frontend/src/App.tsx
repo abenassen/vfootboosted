@@ -30,6 +30,7 @@ import TeamRosterPage from './pages/TeamRosterPage';
 import ProfilePage from './pages/ProfilePage';
 import ManagerProfilePage from './pages/ManagerProfilePage';
 import MaintenancePage from './pages/MaintenancePage';
+import VotoPuroPage from './pages/VotoPuroPage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -86,6 +87,10 @@ export default function App() {
         <Route path="serie-a" element={<RealChampionshipPage />} />
         <Route path="serie-a/:matchId" element={<RealMatchDetailPage />} />
         <Route path="listone" element={<ListonePage />} />
+        {/* Pagina di consultazione, non di gioco: spiega da dove viene il voto
+            puro. Ci si arriva dal menu e dal dettaglio di un voto nelle pagelle,
+            che e' il momento in cui la domanda nasce. */}
+        <Route path="voto-puro" element={<VotoPuroPage />} />
         <Route path="competitions/:competitionId" element={<CompetitionPage />} />
         <Route path="market" element={<MarketPage />} />
         <Route path="auction" element={<AuctionRoomPage />} />
