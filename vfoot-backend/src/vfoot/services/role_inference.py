@@ -294,8 +294,29 @@ def player_profiles(competition_season_id: int, min_minutes: int = MIN_MINUTES):
     keepers |= {pid for pid, role in
                 sofascore_position_roles(competition_season_id).items()
                 if role == Player.ROLE_GK}
+    # ORDINE CANONICO, e non è un vezzo: il k-means pesca i centroidi iniziali per
+    # INDICE di riga (``_kmeans``), quindi la stessa popolazione presentata in un
+    # ordine diverso produce raggruppamenti diversi — equivalenti in qualità, non
+    # identici sui casi di confine. ``grid`` nasce da una query senza ORDER BY, cioè
+    # da un ordine che dipende dal motore e dalla storia delle scritture: fra il
+    # portatile (SQLite) e la produzione (PostgreSQL) era diverso, e con dati
+    # IDENTICI e la stessa popolazione di 370 giocatori dava a J. Harrison ATT su
+    # una e CEN sull'altra.
+    #
+    # La chiave dell'ordine è l'identificativo del PROVIDER, non la chiave primaria:
+    # gli id di tabella sono autoincrementali e quindi diversi su ogni installazione
+    # — ordinare per quelli renderebbe l'inferenza stabile nel tempo ma ancora
+    # diversa fra un'installazione e l'altra, che è metà del problema. Con
+    # (fonte, id esterno) due database che hanno importato le stesse partite
+    # presentano la stessa matrice, e i ruoli si possono confrontare.
+    chiave = dict(Player.objects.filter(id__in=grid)
+                  .values_list("id", "external_id"))
+    fonte = dict(Player.objects.filter(id__in=grid)
+                 .values_list("id", "external_source"))
     ids, rows = [], []
-    for pid, g in grid.items():
+    for pid in sorted(grid, key=lambda p: (fonte.get(p) or "", chiave.get(p) or "",
+                                           str(p))):
+        g = grid[pid]
         if pid in keepers or minutes.get(pid, 0) < min_minutes or g.sum() <= 0:
             continue
         t = totals[pid].get("touches", 0.0)

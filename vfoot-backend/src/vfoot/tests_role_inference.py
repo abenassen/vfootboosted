@@ -10,7 +10,7 @@ from realdata.models import (
 )
 from vfoot.models import CurrentPlayerRole, FantasyLeague, LeaguePlayerRole
 from vfoot.services.role_inference import (
-    TM_AMBIGUOUS, TM_DEFAULT, TM_DETERMINISTIC, infer_roles,
+    TM_AMBIGUOUS, TM_DEFAULT, TM_DETERMINISTIC, infer_roles, player_profiles,
     refresh_current_roles, tm_positions,
 )
 
@@ -113,6 +113,24 @@ class RoleInferenceTests(TestCase):
         b = infer_roles(self.cur.id, self.prev.id, runs=10, n_categories=3)
         self.assertEqual({r.player_id: r.category for r in a.results},
                          {r.player_id: r.category for r in b.results})
+
+    def test_the_matrix_order_is_canonical_and_portable(self):
+        """La popolazione va presentata al k-means SEMPRE nello stesso ordine, e in
+        un ordine che non dipenda dall'installazione: i centroidi iniziali si
+        pescano per indice di riga, quindi un ordine diverso sposta i casi di
+        confine. Fra il portatile (SQLite) e la produzione (PostgreSQL) l'ordine
+        della query senza ORDER BY era diverso e J. Harrison usciva ATT su una e CEN
+        sull'altra, a dati identici. La chiave e' (fonte, id del provider) e non la
+        chiave primaria, che e' autoincrementale e quindi diversa in ogni database."""
+        self._population()
+        ids, _ = player_profiles(self.prev.id, min_minutes=1)
+        chiavi = dict(Player.objects.filter(id__in=ids)
+                      .values_list("id", "external_id"))
+        fonti = dict(Player.objects.filter(id__in=ids)
+                     .values_list("id", "external_source"))
+        atteso = sorted(ids, key=lambda p: (fonti.get(p) or "", chiavi.get(p) or "",
+                                            str(p)))
+        self.assertEqual(list(ids), atteso)
 
     def test_positions_are_read_from_the_season_being_listed(self):
         p = self._player("Uno", "right winger", col=3, seasons=("cur",))
