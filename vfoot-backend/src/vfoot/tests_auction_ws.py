@@ -55,3 +55,27 @@ class AuctionWebSocketTests(TransactionTestCase):
             application, f"/ws/auctions/{self.session.id}/?token={self.outsider_token.key}")
         connected, _ = await comm.connect()
         self.assertFalse(connected)
+
+    async def test_unknown_path_is_refused_without_raising(self):
+        """Un percorso inesistente si chiude, non esplode.
+
+        Senza la rotta catch-all, ``URLRouter`` solleva ``ValueError`` e la
+        connessione muore con un 500 e un traceback nel journal — uno per ogni
+        indirizzo sbagliato che qualcuno prova su un sito pubblico. Qui il
+        `connect()` deve semplicemente tornare "rifiutato", senza eccezioni.
+        """
+        for path in ("/ws/inesistente/", "/ws/", "/ws/auctions/", "/ws/auctions/x/"):
+            with self.subTest(path=path):
+                comm = WebsocketCommunicator(application, path)
+                connected, _ = await comm.connect()
+                self.assertFalse(connected)
+                await comm.disconnect()
+
+    async def test_real_routes_still_win_over_the_catch_all(self):
+        """La catch-all sta in fondo e non deve rubare le rotte vere."""
+        comm = WebsocketCommunicator(
+            application, f"/ws/auctions/{self.session.id}/?token={self.token.key}")
+        connected, _ = await comm.connect()
+        self.assertTrue(connected)
+        self.assertEqual((await comm.receive_json_from())["type"], "update")
+        await comm.disconnect()

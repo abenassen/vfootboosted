@@ -98,3 +98,22 @@ class LiveConsumer(_NudgeConsumer):
 
     # Matches the "live.update" type sent by live_realtime.broadcast_live.
     live_update = _NudgeConsumer._nudge
+
+
+class UnknownPathConsumer(WebsocketConsumer):
+    """Rifiuta un percorso WebSocket che non esiste, senza fare rumore.
+
+    Serve perche' ``URLRouter``, quando nessuna rotta combacia, **solleva**
+    ``ValueError("No route found for path ...")``: la connessione viene rifiutata
+    con un 500 e nel journal resta un traceback completo. Con un sito pubblico
+    quel traceback lo scrive chiunque provi un indirizzo a caso, e il costo non e'
+    il 500 -- e' che il journal si riempie di eccezioni identiche e innocue, cioe'
+    esattamente il posto dove si va a cercare quella vera.
+
+    Montata come ultima rotta in ``ws_routing``, dove intercetta cio' che le altre
+    non hanno preso. Chiude prima di ``accept()``, quindi l'handshake finisce con
+    un rifiuto pulito invece che con un errore del server.
+    """
+
+    def connect(self):
+        self.close(code=4404)
