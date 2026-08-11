@@ -465,63 +465,68 @@ export default function LeagueAdminPage() {
 
   return (
     <div className="space-y-4">
-      <Card className="p-4">
-        <SectionTitle>{activeTab === 'user' ? 'Le mie leghe' : 'Gestione lega'}</SectionTitle>
-        <div className="mt-2 text-sm text-ink-soft">
-          {activeTab === 'user'
-            ? 'Profilo utente e gestione delle tue leghe.'
-            : selectedLeague
-              ? selectedLeague.name
-              : 'Nessuna lega selezionata.'}
-        </div>
-
-        {/* Renders itself only while something is still missing, so it greets a
-            brand-new league and then gets out of the way for good. */}
-        {activeTab === 'league' && league ? (
-          <LeagueSetupChecklist
-            league={league}
-            competitions={competitions}
-            onGoToInvite={() => {
-              // The invite code lives in the league card ABOVE the tab bar, so
-              // there is no tab to switch to — just scroll to it.
-              revealAfterRender('vfoot-invite-code');
-            }}
-            onGoToCompetitions={() => {
-              setLeagueTab('competitions');
-              // The tab BAR, not the panel: it lands with "Competizioni" visibly
-              // selected and the form starting right underneath, instead of
-              // dropping the user into the middle of a form with no context.
-              revealAfterRender('vfoot-league-tabs');
-            }}
-          />
-        ) : null}
-
-        {msg ? (
-          <div
-            className={`mt-3 rounded-xl px-3 py-2 text-sm ${
-              msgTone === 'error'
-                ? 'bg-bad-bg text-bad'
-                : msgTone === 'warning'
-                  ? 'bg-warn-bg text-warn'
-                  : msgTone === 'success'
-                    ? 'bg-good-bg text-good'
-                    : 'bg-surface-2 text-ink-soft'
-            }`}
-            role="status"
-            aria-live="polite"
-          >
-            <span className="mr-2 font-semibold">
-              {msgTone === 'error' ? 'Errore' : msgTone === 'warning' ? 'Attenzione' : msgTone === 'success' ? 'OK' : 'Info'}:
-            </span>
-            {msg}
+      {/* Il titolo della pagina lo dà la scheda attiva, e nella scheda utente
+          non c'e': era «Le mie leghe» — lo stesso nome del bottone in barra —
+          sopra una scheda intitolata «Le tue leghe» che elenca le stesse leghe.
+          Tre volte la stessa cosa in mezzo schermo, e nessuna delle tre aggiunge
+          niente. Adesso l'elenco si intitola da sé. */}
+      {activeTab === 'league' ? (
+        <Card className="p-4">
+          <SectionTitle>Gestione lega</SectionTitle>
+          <div className="mt-2 text-sm text-ink-soft">
+            {selectedLeague ? selectedLeague.name : 'Nessuna lega selezionata.'}
           </div>
-        ) : null}
-      </Card>
+
+          {/* Renders itself only while something is still missing, so it greets a
+              brand-new league and then gets out of the way for good. */}
+          {league ? (
+            <LeagueSetupChecklist
+              league={league}
+              competitions={competitions}
+              onGoToInvite={() => {
+                // The invite code lives in the league card ABOVE the tab bar, so
+                // there is no tab to switch to — just scroll to it.
+                revealAfterRender('vfoot-invite-code');
+              }}
+              onGoToCompetitions={() => {
+                setLeagueTab('competitions');
+                // The tab BAR, not the panel: it lands with "Competizioni" visibly
+                // selected and the form starting right underneath, instead of
+                // dropping the user into the middle of a form with no context.
+                revealAfterRender('vfoot-league-tabs');
+              }}
+            />
+          ) : null}
+        </Card>
+      ) : null}
+
+      {/* Fuori dalla scheda di intestazione perche' quella ora esiste solo per la
+          lega: un messaggio di errore sulla creazione deve comparire lo stesso. */}
+      {msg ? (
+        <div
+          className={`rounded-xl px-3 py-2 text-sm ${
+            msgTone === 'error'
+              ? 'bg-bad-bg text-bad'
+              : msgTone === 'warning'
+                ? 'bg-warn-bg text-warn'
+                : msgTone === 'success'
+                  ? 'bg-good-bg text-good'
+                  : 'bg-surface-2 text-ink-soft'
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="mr-2 font-semibold">
+            {msgTone === 'error' ? 'Errore' : msgTone === 'warning' ? 'Attenzione' : msgTone === 'success' ? 'OK' : 'Info'}:
+          </span>
+          {msg}
+        </div>
+      ) : null}
 
       {activeTab === 'user' ? (
         <>
           <Card className="p-4">
-            <SectionTitle>Le Tue Leghe</SectionTitle>
+            <SectionTitle>Le mie leghe</SectionTitle>
             {leagues.length ? (
               <div className="mt-3 space-y-2">
                 {leagues.map((l) => {
@@ -626,28 +631,44 @@ export default function LeagueAdminPage() {
                 <fieldset className="block text-sm font-medium text-ink-soft">
                   <legend>Come si fanno i punti <span className="text-bad">*</span></legend>
                   <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                    {/* Aura si vede ma non si sceglie: il motore a zone non e'
+                        pronto, e una lega creata in quella modalita' resterebbe
+                        ferma. Mostrarla spenta dice che esiste ed e' in lavoro;
+                        toglierla del tutto direbbe che non esiste. */}
                     {([
-                      ['classic', 'Fantacalcio classico', 'Voti + bonus/malus, ruoli P/D/C/A, listone e asta. Quello a cui giocano tutti.'],
-                      ['aura', 'Aura (sperimentale)', 'Duelli per zona del campo: conta dove giocano i tuoi, non solo il voto.'],
-                    ] as const).map(([value, title, blurb]) => (
+                      ['classic', 'Fantacalcio classico', 'Voti + bonus/malus, ruoli P/D/C/A, listone e asta. Quello a cui giocano tutti.', false],
+                      ['aura', 'Aura', 'Duelli per zona del campo: conta dove giocano i tuoi, non solo il voto.', true],
+                    ] as const).map(([value, title, blurb, locked]) => (
                       <label
                         key={value}
                         className={clsx(
-                          'cursor-pointer rounded-xl border-2 p-3 transition',
-                          createMode === value ? 'border-line bg-surface-2' : 'border-line hover:border-line',
+                          'rounded-xl border-2 border-line p-3 transition',
+                          locked
+                            ? 'cursor-not-allowed bg-surface-2/60 opacity-60'
+                            : 'cursor-pointer hover:border-line',
+                          createMode === value && !locked ? 'bg-surface-2' : null,
                         )}
                       >
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <input
                             type="radio"
                             name="league-mode"
                             value={value}
                             checked={createMode === value}
-                            onChange={() => setCreateMode(value)}
+                            disabled={locked}
+                            onChange={() => {
+                              if (!locked) setCreateMode(value);
+                            }}
                           />
                           <span className="font-semibold">{title}</span>
+                          {locked ? <Badge tone="slate">in arrivo</Badge> : null}
                         </div>
                         <div className="mt-1 pl-6 text-xs font-normal text-ink-faint">{blurb}</div>
+                        {locked ? (
+                          <div className="mt-1 pl-6 text-xs font-normal text-ink-faint">
+                            Non ancora disponibile: per ora si gioca in classico.
+                          </div>
+                        ) : null}
                       </label>
                     ))}
                   </div>
