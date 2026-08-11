@@ -162,24 +162,41 @@ export default function ListonePage() {
             {exporting ? 'Preparo…' : '⬇ Scarica listone (xlsx)'}
           </Button>
         </div>
+        {/* Le due etichette dicevano la formula («media voto puro 2025-2026 →
+            forma corrente», «r=0.38»): giusto per noi, illeggibile per chi
+            gioca. Fuori resta la frase, il dettaglio esatto — stagioni, qualità
+            della stima — sta nel titolo, per chi si ferma sopra. */}
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Badge tone="blue">
+          <Badge
+            tone="blue"
+            title={
+              data.value_season
+                ? `Media dei nostri voti in ${data.value_season}, che lascia sempre più spazio a quelli di ${data.current_season} man mano che il campionato va avanti.`
+                : data.current_season
+                  ? `Media dei nostri voti in ${data.current_season}.`
+                  : undefined
+            }
+          >
             {data.value_season
-              ? `valore = media voto puro ${data.value_season} → forma corrente`
-              : data.current_season
-                ? `valore = media voto puro ${data.current_season}`
-                : 'valore = media voto puro'}
+              ? 'Valore = i nostri voti, dall’anno scorso alla forma di oggi'
+              : 'Valore = la media dei nostri voti di quest’anno'}
           </Badge>
           {data.value_fit ? (
-            <Badge tone="slate">~ = stimato dal mercato (r={data.value_fit.r.toFixed(2)})</Badge>
+            <Badge
+              tone="slate"
+              title={`Chi non ha ancora giocato una partita con voto prende un valore dedotto dal prezzo di mercato, con una regola ricavata dai ${data.value_fit.n} giocatori che hanno tutti e due i dati. È un'indicazione di massima: il legame tra prezzo e rendimento è debole (r=${data.value_fit.r.toFixed(2)}).`}
+            >
+              ~ = valore stimato, il giocatore non ha ancora voti
+            </Badge>
           ) : null}
         </div>
         <div className="mt-1 text-sm text-ink-soft">
           {shown.length} di {data.count} giocatori
         </div>
         <div className="mt-1 text-[11px] text-ink-faint">
-          Il <b>Valore</b> è la media del <b>voto puro</b> (la nostra pagella), senza bonus/malus: non è
-          il fantavoto. La colonna <b>Mercato</b> è il valore Transfermarkt, a solo titolo indicativo.
+          Il <b>Valore</b> è il voto che diamo noi in pagella, senza bonus e malus: è il{' '}
+          <b>voto puro</b>, non il fantavoto. La colonna <b>Mercato</b> dice quanto vale il
+          cartellino nel calcio vero (fonte Transfermarkt): serve solo a farsi un'idea.
         </div>
 
         {/* filters */}
@@ -209,9 +226,15 @@ export default function ListonePage() {
             placeholder="Cerca giocatore o squadra…"
             className="min-w-[10rem] flex-1 rounded-lg border border-line px-2.5 py-1 text-sm"
           />
-          <label className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-soft">
+          {/* «Solo con voto reale» chiedeva di sapere che esiste anche un voto
+              finto. La casella fa una cosa sola: toglie dalla lista chi ha il
+              valore stimato, cioè le righe con la tilde. */}
+          <label
+            title="Nasconde chi ha il valore stimato (~), cioè chi non ha ancora una partita con voto."
+            className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-soft"
+          >
             <input type="checkbox" checked={ratedOnly} onChange={(e) => setRatedOnly(e.target.checked)} />
-            Solo con voto reale
+            Solo chi ha già giocato
           </label>
         </div>
       </Card>
@@ -354,7 +377,7 @@ function PlayerRow({
           /* Shown rather than hidden: planning an auction around someone you
              cannot actually buy is worse than seeing why he is unavailable. */
           <span
-            title="Il suo ruolo attende una decisione dell'amministratore: non è acquistabile finché non viene presa."
+            title="Non è ancora deciso in che ruolo schierarlo: lo stabilisce l'amministratore della lega, e fino ad allora non si può comprare."
             className="rounded border border-dashed border-warn px-1.5 py-0.5 text-[10px] font-semibold text-warn"
           >
             Ruolo da decidere
@@ -413,30 +436,33 @@ function ValueDetail({
         </div>
         <div className="font-semibold text-ink-soft">
           {p.estimated_value === null
-            ? 'Nessun dato disponibile'
+            ? 'Su questo giocatore non abbiamo dati'
             : estimated
               ? 'Valore stimato'
-              : 'Valore calcolato dalle prestazioni'}
+              : 'Valore calcolato sulle sue partite'}
         </div>
+        {/* Qui si spiega da dove viene il numero, e va spiegato con le parole di
+            chi gioca: «Base: misto» era il nome interno del calcolo, non una
+            frase. La parola tecnica resta cercabile nella riga, non a schermo. */}
         <ul className="mt-1 space-y-0.5">
           {estimated ? (
             <li>
-              Nessuna presenza a voto: stimato dal valore di mercato
-              {p.market_value ? ` (${fmtMarket(p.market_value)})` : ''}, tramite la relazione
-              calibrata sui giocatori che hanno entrambi i dati.
+              Non ha ancora una partita con voto: il valore è dedotto dal prezzo del suo
+              cartellino{p.market_value ? ` (${fmtMarket(p.market_value)})` : ''}, guardando
+              quanto rendono di solito i giocatori che costano come lui. È un'indicazione di
+              massima, non una nostra pagella.
             </li>
           ) : (
             <>
               <li>
-                Base: <b>{p.value_basis}</b>
                 {p.value_basis === 'misto'
-                  ? ' — media della stagione precedente che lascia progressivamente spazio alla forma corrente'
+                  ? 'Parte dai voti dell’anno scorso, e più partite gioca quest’anno più contano quelli nuovi.'
                   : p.value_basis === 'precedente'
-                    ? ' — la stagione corrente non ha ancora dati'
-                    : ' — calcolato sulla stagione in corso'}
+                    ? 'Calcolato sui voti dell’anno scorso: quest’anno non è ancora sceso in campo.'
+                    : 'Conta solo quello che ha fatto quest’anno.'}
               </li>
               <li>
-                Presenze a voto: <b>{p.appearances}</b> in {seasons.current}
+                Partite con voto: <b>{p.appearances}</b> in {seasons.current}
                 {seasons.previous ? (
                   <>
                     {' '}· <b>{p.prev_appearances}</b> in {seasons.previous}
@@ -444,8 +470,8 @@ function ValueDetail({
                 ) : null}
               </li>
               <li className="text-ink-faint">
-                Le medie basate su poche presenze sono avvicinate al 6, per evitare che una
-                singola grande prestazione domini la classifica.
+                Chi ha giocato poche partite viene avvicinato al 6: così una sola grande
+                prestazione non lo manda in cima alla lista.
               </li>
             </>
           )}

@@ -455,6 +455,23 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
     if league is not None:
         # Frozen roles win. Players with no frozen row (e.g. someone sold before
         # the listone was drawn up) keep the season role as a fallback.
+        #
+        # AND HERE THE TWO ROLES PART, DELIBERATELY. What this dict changes is the
+        # LABEL and the lineup slot; the vote in ``vp_rows`` was already computed
+        # above, by a function that builds its own ``current_role_map()`` and never
+        # sees a league. So a player frozen ATT here is shown and fielded as an
+        # attacker while his voto puro is z-scored against midfielders — and his
+        # explanation says midfielders too, because ``explain`` reads the role off
+        # the vote's own row, not off this one.
+        #
+        # It is a decision, not an oversight (11/08/2026, AGENTS.md "Classic Role
+        # Resolution"): one vote per player per match, the same in every league.
+        # Measured before choosing: 0.028 of a vote on average, and the SHOWN
+        # half-point moves in 2 appearances out of 36. The alternative — rescoring
+        # per league — costs a pagella per league instead of one per match.
+        # Whoever reverses it passes these roles into ``voto_puro_for_match`` and
+        # adds the league to the pagella cache key; both, or the cache serves one
+        # league's votes to another.
         roles.update(LeaguePlayerRole.objects
                      .filter(league=league, player_id__in=pids)
                      .values_list("player_id", "role"))

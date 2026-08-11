@@ -1772,6 +1772,16 @@ def voto_puro_for_match(match, reference: dict,
                         always_rate: set | None = None) -> list[dict]:
     """Per-player voto puro for one match. List of dicts with components.
 
+    LEAGUE-BLIND ON PURPOSE. There is no ``league`` parameter and there should not
+    be one by accident: a performance is worth what it is worth, and the same match
+    read from two leagues shows the same votes. The roles below come from
+    ``current_role_map()`` — the season-wide measurement — so a player a league has
+    frozen as ATT is still z-scored here against the population the DATA puts him
+    in. That league's frozen role governs his label and his lineup slot, not his
+    vote; see ``classic_pagella.pagella_for_match``, where the two part, and
+    AGENTS.md "Classic Role Resolution" for what the choice costs (0.028 of a vote
+    on average, 2 shown half-points in 36 appearances).
+
     Players below the rating threshold get ``rated=False`` and ``voto_puro=None``
     (senza voto). Goalkeepers are included, scored on the GK channel.
 

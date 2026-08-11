@@ -25,7 +25,9 @@ from vfoot.api.league_views import (
     LeagueRealFixturesView,
     LeagueRealMatchDetailView,
 )
-from vfoot.models import FantasyLeague, LeagueMembership, LeaguePlayerRole
+from vfoot.models import (
+    CurrentPlayerRole, FantasyLeague, LeagueMembership, LeaguePlayerRole,
+)
 from vfoot.services.classic_pagella import pagella_for_match
 
 
@@ -672,3 +674,78 @@ class RealChampionshipTests(TestCase):
         resp = LeagueRealMatchDetailView.as_view()(
             req, league_id=league.id, match_id=empty.id)
         self.assertEqual(resp.status_code, 404)
+
+
+class LeagueRoleDoesNotRescoreTests(TestCase):
+    """The vote is the same in every league; only the LABEL follows the league.
+
+    Pinned deliberately, because the two roles part in silence and the arithmetic
+    hides it: over a real season the gap averages 0.028 of a vote and only moves
+    the shown half-point twice in thirty-six appearances. A test that let it drift
+    would not be caught by looking at a page. See AGENTS.md "Classic Role
+    Resolution" for why it was chosen this way, and what reversing it costs.
+    """
+
+    def setUp(self):
+        comp = Competition.objects.create(external_id="23", name="Serie A")
+        cs = CompetitionSeason.objects.create(
+            competition=comp, season=Season.objects.create(code="2026-2027"),
+            name="Serie A 2026-2027", external_source="sofascore",
+            external_id="95836")
+        home = TeamSeason.objects.create(
+            competition_season=cs, team=Team.objects.create(name="Torino"))
+        away = TeamSeason.objects.create(
+            competition_season=cs, team=Team.objects.create(name="Sassuolo"))
+        self.match = Match.objects.create(
+            competition_season=cs, matchday=1, home_team=home, away_team=away,
+            home_goals=1, away_goals=1, status=Match.STATUS_FINISHED,
+            external_source="sofascore", external_id="16283046")
+
+        self.p = Player.objects.create(full_name="Ala Contesa", short_name="A. Contesa",
+                                       classic_role_seed="CEN")
+        CurrentPlayerRole.objects.create(
+            player=self.p, role_data="CEN", role_mitigated="CEN",
+            method=CurrentPlayerRole.METHOD_CATEGORY, tm_position="right winger")
+        MatchAppearance.objects.create(match=self.match, player=self.p,
+                                       team_season=home, side="home",
+                                       minutes_played=90, is_starter=True)
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=self.p, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=60.0, team_side="home")
+
+        # The two role buckets are placed a whole sigma apart, so scoring him under
+        # the wrong one could not be mistaken for rounding: it would be worth about
+        # six tenths of a vote, not the hundredths the real reference produces.
+        self.reference = {"CEN": {"mean": 0.0, "std": 1.0, "n": 100},
+                          "ATT": {"mean": 1.0, "std": 1.0, "n": 100}}
+
+        admin = User.objects.create_user("boss", password="x")
+        self.league = FantasyLeague.objects.create(
+            name="L", owner=admin, mode="classic", reference_season=cs)
+        LeagueMembership.objects.create(league=self.league, user=admin,
+                                        role=LeagueMembership.ROLE_ADMIN)
+        LeaguePlayerRole.objects.create(
+            league=self.league, player=self.p, role="ATT",
+            source=LeaguePlayerRole.SOURCE_ADMIN)
+
+    def _line(self, league=None):
+        pag = pagella_for_match(self.match, self.reference, league=league)
+        return next(l for l in pag["home"]["starters"] if l["player_id"] == self.p.id)
+
+    def test_the_league_changes_the_label_and_not_the_vote(self):
+        free, in_league = self._line(), self._line(league=self.league)
+        self.assertEqual(free["role"], "CEN")
+        self.assertEqual(in_league["role"], "ATT")   # the frozen role is the label
+        self.assertEqual(in_league["voto_puro"], free["voto_puro"])
+
+    def test_the_vote_is_scored_against_the_measured_role(self):
+        """Not merely 'the same in both' — the same as the CEN one, by value.
+
+        His index sits on the CEN mean, so that bucket puts him at exactly 6.0.
+        The ATT bucket is a whole sigma above, which would drag the same index to
+        6 + 0.8 * (90/115) * (0 - 1) / 1 = 5.37, shown as 5.5. Asserting the 6.0
+        is therefore asserting WHICH mean was subtracted, not merely that two
+        calls agree — two calls would agree just as well if both were wrong."""
+        in_league = self._line(league=self.league)
+        self.assertEqual(in_league["voto_puro"], 6.0)
+        self.assertNotEqual(in_league["voto_puro"], 5.5)

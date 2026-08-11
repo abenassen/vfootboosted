@@ -175,6 +175,28 @@ files as a midfielder is really a forward).
     Authority INSIDE that league (pagella display, lineup legality); it overrides
     layer 2 for that league only.
 
+**A player's VOTE is the same in every league, and that is a decision.** Layer 3
+governs what he is CALLED and where he may be fielded; layer 2 governs what he is
+worth. So a league that froze Sebastiano Esposito as ATT shows him as an attacker,
+fields him as one — and his voto puro is still z-scored against the CEN
+population, because `voto_puro_for_match` builds its own `current_role_map()` and
+never sees the league. The explanation agrees with the vote (it reads the role off
+the vote's own row), so the only thing out of step is the badge.
+
+Chosen on 11/08/2026 over the alternative — one vote per league, scored under that
+league's frozen role — after measuring the cost of the divergence: **0.028 of a
+vote on average, and the number actually SHOWN changes in 2 appearances out of 36**
+(Esposito over 25-26), because the half-point rounding absorbs the rest. Reversing
+it means passing the league's role map into `voto_puro_for_match` and putting the
+league id in the pagella cache key: a vote computed per league instead of once per
+match, for two shown half-points a season.
+
+The one place the arithmetic would NOT be small is a keeper: POR is scored on its
+own scale (mean 1.409, σ 2.189 against 0.28 and 0.420), so a league that froze
+somebody as POR against layer 2 would see whole votes move, not centesimi. No
+league does today; if one ever can, this decision has to be revisited, not
+inherited.
+
 Listone arbitration: only players whose position is genuinely ambiguous AND whose
 Transfermarkt market value clears `league_decisions.RELEVANCE_MIN_VALUE_EUR`
 (€5M) reach the admin's decision queue; everyone below auto-takes the layer-2
