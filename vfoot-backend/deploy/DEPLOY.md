@@ -210,6 +210,96 @@ Additive migrations are low-risk; the pg_dump is the real safety net.
 - **Frontend env.** Build with the three VITE_ vars above; the default base URL is
   `localhost:8000` (dev), wrong for prod.
 
+## Deployare il CALCOLO DEI VOTI — la parte che i sei passi sopra non coprono
+
+**Scritto l'11/08/2026 perché quel giorno il deploy era formalmente corretto e i voti
+in produzione erano diversi da quelli in locale.** Impronte del modello identiche,
+codice identico, e 350 presenze con un ruolo diverso più 218 con un voto diverso su
+11.902. Nessuna delle cause era nel codice appena deployato: erano tutte nei DATI e
+nell'ambiente della macchina. Il codice si deploya con `git pull`; il calcolo dei voti
+no, perché dipende da tabelle che le migrazioni non creano e che nessuno dei passi
+sopra nomina.
+
+### Verifica, prima di tutto il resto
+
+`vote_fingerprint` risponde alla sola domanda che conta — le due installazioni
+calcolano gli stessi voti? — e va lanciato su ENTRAMBE, con lo stesso nome di
+stagione (per nome, non per id: gli id sono diversi su ogni database).
+
+```sh
+# in locale
+manage.py vote_fingerprint --season-name "Serie A 2025-2026" --out /tmp/fp_locale.txt
+# sul server, come vfoot
+manage.py vote_fingerprint --season-name "Serie A 2025-2026" --out /tmp/fp_prod.txt
+# poi si portano giù i due file e si diffano
+diff <(sort fp_locale.txt) <(sort fp_prod.txt) | head -40
+```
+
+Come si legge il risultato:
+
+* **impronte del modello diverse** (pesi/`SCORING_CODE_VERSION`/modello) → è il
+  codice o la calibrazione: il server non ha ancora fatto `git pull`, o
+  `vote_reference.json` è di un'altra versione dei pesi;
+* **impronte del modello uguali, impronta dei voti diversa** → sono i dati, e la
+  lista sotto dice quali. Il `diff` per presenza dice chi: se cambia il RUOLO è
+  l'inferenza, se cambia solo il voto è l'esposizione o una soglia.
+
+### I quattro dati che il calcolo pretende, e che nessuna migrazione porta
+
+1. **Gli intervalli di presenza in campo** (`PlayerOnPitchInterval`). Senza, il
+   codice ripiega su una stima («un titolare gioca dal fischio d'inizio, un
+   subentrato finisce la partita») che sbaglia di oltre venti punti percentuali il
+   pericolo addebitato a un difensore su sette. In produzione erano **zero** per
+   tutta la 2025-26. Si ricostruiscono dalla cache, senza rete:
+   ```sh
+   manage.py import_sofascore_intervals --competition-season <id stagione dati>
+   ```
+2. **La casella in distinta** (`MatchAppearance.raw_stats['position']`), che dice chi
+   era in porta e disambigua chi ha pochi minuti. Gli import nuovi la salvano; per le
+   righe vecchie: `manage.py backfill_sofascore_position --season <id>`.
+3. **Il tag portiere** (`Player.is_goalkeeper`), che viene dal cartellino
+   Transfermarkt e quindi esiste solo per chi sta in una rosa importata. In produzione
+   c'è solo la rosa della stagione NUOVA, quindi i portieri della stagione MISURATA
+   che non giocano più in serie A non erano marcati — e finivano nel raggruppamento
+   per stile come giocatori di movimento. Il calcolo non si fida più del solo tag, ma
+   il tag serve al resto dell'app:
+   ```sh
+   manage.py backfill_goalkeeper_flag --season <id stagione dati>
+   ```
+4. **I ruoli**, ricalcolati DOPO i tre punti sopra — altrimenti restano quelli
+   inferiti sui dati incompleti:
+   ```sh
+   manage.py compute_classic_roles --season <id rose> --data-season <id dati>
+   ```
+
+### E una differenza che NON è un difetto
+
+Le rose Transfermarkt sono una fotografia, e due installazioni che l'hanno scattata
+in giorni diversi hanno rose diverse (l'11/08/2026: 660 tesserati in locale, 638 in
+produzione). Un giocatore la cui posizione TM c'è da una parte e non dall'altra può
+avere un ruolo diverso in modo del tutto legittimo — nella variante `mitigated` una
+posizione certa vince sulla misura. Dopo aver sistemato i quattro punti sopra restava
+esattamente un caso così su 11.902 presenze (L. Pellegrini, `attacking midfield` in
+produzione e niente in locale): quello si spiega, non si ripara.
+
+### Il deploy del calcolo dei voti, in ordine
+
+```sh
+# 1-5 come sopra (build, backup, push, pull, migrate, restart), poi:
+ssh root@139.162.144.123 'cd /srv/vfoot-app/vfoot-backend/src
+  sudo -u vfoot ../.venv/bin/python manage.py backfill_sofascore_position --season 1
+  sudo -u vfoot ../.venv/bin/python manage.py import_sofascore_intervals --competition-season 1
+  sudo -u vfoot ../.venv/bin/python manage.py backfill_goalkeeper_flag --season 1
+  sudo -u vfoot ../.venv/bin/python manage.py compute_classic_roles --season 2 --data-season 1
+  systemctl restart vfoot'          # l'impronta del modello e' anche chiave di cache
+# poi la verifica: vote_fingerprint su entrambe, e diff
+```
+Ognuno di questi comandi è idempotente: rilanciarlo non fa danni, e il `backfill` del
+tag portiere scrive solo verso il vero. `systemctl restart` serve perché i voti si
+mettono in cache sotto l'impronta del modello: cambiando una costante l'impronta
+cambia e la cache si invalida da sé, ma il processo vecchio tiene comunque in memoria
+le scale già lette.
+
 ## Per-season data (not created by migrations)
 
 Nothing to run by hand. The Transfermarkt import (`vfoot-tm-poll`, twice a day) does
