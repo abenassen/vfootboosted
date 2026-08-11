@@ -52,6 +52,7 @@ from realdata.models import (
     MatchAppearance, Player, PlayerTeamStint, PlayerZoneFeature, PROVIDER_SOFASCORE,
 )
 from realdata.services.sofascore_adapter import METHOD_UNPLACED
+from vfoot.services.classic_rating import _round_sum
 
 PROVIDER_TM = "transfermarkt"
 
@@ -268,6 +269,10 @@ def player_profiles(competition_season_id: int, min_minutes: int = MIN_MINUTES):
                            .values_list("player_id", "zone_key", "feature_key")
                            .annotate(v=Sum("value"))
                            .values_list("player_id", "zone_key", "feature_key", "v")):
+        # arrotondata come nel canale del voto (v. classic_rating.PROVIDER_SUM_DECIMALS):
+        # la somma in virgola mobile dipende dall'ordine degli addendi, e su questa
+        # matrice il rumore sposta di reparto i giocatori di confine
+        v = _round_sum(v)
         totals.setdefault(pid, {}).setdefault(fk, 0.0)
         totals[pid][fk] += v
         if fk == "touches":

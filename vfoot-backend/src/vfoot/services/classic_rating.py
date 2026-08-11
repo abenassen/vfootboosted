@@ -903,6 +903,27 @@ EXPOSURE_CREDIT = 0.0
 # La casella del portiere nella distinta SofaScore (v. ``match_lineup_keepers``).
 SOFA_GK_POSITION = "G"
 
+# Decimali a cui si arrotondano le somme che arrivano dal database.
+#
+# Perché serve: quasi tutti i contatori del provider sono INTERI (tocchi, duelli,
+# passaggi) e quelli continui hanno sei decimali (xG, xA). Ma li sommiamo in SQL su
+# colonne float, e la somma in virgola mobile dipende dall'ORDINE degli addendi:
+# PostgreSQL restituisce 9.999999999999998 dove SQLite dà 10.0. Confrontando i voti
+# della 2025-26 fra portatile e produzione, con dati bit-identici, quel rumore ha
+# prodotto quattro «senza voto» diversi — un giocatore con esattamente 6 tocchi che
+# in produzione ne aveva 5.999999999999999, sotto la soglia MIN_TOUCHES_RATED — e
+# uno scarto di ruolo su un giocatore di confine, perché anche la matrice del
+# clustering nasce da queste somme.
+#
+# Sei decimali tengono tutta la precisione che il provider dichiara e buttano solo
+# la coda che nessuno dei due database sa riprodurre.
+PROVIDER_SUM_DECIMALS = 6
+
+
+def _round_sum(value):
+    """Una somma del database, ripulita dal rumore dell'ordine degli addendi."""
+    return value if value is None else round(float(value), PROVIDER_SUM_DECIMALS)
+
 MIN_MINUTES_RATED = 14
 MIN_TOUCHES_RATED = 6
 # Above this many minutes, minutes ALONE decide: the touch count is a proxy for
@@ -1294,7 +1315,10 @@ def _per_match_player_totals(match_ids):
     out = defaultdict(dict)
     covered = set()
     for r in rows:
-        out[(r["match_id"], r["player_id"])][r["feature_key"]] = r["v"]
+        # arrotondata: v. PROVIDER_SUM_DECIMALS — due database che sommano le stesse
+        # righe in un ordine diverso non danno lo stesso float, e quel rumore arriva
+        # fino alle soglie del «senza voto»
+        out[(r["match_id"], r["player_id"])][r["feature_key"]] = _round_sum(r["v"])
         covered.add(r["match_id"])
 
     # A match with no zone row at all is NOT a match where nobody did anything:
@@ -1551,7 +1575,7 @@ def _zone_presence(match_ids) -> dict:
                             .annotate(v=Sum("value"))
                             .values_list("match_id", "player_id", "zone_key", "v")):
         _, col, row = zk.split("_")
-        zones[(mid, pid)][(int(col), int(row))] = v
+        zones[(mid, pid)][(int(col), int(row))] = _round_sum(v)
     out = {}
     for key, z in zones.items():
         total = sum(z.values())
