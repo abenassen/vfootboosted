@@ -280,7 +280,20 @@ def player_profiles(competition_season_id: int, min_minutes: int = MIN_MINUTES):
                    .values_list("player_id", "minutes_played")):
         minutes[pid] = minutes.get(pid, 0.0) + (m or 0)
 
+    # CHI È UN PORTIERE, e perché non basta il tag. ``Player.is_goalkeeper`` viene
+    # dal cartellino Transfermarkt, quindi esiste solo per chi sta in una rosa che
+    # abbiamo importato: su un'installazione che ha le rose della stagione NUOVA ma
+    # non di quella misurata — la produzione all'11/08/2026 — sette portieri della
+    # 2025-26 avevano il tag a False. Senza questa seconda prova finivano qui dentro,
+    # venivano raggruppati per stile con i giocatori di movimento e ne uscivano
+    # centrocampisti: da lì un voto sul canale sbagliato (Montipò 5.0 invece di 6.0)
+    # e categorie spostate anche per gli altri, perché la popolazione del clustering
+    # non era la stessa. La distinta SofaScore dice chi era in porta senza inferire
+    # niente, e c'è dove c'è una partita.
     keepers = set(Player.objects.filter(is_goalkeeper=True).values_list("id", flat=True))
+    keepers |= {pid for pid, role in
+                sofascore_position_roles(competition_season_id).items()
+                if role == Player.ROLE_GK}
     ids, rows = [], []
     for pid, g in grid.items():
         if pid in keepers or minutes.get(pid, 0) < min_minutes or g.sum() <= 0:

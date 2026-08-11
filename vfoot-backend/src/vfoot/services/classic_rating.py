@@ -900,6 +900,9 @@ EXPOSURE_CREDIT = 0.0
 # plain booking, see ``_SENDING_OFF_TYPES``) is
 # rated regardless — that override lives in ``voto_puro_for_match`` via
 # ``rating_forcing_event_players``, because those events are not in the zone totals.
+# La casella del portiere nella distinta SofaScore (v. ``match_lineup_keepers``).
+SOFA_GK_POSITION = "G"
+
 MIN_MINUTES_RATED = 14
 MIN_TOUCHES_RATED = 6
 # Above this many minutes, minutes ALONE decide: the touch count is a proxy for
@@ -1396,6 +1399,32 @@ def _merge_defensive_value(out: dict, match_ids) -> None:
                     DEFENSIVE_VALUE_SOURCE, seen, eligible)
 
 
+def match_lineup_keepers(match_ids) -> dict:
+    """{match_id: {player_id}} di chi, IN DISTINTA, era il portiere.
+
+    Terza risposta alla domanda "questo è un portiere?", e serve perché le altre due
+    dipendono da dati che possono non esserci. ``Player.is_goalkeeper`` viene dal
+    cartellino Transfermarkt e c'è solo per chi è in una rosa che abbiamo importato;
+    il ruolo dichiarato viene dall'inferenza, che di quel tag si fida. Su una
+    installazione senza le rose della stagione misurata — la produzione all'11/08/2026
+    — sette portieri della 2025-26 avevano il tag a False, nessun ruolo, e per questo
+    sono finiti nel clustering dei giocatori di movimento: uscivano CEN, venivano
+    valutati sul canale sbagliato (Montipò 5.0 invece di 6.0) e si prendevano una
+    fetta del pericolo concesso che spetta ai difensori, spostando di mezzo voto 218
+    presenze di compagni di squadra.
+
+    La distinta, invece, c'è sempre dove c'è una partita, e per il portiere non è
+    un'inferenza: è la casella in cui il provider lo ha schierato. Per partita e non
+    per stagione, così un cambio in porta resta due persone diverse.
+    """
+    out: dict[int, set] = defaultdict(set)
+    for mid, pid, raw in (MatchAppearance.objects.filter(match_id__in=match_ids)
+                          .values_list("match_id", "player_id", "raw_stats")):
+        if (raw or {}).get("position") == SOFA_GK_POSITION:
+            out[mid].add(pid)
+    return out
+
+
 def own_goal_shots(match_ids) -> dict:
     """{(match_id, conceding_side): [(minute, xgot)]} for the own goals of a match.
 
@@ -1434,7 +1463,11 @@ def _merge_own_goal_relief(out: dict, match_ids) -> None:
     own_goals = own_goal_shots(match_ids)
     if not own_goals:
         return
+    # Il tag Transfermarkt più la distinta: senza la seconda, il credito non
+    # arrivava proprio ai portieri che il tag non copre — cioè quelli che di questa
+    # correzione hanno più bisogno (v. ``match_lineup_keepers``).
     keepers = set(Player.objects.filter(is_goalkeeper=True).values_list("id", flat=True))
+    lineup_keepers = match_lineup_keepers(match_ids)
     minutes = _minutes_map(match_ids)
     apps = {(a["match_id"], a["player_id"]): (a["side"], a["is_starter"])
             for a in MatchAppearance.objects.filter(match_id__in=match_ids)
@@ -1442,7 +1475,9 @@ def _merge_own_goal_relief(out: dict, match_ids) -> None:
     windows = on_pitch_windows(match_ids, minutes, apps)
     for (mid, side), goals in own_goals.items():
         for (m2, pid), (side2, _starter) in apps.items():
-            if m2 != mid or side2 != side or pid not in keepers:
+            if m2 != mid or side2 != side:
+                continue
+            if pid not in keepers and pid not in lineup_keepers.get(mid, ()):
                 continue
             key = (mid, pid)
             # A keeper with no zone features at all is a match we cannot score (see
@@ -1601,14 +1636,21 @@ def defensive_exposure(match_ids, minutes: dict) -> dict:
     # The keeper is excluded from the split, not merely spared the charge: his
     # heatmap sits entirely in the zone the danger arrives in, so leaving him in
     # would swallow the share the defenders in front of him should carry.
+    #
+    # TRE prove, in OR, perché le prime due possono mancare: il tag Transfermarkt
+    # esiste solo per chi sta in una rosa importata, il ruolo dichiarato si fida di
+    # quel tag, e la distinta invece c'è sempre (v. ``match_lineup_keepers``). Senza
+    # la terza, un portiere che il tag non copre si prendeva una fetta del pericolo
+    # concesso e la sottraeva ai difensori davanti a lui.
     keepers = set(Player.objects.filter(is_goalkeeper=True).values_list("id", flat=True))
     keepers |= {pid for pid, role in current_role_map().items() if role == Player.ROLE_GK}
+    lineup_keepers = match_lineup_keepers(match_ids)
 
     # who can be charged, per (match, side), with their window and presence map
     squads: dict[tuple, list] = defaultdict(list)
     for key, zones in presence.items():
         mid, pid = key
-        if pid in keepers:
+        if pid in keepers or pid in lineup_keepers.get(mid, ()):
             continue
         side, is_starter = appearances.get(key, (None, False))
         if not side:
