@@ -98,11 +98,12 @@ export default function VotoPuroPage() {
         </p>
         <p>
           Il voto puro è l'altra metà: <i>quanto bene ha giocato</i>. È il numero che una pagella dà
-          a prescindere dai bonus, e a noi lo dicono i dati della partita. Da qui viene la differenza
-          principale con l'abitudine di tutti: la pagella di un giornale parte da un'impressione e la
-          traduce in un numero, noi partiamo da quaranta misure di quello che è successo in campo e
-          le trasformiamo in un numero. Sullo stesso gol i due percorsi arrivano quasi sempre vicini,
-          ma non sempre — e quando non ci arrivano, i motivi sono sempre gli stessi, elencati{' '}
+          a prescindere dai bonus, e a noi lo dicono i dati della partita. Da qui viene la
+          differenza principale con l'abitudine di tutti: la pagella di un giornale parte da
+          un'impressione e la traduce in un numero, noi partiamo da quaranta misure di quello che è
+          successo in campo e le trasformiamo in un numero. Sullo stesso gol i due percorsi arrivano
+          quasi sempre vicini, ma non sempre — e quando non ci arrivano, i motivi sono sempre gli
+          stessi, elencati{' '}
           <a href="#differenze" className="font-semibold text-accent underline decoration-dotted">
             più sotto
           </a>
@@ -128,16 +129,16 @@ export default function VotoPuroPage() {
         </p>
         <p>
           Nel calcolo entrano una quarantina di misure. Alcune sono ovvie — tiri, passaggi riusciti,
-          duelli vinti e persi, contrasti, intercetti, respinte, palloni recuperati, dribbling. Altre
-          contano <i>quanto valeva</i> un gesto e non solo che è stato fatto: quanto era difficile il
-          tiro da dove è partito, dove è finito rispetto a com'era piazzato il portiere, quanto era
-          limpida l'occasione creata per un compagno. E ci sono gli errori, che pesano in negativo:
-          il pallone perso male, il dribbling subito, l'errore che concede un tiro, quello che
-          concede un gol, il rigore regalato.
+          duelli vinti e persi, contrasti, intercetti, respinte, palloni recuperati, dribbling.
+          Altre contano <i>quanto valeva</i> un gesto e non solo che è stato fatto: quanto era
+          difficile il tiro da dove è partito, dove è finito rispetto a com'era piazzato il
+          portiere, quanto era limpida l'occasione creata per un compagno. E ci sono gli errori, che
+          pesano in negativo: il pallone perso male, il dribbling subito, l'errore che concede un
+          tiro, quello che concede un gol, il rigore regalato.
         </p>
         <p className="text-xs text-ink-faint">
-          Le zone servono a una cosa che nessuna somma di totali può fare: sapere <i>chi era dove</i>{' '}
-          quando l'avversario è arrivato al tiro. È tutto il capitolo{' '}
+          Le zone servono a una cosa che nessuna somma di totali può fare: sapere{' '}
+          <i>chi era dove</i> quando l'avversario è arrivato al tiro. È tutto il capitolo{' '}
           <a href="#zona" className="font-semibold text-accent underline decoration-dotted">
             pericolo nella tua zona
           </a>
@@ -151,20 +152,20 @@ export default function VotoPuroPage() {
             Dieci duelli vinti non dicono niente da soli: dipende da quanti ne vince chi gioca in
             quel ruolo. Quindi ogni misura viene letta come «quanto si stacca da quello che fa un
             giocatore normale» — sopra o sotto la media. Le prestazioni fuori scala vengono
-            accorciate un po', perché un dato mostruoso in una singola voce non deve da solo decidere
-            il voto.
+            accorciate un po', perché un dato mostruoso in una singola voce non deve da solo
+            decidere il voto.
           </Step>
           <Step n={2} title="Ogni misura ha il suo peso">
             I pesi sono decisi da noi, uno per uno, e sono la parte «di autore» del modello: dicono
             quanto conta calciare bene rispetto a vincere un duello, o quanto costa un errore. Sono
             tarati confrontando i risultati con una stagione intera di pagelle vere, ma non sono una
-            copia delle pagelle: dove abbiamo scelto di leggere il calcio in modo diverso, lo abbiamo
-            tenuto.
+            copia delle pagelle: dove abbiamo scelto di leggere il calcio in modo diverso, lo
+            abbiamo tenuto.
           </Step>
           <Step n={3} title="La somma diventa un voto in scala di pagella">
             Tutte le voci pesate si sommano in un unico punteggio di prestazione, che poi viene
-            confrontato con il suo ruolo: la media di ogni ruolo è <b className="text-ink">6</b>, e da
-            lì si sale o si scende in proporzione a quanto la partita si stacca dalla norma. Il
+            confrontato con il suo ruolo: la media di ogni ruolo è <b className="text-ink">6</b>, e
+            da lì si sale o si scende in proporzione a quanto la partita si stacca dalla norma. Il
             risultato viene arrotondato al mezzo voto, come una pagella, e sta tra 3 e 10.
           </Step>
           <Step n={4} title="Le ultime correzioni">
@@ -172,8 +173,9 @@ export default function VotoPuroPage() {
             di gioco il voto vale quasi per intero, a un quarto d'ora conta meno della metà. Poi c'è
             il risultato: un voto alto in una sconfitta scende un po', un voto basso in una vittoria
             sale un po' — <b className="text-ink">mai il contrario</b>, quindi il risultato non
-            gonfia nessuno, tempera solo i casi stonati. E infine i tre episodi che una pagella non
-            può ignorare — espulsione, autogol, rigore sbagliato — che leggiamo{' '}
+            gonfia nessuno, tempera solo i casi stonati, e non può mai portarli fino al 6. E infine
+            i tre episodi che una pagella non può ignorare — espulsione, autogol, rigore sbagliato —
+            che leggiamo{' '}
             <a href="#errori" className="font-semibold text-accent underline decoration-dotted">
               entrando nel merito dell'errore
             </a>
@@ -182,8 +184,8 @@ export default function VotoPuroPage() {
         </ol>
         <Callout>
           Ogni voto è ispezionabile: nelle pagelle di ogni partita, toccando il voto puro si apre il
-          conto di quel numero — la media del ruolo, ogni voce che l'ha spostata e di quanto, fino al
-          voto finale.
+          conto di quel numero — la media del ruolo, ogni voce che l'ha spostata e di quanto, fino
+          al voto finale.
         </Callout>
       </Section>
 
@@ -236,20 +238,21 @@ export default function VotoPuroPage() {
           <li>
             <b className="text-ink">L'espulsione</b> pesa per il motivo e per il tempo. Il fallo
             tattico dell'ultimo uomo è il meno colpevole di tutti — è una scelta, spesso a favore
-            della squadra; il fallo normale sta in mezzo; condotta violenta, protesta e comportamento
-            antisportivo stanno in cima e hanno un'aggravante fissa, perché non sono calcio.
-            Il tutto moltiplicato per i minuti giocati in dieci: un rosso al 91' non è un rosso al
-            20'. Così si va da quasi zero a circa due punti di voto — e un cartellino preso fuori dal
-            campo, in panchina o a partita finita, non tocca il voto: non ha inciso sulla partita.
+            della squadra; il fallo normale sta in mezzo; condotta violenta, protesta e
+            comportamento antisportivo stanno in cima e hanno un'aggravante fissa, perché non sono
+            calcio. Il tutto moltiplicato per i minuti giocati in dieci: un rosso al 91' non è un
+            rosso al 20'. Così si va da quasi zero a circa due punti di voto — e un cartellino preso
+            fuori dal campo, in panchina o a partita finita, non tocca il voto: non ha inciso sulla
+            partita.
           </li>
           <li>
-            <b className="text-ink">L'autogol</b> non è tutto uguale: distinguiamo la deviazione dalla
-            frittata. Se arriva nello stesso istante di un tiro avversario è una palla deviata,
-            sfortuna, e il calo è minimo (due decimi); se è un errore in solitaria pesa di più (mezzo
-            punto). Per dare un metro: un gol <i>fatto</i> vale circa sette decimi di voto, quindi
-            nemmeno l'autogol peggiore arriva a costare quanto una rete rende. Quando non abbiamo il
-            tempo al secondo non pretendiamo di distinguere: applichiamo un unico calo piccolo,
-            invece di attribuire una gravità che non possiamo misurare.
+            <b className="text-ink">L'autogol</b> non è tutto uguale: distinguiamo la deviazione
+            dalla frittata. Se arriva nello stesso istante di un tiro avversario è una palla
+            deviata, sfortuna, e il calo è minimo (due decimi); se è un errore in solitaria pesa di
+            più (mezzo punto). Per dare un metro: un gol <i>fatto</i> vale circa sette decimi di
+            voto, quindi nemmeno l'autogol peggiore arriva a costare quanto una rete rende. Quando
+            non abbiamo il tempo al secondo non pretendiamo di distinguere: applichiamo un unico
+            calo piccolo, invece di attribuire una gravità che non possiamo misurare.
           </li>
           <li>
             <b className="text-ink">Il rigore sbagliato</b> lo leggiamo prima come tiro: se è stato
@@ -278,8 +281,8 @@ export default function VotoPuroPage() {
           <b className="text-ink">ogni tiro concesso viene addebitato a chi era in quella zona</b>,
           in proporzione a quanto ci giocava, non a tutti. Metà dell'addebito guarda com'è finita
           (gol o parata), metà quanto era pericoloso il tiro. Un tiro debole da lontano costa quasi
-          niente; un'occasione limpida costa mezza rete anche se il portiere la para. Il portiere non
-          entra nella spartizione: ha il suo conto.
+          niente; un'occasione limpida costa mezza rete anche se il portiere la para. Il portiere
+          non entra nella spartizione: ha il suo conto.
         </p>
         <ZoneIllustration />
         <p>
@@ -300,8 +303,8 @@ export default function VotoPuroPage() {
         <p className="text-xs text-ink-faint">
           Nella stagione 2025-26 è andata così in 17 partite: due difensori della stessa difesa, lo
           stesso voto dalla Redazione, e da noi più di un voto e mezzo di differenza. Non è un caso
-          limite: è il motivo per cui un difensore, da noi, può prendere 6,5 in una serata da tre gol
-          presi.
+          limite: è il motivo per cui un difensore, da noi, può prendere 6,5 in una serata da tre
+          gol presi.
         </p>
       </Section>
 
@@ -312,9 +315,10 @@ export default function VotoPuroPage() {
           <b className="text-ink">
             quanto valevano i tiri che ha affrontato, e quanti gol ha preso?
           </b>{' '}
-          Se i tiri nella sua porta valevano due gol e ne ha preso uno, ha guadagnato un gol alla sua
-          squadra. Se valevano mezzo gol e ne ha preso uno, l'ha perso. Ogni tiro pesa per quanto era
-          difficile pararlo: un tiro angolato da dentro l'area non vale un tiro da trenta metri.
+          Se i tiri nella sua porta valevano due gol e ne ha preso uno, ha guadagnato un gol alla
+          sua squadra. Se valevano mezzo gol e ne ha preso uno, l'ha perso. Ogni tiro pesa per
+          quanto era difficile pararlo: un tiro angolato da dentro l'area non vale un tiro da trenta
+          metri.
         </p>
         <p>Attorno a questo:</p>
         <ul className="list-disc space-y-1.5 pl-4 text-sm text-ink-soft marker:text-ink-faint">
@@ -337,11 +341,11 @@ export default function VotoPuroPage() {
           </li>
           <li>
             <b className="text-ink">L'autogol di un compagno pesa per quanto era parabile.</b> Un
-            pallone messo dentro da un proprio difensore non è un tiro che il portiere ha affrontato,
-            quindi non gli costa un gol intero: gli costa quello che valeva. Se era imparabile non
-            paga quasi nulla; se era un pallone da prendere, paga. E se la colpa è sua — il
-            retropassaggio che si lascia sfuggire — la paga dov'è giusto, nel malus dell'errore che
-            porta a un gol.
+            pallone messo dentro da un proprio difensore non è un tiro che il portiere ha
+            affrontato, quindi non gli costa un gol intero: gli costa quello che valeva. Se era
+            imparabile non paga quasi nulla; se era un pallone da prendere, paga. E se la colpa è
+            sua — il retropassaggio che si lascia sfuggire — la paga dov'è giusto, nel malus
+            dell'errore che porta a un gol.
           </li>
           <li>
             <b className="text-ink">Il rigore parato non ha un premio fisso</b>: entra nel conto per
@@ -349,9 +353,9 @@ export default function VotoPuroPage() {
             debole. Il +3 di bonus lo prende comunque, come da regolamento.
           </li>
           <li>
-            <b className="text-ink">Se non ha avuto niente da fare, il voto resta vicino al 6.</b> Un
-            portiere che affronta un tiro solo e lo prende non ha giocato una brutta partita: non ha
-            giocato una partita giudicabile. Sotto i quattro tiri in porta affrontati (la mediana
+            <b className="text-ink">Se non ha avuto niente da fare, il voto resta vicino al 6.</b>{' '}
+            Un portiere che affronta un tiro solo e lo prende non ha giocato una brutta partita: non
+            ha giocato una partita giudicabile. Sotto i quattro tiri in porta affrontati (la mediana
             della Serie A) il giudizio viene smorzato in proporzione.
           </li>
         </ul>
@@ -389,21 +393,22 @@ export default function VotoPuroPage() {
         <p className="text-xs text-ink-faint">
           Il portiere resta il ruolo in cui ci discostiamo di più, e lo diciamo volentieri: su una
           stagione il nostro voto medio è 0,13 sotto quello delle pagelle. Il motivo è quello che si
-          vede negli esempi — noi paghiamo il saldo tra i tiri affrontati e i gol presi, loro leggono
-          anche lo spettacolo delle parate.
+          vede negli esempi — noi paghiamo il saldo tra i tiri affrontati e i gol presi, loro
+          leggono anche lo spettacolo delle parate.
         </p>
       </Section>
 
       <Section id="sv" title="Quando non c'è voto (s.v.)">
         <p>
           Come nel fantacalcio, chi entra per pochi minuti e tocca pochi palloni non prende un voto:
-          prende <b className="text-ink">s.v.</b>, e in formazione lo sostituisce un altro. La regola
-          che usiamo:
+          prende <b className="text-ink">s.v.</b>, e in formazione lo sostituisce un altro. La
+          regola che usiamo:
         </p>
         <ul className="list-disc space-y-1.5 pl-4 text-sm text-ink-soft marker:text-ink-faint">
           <li>
-            dai <b className="text-ink">16 minuti</b> in su il voto c'è sempre, anche se ha visto poco
-            il pallone: chi sta in campo un quarto d'ora viene giudicato — magari male, ma giudicato;
+            dai <b className="text-ink">16 minuti</b> in su il voto c'è sempre, anche se ha visto
+            poco il pallone: chi sta in campo un quarto d'ora viene giudicato — magari male, ma
+            giudicato;
           </li>
           <li>
             tra i 14 e i 16 minuti serve anche un minimo di coinvolgimento: almeno sei palloni
@@ -426,9 +431,9 @@ export default function VotoPuroPage() {
 
       <Section id="differenze" title="Le differenze tipiche col fantacalcio">
         <p>
-          Queste sono le discrepanze che tornano più spesso. Sono tutte volute: nascono da una scelta
-          su come leggere il calcio, non da un difetto del calcolo — e l'ultima raccoglie i casi su
-          cui si discute di più.
+          Queste sono le discrepanze che tornano più spesso. Sono tutte volute: nascono da una
+          scelta su come leggere il calcio, non da un difetto del calcolo — e l'ultima raccoglie i
+          casi su cui si discute di più.
         </p>
         <Callout>
           Come sono scelti gli esempi. Fantacalcio.it pubblica <b>due</b> voti — la Redazione (la
@@ -441,10 +446,11 @@ export default function VotoPuroPage() {
 
         <Differenza titolo="1. Il gol non vale un voto fisso">
           <p>
-            Nelle pagelle il gol è quasi una tariffa: tra gli attaccanti che hanno segnato una volta,
-            la Redazione ha scritto <b className="text-ink">esattamente 7,0 in 261 casi su 357</b>{' '}
-            (media 7,03, con oscillazioni minime). Noi partiamo dalla stessa media — 6,86 — ma con il
-            doppio della dispersione, perché sotto il gol continuiamo a leggere la partita.
+            Nelle pagelle il gol è quasi una tariffa: tra gli attaccanti che hanno segnato una
+            volta, la Redazione ha scritto{' '}
+            <b className="text-ink">esattamente 7,0 in 261 casi su 357</b> (media 7,03, con
+            oscillazioni minime). Noi partiamo dalla stessa media — 6,86 — ma con il doppio della
+            dispersione, perché sotto il gol continuiamo a leggere la partita.
           </p>
           <Caso
             partita="Juventus–Parma 2-0 · 1ª giornata"
@@ -488,9 +494,10 @@ export default function VotoPuroPage() {
           <p>
             Una pagella legge anche il risultato: chi perde 0-3 raramente prende più di 6, chi vince
             prende di più. Noi guardiamo il risultato solo per <i>temperare</i> i voti stonati (alto
-            in una sconfitta, basso in una vittoria) e mai per esaltarli. Il rovescio è che un
-            difensore o un centrocampista di una squadra in difficoltà, se ha tenuto la sua zona,
-            resta alto.
+            in una sconfitta, basso in una vittoria) e mai per esaltarli — e il risultato non può
+            cancellare più di due terzi della distanza dal 6: quanto pesante sia stata la sconfitta,
+            una buona partita resta una buona partita. Il rovescio è che un difensore o un
+            centrocampista di una squadra in difficoltà, se ha tenuto la sua zona, resta alto.
           </p>
           <Caso
             partita="Verona–Inter 1-2 · 10ª giornata"
@@ -504,10 +511,10 @@ export default function VotoPuroPage() {
         <Differenza titolo="4. Gli errori hanno un prezzo, anche senza cartellino">
           <p>
             Il pallone perso male da cui nasce il gol avversario, il dribbling subito, il rigore
-            regalato: nel fantacalcio non c'è nessun malus per queste cose, e nella pagella si vedono
-            solo se il giornalista ha deciso di vederle. Da noi entrano nel conto sempre, con un peso
-            proporzionato al danno — l'errore che porta a un gol è la voce negativa più pesante di
-            tutte, dopo l'espulsione.
+            regalato: nel fantacalcio non c'è nessun malus per queste cose, e nella pagella si
+            vedono solo se il giornalista ha deciso di vederle. Da noi entrano nel conto sempre, con
+            un peso proporzionato al danno — l'errore che porta a un gol è la voce negativa più
+            pesante di tutte, dopo l'espulsione.
           </p>
         </Differenza>
 
@@ -515,17 +522,17 @@ export default function VotoPuroPage() {
           <p>
             Ci sono partite in cui la nostra lettura è quella di minoranza: la diamo diversa dalle
             pagelle <i>e</i> dal rating indipendente. Il caso tipico è l'attaccante che segna in una
-            squadra travolta — il gol è suo e glielo paghiamo per intero col bonus, ma la mezz'ora di
-            gioco intorno al gol resta quella di una serata perduta. Sono i casi che apriamo uno per
-            uno quando ritariamo i pesi, ed è lì che il modello si difende o cambia.
+            squadra travolta — il gol è suo e glielo paghiamo per intero col bonus, ma la mezz'ora
+            di gioco intorno al gol resta quella di una serata perduta. Sono i casi che apriamo uno
+            per uno quando ritariamo i pesi, ed è lì che il modello si difende o cambia.
           </p>
           <Caso
             partita="Inter–Pisa 6-2 · 22ª giornata"
             chi="Moreo"
-            righe={[{ chi: '', noi: 6.0, red: 7.5, stat: 7.5, sofa: 8.7 }]}
+            righe={[{ chi: '', noi: 6.5, red: 7.5, stat: 7.5, sofa: 8.7 }]}
             compatto
             invertito
-            perche="Due gol nel 6-2 dell'Inter, e un nostro 6,0 di voto puro — con i due gol il fantavoto è 12,0, come per tutti. Nel voto pesano il pericolo passato dalla sua zona e i duelli persi: per le pagelle e per il rating due gol valgono la serata, per noi la raccontano solo in parte."
+            perche="Due gol nel 6-2 dell'Inter, e un nostro 6,5 di voto puro — con i due gol il fantavoto è 12,5, come per tutti. Nel voto pesano il pericolo passato dalla sua zona e i quattro gol di scarto che la sua squadra aveva mentre lui era in campo: per le pagelle e per il rating due gol valgono la serata, per noi la raccontano solo in parte."
           />
         </Differenza>
       </Section>
@@ -533,13 +540,16 @@ export default function VotoPuroPage() {
       <Section id="accordo" title="Quanto siamo d'accordo con le pagelle, in numeri">
         <p>
           Non lavoriamo alla cieca: ogni volta che cambiamo qualcosa rigiochiamo l'ultima stagione
-          conclusa e confrontiamo tutti i nostri voti con i due di fantacalcio.it. Sulla 2025-26 sono{' '}
-          <b className="text-ink">10.583 pagelle</b> confrontate una per una.
+          conclusa e confrontiamo tutti i nostri voti con i due di fantacalcio.it. Sulla 2025-26
+          sono <b className="text-ink">10.583 pagelle</b> confrontate una per una.
         </p>
         <div className="grid gap-2 sm:grid-cols-3">
           <Numero valore="89,8%" testo="dei nostri voti è entro mezzo punto dalla pagella" />
           <Numero valore="99,1%" testo="è entro un punto" />
-          <Numero valore="595" testo="i casi (5,6%) fuori da entrambe le letture di almeno un punto: 368 verso l'alto, 227 verso il basso" />
+          <Numero
+            valore="596"
+            testo="i casi (5,6%) fuori da entrambe le letture di almeno un punto: 369 verso l'alto, 227 verso il basso"
+          />
         </div>
         <p>
           Lo scarto medio è 0,34 punti: siamo <i>vicini</i> alle pagelle, non allineati. Per ruolo:
@@ -549,9 +559,9 @@ export default function VotoPuroPage() {
         </p>
         <p>
           Chi ha ragione, quando divergiamo? Un metro indipendente è il{' '}
-          <b className="text-ink">rating di SofaScore</b>, calcolato sugli eventi della partita e mai
-          usato nel nostro modello. Su chi <i>non</i> ha segnato — togliendo il gol, che mette tutti
-          d'accordo — il nostro voto gli somiglia più di quanto gli somigli la pagella:
+          <b className="text-ink">rating di SofaScore</b>, calcolato sugli eventi della partita e
+          mai usato nel nostro modello. Su chi <i>non</i> ha segnato — togliendo il gol, che mette
+          tutti d'accordo — il nostro voto gli somiglia più di quanto gli somigli la pagella:
         </p>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[420px] text-sm">
@@ -602,21 +612,22 @@ export default function VotoPuroPage() {
             numeri da partita anonima.
           </li>
           <li>
-            <b className="text-ink">Quello che non si conta.</b> Il movimento che libera il compagno,
-            la copertura preventiva, il tempo perso con intelligenza: sono nel calcio e non sono nei
-            dati. Per i difensori ci aiutiamo con un indicatore di valore difensivo, ma resta una
-            stima.
+            <b className="text-ink">Quello che non si conta.</b> Il movimento che libera il
+            compagno, la copertura preventiva, il tempo perso con intelligenza: sono nel calcio e
+            non sono nei dati. Per i difensori ci aiutiamo con un indicatore di valore difensivo, ma
+            resta una stima.
           </li>
           <li>
             <b className="text-ink">Siamo prudenti.</b> Il 45% dei nostri voti è esattamente 6,
-            contro il 36% delle pagelle: quando i dati non dicono niente di netto, noi non inventiamo
-            un giudizio. È una scelta, ma vuol dire anche qualche 6 dove un occhio umano avrebbe
-            visto una sfumatura.
+            contro il 36% delle pagelle: quando i dati non dicono niente di netto, noi non
+            inventiamo un giudizio. È una scelta, ma vuol dire anche qualche 6 dove un occhio umano
+            avrebbe visto una sfumatura.
           </li>
           <li>
             <b className="text-ink">In alto siamo più larghi delle pagelle.</b> Quando un attaccante
-            segna e domina arriviamo all'8 più spesso di loro: leggiamo il gol insieme al resto della
-            partita, invece di fermarci alla tariffa. È il punto della scala che teniamo più d'occhio.
+            segna e domina arriviamo all'8 più spesso di loro: leggiamo il gol insieme al resto
+            della partita, invece di fermarci alla tariffa. È il punto della scala che teniamo più
+            d'occhio.
           </li>
           <li>
             <b className="text-ink">I portieri sono il ruolo più difficile</b> e il nostro punto più
@@ -634,8 +645,8 @@ export default function VotoPuroPage() {
           segnalazione ha ragione, per farci cambiare un peso.
         </Callout>
         <p className="text-xs text-ink-faint">
-          Cifre e confronti misurati sulla stagione 2025-26, l'ultima conclusa, sulle 10.583 presenze
-          che abbiamo potuto appaiare con entrambe le colonne di fantacalcio.it.
+          Cifre e confronti misurati sulla stagione 2025-26, l'ultima conclusa, sulle 10.583
+          presenze che abbiamo potuto appaiare con entrambe le colonne di fantacalcio.it.
         </p>
       </Section>
 
@@ -648,7 +659,15 @@ export default function VotoPuroPage() {
   );
 }
 
-function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+function Section({
+  id,
+  title,
+  children,
+}: {
+  id: string;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     // scroll-mt: la barra in alto è fissa, e senza questo un'ancora finisce
     // sotto di essa — il titolo del paragrafo resta nascosto proprio a chi ci è
@@ -706,7 +725,13 @@ function Caso({
 }: {
   partita: string;
   chi: string;
-  righe: Array<{ chi: string; noi: number; red: number; stat?: number; sofa?: number }>;
+  righe: Array<{
+    chi: string;
+    noi: number;
+    red: number;
+    stat?: number;
+    sofa?: number;
+  }>;
   perche: string;
   compatto?: boolean;
   invertito?: boolean;
@@ -722,7 +747,13 @@ function Caso({
       <div className="mt-2 space-y-1.5">
         {righe.map((r, i) => (
           <div key={r.chi || i} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-            <span className={compatto ? 'shrink-0 font-semibold text-ink' : 'w-24 shrink-0 font-semibold text-ink'}>
+            <span
+              className={
+                compatto
+                  ? 'shrink-0 font-semibold text-ink'
+                  : 'w-24 shrink-0 font-semibold text-ink'
+              }
+            >
               {compatto ? chi : r.chi}
             </span>
             <span className="rounded-lg bg-brand/15 px-2 py-1 font-mono font-bold text-brand-strong">
@@ -809,9 +840,9 @@ function ZoneIllustration() {
       </div>
       <figcaption className="mt-2 text-xs text-ink-faint">
         Il tiro concesso parte dalla zona scura. L'addebito va a chi giocava lì, in proporzione a
-        quanto ci stava, e in parte alle zone confinanti — così un tiro partito a un metro dal confine
-        non finisce sulle spalle del difensore sbagliato. Chi era all'altro lato del campo non paga
-        niente.
+        quanto ci stava, e in parte alle zone confinanti — così un tiro partito a un metro dal
+        confine non finisce sulle spalle del difensore sbagliato. Chi era all'altro lato del campo
+        non paga niente.
       </figcaption>
     </figure>
   );
