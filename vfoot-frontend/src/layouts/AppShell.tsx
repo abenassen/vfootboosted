@@ -460,6 +460,22 @@ export default function AppShell() {
               <span>🗂️</span> Le mie leghe
             </Link>
 
+            {/* Solo per chi gestisce il sito. Nascondere la voce e' cortesia:
+                le API dietro rispondono 403 a chiunque non sia staff, quindi un
+                client che mentisse su questo flag troverebbe una pagina muta. */}
+            {user?.is_staff && (
+              <Link
+                to="/manutenzione"
+                className={clsx(
+                  'flex items-center gap-1 rounded-xl px-2 py-1 text-sm',
+                  location.pathname.startsWith('/manutenzione') ? 'bg-black/30' : 'hover:bg-surface/15',
+                )}
+                title="Manutenzione del sito"
+              >
+                <span>🩺</span> Manutenzione
+              </Link>
+            )}
+
             <div className="h-8 w-px bg-surface/25" aria-hidden />
 
             <Link

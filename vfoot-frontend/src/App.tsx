@@ -29,11 +29,24 @@ import DecisionsPage from './pages/DecisionsPage';
 import TeamRosterPage from './pages/TeamRosterPage';
 import ProfilePage from './pages/ProfilePage';
 import ManagerProfilePage from './pages/ManagerProfilePage';
+import MaintenancePage from './pages/MaintenancePage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="p-6 text-sm text-ink-faint">Caricamento sessione…</div>;
   if (!user) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** Chi gestisce il SITO, non una lega: il flag `is_staff` di Django, lo stesso che
+ *  apre /admin/. Questo rimando NON è il cancello — le API dietro controllano da
+ *  sole e rispondono 403 — ma senza di lui un utente qualunque che digita l'URL si
+ *  trova davanti il titolo della pagina e un messaggio d'errore, cioè scopre che
+ *  la pagina esiste senza ricavarne niente. Tanto vale non mostrargliela. */
+function RequireStaff({ children }: { children: ReactElement }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="p-6 text-sm text-ink-faint">Caricamento sessione…</div>;
+  if (!user?.is_staff) return <Navigate to="/home" replace />;
   return children;
 }
 
@@ -78,6 +91,18 @@ export default function App() {
         <Route path="auction" element={<AuctionRoomPage />} />
         <Route path="decisioni" element={<DecisionsPage />} />
         <Route path="league-admin" element={<LeagueAdminPage />} />
+        {/* Manutenzione del sito: riservata a chi lo gestisce, non a chi
+            amministra una lega. La rotta esiste per tutti, ma le API dietro
+            rispondono 403 a chi non e' staff: nascondere la voce di menu e'
+            cortesia, il cancello sta nel backend. */}
+        <Route
+          path="manutenzione"
+          element={
+            <RequireStaff>
+              <MaintenancePage />
+            </RequireStaff>
+          }
+        />
         <Route path="league-admin/competitions/new" element={<CompetitionCreatePage />} />
         {/* "advanced" before ":competitionId", or the word would be read as an id. */}
         <Route path="league-admin/competitions/advanced" element={<CompetitionAdvancedPage />} />

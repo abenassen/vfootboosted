@@ -1,3 +1,8 @@
+import type {
+  DecideResponse,
+  MaintenanceState,
+  ProposalDetail,
+} from '../types/maintenance';
 import type { LeagueDecision, LeagueDecisionsResponse } from '../types/decisions';
 import type {
   LineupContextResponse,
@@ -1331,5 +1336,36 @@ export async function subscribePush(subscription: {
 
 export async function unsubscribePush(endpoint: string): Promise<{ removed: number }> {
   const res = await authedPost('/push/unsubscribe', { endpoint });
+  return parseJsonOrThrow(res);
+}
+
+// --- Manutenzione del sito (solo staff) --------------------------------------
+
+/** Read the maintenance state: the verdict, what is waiting, recent agent passes.
+ *
+ *  Answers 403 for anyone who is not staff. The `is_staff` flag on the auth user
+ *  only decides whether the menu OFFERS this page; the gate is here. */
+export async function getMaintenanceState(): Promise<MaintenanceState> {
+  const res = await fetch(`${baseUrl()}/maintenance/state/`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getMaintenanceProposal(id: number): Promise<ProposalDetail> {
+  const res = await fetch(`${baseUrl()}/maintenance/proposals/${id}/`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** Approving does NOT execute: the executor runs on its own timer, within five
+ *  minutes. The response says so, so the page can be honest about it. */
+export async function decideMaintenanceProposal(
+  id: number,
+  decision: 'approve' | 'reject',
+  why?: string,
+): Promise<DecideResponse> {
+  const res = await authedPost(`/maintenance/proposals/${id}/decide/`, { decision, why });
   return parseJsonOrThrow(res);
 }

@@ -6,6 +6,10 @@ export interface AuthUser {
    *  options). Empty string => no avatar chosen; the UI falls back to a
    *  deterministic default seeded from the username. */
   avatar: string;
+  /** Chi gestisce il SITO (non una lega). Decide solo se il menu OFFRE la pagina
+   *  di manutenzione: le API dietro controllano da sole, quindi un client che
+   *  mentisse su questo flag troverebbe una pagina che risponde 403 a tutto. */
+  is_staff?: boolean;
 }
 
 export interface ProfileUpdateRequest {
