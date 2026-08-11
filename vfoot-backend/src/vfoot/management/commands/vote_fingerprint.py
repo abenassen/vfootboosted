@@ -67,6 +67,13 @@ class Command(BaseCommand):
         matches = (Match.objects.filter(competition_season=cs, status=Match.STATUS_FINISHED)
                    .select_related("home_team__team", "away_team__team")
                    .order_by("matchday", "id"))
+        # Il NOME COMPLETO come chiave, non quello breve: in Serie A 2025-26 giocano
+        # sia Lorenzo sia Luca Pellegrini, e per entrambi il nome breve e'
+        # "L. Pellegrini". Con quello il diff fra due installazioni confrontava due
+        # persone diverse e produceva una differenza che non esiste — o, peggio,
+        # nascondeva una che esiste.
+        from realdata.models import Player
+        interi = dict(Player.objects.values_list("id", "full_name"))
         righe = []
         for m in matches:
             # chiave portabile: giornata + nomi delle squadre, non gli id
@@ -74,7 +81,8 @@ class Command(BaseCommand):
             for r in cr.voto_puro_for_match(m, ref):
                 voto = ("sv" if r["voto_puro"] is None
                         else format(r["voto_puro"], ".1f"))
-                righe.append(f"{etichetta}|{r['name']}|{r['role']}|{voto}")
+                chi = interi.get(r["player_id"]) or r["name"]
+                righe.append(f"{etichetta}|{chi}|{r['role']}|{voto}")
         righe.sort()
         impronta = hashlib.sha256("\n".join(righe).encode()).hexdigest()[:24]
         self.stdout.write(f"\npartite    : {len(matches)}")
