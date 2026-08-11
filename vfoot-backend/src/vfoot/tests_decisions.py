@@ -186,14 +186,30 @@ class DecisionApiTests(DecisionQueueTests):
         super().setUp()
         self.client = APIClient()
 
-    def test_the_market_opens_even_with_a_player_still_pending(self):
-        """The league keeps working around him; only he waits."""
+    def test_a_pending_player_does_not_freeze_the_others(self):
+        """The league keeps working around him; only he waits.
+
+        Written against the league-wide switch that used to sit here: with the
+        gate per player, a roster still fills up while one name is in limbo."""
+        from vfoot.models import FantasyTeam
+        from vfoot.services.listone import snapshot_league_listone
+        ok = self._player("Deciso", method=CurrentPlayerRole.METHOD_TM,
+                          tm_position="centre-back", role="DIF")
         self._player("Esordiente", method=CurrentPlayerRole.METHOD_DEFAULT)
-        open_role_decisions(self.league)
+        # Il listone, non solo la coda delle decisioni: comprare passa ora dalla
+        # legalita' d'asta, che il ruolo congelato lo pretende — e senza sarebbe
+        # possibile mettere in rosa qualcuno che nella lega non esiste ancora.
+        snapshot_league_listone(self.league)
+        team = FantasyTeam.objects.create(
+            league=self.league,
+            manager=LeagueMembership.objects.get(league=self.league, user=self.admin),
+            name="Squadra")
+
         self.client.force_authenticate(user=self.admin)
-        r = self.client.patch(f"/api/v1/leagues/{self.league.id}/market",
-                              {"is_open": True}, format="json")
-        self.assertEqual(r.status_code, 200)
+        r = self.client.post(
+            f"/api/v1/leagues/{self.league.id}/teams/{team.id}/roster/add",
+            {"player_id": ok.id, "purchase_price": 10}, format="json")
+        self.assertEqual(r.status_code, 201)
 
     def test_an_auction_refuses_the_undecided_and_names_them(self):
         ok = self._player("Deciso", method=CurrentPlayerRole.METHOD_TM,
@@ -278,24 +294,12 @@ class LateArrivalTests(DecisionQueueTests):
         self.assertEqual(summary["decisions_opened"], 1)
         self.assertIsNotNone(market_blocked_reason(self.league))
 
-    def test_opening_the_market_catches_up_with_the_roster_by_itself(self):
-        """Opening the market seeds whoever has arrived since — and opens for
-        them, not against them: the market opens, only the newcomer waits."""
-        self.snapshot(self.league)
-        late = self._player("Arrivato tardi", method=CurrentPlayerRole.METHOD_DEFAULT)
-        self.league.market_open = False
-        self.league.save(update_fields=["market_open"])
-
-        self.client.force_authenticate(user=self.admin)
-        r = self.client.patch(f"/api/v1/leagues/{self.league.id}/market",
-                              {"is_open": True}, format="json")
-        self.assertEqual(r.status_code, 200)
-        self.league.refresh_from_db()
-        self.assertTrue(self.league.market_open)
-        self.assertEqual(undecided_player_ids(self.league), {late.id})
-
     def test_a_late_arrival_cannot_be_added_to_a_roster_undecided(self):
-        """The gate that actually matters, since the market is open by default."""
+        """The gate that actually matters: there is no other one left.
+
+        (The catch-up itself is tested above, on the snapshot the Transfermarkt
+        import runs — it used to be triggered by opening the market, an
+        interruttore che non esiste piu'.)"""
         self.snapshot(self.league)
         p = self._player("Arrivato tardi", method=CurrentPlayerRole.METHOD_DEFAULT)
         self.snapshot(self.league)
@@ -496,6 +500,40 @@ class QueueCriterionTests(TestCase):
                              tm_position="left winger", role_margin=0.9)
         self.assertFalse(r.needs_decision)
 
+    def test_a_settled_margin_on_a_border_player_still_needs_one(self):
+        """Esposito: the runs agreed (margin 0.44) and he is still on the CEN/ATT
+        line (boundary 0.82). This is the case the margin alone cannot see, since
+        it is read off the co-association average that erased the border."""
+        from vfoot.services.role_inference import PlayerRoleResult
+        r = PlayerRoleResult(player_id=1, category="centrocampista offensivo",
+                             confidence=0.34, role_data="CEN", role_mitigated="CEN",
+                             method="category", tm_position="second striker",
+                             role_margin=0.44, role_boundary=0.82)
+        self.assertTrue(r.needs_decision)
+
+    def test_a_player_far_from_every_other_role_does_not(self):
+        """Zaniolo: ambiguous position, but 0.79 from the nearest category of
+        another role and a margin of 0.67. Nothing to arbitrate — where we differ
+        from the listone on him it is a convention, not a doubt, and conventions
+        are not the queue's business."""
+        from vfoot.services.role_inference import PlayerRoleResult
+        r = PlayerRoleResult(player_id=1, category="ala offensiva", confidence=0.76,
+                             role_data="ATT", role_mitigated="ATT", method="category",
+                             tm_position="second striker",
+                             role_margin=0.67, role_boundary=0.79)
+        self.assertFalse(r.needs_decision)
+
+    def test_a_certain_tm_position_ends_the_question_however_close_the_border(self):
+        """The boundary is subject to the same gate as the margin: an unambiguous
+        TM position answers first, and being on a border under it says our
+        clustering wobbled, not that TM is wrong."""
+        from vfoot.services.role_inference import PlayerRoleResult
+        r = PlayerRoleResult(player_id=1, category="centrocampista offensivo",
+                             confidence=0.3, role_data="CEN", role_mitigated="ATT",
+                             method="category", tm_position="centre-forward",
+                             role_margin=0.9, role_boundary=0.99)
+        self.assertFalse(r.needs_decision)
+
 
 class LimboSurvivesRepollTests(DecisionQueueTests):
     """A player waiting on a decision must still be waiting after the next poll.
@@ -564,7 +602,22 @@ class DecisionRationaleTests(DecisionQueueTests):
         open_role_decisions(self.league)
         d = LeagueDecision.objects.get(league=self.league)
         self.assertIn("12%", d.rationale)
-        self.assertIn("ala offensiva", d.rationale)
+
+    def test_a_border_player_is_not_described_as_a_torn_measure(self):
+        """The margin that got him here is 0.44 — ABOVE the threshold. Reporting it
+        as "stacca di appena 44%, sotto la soglia" quotes a number against a
+        threshold it does not cross, and the admin is left reading a sentence that
+        contradicts itself."""
+        p = self._player("Sul confine", method=CurrentPlayerRole.METHOD_CATEGORY)
+        CurrentPlayerRole.objects.filter(player=p).update(
+            role_margin=0.44, role_boundary=0.82,
+            category="centrocampista offensivo")
+        open_role_decisions(self.league)
+        d = LeagueDecision.objects.get(league=self.league)
+        self.assertIn("confine", d.rationale)
+        self.assertIn("82%", d.rationale)
+        self.assertNotIn("44%", d.rationale)
+        self.assertIn("centrocampista offensivo", d.rationale)
 
     def test_no_case_reaches_the_admin_without_an_explanation(self):
         self._player("Distinta", method=CurrentPlayerRole.METHOD_SOFA)

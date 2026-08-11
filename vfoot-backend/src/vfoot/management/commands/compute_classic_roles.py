@@ -17,7 +17,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from realdata.models import CompetitionSeason, Player
 from vfoot.services.role_inference import (
-    LOW_CONFIDENCE, infer_roles, store_roles, tm_positions,
+    LOW_CONFIDENCE, ROLE_MARGIN_REVIEW, infer_roles, store_roles, tm_positions,
 )
 
 
@@ -69,11 +69,16 @@ class Command(BaseCommand):
             if r.needs_decision:
                 nm = (names.get(r.player_id) or fulls.get(r.player_id)
                       or str(r.player_id))
-                # the margin says WHICH doubt it is, so the admin can triage:
-                # a measured player torn between two roles reads differently from
-                # one we simply have no evidence on.
-                needed.append(f"{nm} ({r.role_mitigated} {r.role_margin:.2f})"
-                              if r.method == "category" else nm)
+                # WHICH doubt it is, so the admin can triage: a measured player is
+                # printed with the reading that flagged him — "m" when the runs
+                # disagreed, "b" when they agreed on a border — and one we have no
+                # evidence on with nothing, because there is nothing to weigh.
+                if r.method == "category":
+                    why = ("m" if r.role_margin < ROLE_MARGIN_REVIEW
+                           else "b") + f" {r.role_margin:.2f}/{r.role_boundary:.2f}"
+                    needed.append(f"{nm} ({r.role_mitigated} {why})")
+                else:
+                    needed.append(nm)
 
         self.stdout.write(f"\ngiocatori trattati       : {len(rep.results)}")
         self.stdout.write(f"  misurati dai dati      : {rep.n_measured}")

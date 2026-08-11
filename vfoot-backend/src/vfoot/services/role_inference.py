@@ -108,6 +108,13 @@ _COUNTERS = ("touches", "touches_in_box", "shots", "shots_on_target", "xg_shots"
 # that condense to the SAME role and still be perfectly determined for us.
 ROLE_MARGIN_REVIEW = 0.25
 
+# ...and the same question asked again in the space where the first one goes blind.
+# See ``role_boundaries``: above this ratio a player sits nearly as close to a
+# category of ANOTHER role as to his own. 0.80 was read off the 44 measured players
+# whose TM position is ambiguous — the only ones this can ever fire on — and it is
+# where the queue stops growing faster than what it catches.
+BOUNDARY_REVIEW = 0.80
+
 
 @dataclass
 class PlayerRoleResult:
@@ -121,6 +128,11 @@ class PlayerRoleResult:
     # How far the winning fantasy role is ahead of the runner-up, 0..1 (see
     # ``role_margin``). 1.0 when the role did not come from the clustering at all.
     role_margin: float = 1.0
+    # How close he sits to a category of ANOTHER role, as a ratio of the distance
+    # to his own (see ``role_boundaries``). 0.0 when the role did not come from
+    # the clustering — the two "no doubt" defaults point in opposite directions
+    # because the two quantities do.
+    role_boundary: float = 0.0
 
     @property
     def needs_decision(self) -> bool:
@@ -142,17 +154,42 @@ class PlayerRoleResult:
         * we could not measure him — the SofaScore lineup position is all we have,
           and for a winger it is F/M/D, which cannot answer the CEN-or-ATT question
           fantacalcio itself splits down the middle: it agrees 8 times out of 15;
-        * we did measure him and the clustering did not separate his two candidate
-          roles (``role_margin`` below ROLE_MARGIN_REVIEW). Berardi is this case:
-          60 runs put him at CEN 56% / ATT 35%. Note that ``confidence`` cannot see
-          it — it measures how firmly he sits in his CATEGORY, and oscillating
-          between two styles that condense to the SAME role is not a problem.
+        * we did measure him and the measurement itself sits on the CEN/ATT line.
+          That doubt has two shapes too, and one of them is invisible to the other:
+
+          - ``role_margin`` below ROLE_MARGIN_REVIEW — the runs themselves could
+            not agree. Berardi is this case: 60 runs put him at CEN 56% / ATT 35%.
+          - ``role_boundary`` above BOUNDARY_REVIEW — the runs agreed, but he sits
+            on the border in the FEATURE space. Esposito is this case, and only
+            this one: margin 0.44 (settled), boundary 0.82 (on the line).
+
+          The second exists because the first is computed on the co-association
+          matrix, and that is precisely where players in doubt stop looking like
+          it: two of them float between the same groups in the same proportions,
+          so their co-association PROFILES converge even when they land apart half
+          the runs. Barella and Esposito are 2.57σ apart on ball recoveries and
+          3.27 apart overall — and only two players out of 370 have a
+          co-association profile closer to Barella's than Esposito does. A margin
+          read there cannot see a border it has already averaged away.
+
+          Measured against the 2026-27 listone on the 44 players this can fire on:
+          the margin alone asks 7 questions and lands on 1 real disagreement; the
+          boundary asks 11 and lands on 6. They are kept in OR — the margin still
+          catches players the boundary does not (Ngonge, Cancellieri, Cambiaghi),
+          and nobody the queue holds today is dropped by adding a criterion.
+
+        Note that ``confidence`` answers neither question: it measures how firmly
+        he sits in his CATEGORY, and oscillating between two styles that condense
+        to the SAME role is not a problem. In the loosest category 39 players out
+        of 41 are below LOW_CONFIDENCE, which would make it a filter that fires on
+        nearly everyone it is shown.
         """
         if self.tm_position not in TM_AMBIGUOUS:
             return False
         if self.method != "category":
             return True
-        return self.role_margin < ROLE_MARGIN_REVIEW
+        return (self.role_margin < ROLE_MARGIN_REVIEW
+                or self.role_boundary > BOUNDARY_REVIEW)
 
 
 @dataclass
@@ -397,6 +434,39 @@ def role_margins(M: np.ndarray, labels: np.ndarray, by_label: dict) -> np.ndarra
     return top2[:, 1] - top2[:, 0]
 
 
+def role_boundaries(Z: np.ndarray, labels: np.ndarray, by_label: dict) -> np.ndarray:
+    """How close each player sits to a category of ANOTHER fantasy role, 0..∞.
+
+    ``distance to his own category's centre / distance to the nearest centre whose
+    category condenses to a different role``. Near 1 he is on the border; well
+    below it his role is not in question whatever the runs did.
+
+    This is ``role_margin``'s question asked in the space where it can still be
+    answered. The margin lives on the co-association matrix, which averages over
+    60 runs — and averaging is exactly what erases a border for the players
+    standing on it, because two undecided players drift between the same groups
+    and end up with the same PROFILE of indecision. The feature space keeps the
+    geometry: Esposito is 0.82 here and 0.44 there, and 0.82 is the true reading.
+
+    Zero when there is no category of another role to be close to, which cannot
+    happen with the shipped categories and would mean "no doubt" if it did.
+    """
+    role_of = {lab: _role_for_category(name) for lab, name in by_label.items()}
+    labs = sorted(role_of)
+    C = np.stack([Z[labels == lab].mean(0) for lab in labs])
+    D = np.linalg.norm(Z[:, None, :] - C[None, :, :], axis=2)
+    own_col = {lab: j for j, lab in enumerate(labs)}
+    out = np.zeros(len(Z))
+    for i in range(len(Z)):
+        own = int(labels[i])
+        other = [j for j, lab in enumerate(labs) if role_of[lab] != role_of[own]]
+        if not other:
+            continue
+        nearest = D[i, other].min()
+        out[i] = D[i, own_col[own]] / nearest if nearest > 0 else 0.0
+    return out
+
+
 # --------------------------------------------------------------------------
 # the pipeline
 # --------------------------------------------------------------------------
@@ -422,15 +492,16 @@ def infer_roles(roster_season_id: int, data_season_id: int, *,
             meta["role"] = _role_for_category(name)
         report.categories = cats
         margins = role_margins(M, labels, by_label)
+        boundaries = role_boundaries(Zs, labels, by_label)
     else:
         labels, conf, by_label = np.zeros(0), np.zeros(0), {}
-        margins = np.zeros(0)
+        margins = boundaries = np.zeros(0)
 
     measured = {}
     for i, pid in enumerate(ids):
         name = by_label[int(labels[i])]
         measured[pid] = (name, float(conf[i]), _role_for_category(name),
-                         float(margins[i]))
+                         float(margins[i]), float(boundaries[i]))
 
     # Coarse SofaScore lineup position: too few minutes to cluster (< MIN_MINUTES)
     # is NOT the same as no data — a player who lined up at all has a position, and
@@ -440,11 +511,12 @@ def infer_roles(roster_season_id: int, data_season_id: int, *,
     everyone = set(tm_pos) | set(measured) | set(sofa_roles)
     for pid in sorted(everyone):
         pos = tm_pos.get(pid, "")
-        # margin 1.0 = the role did not come from the clustering, so there is no
-        # runner-up to be close to; only a measured player can be torn.
-        margin = 1.0
+        # margin 1.0 / boundary 0.0 = the role did not come from the clustering, so
+        # there is no runner-up to be close to and no border to stand on; only a
+        # measured player can be torn.
+        margin, boundary = 1.0, 0.0
         if pid in measured:
-            cat, c, role, margin = measured[pid]
+            cat, c, role, margin, boundary = measured[pid]
             method = "category"
             report.n_measured += 1
         elif pos in TM_DETERMINISTIC:
@@ -472,7 +544,8 @@ def infer_roles(roster_season_id: int, data_season_id: int, *,
         report.results.append(PlayerRoleResult(
             player_id=pid, category=cat, confidence=round(c, 3),
             role_data=role, role_mitigated=mitigated, method=method,
-            tm_position=pos, role_margin=round(margin, 3)))
+            tm_position=pos, role_margin=round(margin, 3),
+            role_boundary=round(boundary, 3)))
     return report
 
 
@@ -498,7 +571,7 @@ def store_roles(report: InferenceReport) -> int:
             CurrentPlayerRole(
                 player_id=r.player_id,
                 category=r.category, confidence=r.confidence,
-                role_margin=r.role_margin,
+                role_margin=r.role_margin, role_boundary=r.role_boundary,
                 role_data=r.role_data, role_mitigated=r.role_mitigated,
                 method=r.method, tm_position=r.tm_position)
             for r in report.results], batch_size=500)

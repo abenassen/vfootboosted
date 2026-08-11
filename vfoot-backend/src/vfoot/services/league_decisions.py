@@ -16,6 +16,7 @@ bidding would change what people paid for.
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from realdata.models import Player
@@ -24,7 +25,7 @@ from vfoot.models import (
     CurrentPlayerRole,
 )
 from vfoot.services.role_inference import (
-    ROLE_MARGIN_REVIEW, TM_AMBIGUOUS, TM_DEFAULT,
+    BOUNDARY_REVIEW, ROLE_MARGIN_REVIEW, TM_AMBIGUOUS, TM_DEFAULT,
 )
 
 ROLE_LABELS = {Player.ROLE_GK: "Portiere", Player.ROLE_DEF: "Difensore",
@@ -59,13 +60,23 @@ def decision_rationale(row) -> str:
         return ("Arrivato dopo l'ultimo calcolo dei ruoli: nessuno storico su cui "
                 "sciogliere una posizione ambigua.")
     if row.method == CurrentPlayerRole.METHOD_CATEGORY:
-        # The measurement ran and came out split. Saying by how much is the whole
-        # point: 34% contro 30% is a different question from 60% contro 15%.
-        gap = f"{row.role_margin * 100:.0f}%"
         style = f" (stile di gioco: {row.category})" if row.category else ""
-        return (f"Posizione del provider ambigua e misura in bilico{style}: il ruolo "
-                f"vincente stacca il secondo di appena {gap}, sotto la soglia oltre "
-                f"la quale ci fidiamo del dato.")
+        # The measurement ran, and it can be open in two different ways. Telling
+        # them apart is not pedantry: "i giri non si sono accordati" and "i giri si
+        # sono accordati su un giocatore che sta sul confine" are different
+        # questions, and an admin who reads the wrong one is being told a number
+        # that contradicts the threshold it is quoted against.
+        if row.role_margin < ROLE_MARGIN_REVIEW:
+            # Saying by how much is the whole point: 34% contro 30% is a different
+            # question from 60% contro 15%.
+            gap = f"{row.role_margin * 100:.0f}%"
+            return (f"Posizione del provider ambigua e misura in bilico{style}: il ruolo "
+                    f"vincente stacca il secondo di appena {gap}, sotto la soglia oltre "
+                    f"la quale ci fidiamo del dato.")
+        near = f"{row.role_boundary * 100:.0f}%"
+        return (f"Posizione del provider ambigua e profilo sul confine{style}: dal "
+                f"gruppo di un altro ruolo dista quasi quanto dal proprio ({near}), "
+                f"quindi la misura c'e' ma da sola non lo colloca.")
     return METHOD_REASON.get(row.method, "")
 
 
@@ -125,19 +136,25 @@ def players_needing_decision(league, *,
                              tm_position__in=TM_AMBIGUOUS)
                      .exclude(method=CurrentPlayerRole.METHOD_CATEGORY)
                      .values_list("player_id", flat=True))
-    # Measured, but the measurement itself was a coin flip. Only where the TM
-    # position is AMBIGUOUS: there nobody overrules the clustering, so a role
+    # Measured, but the measurement itself sits on the CEN/ATT line. Only where the
+    # TM position is AMBIGUOUS: there nobody overrules the clustering, so a role
     # decided by 56% against 35% is genuinely open. Under a certain TM position
     # the same tight margin means nothing — TM matched the listone 351 times out
     # of 352, in every margin band, so those cases (Nico Paz, McTominay) belong to
-    # TM and asking about them is work with nothing to correct. Same criterion as
-    # ``role_inference.needs_decision``; the two must not drift apart, since one
-    # reports what the other enforces.
+    # TM and asking about them is work with nothing to correct.
+    #
+    # Two readings in OR, because they see different players: the margin catches
+    # the runs disagreeing with each other, the boundary catches a border the runs
+    # agreed on and the co-association average then erased (Esposito: margin 0.44,
+    # boundary 0.82). Same criterion as ``role_inference.needs_decision``, which
+    # carries the measurements; the two must not drift apart, since one reports
+    # what the other enforces.
     torn = set(CurrentPlayerRole.objects
                .filter(player_id__in=candidates,
                        tm_position__in=TM_AMBIGUOUS,
-                       method=CurrentPlayerRole.METHOD_CATEGORY,
-                       role_margin__lt=ROLE_MARGIN_REVIEW)
+                       method=CurrentPlayerRole.METHOD_CATEGORY)
+               .filter(Q(role_margin__lt=ROLE_MARGIN_REVIEW)
+                       | Q(role_boundary__gt=BOUNDARY_REVIEW))
                .values_list("player_id", flat=True))
     # A player who arrived since the last inference run has NO CurrentPlayerRole at
     # all. Without this he would be seeded straight from Player.classic_role_seed —
