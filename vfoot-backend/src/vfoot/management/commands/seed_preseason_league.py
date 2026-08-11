@@ -122,7 +122,7 @@ class Command(BaseCommand):
             prior.delete()
 
         league = FantasyLeague.objects.create(
-            name=league_name, owner=owner, market_open=True,
+            name=league_name, owner=owner,
             mode=FantasyLeague.MODE_CLASSIC, reference_season=cs)
         competition = FantasyCompetition.objects.create(
             league=league, name=str(opts["competition_name"]),

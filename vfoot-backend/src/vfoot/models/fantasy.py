@@ -19,7 +19,6 @@ class FantasyLeague(models.Model):
     owner = models.ForeignKey(User, on_delete=models.PROTECT, related_name="owned_fantasy_leagues")
     mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_AURA)
     invite_code = models.CharField(max_length=12, unique=True, db_index=True, null=True, blank=True)
-    market_open = models.BooleanField(default=True)
     # Max bench substitutions applied when scoring a matchday (classic: an s.v.
     # starter is replaced by the first eligible bench player in priority order, up
     # to this many times). League-configurable by the admin; fantacalcio default 5.
@@ -161,11 +160,30 @@ class FantasyTeam(models.Model):
 
 
 class FantasyRosterSlot(models.Model):
+    """Un contratto: chi, per quale squadra, da quando, a quanto — e, se e' finito,
+    fino a quando e con quanto incassato.
+
+    Le quattro date/cifre bastano a ricostruire rosa E budget di un allenatore a
+    una data qualunque della stagione, senza nessun saldo accumulato altrove: la
+    rosa a T sono i contratti aperti a T, il budget e' quello iniziale meno quel
+    che pesa ancora piu' quel che si e' bruciato per strada.
+    """
+
     team = models.ForeignKey(FantasyTeam, on_delete=models.CASCADE, related_name="roster_slots")
     player = models.ForeignKey(Player, on_delete=models.PROTECT, related_name="fantasy_rosters")
     acquired_at = models.DateTimeField(default=timezone.now)
     released_at = models.DateTimeField(null=True, blank=True)
     purchase_price = models.IntegerField(default=1)
+    # Quanto e' rientrato in cassa chiudendo il contratto. Null finche' e' aperto.
+    #
+    # Senza questo campo il recupero non esisteva: il budget si ricalcola dai soli
+    # contratti aperti, quindi chiudendone uno tornavano indietro TUTTI i crediti
+    # pagati, qualunque cifra fosse stata pattuita. Il mercato a offerte applicava
+    # il tetto giusto al momento dell'offerta e poi, alla validazione, restituiva
+    # la differenza dal nulla (comprato a 100, recupero pattuito 1: la squadra ci
+    # guadagnava 99). Non e' vincolato a essere <= purchase_price: rivendere in
+    # guadagno e' normale, e qui l'admin trascrive un accordo presso fuori.
+    sale_price = models.IntegerField(null=True, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["team", "released_at"])]
@@ -503,6 +521,12 @@ class CurrentPlayerRole(models.Model):
     # styles that condense to the same role is harmless, being split across the
     # CEN/ATT line is not. 1.0 when the role did not come from the clustering.
     role_margin = models.FloatField(default=1.0)
+    # The same question asked in the feature space: how close he sits to a
+    # category of ANOTHER role, as a ratio of the distance to his own. Above
+    # BOUNDARY_REVIEW he is on the CEN/ATT line even when the runs agreed — the
+    # co-association matrix the margin is read from averages that border away.
+    # 0.0 when the role did not come from the clustering.
+    role_boundary = models.FloatField(default=0.0)
     role_data = models.CharField(max_length=3, blank=True, default="")
     role_mitigated = models.CharField(max_length=3, blank=True, default="")
     method = models.CharField(max_length=10, choices=METHOD_CHOICES,

@@ -15,10 +15,21 @@ i.e. after paying ``x`` the team must keep at least 1 credit for each of its sti
 unfilled slots (the ``- 1`` is the slot being filled by this very purchase). The
 largest legal bid is therefore ``budget_remaining - (slots_remaining_total - 1)``.
 
-Budget spent is read from the team's ACTIVE roster slots (``released_at is null``),
-so it naturally accounts for players already assigned by any means (auction close,
-direct-assign, bulk import) — the engine never keeps a separate ledger that could
-drift from the roster.
+Budget is read from the team's CONTRACTS, never from a separate ledger that could
+drift from the roster — players assigned by any means (auction close, direct-assign,
+bulk import) are accounted for by the same sum. Two terms, not one:
+
+    remaining = initial_budget
+              - sum(purchase_price) over OPEN contracts        # what is still owned
+              - sum(purchase_price - sale_price) over CLOSED   # what was burned
+
+The second term is the one that had to be added. Reading only the open contracts
+meant that closing one gave back every credit paid for that player, whatever had
+actually been agreed on the way out: the offer market enforced its ceiling when the
+offer was placed and then, on settlement, refunded the difference out of thin air
+(bought at 100, agreed recovery 1 -> the team came out 99 credits richer). A closed
+contract leaves exactly the hole between what it cost and what came back — zero when
+the recovery was full, which is what every pre-``sale_price`` release is backfilled to.
 """
 
 from __future__ import annotations
@@ -91,10 +102,23 @@ def team_budgets(league: FantasyLeague) -> dict[int, TeamBudget]:
             filled.setdefault(team_id, {}).setdefault(role, 0)
             filled[team_id][role] += 1
 
+    # What the closed contracts took away for good. A sale above the purchase price
+    # is a NEGATIVE hole — it gives credits back — and that is deliberate: a manager
+    # who resells at a profit is ordinary, and the admin is transcribing a deal.
+    sunk: dict[int, int] = {}
+    for team_id, price, sale in (
+        FantasyRosterSlot.objects.filter(team__league=league, released_at__isnull=False)
+        .values_list("team_id", "purchase_price", "sale_price")
+    ):
+        # sale_price NULL on a closed contract can only be a row written before the
+        # field existed and missed by the backfill; full recovery is what it meant.
+        recovered = int(price) if sale is None else int(sale)
+        sunk[team_id] = sunk.get(team_id, 0) + int(price) - recovered
+
     out: dict[int, TeamBudget] = {}
     for t in teams:
         t_spent = spent.get(t.id, 0)
-        remaining = league.initial_budget - t_spent
+        remaining = league.initial_budget - t_spent - sunk.get(t.id, 0)
         t_filled = filled.get(t.id, {})
         per_role: dict[str, dict[str, int]] = {}
         slots_remaining_total = 0
@@ -151,9 +175,12 @@ def check_purchase(
         )
     max_bid = tb.max_bid_for_role(role)
     if amount > max_bid:
+        # "Prezzo" e non "offerta": la stessa regola vale al rilancio in asta e
+        # quando l'admin scrive a mano un acquisto, dove di offerte non ce n'e'
+        # nessuna e la frase parlava di una cosa che non stava succedendo.
         return LegalityResult(
             False,
-            f"Offerta troppo alta: al massimo {currency.price(max_bid)} "
+            f"Prezzo troppo alto: al massimo {currency.price(max_bid)} "
             f"(devi lasciarne almeno 1 per ciascuno degli altri "
             f"{tb.slots_remaining_total - 1} slot da riempire).",
             max_bid,

@@ -57,14 +57,14 @@ from vfoot.api.league_views import (
     LeagueRosterImportCSVView,
     LeagueRosterImportXLSXView,
     PlayerSearchView,
-    MarketToggleView,
     LeagueSettingsUpdateView,
     CompetitionStructureView,
     MemberRoleUpdateView,
     LeagueReferenceSeasonView,
     RealSeasonListView,
     TeamRosterAddView,
-    TeamRosterRemoveView,
+    TeamRosterSellView,
+    TeamRosterVoidView,
     TeamRosterView,
 )
 from vfoot.api.market_views import (
@@ -174,7 +174,6 @@ urlpatterns = [
         MemberRoleUpdateView.as_view(),
         name="league-member-role",
     ),
-    path("leagues/<int:league_id>/market", MarketToggleView.as_view(), name="league-market-toggle"),
     # Repair market (offer-based sessions on free agents, classic mode).
     path("leagues/<int:league_id>/market/active", MarketActiveView.as_view(), name="market-active"),
     path("leagues/<int:league_id>/market/sessions", MarketSessionListView.as_view(), name="market-sessions"),
@@ -192,9 +191,14 @@ urlpatterns = [
     path("leagues/<int:league_id>/teams/<int:team_id>/roster", TeamRosterView.as_view(), name="team-roster"),
     path("leagues/<int:league_id>/teams/<int:team_id>/roster/add", TeamRosterAddView.as_view(), name="team-roster-add"),
     path(
-        "leagues/<int:league_id>/teams/<int:team_id>/roster/remove",
-        TeamRosterRemoveView.as_view(),
-        name="team-roster-remove",
+        "leagues/<int:league_id>/teams/<int:team_id>/roster/sell",
+        TeamRosterSellView.as_view(),
+        name="team-roster-sell",
+    ),
+    path(
+        "leagues/<int:league_id>/teams/<int:team_id>/roster/void",
+        TeamRosterVoidView.as_view(),
+        name="team-roster-void",
     ),
     path(
         "leagues/<int:league_id>/roster/bulk-assign",

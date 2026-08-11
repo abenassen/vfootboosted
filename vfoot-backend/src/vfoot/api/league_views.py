@@ -45,12 +45,12 @@ from vfoot.api.league_serializers import (
     CreateLeagueSerializer,
     ImportRosterCSVSerializer,
     JoinLeagueSerializer,
-    MarketToggleSerializer,
     MatchdayConcludeSerializer,
     NominateSerializer,
     PlaceBidSerializer,
     QualificationRuleCreateSerializer,
-    RemoveRosterPlayerSerializer,
+    SellRosterPlayerSerializer,
+    VoidRosterSlotSerializer,
     UpdateMemberRoleSerializer,
     UpdateMyTeamSerializer,
 )
@@ -166,7 +166,6 @@ class LeagueListCreateView(APIView):
                     "name": m.league.name,
                     "role": m.role,
                     "invite_code": m.league.invite_code,
-                    "market_open": m.league.market_open,
                     "team_name": m.team.name if hasattr(m, "team") else None,
                     "team_crest": m.team.crest if hasattr(m, "team") else "",
                     "reference_season": (
@@ -276,7 +275,6 @@ class LeagueDetailView(APIView):
                 "league_id": league.id,
                 "name": league.name,
                 "mode": league.mode,
-                "market_open": league.market_open,
                 "max_substitutions": league.max_substitutions,
                 "defense_bonus_enabled": league.defense_bonus_enabled,
                 "defense_bonus_mode": league.defense_bonus_mode,
@@ -850,31 +848,17 @@ def _ensure_players_decided(league, player_ids):
         status=status.HTTP_400_BAD_REQUEST)
 
 
-class MarketToggleView(APIView):
-    authentication_classes = [TokenAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def patch(self, request, league_id: int):
-        league = get_object_or_404(FantasyLeague, id=league_id)
-        _ensure_admin(league, request.user.id)
-        s = MarketToggleSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        if s.validated_data["is_open"]:
-            # Catch up with the real market first. Roles are frozen but the roster
-            # is not, and a player who arrived after the listone was drawn has no
-            # frozen role: seeding him here is what stops a January signing from
-            # slipping past the gate and being priced before anyone has agreed
-            # what he is. Additive — nothing already decided is touched.
-            # Catch up with the real market. Roles are frozen but the roster is
-            # not, and a player who arrived after the listone was drawn has no
-            # frozen role. Opening the market is NOT refused for it: only the
-            # players still in limbo are, one by one, where they are used.
-            if league.mode == FantasyLeague.MODE_CLASSIC:
-                snapshot_league_listone(league)
-        league.market_open = s.validated_data["is_open"]
-        league.save(update_fields=["market_open"])
-        return Response({"league_id": league.id, "market_open": league.market_open})
+# Non c'e' piu' un interruttore "mercato aperto/chiuso" di lega. Era il primo
+# abbozzo dell'amministrazione, scritto prima che esistessero l'asta e il mercato
+# a offerte, e chiudeva soltanto i tre endpoint qui sotto — tutti riservati
+# all'admin: un lucchetto che l'admin metteva a se' stesso, nella stessa pagina in
+# cui teneva la chiave. Chi apre e chiude davvero il mercato ha il suo stato:
+# ``AuctionSession.status`` per l'asta, ``MarketSession.status`` per le offerte, e
+# nessuno dei due consultava quel flag. Il gate che conta resta
+# ``_ensure_players_decided``: un giocatore il cui ruolo e' ancora una domanda
+# aperta non finisce in rosa. Il recupero dei nuovi arrivati non e' andato perso
+# con l'interruttore: ``snapshot_league_listone`` gira a ogni poll Transfermarkt
+# (import_transfermarkt_squads), che e' il momento in cui la rosa reale cambia.
 
 
 class LeagueSettingsUpdateView(APIView):
@@ -1071,7 +1055,17 @@ class TeamRosterView(APIView):
         _membership_or_404(league, request.user.id)
 
         team = get_object_or_404(FantasyTeam, id=team_id, league=league)
-        slots = FantasyRosterSlot.objects.filter(team=team, released_at__isnull=True).select_related("player")
+        slots = list(
+            FantasyRosterSlot.objects.filter(team=team, released_at__isnull=True)
+            .select_related("player"))
+
+        # Il ruolo e il portafoglio viaggiano con la rosa: senza, il pannello di
+        # gestione non puo' dire ne' se la rosa e' completa ne' quanto si puo'
+        # ancora spendere, ed erano proprio le due domande a cui non rispondeva.
+        # In modalita' aura non c'e' ne' listone ne' asta: restano fuori.
+        is_classic = league.mode == FantasyLeague.MODE_CLASSIC
+        role_map = league_role_map(league, [s.player_id for s in slots]) if is_classic else {}
+        budget = team_budgets(league).get(team.id) if is_classic else None
 
         return Response(
             {
@@ -1079,14 +1073,40 @@ class TeamRosterView(APIView):
                 "team_name": team.name,
                 "players": [
                     {
+                        "slot_id": s.id,
                         "player_id": s.player_id,
                         "name": s.player.short_name or s.player.full_name,
                         "price": s.purchase_price,
+                        "role": role_map.get(s.player_id),
                     }
                     for s in slots
                 ],
+                "budget": None if budget is None else {
+                    "initial": budget.initial_budget,
+                    "spent": budget.spent,
+                    "remaining": budget.remaining,
+                    "slots": budget.slots,
+                    "slots_remaining_total": budget.slots_remaining_total,
+                },
             }
         )
+
+
+# Le tre operazioni che l'admin fa su una rosa, e sono tre perche' sono tre cose
+# diverse — non tre modi di dire la stessa:
+#
+#   * ACQUISTO   un contratto si apre. Costa, e deve stare dentro slot e budget.
+#   * VENDITA    un contratto si chiude, con l'incasso che decide l'admin: sta
+#                trascrivendo un accordo preso fuori dall'app, non applicando il
+#                regolamento di una sessione di mercato.
+#   * ANNULLO    il contratto non e' mai esistito. La riga si cancella, non si
+#                chiude: chiuderla a incasso pieno darebbe gli stessi numeri ma
+#                lascerebbe nello storico un acquisto seguito da una cessione che
+#                nessuno ha fatto, e lo storico serve a ricostruire le rose.
+#
+# Uno scambio fra due allenatori si scrive come una vendita di qua e un acquisto
+# di la': un'operazione unica che le impacchetta sarebbe struttura in piu' per un
+# caso che si presenta di rado.
 
 
 class TeamRosterAddView(APIView):
@@ -1097,8 +1117,6 @@ class TeamRosterAddView(APIView):
     def post(self, request, league_id: int, team_id: int):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _ensure_admin(league, request.user.id)
-        if not league.market_open:
-            return Response({"detail": "Market is closed."}, status=status.HTTP_400_BAD_REQUEST)
         team = get_object_or_404(FantasyTeam, id=team_id, league=league)
         s = AddRosterPlayerSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -1113,11 +1131,27 @@ class TeamRosterAddView(APIView):
         if already:
             return Response({"detail": "Player already assigned in this league."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Stessa legalita' dell'asta, che finora questa strada saltava del tutto:
+        # si poteva aggiungere un nono difensore, o pagarlo 900 su 1000, e nessuno
+        # diceva niente — la rosa risultava illegale solo piu' tardi, in campo.
+        # ``force`` resta per chi sta ricostruendo a mano una rosa gia' giocata,
+        # i cui conti non tornano perche' vengono da un'altra app.
+        if league.mode == FantasyLeague.MODE_CLASSIC and not data.get("force"):
+            legality = check_purchase(
+                league, team.id, player_role(league, player), data["purchase_price"])
+            if not legality.ok:
+                return Response({"detail": legality.reason, "max_price": legality.max_bid,
+                                 "code": "illegal_purchase"},
+                                status=status.HTTP_400_BAD_REQUEST)
+
         slot = FantasyRosterSlot.objects.create(team=team, player=player, purchase_price=data["purchase_price"])
         return Response({"slot_id": slot.id, "player_id": player.id}, status=status.HTTP_201_CREATED)
 
 
-class TeamRosterRemoveView(APIView):
+class TeamRosterSellView(APIView):
+    """Chiude un contratto: il giocatore torna svincolato, in cassa rientra la
+    cifra che dice l'admin (di default quella pagata, cioe' recupero pieno)."""
+
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -1125,14 +1159,12 @@ class TeamRosterRemoveView(APIView):
     def post(self, request, league_id: int, team_id: int):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _ensure_admin(league, request.user.id)
-        if not league.market_open:
-            return Response({"detail": "Market is closed."}, status=status.HTTP_400_BAD_REQUEST)
         # No role gate here: releasing a player never depends on his role. Nor
         # should the case arise — anyone on a roster was bought, so he had a role
         # at the time, and a role settled in a league never becomes an open
         # question again (see open_role_decisions).
         team = get_object_or_404(FantasyTeam, id=team_id, league=league)
-        s = RemoveRosterPlayerSerializer(data=request.data)
+        s = SellRosterPlayerSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         player_id = s.validated_data["player_id"]
 
@@ -1140,14 +1172,63 @@ class TeamRosterRemoveView(APIView):
         if not slot:
             return Response({"detail": "Player not in active roster."}, status=status.HTTP_404_NOT_FOUND)
 
+        sale_price = s.validated_data.get("sale_price")
+        if sale_price is None:
+            sale_price = slot.purchase_price
+
         slot.released_at = timezone.now()
-        slot.save(update_fields=["released_at"])
+        slot.sale_price = int(sale_price)
+        slot.save(update_fields=["released_at", "sale_price"])
         # Same invariant as a market settlement: a lineup that is still open must not
         # be left holding a player the team no longer has. There is no incoming
         # player here, so the slot is vacated — the manager can refill it, since a
         # locked lineup is never touched.
         vacated = lineup_repair.swap_player(league, team.id, player_id, None)
-        return Response({"lineups_vacated": vacated}, status=status.HTTP_200_OK)
+        return Response({"lineups_vacated": vacated, "sale_price": slot.sale_price},
+                        status=status.HTTP_200_OK)
+
+
+class TeamRosterVoidView(APIView):
+    """Annulla un contratto: lo cancella, come se non fosse mai stato firmato.
+
+    Le giornate gia' calcolate non si toccano — il punteggio legge la formazione
+    consegnata, non la rosa di oggi (``classic_matchday_scoring``: la formazione fa
+    fede). Quello che sparisce e' il contratto, non le partite che ha giocato.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, league_id: int, team_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        team = get_object_or_404(FantasyTeam, id=team_id, league=league)
+        s = VoidRosterSlotSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        slot_id = s.validated_data.get("slot_id")
+        player_id = s.validated_data.get("player_id")
+        if slot_id is None and player_id is None:
+            return Response({"detail": "Indica slot_id oppure player_id."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Per player_id si annulla il contratto APERTO: e' quello che si sta
+        # guardando. Per annullare uno gia' chiuso serve il suo slot_id, perche'
+        # di chiusi lo stesso giocatore puo' averne piu' d'uno.
+        q = FantasyRosterSlot.objects.filter(team=team)
+        slot = (q.filter(id=slot_id).first() if slot_id is not None
+                else q.filter(player_id=player_id, released_at__isnull=True).first())
+        if not slot:
+            return Response({"detail": "Contratto non trovato per questa squadra."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        was_active = slot.released_at is None
+        player_id = slot.player_id
+        slot.delete()
+        vacated = (lineup_repair.swap_player(league, team.id, player_id, None)
+                   if was_active else 0)
+        return Response({"lineups_vacated": vacated, "player_id": player_id},
+                        status=status.HTTP_200_OK)
 
 
 class LeagueRosterBulkAssignView(APIView):
@@ -1158,8 +1239,6 @@ class LeagueRosterBulkAssignView(APIView):
     def post(self, request, league_id: int):
         league = get_object_or_404(FantasyLeague, id=league_id)
         _ensure_admin(league, request.user.id)
-        if not league.market_open:
-            return Response({"detail": "Market is closed."}, status=status.HTTP_400_BAD_REQUEST)
 
         s = BulkAssignRosterSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -4570,6 +4649,31 @@ class LeagueStandingsView(APIView):
         return Response({"competition_id": comp.id if comp else None, "standings": standings})
 
 
+def _fixture_managers(fx) -> dict:
+    """I due fantallenatori della sfida: chi è, che faccia ha, che squadra schiera.
+
+    Aggiunto al referto QUI e non dentro il payload congelato, di proposito.
+    L'avatar e il nome utente sono proprietà vive della persona: chi si cambia la
+    faccia a novembre se la deve ritrovare anche sui tabellini di settembre, e un
+    descrittore congelato alla conclusione avrebbe mostrato per sempre l'avatar di
+    quel sabato. Costa due join per referto e vale per i payload vecchi come per
+    quelli nuovi.
+    """
+    out = {}
+    for side, team in (("home", fx.home_team), ("away", fx.away_team)):
+        user = team.manager.user
+        profile = getattr(user, "profile", None)
+        out[f"{side}_manager"] = {
+            "user_id": user.id,
+            "username": user.username,
+            # Stringa vuota = nessun avatar scelto: il client disegna comunque una
+            # faccia, seminata sul nome utente (v. components/Avatar).
+            "avatar": profile.avatar if profile else "",
+            "team_id": team.id,
+        }
+    return out
+
+
 class FixtureDetailView(APIView):
     """The tabellino of a league fixture — frozen if the matchday is concluded,
     computed on the spot if it is still being played.
@@ -4587,14 +4691,16 @@ class FixtureDetailView(APIView):
         fx = get_object_or_404(
             FantasyFixture.objects.select_related(
                 "competition__league", "detail", "fantasy_matchday",
-                "home_team", "away_team"),
+                "home_team__manager__user__profile",
+                "away_team__manager__user__profile"),
             id=fixture_id,
         )
         league = fx.competition.league
         _membership_or_404(league, request.user.id)
+        managers = _fixture_managers(fx)
         detail = getattr(fx, "detail", None)
         if detail is not None:
-            return Response(detail.payload)
+            return Response({**detail.payload, **managers})
 
         md = fx.fantasy_matchday
         if md is None or md.status == FantasyMatchday.STATUS_CONCLUDED:
@@ -4610,7 +4716,7 @@ class FixtureDetailView(APIView):
         # use), otherwise the league's current rules.
         ruleset = (Ruleset.from_snapshot(md.ruleset_snapshot) if md.ruleset_snapshot
                    else Ruleset.from_league(league))
-        return Response(score_fixture_live(fx, league, md, ruleset))
+        return Response({**score_fixture_live(fx, league, md, ruleset), **managers})
 
 
 def _zone_grid_keys(cols: int = 5, rows: int = 4) -> list[str]:
@@ -4901,7 +5007,7 @@ class LeagueTeamLineupView(APIView):
                 # Spending summary: a fixed 500 budget (as used elsewhere), what
                 # this squad cost, and per-role breakdown — so the manager reads
                 # where his money went without adding it up by hand.
-                "budget": _roster_budget(roster, league.initial_budget),
+                "budget": _roster_budget(roster, league.initial_budget, team.id),
                 # Which season the appearances/minutes/label describe. The client
                 # must say so: pre-season these are LAST year's, and a silent
                 # "poco impiegato" from stale data is exactly the confusion to avoid.
@@ -4915,20 +5021,32 @@ class LeagueTeamLineupView(APIView):
         )
 
 
-def _roster_budget(roster: list, initial: int) -> dict:
+def _roster_budget(roster: list, initial: int, team_id: int) -> dict:
     """Spending summary against the LEAGUE's budget.
 
     Was hardcoded to 500 while FantasyLeague.initial_budget defaults to 1000 and
     is configurable per league, so the Squadra page reported a residue of zero to
     anyone who had spent more than 500 — which, on the default economy, is most
     of a full roster.
+
+    The residue is NOT ``initial - spent``: a contract closed for less than it
+    cost leaves a hole that no longer shows up anywhere in the current roster.
+    Read that from the contracts (``sunk``) or this page would keep showing a
+    manager credits the auction engine has already refused to let him spend —
+    two numbers for one wallet, and the one on screen the wrong one.
     """
     spent = sum(r["price"] for r in roster)
+    sunk = 0
+    for price, sale in (
+        FantasyRosterSlot.objects.filter(team_id=team_id, released_at__isnull=False)
+        .values_list("purchase_price", "sale_price")
+    ):
+        sunk += int(price) - (int(price) if sale is None else int(sale))
     by_role: dict[str, int] = {}
     for r in roster:
         by_role[r["role"]] = by_role.get(r["role"], 0) + r["price"]
-    return {"initial": initial, "spent": spent, "remaining": max(0, initial - spent),
-            "by_role": by_role}
+    return {"initial": initial, "spent": spent, "sunk": sunk,
+            "remaining": max(0, initial - spent - sunk), "by_role": by_role}
 
 
 class LeagueTeamLineupSaveView(APIView):

@@ -59,7 +59,15 @@ export interface TeamLineupContext {
   is_own?: boolean;
   competitions: { competition_id: number; name: string }[];
   competition: number | null; // the competition this lineup refers to
-  budget?: { initial: number; spent: number; remaining: number; by_role: Record<string, number> };
+  budget?: {
+    initial: number;
+    spent: number;
+    /** Crediti bruciati dai contratti chiusi: pagato meno incassato. Il residuo
+     *  non e' initial - spent, e questo e' il pezzo che manca all'appello. */
+    sunk: number;
+    remaining: number;
+    by_role: Record<string, number>;
+  };
   stats_season?: string | null;      // stagione da cui vengono presenze/minuti/etichetta
   stats_is_reference?: boolean;      // true = campionato in corso; false = stagione precedente
   matchdays: number[];

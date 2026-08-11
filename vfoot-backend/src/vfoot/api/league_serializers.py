@@ -46,17 +46,26 @@ class UpdateMemberRoleSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=["admin", "manager"])
 
 
-class MarketToggleSerializer(serializers.Serializer):
-    is_open = serializers.BooleanField()
-
-
 class AddRosterPlayerSerializer(serializers.Serializer):
     player_id = serializers.IntegerField()
     purchase_price = serializers.IntegerField(min_value=1, default=1)
+    # Scavalca il controllo di legalita' (slot per ruolo + tetto di spesa). Serve
+    # a chi ricostruisce a mano una rosa gia' giocata altrove, i cui conti non
+    # tornano con questa lega: e' un caso reale, ma va chiesto per nome.
+    force = serializers.BooleanField(default=False, required=False)
 
 
-class RemoveRosterPlayerSerializer(serializers.Serializer):
+class SellRosterPlayerSerializer(serializers.Serializer):
     player_id = serializers.IntegerField()
+    # Quanto rientra in cassa. Assente = il prezzo pagato, cioe' recupero pieno.
+    # Puo' superarlo: rivendere in guadagno e' normale. Zero e' ammesso (svincolo
+    # a perdere); negativo no, quello sarebbe una multa e non una cessione.
+    sale_price = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+
+
+class VoidRosterSlotSerializer(serializers.Serializer):
+    slot_id = serializers.IntegerField(required=False, allow_null=True)
+    player_id = serializers.IntegerField(required=False, allow_null=True)
 
 
 class BulkAssignRosterSerializer(serializers.Serializer):

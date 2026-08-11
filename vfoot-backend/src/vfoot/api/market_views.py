@@ -146,7 +146,7 @@ class MarketSessionCreateView(APIView):
         data = s.validated_data
 
         # Catch up with the real market before opening, so a mid-season signing has
-        # a frozen role and can be offered/released (same reasoning as MarketToggle).
+        # a frozen role and can be offered/released.
         snapshot_league_listone(league)
 
         session = MarketSession.objects.create(

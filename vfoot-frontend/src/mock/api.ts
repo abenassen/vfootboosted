@@ -240,7 +240,6 @@ export async function getLeagues(): Promise<LeagueSummary[]> {
     name: l.name,
     role: 'admin',
     invite_code: l.invite_code,
-    market_open: l.market_open,
     team_name: l.teams[0]?.name ?? null,
     reference_season: null,
   }));
@@ -253,7 +252,6 @@ export async function createLeague(req: CreateLeagueRequest) {
     league_id: id,
     name: req.name,
     mode: 'aura',
-    market_open: true,
     max_substitutions: 5,
     defense_bonus_enabled: true,
     defense_bonus_mode: 'add_own',
@@ -346,14 +344,6 @@ export async function updateMemberRole(leagueId: number, membershipId: number, r
   return { membership_id: m.membership_id, role: m.role };
 }
 
-export async function setMarketStatus(leagueId: number, isOpen: boolean) {
-  await sleep(80);
-  const l = mockLeagues.find((x) => x.league_id === leagueId);
-  if (!l) throw new Error('League not found.');
-  l.market_open = isOpen;
-  return { league_id: leagueId, market_open: isOpen };
-}
-
 export async function updateLeagueSettings(
   leagueId: number,
   settings: { max_substitutions?: number; defense_bonus_enabled?: boolean; defense_bonus_mode?: string },
@@ -364,15 +354,24 @@ export async function updateLeagueSettings(
 
 export async function getTeamRoster(_leagueId: number, teamId: number): Promise<TeamRoster> {
   await sleep(80);
-  return { team_id: teamId, team_name: `Team ${teamId}`, players: [] };
+  return { team_id: teamId, team_name: `Team ${teamId}`, players: [], budget: null };
 }
 
-export async function addRosterPlayer(_leagueId: number, _teamId: number, playerId: number, _purchasePrice = 1) {
+export async function addRosterPlayer(
+  _leagueId: number, _teamId: number, playerId: number, _purchasePrice = 1, _force = false,
+) {
   await sleep(80);
   return { player_id: playerId };
 }
 
-export async function removeRosterPlayer(_leagueId: number, _teamId: number, _playerId: number) {
+export async function sellRosterPlayer(
+  _leagueId: number, _teamId: number, _playerId: number, salePrice?: number,
+) {
+  await sleep(80);
+  return { ok: true, sale_price: salePrice ?? null };
+}
+
+export async function voidRosterSlot(_leagueId: number, _teamId: number, _slotId: number) {
   await sleep(80);
   return { ok: true };
 }

@@ -68,7 +68,7 @@ class Command(BaseCommand):
             FantasyCompetition.objects.filter(league=prior).delete()
             prior.delete()
 
-        league = FantasyLeague.objects.create(name=league_name, owner=owner, market_open=False)
+        league = FantasyLeague.objects.create(name=league_name, owner=owner)
         competition = FantasyCompetition.objects.create(
             league=league,
             name=str(options["competition_name"]),

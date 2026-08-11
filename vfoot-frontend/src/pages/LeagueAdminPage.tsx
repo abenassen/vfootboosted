@@ -15,9 +15,9 @@ import {
   importRosterCsv,
   importRosterXlsx,
   joinLeague,
-  removeRosterPlayer,
   searchPlayers,
-  setMarketStatus,
+  sellRosterPlayer,
+  voidRosterSlot,
   updateLeagueSettings,
   updateMemberRole,
 } from '../api';
@@ -29,6 +29,8 @@ import {
   type OfficeVoteMatch,
 } from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
+import { CURRENCY_SYMBOL, amount, price } from '../utils/currency';
+import { ROLE_ORDER } from '../utils/market';
 import type { PrizeChange, RecomputeResult } from '../api/backend';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
@@ -38,6 +40,7 @@ import LeagueSetupChecklist from '../components/LeagueSetupChecklist';
 import Crest from '../components/Crest';
 import { competitionFormatLabel } from '../league/competitionFormat';
 import type {
+  ClassicRole,
   CompetitionItem,
   LeagueDetail,
   LeagueMatchdayItem,
@@ -85,6 +88,21 @@ export default function LeagueAdminPage() {
   const [playerResults, setPlayerResults] = useState<PlayerSearchItem[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerSearchItem | null>(null);
   const [manualPrice, setManualPrice] = useState('1');
+  // Scavalca il controllo di legalita' sull'acquisto. Non e' un'impostazione:
+  // si accende per un acquisto e si spegne da sola appena e' andato a buon fine.
+  const [forceBuy, setForceBuy] = useState(false);
+  // Perche' l'acquisto e' stato rifiutato, tenuto qui e non letto dal banner in
+  // cima alla pagina: quello indovina il proprio tono dal testo del messaggio
+  // (vedi l'effetto poco sotto), quindi un rifiuto che non contiene la parola
+  // "errore" gli risulta un'informazione — e comunque sta fuori schermo, mentre
+  // la ragione serve accanto al campo dove si e' appena scritto il prezzo.
+  const [buyRefusal, setBuyRefusal] = useState<string | null>(null);
+  // Quale contratto si sta chiudendo o cancellando, e a quanto. Uno per volta,
+  // e la conferma sta nella riga: un window.confirm qui bloccherebbe la pagina e
+  // direbbe comunque meno di quanto dice la frase che si legge sotto il nome.
+  const [sellFor, setSellFor] = useState<number | null>(null);
+  const [sellPrice, setSellPrice] = useState('');
+  const [voidFor, setVoidFor] = useState<number | null>(null);
 
   const [csvText, setCsvText] = useState('team_name,manager_username,player_id,price\n');
   const [csvFile, setCsvFile] = useState<File | null>(null);
@@ -543,9 +561,6 @@ export default function LeagueAdminPage() {
                       <Badge tone={l.role === 'admin' ? 'green' : 'slate'}>
                         {l.role === 'admin' ? 'amministratore' : 'partecipante'}
                       </Badge>
-                      <Badge tone={l.market_open ? 'green' : 'slate'}>
-                        Rosa {l.market_open ? 'modificabile' : 'bloccata'}
-                      </Badge>
                       <Button
                         size="sm"
                         variant={active ? 'primary' : 'secondary'}
@@ -723,7 +738,6 @@ export default function LeagueAdminPage() {
               <SectionTitle>
                 Gestione lega{selectedLeague ? <span className="ml-1 normal-case text-ink">· {selectedLeague.name}</span> : null}
               </SectionTitle>
-              {selectedLeague ? <Badge tone={selectedLeague.market_open ? 'green' : 'slate'}>Rosa {selectedLeague.market_open ? 'modificabile' : 'bloccata'}</Badge> : null}
             </div>
             <div className="mt-1 text-[11px] text-ink-faint">
               Riferita alla lega selezionata in alto. Cambia lega dal selettore in cima alla pagina.
@@ -738,41 +752,13 @@ export default function LeagueAdminPage() {
                   </span>
                   <CopyButton value={league.invite_code} label="Copia codice" />
                 </div>
-                {/* State first, action second. The button used to carry the whole
-                    sentence ("Blocca modifiche manuali alla rosa"), which reads
-                    just as easily as a description of how things ARE as of what
-                    the click will do — and the two readings are opposites. */}
-                <div className="rounded-xl border px-3 py-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-sm">
-                        Modifiche manuali alla rosa:{' '}
-                        <b className={league.market_open ? 'text-good' : 'text-ink-soft'}>
-                          {league.market_open ? 'abilitate' : 'bloccate'}
-                        </b>
-                      </div>
-                      <div className="mt-1 text-[11px] text-ink-faint">
-                        Inserimento manuale e import di rose (add/rimuovi/bulk/CSV). Non è il mercato a
-                        offerte: quello si gestisce nella scheda <b>Mercato</b>.
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          if (!league) return;
-                          await setMarketStatus(league.league_id, !league.market_open);
-                          await loadLeagueDetail(league.league_id);
-                          await refreshLeagues();
-                        })
-                      }
-                    >
-                      {league.market_open ? 'Blocca' : 'Abilita'}
-                    </Button>
-                  </div>
-                </div>
+                {/* Qui stava "Modifiche manuali alla rosa: abilitate / bloccate".
+                    Chiudeva soltanto add/rimuovi/import — tutte azioni dell'admin,
+                    e l'interruttore era in questa stessa pagina: un lucchetto che
+                    chi ha la chiave mette a se' stesso. Non fermava ne' l'asta ne'
+                    il mercato a offerte, che hanno il loro stato e non lo
+                    leggevano. Chi lo chiudeva e se ne dimenticava si ritrovava un
+                    "Market is closed." davanti all'import di un foglio. */}
                 {(() => {
                   // Everything in here edits a DRAFT. These four rules decide how
                   // votes are counted for the whole league, and they used to be
@@ -1157,17 +1143,41 @@ export default function LeagueAdminPage() {
                           onClick={() =>
                             void run(async () => {
                               if (!selectedLeagueId || !selectedTeamId || !selectedPlayer) return;
-                              await addRosterPlayer(selectedLeagueId, selectedTeamId, selectedPlayer.player_id, Number(manualPrice));
+                              setBuyRefusal(null);
+                              try {
+                                await addRosterPlayer(
+                                  selectedLeagueId, selectedTeamId, selectedPlayer.player_id,
+                                  Number(manualPrice), forceBuy);
+                              } catch (e) {
+                                if (e instanceof ApiError) setBuyRefusal(e.message);
+                                throw e;
+                              }
                               await loadRoster(selectedLeagueId, selectedTeamId);
                               setPlayerQuery('');
                               setPlayerResults([]);
                               setSelectedPlayer(null);
+                              setForceBuy(false);
                             })
                           }
                         >
-                          Add
+                          Compra
                         </Button>
                       </div>
+                      {/* Il rifiuto si legge qui, e la spunta per scavalcarlo compare
+                          solo adesso: e' l'unico momento in cui serve saperlo. */}
+                      {buyRefusal ? (
+                        <div className="mt-2 rounded-xl border border-bad/40 bg-bad-bg/40 px-3 py-2 text-[11px]">
+                          <div className="text-ink">{buyRefusal}</div>
+                          <label className="mt-2 flex items-center gap-2 text-ink-faint">
+                            <input
+                              type="checkbox"
+                              checked={forceBuy}
+                              onChange={(e) => setForceBuy(e.target.checked)}
+                            />
+                            Forza: scavalca slot e budget (per rose ricostruite da altrove)
+                          </label>
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="mt-3 rounded-xl border p-3">
@@ -1248,27 +1258,137 @@ export default function LeagueAdminPage() {
                     </div>
                   </Card>
 
+                  {/* Questa colonna serve a RIEMPIRE, non a leggere: una riga di
+                      conti — quanto resta e quali caselle mancano, cioe' le due
+                      domande che decidono se puoi ancora comprare — e poi i nomi
+                      con le due azioni. La rosa si studia dalla pagina Rose, che
+                      ha statistiche, reparti e tutto il resto. */}
                   <Card className="p-4">
                     <SectionTitle>Roster corrente</SectionTitle>
                     <div className="mt-2 text-sm text-ink-soft">Team: <span className="font-semibold">{selectedTeamName || '-'}</span></div>
+                    {roster?.budget ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border bg-surface-2 px-3 py-2 text-[11px]">
+                        <span>
+                          speso <b className="text-ink">{price(roster.budget.spent)}</b> di {price(roster.budget.initial)}
+                        </span>
+                        <span>
+                          residuo{' '}
+                          <b className={roster.budget.remaining < roster.budget.slots_remaining_total ? 'text-bad' : 'text-good'}>
+                            {price(roster.budget.remaining)}
+                          </b>
+                        </span>
+                        <span className="text-ink-faint">
+                          {ROLE_ORDER.map((r) => {
+                            const s = roster.budget!.slots[r as ClassicRole];
+                            return `${r} ${s.filled}/${s.quota}`;
+                          }).join(' · ')}
+                        </span>
+                        {roster.budget.slots_remaining_total === 0 ? (
+                          <Badge tone="green">rosa completa</Badge>
+                        ) : (
+                          <Badge tone="slate">{roster.budget.slots_remaining_total} da riempire</Badge>
+                        )}
+                      </div>
+                    ) : null}
                     <div className="mt-2 max-h-[520px] overflow-auto space-y-1 text-xs">
                       {roster?.players.length ? (
-                        roster.players.map((p) => (
-                          <div key={p.player_id} className="flex items-center justify-between rounded-lg border px-2 py-1">
-                            <span>#{p.player_id} {p.name} (EUR {p.price})</span>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() =>
-                                void run(async () => {
-                                  if (!selectedLeagueId || !selectedTeamId) return;
-                                  await removeRosterPlayer(selectedLeagueId, selectedTeamId, p.player_id);
-                                  await loadRoster(selectedLeagueId, selectedTeamId);
-                                })
-                              }
-                            >
-                              Remove
-                            </Button>
+                        [...roster.players]
+                          .sort((a, b) =>
+                            (ROLE_ORDER.indexOf(a.role ?? '') - ROLE_ORDER.indexOf(b.role ?? ''))
+                            || a.name.localeCompare(b.name))
+                          .map((p) => (
+                          <div key={p.slot_id} className="rounded-lg border px-2 py-1">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="min-w-0">
+                                {p.role ? <Badge tone="blue">{p.role}</Badge> : null}{' '}
+                                <b className="text-ink">{p.name}</b>{' '}
+                                <span className="text-ink-faint">{price(p.price)}</span>
+                              </span>
+                              {sellFor === p.slot_id || voidFor === p.slot_id ? null : (
+                                <span className="flex items-center gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                      setVoidFor(null);
+                                      setSellFor(p.slot_id);
+                                      setSellPrice(String(p.price));
+                                    }}
+                                  >
+                                    Vendi
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => { setSellFor(null); setVoidFor(p.slot_id); }}
+                                  >
+                                    Annulla contratto
+                                  </Button>
+                                </span>
+                              )}
+                            </div>
+
+                            {sellFor === p.slot_id ? (
+                              <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2">
+                                <label htmlFor={`sell-${p.slot_id}`} className="text-ink-faint">
+                                  Rientrano in cassa
+                                </label>
+                                <input
+                                  id={`sell-${p.slot_id}`}
+                                  className="w-20 rounded-lg border px-2 py-1"
+                                  value={sellPrice}
+                                  onChange={(e) => setSellPrice(e.target.value)}
+                                />
+                                <span className="text-ink-faint">
+                                  {CURRENCY_SYMBOL} (pagato {p.price})
+                                </span>
+                                <Button
+                                  size="sm"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void run(async () => {
+                                      if (!selectedLeagueId || !selectedTeamId) return;
+                                      await sellRosterPlayer(
+                                        selectedLeagueId, selectedTeamId, p.player_id,
+                                        Number(sellPrice));
+                                      await loadRoster(selectedLeagueId, selectedTeamId);
+                                      setSellFor(null);
+                                    })
+                                  }
+                                >
+                                  Conferma vendita
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => setSellFor(null)}>
+                                  Lascia stare
+                                </Button>
+                              </div>
+                            ) : null}
+
+                            {voidFor === p.slot_id ? (
+                              <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2">
+                                <span className="text-ink-faint">
+                                  Cancella il contratto: come se non fosse mai stato firmato.
+                                  Tornano in cassa {amount(p.price)} e non ne resta traccia.
+                                </span>
+                                <Button
+                                  size="sm"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void run(async () => {
+                                      if (!selectedLeagueId || !selectedTeamId) return;
+                                      await voidRosterSlot(selectedLeagueId, selectedTeamId, p.slot_id);
+                                      await loadRoster(selectedLeagueId, selectedTeamId);
+                                      setVoidFor(null);
+                                    })
+                                  }
+                                >
+                                  Annulla davvero
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => setVoidFor(null)}>
+                                  Lascia stare
+                                </Button>
+                              </div>
+                            ) : null}
                           </div>
                         ))
                       ) : (

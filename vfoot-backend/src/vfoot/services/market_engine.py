@@ -440,8 +440,14 @@ def apply_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
             f"{currency.NAME_PLURAL.capitalize()} insufficienti al momento della validazione "
             f"(max {currency.price(st.max_amount_releasing(recovery))}).")
 
+    # Il recupero va SCRITTO sul contratto, non solo sull'offerta: il budget si
+    # legge dai contratti, e uno chiuso senza incasso dichiarato restituisce tutto
+    # quel che era stato pagato. Il tetto qui sopra veniva applicato e poi disfatto
+    # un istante dopo — comprato a 100 e svincolato con recupero 1, la squadra ne
+    # usciva con 99 crediti in piu' di quanti ne avesse mai avuti.
     release_slot.released_at = now
-    release_slot.save(update_fields=["released_at"])
+    release_slot.sale_price = recovery
+    release_slot.save(update_fields=["released_at", "sale_price"])
     acquire_slot = FantasyRosterSlot.objects.create(
         team_id=offer.team_id, player_id=offer.target_player_id,
         purchase_price=offer.amount, acquired_at=now,

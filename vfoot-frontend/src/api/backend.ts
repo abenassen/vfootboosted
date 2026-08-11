@@ -523,15 +523,6 @@ export async function updateMemberRole(leagueId: number, membershipId: number, r
   return parseJsonOrThrow(res);
 }
 
-export async function setMarketStatus(leagueId: number, isOpen: boolean) {
-  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/market`, {
-    method: 'PATCH',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ is_open: isOpen }),
-  });
-  return parseJsonOrThrow(res);
-}
-
 export interface LeagueSettingsPatch {
   max_substitutions?: number;
   defense_bonus_enabled?: boolean;
@@ -562,22 +553,36 @@ export async function getTeamRoster(leagueId: number, teamId: number): Promise<T
   return parseJsonOrThrow(res);
 }
 
-export async function addRosterPlayer(leagueId: number, teamId: number, playerId: number, purchasePrice = 1) {
+export async function addRosterPlayer(
+  leagueId: number, teamId: number, playerId: number, purchasePrice = 1, force = false,
+) {
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/teams/${teamId}/roster/add`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ player_id: playerId, purchase_price: purchasePrice }),
+    body: JSON.stringify({ player_id: playerId, purchase_price: purchasePrice, force }),
   });
   return parseJsonOrThrow(res);
 }
 
-export async function removeRosterPlayer(leagueId: number, teamId: number, playerId: number) {
-  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/teams/${teamId}/roster/remove`, {
+/** Chiude il contratto: incasso deciso dall'admin, assente = il prezzo pagato. */
+export async function sellRosterPlayer(
+  leagueId: number, teamId: number, playerId: number, salePrice?: number,
+) {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/teams/${teamId}/roster/sell`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ player_id: playerId }),
+    body: JSON.stringify({ player_id: playerId, sale_price: salePrice ?? null }),
   });
-  if (res.status === 204) return { ok: true };
+  return parseJsonOrThrow(res);
+}
+
+/** Cancella il contratto, come se non fosse mai stato firmato. */
+export async function voidRosterSlot(leagueId: number, teamId: number, slotId: number) {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/teams/${teamId}/roster/void`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ slot_id: slotId }),
+  });
   return parseJsonOrThrow(res);
 }
 
