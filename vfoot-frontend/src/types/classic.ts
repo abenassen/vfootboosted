@@ -2,6 +2,8 @@
 // backend FantasyFixtureDetail.payload for classic leagues. Discriminated from the
 // aura SimFixtureDetail by `mode: 'classic'`.
 
+import type { FixtureManager } from './league';
+
 export type ClassicRole = 'POR' | 'DIF' | 'CEN' | 'ATT';
 export type ClassicLineupRole = 'GK' | 'DEF' | 'MID' | 'ATT';
 
@@ -117,6 +119,11 @@ export interface ClassicFixtureDetail {
   competition_id?: number | null;
   home_team: string;
   away_team: string;
+  /** I due fantallenatori. Assenti sulle pagelle di una partita vera di Serie A
+   *  (non c'è nessuno che la schiera) e su qualunque referto che non venga da una
+   *  sfida di lega. */
+  home_manager?: FixtureManager | null;
+  away_manager?: FixtureManager | null;
   home_goals: number;
   away_goals: number;
   home_total: number;

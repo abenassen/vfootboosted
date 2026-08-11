@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Card, SectionTitle } from '../ui';
 import { MatchScoreHeader, type MatchHeaderVM } from './MatchScoreHeader';
+import { MatchManagers } from './MatchManagers';
 import type {
   ClassicFixtureDetail,
   ClassicPlayerEvents,
@@ -213,6 +214,19 @@ export function ClassicMatchDetail({
         <TeamColumn name={d.home_team} team={d.home} realMatch={realMatch} />
         <TeamColumn name={d.away_team} team={d.away} realMatch={realMatch} />
       </div>
+
+      {/* In fondo, chi ha schierato tutto questo. Su una partita vera di Serie A
+          non c'è: nessuno dei due allenatori del campionato ha un account qui, e
+          il payload delle pagelle infatti non porta nessun fantallenatore. */}
+      {!realMatch ? (
+        <MatchManagers
+          home={d.home_manager}
+          away={d.away_manager}
+          homeTeam={d.home_team}
+          awayTeam={d.away_team}
+          result={d.result}
+        />
+      ) : null}
     </div>
   );
 }

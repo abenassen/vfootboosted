@@ -9,6 +9,7 @@ import {
 } from '../../api/simulationAdapters';
 import { Button, Card, SectionTitle } from '../ui';
 import { MatchScoreHeader } from './MatchScoreHeader';
+import { MatchManagers } from './MatchManagers';
 import { ZonePitchGrid } from './ZonePitchGrid';
 import { ZoneInspector } from './ZoneInspector';
 import { ScoreBuildExplainer } from './ScoreBuildExplainer';
@@ -159,6 +160,17 @@ export function MatchDetail({
           />
         </div>
       </Card>
+
+      {/* Chi schiera le due squadre. Manca sull'artefatto della simulazione
+          storica (squadre inventate, nessun account dietro), e la striscia lo
+          sa: senza i due allenatori non disegna niente. */}
+      <MatchManagers
+        home={data.home_manager}
+        away={data.away_manager}
+        homeTeam={data.home_team}
+        awayTeam={data.away_team}
+        result={data.result}
+      />
     </div>
   );
 }

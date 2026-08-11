@@ -5,7 +5,6 @@ export interface LeagueSummary {
   name: string;
   role: 'admin' | 'manager';
   invite_code: string;
-  market_open: boolean;
   team_name?: string | null;
   /** Opaque crest descriptor of the caller's team in THIS league (see
    *  utils/crest). One per team, unlike the avatar, which is one per account. */
@@ -39,6 +38,18 @@ export interface LeagueTeam {
   record?: TeamRecord;
 }
 
+/** Chi schiera una delle due squadre di un tabellino. Arriva col referto ma non
+ *  è congelato dentro: il backend lo rilegge a ogni richiesta, così l'avatar sui
+ *  tabellini vecchi è sempre la faccia di adesso. Opzionale ovunque, perché una
+ *  partita simulata non ha allenatori veri dietro. */
+export interface FixtureManager {
+  user_id: number;
+  username: string;
+  /** Descrittore opaco (v. utils/avatar). Vuoto = faccia predefinita dal nome. */
+  avatar: string;
+  team_id: number;
+}
+
 export interface ReferenceSeason {
   id: number;
   name: string;
@@ -54,7 +65,6 @@ export interface LeagueDetail {
   league_id: number;
   name: string;
   mode: 'aura' | 'classic';
-  market_open: boolean;
   max_substitutions: number;
   defense_bonus_enabled: boolean;
   defense_bonus_mode: 'add_own' | 'subtract_opponent';
@@ -72,7 +82,22 @@ export interface LeagueDetail {
 export interface TeamRoster {
   team_id: number;
   team_name: string;
-  players: Array<{ player_id: number; name: string; price: number }>;
+  players: Array<{
+    slot_id: number;
+    player_id: number;
+    name: string;
+    price: number;
+    /** Ruolo congelato nel listone di lega. Null in aura, dove non esiste. */
+    role: ClassicRole | null;
+  }>;
+  /** Portafoglio e caselle della squadra. Null in aura: non c'e' ne' asta ne' quota. */
+  budget: {
+    initial: number;
+    spent: number;
+    remaining: number;
+    slots: Record<ClassicRole, AuctionSlotCount>;
+    slots_remaining_total: number;
+  } | null;
 }
 
 export interface CreateLeagueRequest {

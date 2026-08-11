@@ -28,7 +28,7 @@ from realdata.models import (
 )
 from vfoot.models import (
     FantasyCompetition, FantasyFixture, FantasyFixtureDetail, FantasyLeague,
-    FantasyMatchday, FantasyTeam, LeagueMembership, SavedLineupSnapshot,
+    FantasyMatchday, FantasyTeam, LeagueMembership, SavedLineupSnapshot, UserProfile,
 )
 from vfoot.services.classic_matchday_scoring import _live_states, _mark_unstable
 
@@ -188,3 +188,33 @@ class LiveDetailTests(TestCase):
         res = self.client.get(f"/api/v1/fixtures/{self.fixture.id}")
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.data["frozen"])
+
+    # -- i due fantallenatori ------------------------------------------------ #
+    def test_the_tabellino_names_both_managers_live(self):
+        SavedLineupSnapshot.objects.create(
+            league_id=str(self.league.id), matchday_id="22",
+            lineup_id=f"team{self.mine.id}",
+            gk_player_id=str(self._player("Portiere", self.playing[0]).id),
+            starter_player_ids=[self._player("Attaccante", self.playing[1]).id],
+            bench_player_ids=[])
+        res = self.client.get(f"/api/v1/fixtures/{self.fixture.id}")
+        self.assertEqual(res.data["home_manager"]["username"], "mario")
+        self.assertEqual(res.data["away_manager"]["username"], "luigi")
+        self.assertEqual(res.data["home_manager"]["team_id"], self.mine.id)
+        # Nessun profilo = nessun avatar scelto, che è uno stato normale: il client
+        # ne disegna uno seminato sul nome, e la stringa vuota è come glielo dice.
+        self.assertEqual(res.data["away_manager"]["avatar"], "")
+
+    def test_a_frozen_tabellino_shows_the_avatar_of_today(self):
+        """Il referto è congelato, la faccia no.
+
+        Congelare l'avatar dentro il payload avrebbe voluto dire che chi se la
+        cambia oggi resta con la vecchia su tutte le partite già giocate — e la
+        striscia in fondo al tabellino esiste proprio per farla vedere."""
+        FantasyFixtureDetail.objects.create(
+            fixture=self.fixture, vfoot_home=1.0, vfoot_away=2.0,
+            payload={"mode": "classic", "frozen": True})
+        UserProfile.objects.create(user=self.user, avatar='{"top":"hat"}')
+        res = self.client.get(f"/api/v1/fixtures/{self.fixture.id}")
+        self.assertEqual(res.data["home_manager"]["avatar"], '{"top":"hat"}')
+        self.assertEqual(res.data["home_manager"]["user_id"], self.user.id)

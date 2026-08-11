@@ -1,6 +1,8 @@
 // Types for the read-only historical Vfoot league dry-run simulation.
 // Mirrors the backend artifact served at /api/v1/simulations/historical-vfoot/latest.
 
+import type { FixtureManager } from './league';
+
 export type SimResult = 'home' | 'draw' | 'away';
 
 export interface SimConfig {
@@ -191,4 +193,8 @@ export interface SimFixtureDetail extends SimFixtureSummary {
   home_lineup: SimLineup;
   away_lineup: SimLineup;
   vector_report: SimVectorReport;
+  /** I due fantallenatori, quando dietro la sfida ci sono davvero due persone: il
+   *  referto di una lega aura li porta, l'artefatto della simulazione storica no. */
+  home_manager?: FixtureManager | null;
+  away_manager?: FixtureManager | null;
 }
