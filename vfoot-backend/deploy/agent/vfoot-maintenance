@@ -1,0 +1,134 @@
+#!/bin/sh
+# Fixed entry point the unprivileged `vfoot` user may run as root via sudo
+# (see vfoot-maintenance.sudoers). Install at /usr/local/sbin/vfoot-maintenance,
+# mode 0755, owned by root.
+#
+# THIS SCRIPT VALIDATES AGAIN. Everything reaching it has already been checked in
+# Python (realdata/services/maintenance.py). It is checked here a second time, in a
+# different language, because the Python side builds its arguments from a proposal
+# written by a language model whose input contains text scraped off other people's
+# websites. Two independent gates; neither can be talked out of it with a sentence.
+#
+#   restart <unit>              restart one allow-listed unit
+#   check                       the smoke check: is the server alive?  (exit 0/1)
+#   arm-rollback <tag> <secs>   schedule the dead-man: re-check in <secs> and,
+#                               unless healthy, revert to <tag>
+#   rollback <tag>              revert the checkout to <tag> and restart, now
+set -eu
+
+REPO=/srv/vfoot-app
+PY="$REPO/vfoot-backend/.venv/bin/python"
+SRC="$REPO/vfoot-backend/src"
+APP_USER=vfoot
+
+# Mirrors ALLOWED_UNITS in realdata/services/maintenance.py. Kept as a literal list
+# rather than a glob: `vfoot-*` would also match a unit somebody drops in later.
+ALLOWED_UNITS="vfoot vfoot-tick vfoot-calendar vfoot-tm-poll vfoot-egress-refill vfoot-market vfoot-nudge vfoot-health"
+
+die() { echo "vfoot-maintenance: $*" >&2; exit 1; }
+
+check_unit() {
+    for u in $ALLOWED_UNITS; do
+        [ "$u" = "$1" ] && return 0
+    done
+    die "unita' non permessa: $1"
+}
+
+# A tag this script created, and nothing else. Without the pattern check, `rollback`
+# takes an arbitrary revision — i.e. "revert to anything" — which is a much larger
+# power than "undo what we just did".
+check_tag() {
+    case "$1" in
+        pre-agent-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+        *) die "tag non valido: $1" ;;
+    esac
+    sudo -u "$APP_USER" git -C "$REPO" rev-parse --verify "$1^{commit}" >/dev/null 2>&1 \
+        || die "il tag $1 non esiste"
+}
+
+smoke_check() {
+    # Four cheap questions, ~10 seconds. They answer "is it up and are the parts
+    # still talking", NOT "was the patch correct" — a wrong-but-harmless fix passes
+    # all four, and is caught next morning when health_report raises the same alarm.
+    systemctl is-active --quiet vfoot || { echo "vfoot.service non e' attivo"; return 1; }
+
+    # Port 8000 DIRECTLY, never through nginx: nginx answers 503 for the maintenance
+    # page and would mask everything behind a plausible-looking failure.
+    curl -sf -o /dev/null --max-time 10 http://127.0.0.1:8000/admin/login/ \
+        || { echo "l'app non risponde su 127.0.0.1:8000"; return 1; }
+
+    # Touches the ORM, so it exercises Django, the migrations and the database at once.
+    sudo -u "$APP_USER" sh -c "cd '$SRC' && '$PY' manage.py health_report --skip-shape" \
+        >/dev/null 2>&1 || { echo "health_report solleva"; return 1; }
+
+    sudo -u "$APP_USER" sh -c "cd '$SRC' && '$PY' manage.py tick --dry-run" \
+        >/dev/null 2>&1 || { echo "il tick solleva"; return 1; }
+
+    echo "controllo di fumo passato"
+    return 0
+}
+
+do_rollback() {
+    tag="$1"
+    echo "ripristino a $tag"
+    sudo -u "$APP_USER" git -C "$REPO" reset --hard "$tag" || die "reset fallito"
+    sudo -u "$APP_USER" sh -c "cd '$SRC' && '$PY' manage.py collectstatic --noinput" \
+        >/dev/null 2>&1 || true
+    systemctl restart vfoot
+    echo "ripristinato a $tag e riavviato"
+}
+
+cmd="${1:-}"
+[ -n "$cmd" ] || die "manca il comando (restart|check|arm-rollback|rollback)"
+shift
+
+case "$cmd" in
+    restart)
+        [ $# -eq 1 ] || die "uso: restart <unita'>"
+        check_unit "$1"
+        systemctl restart "$1"
+        echo "riavviato $1"
+        ;;
+
+    check)
+        smoke_check
+        ;;
+
+    arm-rollback)
+        [ $# -eq 2 ] || die "uso: arm-rollback <tag> <secondi>"
+        check_tag "$1"
+        case "$2" in ''|*[!0-9]*) die "secondi non numerico: $2" ;; esac
+        [ "$2" -ge 60 ] && [ "$2" -le 3600 ] || die "secondi fuori da 60..3600"
+        # THE DIRECTION OF FALL. The timer re-runs the smoke check ITSELF and reverts
+        # unless it passes — rather than reading a flag someone wrote earlier. So if
+        # the thing that was supposed to declare success has itself died, the answer
+        # is still "revert". Written the other way round ("if the check failed,
+        # revert"), a dead checker leaves broken code live all night.
+        systemd-run --quiet --collect \
+            --unit="vfoot-rollback-$1" \
+            --on-active="$2" \
+            --description="Ripristino automatico a $1 se il server non e' sano" \
+            /usr/local/sbin/vfoot-maintenance rollback-unless-healthy "$1"
+        echo "ripristino armato: fra ${2}s si ricontrolla e, se non e' sano, si torna a $1"
+        ;;
+
+    rollback-unless-healthy)
+        [ $# -eq 1 ] || die "uso: rollback-unless-healthy <tag>"
+        check_tag "$1"
+        if smoke_check; then
+            echo "sano: non tocco niente"
+            exit 0
+        fi
+        do_rollback "$1"
+        ;;
+
+    rollback)
+        [ $# -eq 1 ] || die "uso: rollback <tag>"
+        check_tag "$1"
+        do_rollback "$1"
+        ;;
+
+    *)
+        die "comando sconosciuto: $cmd"
+        ;;
+esac

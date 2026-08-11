@@ -1,0 +1,10 @@
+[Unit]
+Description=Esegue le proposte di manutenzione approvate, ogni 5 minuti
+[Timer]
+# Cinque minuti e' il ritardo massimo fra il tuo si' e l'azione. Costa una query
+# quando non c'e' niente da fare, che e' quasi sempre.
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=30s
+[Install]
+WantedBy=timers.target

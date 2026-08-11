@@ -35,7 +35,11 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("id", "username", "email", "avatar")
+        # is_staff is read-only and only tells the client whether to OFFER the
+        # maintenance page in the menu. It grants nothing: the endpoints behind it
+        # check IsAdminUser themselves, so a client that lies about this flag sees
+        # a page that answers 403 to everything.
+        fields = ("id", "username", "email", "avatar", "is_staff")
 
     def get_avatar(self, user) -> str:
         profile = getattr(user, "profile", None)

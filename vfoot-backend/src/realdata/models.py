@@ -499,6 +499,129 @@ class JobRun(models.Model):
         return gone
 
 
+class MaintenanceRun(models.Model):
+    """One pass of the maintenance agent: what woke it, and what it concluded.
+
+    The agent is STATELESS between passes. Without a written record it would
+    re-diagnose Tuesday's problem from scratch on Wednesday and quite possibly
+    "fix" it a second time — so this table is not a log, it is the agent's memory,
+    and the rule that reads it (never re-propose what was rejected) is what stops
+    it from becoming a colleague who repeats the same idea every morning.
+
+    ``agent_cmd`` records WHICH adapter produced the pass. Two providers behind one
+    contract means a proposal's quality cannot be read without knowing who wrote it,
+    and "which model was this?" is the first question asked of a bad proposal.
+    """
+
+    TRIGGER_ALARM = "alarm"
+    TRIGGER_WEEKLY = "weekly"
+    TRIGGER_MANUAL = "manual"
+    TRIGGER_CHOICES = [
+        (TRIGGER_ALARM, "Verdetto rosso"),
+        (TRIGGER_WEEKLY, "Passata settimanale"),
+        (TRIGGER_MANUAL, "A mano"),
+    ]
+
+    started_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    trigger = models.CharField(max_length=12, choices=TRIGGER_CHOICES,
+                               default=TRIGGER_ALARM)
+    agent_cmd = models.CharField(max_length=200, blank=True, default="")
+    # The health verdict that woke it, stored verbatim: the proposal is only
+    # judgeable next to the evidence the agent was actually given.
+    context = models.JSONField(default=dict, blank=True)
+    ok = models.BooleanField(null=True, blank=True)
+    summary = models.CharField(max_length=300, blank=True, default="")
+    diagnosis = models.TextField(blank=True, default="")
+    error = models.TextField(blank=True, default="")
+
+    class Meta:
+        indexes = [models.Index(fields=["-started_at"])]
+
+    def __str__(self) -> str:
+        state = {True: "ok", False: "FALLITA", None: "interrotta"}[self.ok]
+        return f"manutenzione {self.started_at:%d/%m %H:%M} [{state}]"
+
+
+class MaintenanceProposal(models.Model):
+    """One thing the agent proposes doing. The agent NEVER acts — this is the seam.
+
+    ``kind`` comes from a closed set and ``payload`` is re-validated in Python at
+    execution time (see ``services/maintenance.validate``). That double check is the
+    whole security model: the agent's input contains error strings that came from
+    other people's websites, so a fully hijacked model must still be unable to do
+    anything but propose one of these — and a human must still click.
+
+    The list of permitted actions therefore lives in an ``if``, not in a prompt that
+    politely asks the model to behave.
+    """
+
+    KIND_RESTART_UNIT = "restart_unit"
+    KIND_RERUN_COMMAND = "rerun_command"
+    KIND_CLEAR_CACHE_FILE = "clear_cache_file"
+    KIND_APPLY_PATCH = "apply_patch"
+    KIND_NONE = "none"
+    KIND_CHOICES = [
+        (KIND_RESTART_UNIT, "Riavvia un'unita'"),
+        (KIND_RERUN_COMMAND, "Rilancia un comando"),
+        (KIND_CLEAR_CACHE_FILE, "Cancella un file di cache"),
+        (KIND_APPLY_PATCH, "Applica una patch"),
+        (KIND_NONE, "Nessuna azione"),
+    ]
+
+    # Kinds that may execute without a human, when the auto tier is switched on.
+    # apply_patch is deliberately absent and must stay absent.
+    AUTO_KINDS = (KIND_RESTART_UNIT, KIND_RERUN_COMMAND, KIND_CLEAR_CACHE_FILE)
+
+    STATUS_PROPOSED = "proposed"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_DONE = "done"
+    STATUS_FAILED = "failed"
+    STATUS_REFUSED = "refused"
+    STATUS_CHOICES = [
+        (STATUS_PROPOSED, "In attesa di un sì"),
+        (STATUS_APPROVED, "Approvata, da eseguire"),
+        (STATUS_REJECTED, "Rifiutata"),
+        (STATUS_DONE, "Eseguita"),
+        (STATUS_FAILED, "Esecuzione fallita"),
+        (STATUS_REFUSED, "Respinta dalla validazione"),
+    ]
+
+    run = models.ForeignKey(MaintenanceRun, on_delete=models.CASCADE,
+                            related_name="proposals")
+    kind = models.CharField(max_length=24, choices=KIND_CHOICES)
+    payload = models.JSONField(default=dict, blank=True)
+    rationale = models.TextField(blank=True, default="")
+    evidence = models.JSONField(default=dict, blank=True)
+    # sha256 of (kind, payload): the identity used to recognise a proposal already
+    # rejected once. Without it the agent re-proposes the same rejected idea nightly.
+    fingerprint = models.CharField(max_length=64, blank=True, default="")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES,
+                              default=STATUS_PROPOSED)
+    decided_by = models.ForeignKey("auth.User", null=True, blank=True,
+                                   on_delete=models.SET_NULL,
+                                   related_name="maintenance_decisions")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    executed_at = models.DateTimeField(null=True, blank=True)
+    result = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["fingerprint"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind} [{self.status}]"
+
+    @property
+    def needs_human(self) -> bool:
+        """True when no auto tier may ever execute this. ``apply_patch`` always does."""
+        return self.kind not in self.AUTO_KINDS
+
+
 class PlayerZoneFeature(models.Model):
     """
     Aggregated feature values by player and zone for one match.

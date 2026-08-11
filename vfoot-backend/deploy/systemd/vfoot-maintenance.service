@@ -1,0 +1,11 @@
+[Unit]
+Description=Vfoot esecutore di manutenzione: applica le proposte approvate
+[Service]
+Type=oneshot
+User=vfoot
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+# Deve esistere qualcosa di vivo su un timer che agisca, perche' l'approvazione
+# arriva ore dopo la proposta — leggi la mail a colazione, o premi il bottone da
+# una spiaggia — e a quel punto il processo dell'agente e' morto da un pezzo.
+# Quel qualcosa e' questo, ed e' codice normale: nessun modello in questo giro.
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py maintenance_tick

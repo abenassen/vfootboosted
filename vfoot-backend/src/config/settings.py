@@ -395,6 +395,34 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL",
 # command by hand never posts an alarm to anybody.
 VFOOT_HEALTH_EMAIL = os.environ.get("VFOOT_HEALTH_EMAIL", "")
 
+
+# --- Maintenance agent ----------------------------------------------------
+# The agent PROPOSES and this code EXECUTES; see realdata/services/maintenance.py
+# and vfoot-backend/docs/maintenance_agent_plan.md.
+
+# The adapter script (deploy/agent/vfoot-agent-*). Empty = no agent, which is the
+# default everywhere: the deterministic surveillance (health_report) is what
+# protects the system, and it runs whether or not this is set.
+VFOOT_AGENT_CMD = os.environ.get("VFOOT_AGENT_CMD", "")
+# Skip the subprocess entirely and use a canned answer. This is what makes the
+# risky machinery — apply, smoke check, dead-man rollback — testable without a
+# model, without root and without production.
+VFOOT_AGENT_SIMULATED = _env_bool("VFOOT_AGENT_SIMULATED", False)
+VFOOT_AGENT_TIMEOUT = float(os.environ.get("VFOOT_AGENT_TIMEOUT", "1800"))
+
+# OFF until after the deploy, deliberately. Until it is on, EVERY proposal waits
+# for a human — which is the whole point of the run-in period: you cannot judge
+# whether the agent's diagnoses are any good by watching it act on them.
+VFOOT_MAINTENANCE_AUTO = _env_bool("VFOOT_MAINTENANCE_AUTO", False)
+VFOOT_MAINTENANCE_MAX_ACTIONS = int(
+    os.environ.get("VFOOT_MAINTENANCE_MAX_ACTIONS", "2"))
+# Fixed path so the sudoers rule can name an exact binary (see deploy/maintenance/).
+VFOOT_MAINTENANCE_WRAPPER = os.environ.get(
+    "VFOOT_MAINTENANCE_WRAPPER", "/usr/local/sbin/vfoot-maintenance")
+VFOOT_MAINTENANCE_SIMULATED = _env_bool("VFOOT_MAINTENANCE_SIMULATED", False)
+# The checkout the agent reads and patches. Defaults to this repository.
+VFOOT_REPO_ROOT = os.environ.get("VFOOT_REPO_ROOT", str(REPO_ROOT))
+
 # Confirmation links point at the SPA, which then calls the verify endpoint.
 VFOOT_FRONTEND_BASE_URL = os.environ.get("VFOOT_FRONTEND_BASE_URL",
                                          "http://localhost:5173")

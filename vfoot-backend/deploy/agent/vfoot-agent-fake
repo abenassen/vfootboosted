@@ -1,0 +1,35 @@
+#!/bin/sh
+# Adapter: none. Echoes a canned proposal read from VFOOT_AGENT_FAKE_ANSWER (a file),
+# or a default restart proposal if that isn't set.
+#
+# THIS IS THE MOST IMPORTANT ADAPTER IN THE DIRECTORY. The machinery downstream of
+# it — validation, approval, apply, smoke check, dead-man rollback — is the part you
+# cannot afford to discover broken at three in the morning, and it is also the part
+# that is annoying to exercise for real: it needs a red verdict, a model, money, and
+# several minutes per attempt. With this, the whole chain runs in the test suite, in
+# half a second, deterministically, as often as you like.
+#
+# Nothing here calls a model. That is the point.
+set -eu
+
+cat > /dev/null   # drain the context: the fake doesn't read it
+
+if [ -n "${VFOOT_AGENT_FAKE_ANSWER:-}" ] && [ -f "$VFOOT_AGENT_FAKE_ANSWER" ]; then
+    cat "$VFOOT_AGENT_FAKE_ANSWER"
+    exit 0
+fi
+
+cat <<'JSON'
+{
+  "summary": "[finto] l'egress sembra a corto di IP buoni",
+  "diagnosis": "Risposta finta: nessun modello e' stato interpellato.",
+  "proposals": [
+    {
+      "kind": "restart_unit",
+      "payload": {"unit": "vfoot-egress-refill"},
+      "rationale": "[finto] ricarica il pool",
+      "evidence": {}
+    }
+  ]
+}
+JSON

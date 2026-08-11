@@ -29,6 +29,8 @@ questi file ne sono la copia versionata. L'ambiente (DB, SMTP, VAPID) arriva da
 | `vfoot-nudge` | 10:00 | `nudge_conclusions` | l'admin distratto non viene mai richiamato: classifica ferma finché non se ne accorge da solo |
 | `vfoot-backup` | 03:15 | `/usr/local/sbin/vfoot-backup` | **nessuna copia dei dati** fra un deploy e l'altro (**root**) |
 | `vfoot-health` | 07:30 | `health_report --mail --prune` | nessuno si accorge che uno degli altri sette ha smesso di girare, o che gira e non riporta piu' niente |
+| `vfoot-agent` | ogni ora, ma decide da sé | `maintenance_run` | niente diagnosi automatica: il guasto lo scopri lo stesso dalla mail, ma lo capisci e lo correggi tu |
+| `vfoot-maintenance` | ogni 5 min | `maintenance_tick` | le proposte che hai approvato non vengono mai eseguite |
 
 Fuori da questa tabella, ma schedulato lo stesso: il rinnovo dei certificati TLS,
 che è il timer di sistema `certbot.timer` (vedi `DEPLOY.md`) — di nostro non ha
@@ -92,6 +94,53 @@ la lettura offline non toglierebbe una singola richiesta.
 
 Cioè costa **meno di prima anche nel giorno di gara**, e sull'anno gira intorno a
 ~60 richieste al giorno contro 160. Il denso non è stato comprato: è avanzato.
+
+### L'agente propone, l'esecutore fa — e sono due unità apposta
+
+`vfoot-agent` e `vfoot-maintenance` sono lo stesso lavoro spezzato in due, e la
+spaccatura è il presidio, non un dettaglio di packaging.
+
+**`vfoot-agent` gira come `vfoot` senza sudo**: legge, cerca, fa girare i test, crea
+un branch sotto `fix/`. Non riavvia niente, non applica niente, non ha una voce in
+`/etc/sudoers.d`. Scrive una *proposta*, il cui `kind` viene da un insieme chiuso.
+
+**`vfoot-maintenance` è codice normale**, nessun modello coinvolto: rilegge la
+proposta, la **rivalida da capo** contro le liste in
+`realdata/services/maintenance.py`, e solo allora attraversa il ponte sudo
+`/usr/local/sbin/vfoot-maintenance` — che a sua volta ricontrolla tutto una seconda
+volta, in shell.
+
+Due cancelli indipendenti, in due linguaggi, perché l'ingresso dell'agente contiene
+messaggi d'errore che vengono dai siti che scrapiamo: nessuna frase in un prompt può
+essere l'ultima difesa. Un modello completamente dirottato può, al massimo, proporre
+una delle cinque cose dell'insieme — e per tre di quelle serve comunque il tuo sì.
+
+Esiste anche un'unità separata perché **l'approvazione arriva ore dopo la proposta**:
+leggi la mail a colazione, o premi il bottone da una spiaggia, e a quel punto il
+processo dell'agente è morto da un pezzo. Qualcosa di vivo su un timer deve essere la
+cosa che agisce.
+
+Perché il timer dell'agente scatta ogni ora ma non costa niente: `maintenance_run`
+guarda il verdetto e, se è verde, esce prima di aprire il portafoglio — stessa forma
+di `sync_calendar --if-due`. **A svegliarlo è il verdetto rosso, non l'orologio**: un
+agente che ogni mattina legge dati sani è un agente che prima o poi ti rassicura
+sulla mattina sbagliata.
+
+Il livello automatico (`VFOOT_MAINTENANCE_AUTO`) **parte spento**: finché è spento
+ogni proposta aspetta un umano, che è tutto il senso del rodaggio. E `apply_patch`
+non entra nel livello automatico a nessuna impostazione, mai.
+
+Da terminale, durante il rodaggio:
+
+```sh
+manage.py maintenance_review              # cosa aspetta un sì
+manage.py maintenance_review --show 12    # una proposta per intero, col diff
+manage.py maintenance_review --approve 12 # la esegue il prossimo tick
+manage.py maintenance_review --reject 12 --why "sbagliato il nome"
+```
+
+Un rifiuto non è solo un no: l'impronta torna all'agente alla passata successiva, e
+la stessa idea non si ripresenta domani mattina.
 
 ### Le due dipendenze da conoscere
 

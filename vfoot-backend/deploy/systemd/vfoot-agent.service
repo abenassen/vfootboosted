@@ -1,0 +1,13 @@
+[Unit]
+Description=Vfoot agente di manutenzione: chiede una diagnosi quando il verdetto e' rosso
+[Service]
+Type=oneshot
+# Senza sudo, e senza voce in /etc/sudoers.d: l'agente legge, cerca, fa girare i
+# test e crea un branch. Non riavvia niente e non applica niente — quello lo fa
+# l'esecutore (vfoot-maintenance.timer), che e' codice normale.
+User=vfoot
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+# Il comando decide da se' se c'e' qualcosa da chiedere: con verdetto verde esce
+# subito senza chiamare nessun modello. Per questo il timer puo' scattare a ogni
+# ora senza che questo costi niente — stessa forma di `sync_calendar --if-due`.
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py maintenance_run

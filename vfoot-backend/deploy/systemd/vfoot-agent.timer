@@ -1,0 +1,14 @@
+[Unit]
+Description=Controlla ogni ora se c'e' un verdetto rosso da far diagnosticare
+[Timer]
+# Ogni ora, ma a svegliare l'agente e' il VERDETTO, non questo timer: con tutto
+# verde il comando esce prima di aprire il portafoglio. Un agente che ogni mattina
+# legge dati sani e' un agente che prima o poi ti rassicura sulla mattina sbagliata.
+OnBootSec=15min
+OnUnitActiveSec=1h
+# Sfalsato: se il guasto e' un servizio esterno, non serve arrivare allo stesso
+# secondo di tutti gli altri che stanno riprovando.
+RandomizedDelaySec=5m
+Persistent=true
+[Install]
+WantedBy=timers.target

@@ -23,6 +23,10 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/v1/", include("vfoot.api.urls")),
+    # Site maintenance (staff only). Its own include, not a block appended to
+    # vfoot.api.urls: different audience, and it keeps the whole feature inside
+    # the realdata app instead of straddling two.
+    path("api/v1/maintenance/", include("realdata.api.urls")),
 ]
 
 

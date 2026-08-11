@@ -18,9 +18,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UNIT_DIR=/etc/systemd/system
 BACKUP_SRC="$HERE/../backup/vfoot-backup"
 BACKUP_DST=/usr/local/sbin/vfoot-backup
+MAINT_SRC="$HERE/../agent/vfoot-maintenance"
+MAINT_DST=/usr/local/sbin/vfoot-maintenance
+MAINT_SUDOERS_SRC="$HERE/../agent/vfoot-maintenance.sudoers"
+MAINT_SUDOERS_DST=/etc/sudoers.d/vfoot-maintenance
 
 # L'inventario. Aggiungere un job = una riga qui + i due file dell'unita'.
-ALL_UNITS=(tick calendar tm-poll egress-refill market nudge backup health)
+ALL_UNITS=(tick calendar tm-poll egress-refill market nudge backup health agent maintenance)
 
 DRY=""
 ENABLE=()
@@ -79,6 +83,23 @@ if [ -f "$BACKUP_SRC" ]; then
   run install -m 0755 "$BACKUP_SRC" "$BACKUP_DST"
 fi
 
+# Il ponte sudo della manutenzione: senza di lui l'esecutore non puo' riavviare
+# ne' ripristinare, cioe' non puo' fare niente di cio' per cui esiste. La regola
+# sudoers si valida PRIMA di installarla: un file sudoers rotto in /etc/sudoers.d
+# puo' togliere sudo a tutti, e questo e' l'unico posto in cui accorgersene costa
+# ancora zero.
+if [ -f "$MAINT_SRC" ]; then
+  echo "== Installo $MAINT_DST + regola sudoers"
+  run install -m 0755 "$MAINT_SRC" "$MAINT_DST"
+  if [ -n "$DRY" ]; then
+    echo "[dry-run] visudo -cf $MAINT_SUDOERS_SRC && install -m 0440 ... $MAINT_SUDOERS_DST"
+  elif visudo -cf "$MAINT_SUDOERS_SRC" >/dev/null; then
+    install -m 0440 "$MAINT_SUDOERS_SRC" "$MAINT_SUDOERS_DST"
+  else
+    echo "  REGOLA SUDOERS NON VALIDA: non installata (vedi $MAINT_SUDOERS_SRC)" >&2
+  fi
+fi
+
 run systemctl daemon-reload
 
 if [ ${#ENABLE[@]} -gt 0 ]; then
@@ -93,6 +114,23 @@ if [ ${#ENABLE[@]} -gt 0 ]; then
     if [ "$u" = calendar ] || [ "$u" = tick ]; then
       if [ ! -x /usr/local/sbin/vfoot-egress ]; then
         echo "  SALTO vfoot-$u: manca /usr/local/sbin/vfoot-egress (vedi DEPLOY.md)" >&2
+        continue
+      fi
+    fi
+    # L'esecutore riavvia e ripristina: senza il suo ponte sudo non puo' fare
+    # niente di cio' per cui esiste, e una proposta approvata resterebbe li'.
+    if [ "$u" = maintenance ]; then
+      if [ ! -x /usr/local/sbin/vfoot-maintenance ]; then
+        echo "  SALTO vfoot-$u: manca /usr/local/sbin/vfoot-maintenance (vedi DEPLOY.md)" >&2
+        continue
+      fi
+    fi
+    # L'agente senza adattatore configurato fallirebbe a ogni scatto. La
+    # sorveglianza deterministica (vfoot-health) non dipende da lui: se questo
+    # resta spento, il sistema e' sorvegliato lo stesso, solo senza diagnosi.
+    if [ "$u" = agent ]; then
+      if ! grep -q '^VFOOT_AGENT_CMD=..*' /srv/vfoot-app/.env 2>/dev/null; then
+        echo "  SALTO vfoot-$u: VFOOT_AGENT_CMD non e' impostata in .env" >&2
         continue
       fi
     fi

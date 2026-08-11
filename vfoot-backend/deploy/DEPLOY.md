@@ -4,6 +4,13 @@ How to ship a new version to production, and how to turn the automated polling o
 at launch. Written from the 23/07/2026 deploy (`03b099b` → current `main`); the
 gotchas below are ones that actually bit.
 
+> **Per la riapertura si segue `REBUILD.md`, non questo.** Il deploy di rientro
+> butta il database e ricostruisce la 25-26 dalla cache delle risposte: la
+> produzione ha le partite giuste ma estratte con l'estrattore vecchio (31 chiavi
+> feature su 47, zero `raw_stats`, zero tiri), e un aggiornamento incrementale
+> lascerebbe quel difetto sotto un listone che sembra a posto. Questo file resta
+> la procedura per ogni deploy successivo.
+
 ## Server layout
 
 - Host: `ssh -t root@139.162.144.123`
@@ -294,11 +301,45 @@ sulla forma del dato»). In breve: prende i due guasti che non hanno codice d'us
 — il job che ha smesso di scattare, e il job che scatta, riesce, e non riporta più
 niente perché la pagina che leggeva è cambiata.
 
+### Agente di manutenzione — si accende DOPO, e in sola lettura
+
+Il backend c'è tutto (`vfoot-agent` + `vfoot-maintenance`, vedi
+`deploy/systemd/README.md` e `docs/maintenance_agent_plan.md`), ma il piano è
+accenderlo **dopo** il go-live e tenerlo in sola lettura due o tre settimane: non si
+può giudicare se le sue diagnosi valgono guardandolo agire.
+
+`install.sh` installa da sé il ponte sudo `/usr/local/sbin/vfoot-maintenance` e ne
+valida la regola sudoers **prima** di copiarla (un file rotto in `/etc/sudoers.d`
+toglie sudo a tutti). Nel `.env` servono:
+
+```sh
+VFOOT_AGENT_CMD=/srv/vfoot-app/vfoot-backend/deploy/agent/vfoot-agent-claude
+# VFOOT_MAINTENANCE_AUTO resta assente/false: durante il rodaggio ogni proposta
+# aspetta un umano. apply_patch non entra nel livello automatico MAI, comunque.
+```
+
+Provalo prima col finto, che non chiama nessun modello e non costa niente:
+
+```sh
+sudo -u vfoot ... manage.py maintenance_run --force   # con VFOOT_AGENT_CMD=.../vfoot-agent-fake
+sudo -u vfoot ... manage.py maintenance_review        # cosa aspetta un sì
+sudo -u vfoot ... manage.py maintenance_tick --dry-run
+```
+
+Se `VFOOT_AGENT_CMD` non è impostata, `install.sh --enable agent` salta l'unità
+invece di riempire il journal di errori. La sorveglianza deterministica
+(`vfoot-health`) non dipende dall'agente: senza di lui il sistema è sorvegliato lo
+stesso, solo senza diagnosi automatica.
+
 ### Enable at launch
 ```sh
 ssh root@139.162.144.123 'cd /srv/vfoot-app/vfoot-backend/deploy/systemd
   ./install.sh --enable-all'
 ```
+`--enable-all` accende anche `agent` e `maintenance`. Se vuoi il go-live senza
+agente, elencali a mano: `--enable tick --enable calendar --enable tm-poll
+--enable egress-refill --enable market --enable nudge --enable backup
+--enable health`.
 `vfoot-backup` deserves to go on **before** launch, not at it: it is the only copy
 of the data between one deploy and the next, and it depends on nothing.
 

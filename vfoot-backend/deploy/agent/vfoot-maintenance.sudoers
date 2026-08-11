@@ -1,0 +1,12 @@
+# Install as /etc/sudoers.d/vfoot-maintenance  (validate: visudo -cf this file, mode 0440)
+#
+# The unprivileged app user `vfoot` may run ONLY the fixed maintenance wrapper as
+# root — nothing else. This is the second narrow bridge across the privilege
+# boundary (the first is vfoot-egress), and it exists for the same reason: the app
+# DECIDES, root ACTS, and the set of things root will act on is a literal list
+# inside the wrapper.
+#
+# The agent itself has no entry here and never will: it runs as `vfoot` with no
+# sudo at all, and cannot restart, revert or deploy anything. It writes a proposal;
+# the executor — ordinary Python, no model in the loop — is what crosses this line.
+vfoot ALL=(root) NOPASSWD: /usr/local/sbin/vfoot-maintenance

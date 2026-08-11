@@ -1,0 +1,22 @@
+#!/bin/sh
+# Adapter: Claude.  stdin = the context JSON.  stdout = ONLY the proposal JSON.
+# Exit != 0 means the pass failed (the caller records it and carries on).
+#
+# Runs as `vfoot`, in the checkout, with NO sudo. It can read, search, run the test
+# suite and create a branch. It cannot restart anything, cannot deploy, and has no
+# entry in sudoers — the power lives entirely in the executor on the other side of
+# the JSON contract.
+#
+# The tool list is the second reason this is safe and the first reason it is cheap:
+# no WebFetch, no WebSearch, no network. The agent reasons about a digested report,
+# never about bytes fetched from the site that just broke.
+set -eu
+
+REPO=/srv/vfoot-app
+cd "$REPO" || exit 1
+
+exec claude -p "$(cat)" \
+    --model claude-opus-5 \
+    --append-system-prompt "$(cat "$REPO/vfoot-backend/deploy/agent/prompt.md")" \
+    --allowedTools 'Read,Grep,Glob,Bash(git *),Bash(*manage.py test*)' \
+    --output-format json

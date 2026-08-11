@@ -1,0 +1,35 @@
+#!/bin/sh
+# Adapter: Kimi (Moonshot), through the same CLI.
+#
+# Moonshot exposes an Anthropic-compatible endpoint, so swapping provider is an
+# ENVIRONMENT BLOCK, not a rewrite: same binary, same contract, same prompt, same
+# tool restrictions. That is the whole payoff of putting the seam at the contract
+# instead of at an SDK.
+#
+# Two things worth knowing:
+#  * their endpoint does not serve WebFetch — which costs us nothing, because we
+#    deliberately don't give the agent WebFetch anyway (it must not read payloads
+#    that came from outside);
+#  * `kimi-k3` thinks by default. The k2.7-code variants are faster but REQUIRE
+#    thinking to be enabled explicitly and 400 otherwise, so k3 is the safe default.
+#
+# Cost note: kimi-k3 lists at the same price as Sonnet 5. If this adapter exists to
+# save money, `kimi-k2.6` is the model to point it at, not k3.
+set -eu
+
+REPO=/srv/vfoot-app
+cd "$REPO" || exit 1
+
+export ANTHROPIC_BASE_URL="https://api.moonshot.ai/anthropic"
+export ANTHROPIC_AUTH_TOKEN="${KIMI_API_KEY:?KIMI_API_KEY non impostata}"
+export ANTHROPIC_MODEL="${KIMI_MODEL:-kimi-k3}"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$ANTHROPIC_MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$ANTHROPIC_MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$ANTHROPIC_MODEL"
+export CLAUDE_CODE_SUBAGENT_MODEL="$ANTHROPIC_MODEL"
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW="1048576"   # k3 ha 1M di contesto
+
+exec claude -p "$(cat)" \
+    --append-system-prompt "$(cat "$REPO/vfoot-backend/deploy/agent/prompt.md")" \
+    --allowedTools 'Read,Grep,Glob,Bash(git *),Bash(*manage.py test*)' \
+    --output-format json
