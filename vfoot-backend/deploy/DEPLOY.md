@@ -210,6 +210,31 @@ Additive migrations are low-risk; the pg_dump is the real safety net.
 - **Frontend env.** Build with the three VITE_ vars above; the default base URL is
   `localhost:8000` (dev), wrong for prod.
 
+## Il benchmark del voto, pubblicato ma non collegato
+
+Le 40 pagine di `voto_benchmark/` (indice + 38 giornate + divergenze, ~32 MB) sono
+servite da nginx su **`https://vfoot.it/benchmark-voto-7a1dbf30ec1d/`**. Non è linkata da nessuna parte
+nell'app: si dà per link diretto a chi chiede conto di un voto o fa da collaudo.
+Risponde `X-Robots-Tag: noindex, nofollow` e ha `autoindex off`, quindi non si arriva
+per caso né dai motori.
+
+Sta in **`/srv/vfoot-benchmark`, fuori da `/srv/vfoot-web`**, per la stessa ragione
+della pagina di manutenzione: il passo 5 del deploy fa `rsync --delete` su
+`/srv/vfoot-web` e cancellerebbe tutto. (Verificato: dopo un deploy completo la
+cartella è ancora al suo posto e risponde 200.)
+
+Per aggiornarlo dopo una ritaratura del modello:
+```sh
+# in locale (il server ha 1 CPU e ~400 MB liberi: non gli si fa calcolare 380 partite
+# mentre serve il sito, e i voti delle due installazioni coincidono — v. vote_fingerprint)
+manage.py build_voto_benchmark --season 2
+rsync -az --delete voto_benchmark/ root@139.162.144.123:/srv/vfoot-benchmark/
+ssh root@139.162.144.123 'chown -R vfoot:vfoot /srv/vfoot-benchmark'
+```
+Il blocco nginx è in `location ^~ /benchmark-voto-7a1dbf30ec1d/` di `vfoot.it.conf`: `^~` serve a battere
+il fallback della SPA (`location /`), che altrimenti risponderebbe `index.html` a ogni
+file. Backup della conf precedente in `/root/backups/vfoot.it.conf.pre-benchmark-*`.
+
 ## Deployare il CALCOLO DEI VOTI — la parte che i sei passi sopra non coprono
 
 **Scritto l'11/08/2026 perché quel giorno il deploy era formalmente corretto e i voti

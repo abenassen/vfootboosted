@@ -548,7 +548,7 @@ export default function VotoPuroPage() {
           <Numero valore="99,1%" testo="è entro un punto" />
           <Numero
             valore="596"
-            testo="i casi (5,6%) fuori da entrambe le letture di almeno un punto: 369 verso l'alto, 227 verso il basso"
+            testo="i casi (5,6%) fuori da entrambe le letture di almeno un punto: 368 verso l'alto, 228 verso il basso"
           />
         </div>
         <p>
