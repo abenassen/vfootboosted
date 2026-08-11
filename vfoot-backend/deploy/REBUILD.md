@@ -149,12 +149,74 @@ sudo -u postgres psql -d vfoot -Atc \
   "select count(*) from realdata_matchshot"                              # ~9381, non 0
 ```
 
-### 5. La stagione 26-27 (questa sì, in rete)
+#### 4b. Le partite importate non sono «finite», e conta
+
+L'importatore storico legge `status.type` solo per decidere cosa saltare
+(`sofascore_adapter`, `only_finished`): non scrive **mai** `Match.status`, che
+resta `scheduled`, né `data_ready`, che resta falso. Su un database ricostruito
+da zero escono 380 partite di una stagione conclusa in stato `scheduled`.
+
+Non è cosmetico. `player_ratings._compute_season_player_ratings` filtra
+`status=FINISHED`: con tutte a `scheduled` trova zero partite, **ritorna `{}` e il
+listone ripiega sullo snapshot** senza dire niente — la stessa forma di guasto di
+`export_dev_db` (voti plausibili e sbagliati, nessun allarme).
 
 ```sh
-sudo -u vfoot ../.venv/bin/python manage.py import_transfermarkt_squads   # rose + valori
-sudo -u vfoot ../.venv/bin/python manage.py sync_calendar                 # calendario
+sudo -u vfoot ../.venv/bin/python manage.py sync_calendar --year 25/26 --offline
 ```
+
+Legge la cache degli schedule che il server ha già, stampa gli stati
+(`scheduled -> finished`) e stampiglia l'`external_id` 76457 sulla
+`CompetitionSeason` — che l'import offline lascia vuoto. Crea anche le 5 partite
+rinviate che l'import salta, arrivando a 385 come in locale.
+
+Restano `data_ready=false`, e **vanno messe a vero a mano**. Non è pignoleria:
+`candidate_matches()` prende tutto ciò che non è `data_ready`, quindi appena
+l'`external_id` c'è il tick si trova 380 partite finite da stampigliare e poi da
+riscaricare una per una attraverso l'egress — una stagione intera, per niente.
+
+```sh
+sudo -u vfoot ../.venv/bin/python manage.py shell -c "
+from realdata.models import Match
+print(Match.objects.filter(competition_season_id=1, status=Match.STATUS_FINISHED,
+                           data_ready=False).update(data_ready=True))
+from realdata.services.match_scheduler import candidate_matches
+print('candidate del tick:', candidate_matches().count())   # 0 finche' non c'e' la 26/27
+"
+```
+
+La prova che tutto questo serviva a qualcosa (dev'essere ~554 giocatori e la
+media intorno a 6, non un dizionario vuoto):
+
+```sh
+sudo -u vfoot ../.venv/bin/python manage.py shell -c "
+from vfoot.services.player_ratings import _compute_season_player_ratings
+import statistics
+d = _compute_season_player_ratings(1)
+a = [v['avg'] for v in d.values() if v.get('avg')]
+print(len(a), round(statistics.mean(a), 3), round(statistics.pstdev(a), 3))"
+```
+
+### 5. La stagione 26-27 (questa sì, in rete)
+
+**Prima il calendario, poi le rose** — l'ordine inverso, che questo documento
+prescriveva fino all'11/08, importa le rose della stagione SBAGLIATA:
+
+```sh
+sudo -u vfoot ../.venv/bin/python manage.py sync_calendar --egress --year 26/27
+sudo -u vfoot ../.venv/bin/python manage.py poll_transfermarkt   # rose + valori
+```
+
+`poll_transfermarkt` sceglie da sé la `CompetitionSeason` con **l'id più alto**
+(`_resolve_season`) e da quella deriva l'annata Transfermarkt, apposta perché
+scrape e import non possano divergere. Su un database appena ricostruito l'unica
+stagione esistente è la 25-26, quindi lanciarlo prima del calendario scarica le
+rose del 2025 e le scrive sulla stagione vecchia. Il calendario crea la 26-27
+(id 2, `external_id` 95836) e con essa il bersaglio giusto.
+
+`import_transfermarkt_squads` **non** è il comando da usare qui: vuole un
+`--cache-dir` obbligatorio perché importa da uno scrape già fatto. Quello che
+scrape e importa insieme è `poll_transfermarkt`, lo stesso del job `vfoot-tm-poll`.
 
 Transfermarkt dall'IP del Linode passa senza anti-bot. SofaScore no: `sync_calendar`
 esce dall'`egress`, quindi il tunnel WireGuard deve essere su prima di lanciarlo.
@@ -169,6 +231,14 @@ sudo -u vfoot ../.venv/bin/python manage.py compute_classic_roles \
 `--dry-run` per leggere le categorie e l'elenco «DA DECIDERE PRIMA DELL'ASTA»
 prima che conti. La riga di ogni caso misurato dice quale delle due letture lo ha
 pescato: `m` il margine, `b` il confine.
+
+Quel numero è **filtrato a 5M** come la coda vera del prodotto
+(`league_decisions.players_needing_decision`): sotto quella soglia l'ambiguo
+prende la proposta del sistema e non disturba nessuno. L'11/08/2026 erano **17**
+con il cancello e 53 senza — la differenza sono ragazzi appena tesserati, senza un
+minuto in Serie A, che ogni finestra di mercato aggiunge a decine. Se questo
+comando tornasse a stampare il numero non filtrato, ci si preparerebbe a un lavoro
+che non esiste.
 
 Poi lo stesso comando senza `--dry-run`, oppure si lascia fare al polling
 Transfermarkt, che chiama `refresh_current_roles` da sé due volte al giorno.
@@ -193,6 +263,15 @@ Da controllare **prima** di togliere il 503, perché un vuoto qui non fa rumore:
   documenta, `.env.example` sì. Su una macchina rifatta si perdono senza avviso.
 - `VFOOT_FRONTEND_BASE_URL=https://vfoot.it` — è il link dentro le email.
 - chiavi VAPID (`manage.py vapid_keys`) se si vogliono le push.
+- `REDIS_URL=redis://127.0.0.1:6379/1` — **e Redis non c'era.** `DEPLOY.md` dice
+  «the Redis that already runs on the box»: non era vero, il pacchetto non era
+  nemmeno installato. Senza, il channel layer è quello in memoria, e il tick — che
+  è un processo separato dal web server — spinge i suoi aggiornamenti live dentro
+  la propria memoria: la pagina non si aggiorna mai e non c'è un errore da nessuna
+  parte (la trappola è scritta in `vfoot/services/live_realtime.py`). Installato
+  l'11/08/2026 con persistenza spenta e `maxmemory 64mb`, perché qui Redis porta
+  solo messaggi che durano un istante e su 967 MB di RAM il fork di un BGSAVE è il
+  rischio più grosso che introdurrebbe.
 
 ---
 
@@ -256,9 +335,14 @@ python3 egress/sofascore_egress.py status          # quanti ne sono passati
 Poi la prova che conta, che non è "il tunnel sale" ma "SofaScore ci risponde":
 
 ```sh
-python3 egress/sofascore_egress.py fetch --kind final <un_id_partita>
+python3 egress/sofascore_egress.py fetch --kind final --match-ids <un_id_partita>
 ls /var/cache/sofascore | head        # devono comparire dei file
 ```
+
+L'id partita va su `--match-ids`, non posizionale. E i file di prova conviene
+cancellarli dopo: `/var/cache/sofascore` è quello che legge il canarino sulla
+forma del dato, e una partita non giocata ci lascia `lineups` e `shotmap` da 4
+byte.
 
 Se il refill non promuove nessun IP, **tutto il resto della catena SofaScore è
 fermo** e non ha senso accendere calendar e tick: fallirebbero a ogni scatto
@@ -536,7 +620,7 @@ sudo -u vfoot ../.venv/bin/python manage.py health_report --json | head -40
 
 **La Serie A 2026-27 comincia il 22/08/2026**, e un'asta si fa prima della prima
 giornata, non dopo. Contando all'indietro da lì: serve il sito aperto, i membri
-avvisati, la lega creata e la coda dei ruoli smaltita (23 decisioni) **con
+avvisati, la lega creata e la coda dei ruoli smaltita (17 decisioni) **con
 qualche giorno di margine per l'asta**. È questo a dettare quando togliere il
 503, non la lunghezza di questo documento.
 

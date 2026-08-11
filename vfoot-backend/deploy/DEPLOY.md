@@ -157,10 +157,15 @@ The auction room is real-time over `wss://vfoot.it/ws/auctions/<id>/`. One-time 
 1. **Deps** — `pip install -r requirements.txt` now pulls `channels`, `daphne`,
    `channels-redis`, `websockets`. `websockets` is what lets **uvicorn** serve the
    WS handshake; without it the upgrade is refused.
-2. **`.env`** — set `REDIS_URL=redis://127.0.0.1:6379/1` (Redis already runs on the
-   box). Without it the channel layer falls back to in-memory, which does NOT fan
-   out across uvicorn workers, so bids wouldn't reach other watchers. If `vfoot.service`
-   runs more than one worker, `REDIS_URL` is mandatory.
+2. **`.env`** — set `REDIS_URL=redis://127.0.0.1:6379/1`. Redis did NOT run on the
+   box: this line used to claim it did, and the package was not even installed
+   (found and fixed 11/08/2026, `apt install redis-server`, persistenza spenta e
+   `maxmemory 64mb` — qui porta solo messaggi transitori). Without it the channel
+   layer falls back to in-memory, which does NOT fan out across PROCESSES. Two
+   things break, and neither says so: bids don't reach other watchers if
+   `vfoot.service` ever runs more than one worker, and — always, even with one —
+   the live score push never arrives, because `vfoot-tick` is its own process and
+   its nudge dies in its own memory (`vfoot/services/live_realtime.py`).
 3. **nginx** — the `/ws` location must forward the upgrade, not just proxy_pass:
 
    ```nginx

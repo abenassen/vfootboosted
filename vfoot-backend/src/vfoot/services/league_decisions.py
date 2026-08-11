@@ -96,7 +96,7 @@ def _roster_player_ids(league) -> set[int]:
                .values_list("player_id", flat=True))
 
 
-def _latest_market_values(player_ids) -> dict[int, int]:
+def latest_market_values(player_ids) -> dict[int, int]:
     """player_id -> most recent Transfermarkt value_eur (0 when we have none)."""
     from realdata.models import PlayerMarketValue
     out: dict[int, int] = {}
@@ -176,7 +176,7 @@ def players_needing_decision(league, *,
     # Relevance gate: only players worth an admin's time reach the queue. The rest
     # (barely-featuring youngsters and squad filler) auto-take the system proposal.
     if min_market_value:
-        values = _latest_market_values(flagged)
+        values = latest_market_values(flagged)
         flagged = {pid for pid in flagged
                    if values.get(pid, 0) >= min_market_value}
     return flagged

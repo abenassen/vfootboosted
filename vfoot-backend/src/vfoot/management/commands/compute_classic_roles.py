@@ -16,6 +16,9 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand, CommandError
 
 from realdata.models import CompetitionSeason, Player
+from vfoot.services.league_decisions import (
+    RELEVANCE_MIN_VALUE_EUR, latest_market_values,
+)
 from vfoot.services.role_inference import (
     LOW_CONFIDENCE, ROLE_MARGIN_REVIEW, infer_roles, store_roles, tm_positions,
 )
@@ -66,7 +69,9 @@ class Command(BaseCommand):
                 counts_data[r.role_data or "-"] = counts_data.get(r.role_data or "-", 0) + 1
             if r.method == "category" and r.confidence < LOW_CONFIDENCE:
                 low += 1
-            if r.needs_decision:
+            # La coda e' una domanda su chi si puo' COMPRARE: fuori rosa non e'
+            # una decisione, e' rumore. Stesso filtro dei conteggi qui sopra.
+            if r.needs_decision and r.player_id in roster:
                 nm = (names.get(r.player_id) or fulls.get(r.player_id)
                       or str(r.player_id))
                 # WHICH doubt it is, so the admin can triage: a measured player is
@@ -76,9 +81,9 @@ class Command(BaseCommand):
                 if r.method == "category":
                     why = ("m" if r.role_margin < ROLE_MARGIN_REVIEW
                            else "b") + f" {r.role_margin:.2f}/{r.role_boundary:.2f}"
-                    needed.append(f"{nm} ({r.role_mitigated} {why})")
+                    needed.append((r.player_id, f"{nm} ({r.role_mitigated} {why})"))
                 else:
-                    needed.append(nm)
+                    needed.append((r.player_id, nm))
 
         self.stdout.write(f"\ngiocatori trattati       : {len(rep.results)}")
         self.stdout.write(f"  misurati dai dati      : {rep.n_measured}")
@@ -90,11 +95,26 @@ class Command(BaseCommand):
         self.stdout.write(f"   mitigata (TM prioritario): {dict(sorted(counts.items()))}")
         self.stdout.write(f"   pura dai dati            : {dict(sorted(counts_data.items()))}")
         self.stdout.write(f"categoria incerta (<{LOW_CONFIDENCE}) : {low}")
+
+        # LO STESSO CANCELLO DEL PRODOTTO, o questo numero mente. La coda che
+        # l'admin vede davvero e' `league_decisions.players_needing_decision`, che
+        # sotto i 5M lascia passare la proposta del sistema senza chiedere niente:
+        # un dubbio su una riserva da 300k non e' una decisione d'asta. Senza il
+        # filtro qui, ogni finestra di mercato gonfia questo numero di giovani
+        # appena tesserati e senza dati — a Ferragosto 2026 erano 53 contro 17 —
+        # e chi legge si prepara a un lavoro che non esiste.
+        values = latest_market_values([pid for pid, _ in needed])
+        relevant = [lbl for pid, lbl in needed
+                    if values.get(pid, 0) >= RELEVANCE_MIN_VALUE_EUR]
         self.stdout.write(self.style.WARNING(
-            f"DA DECIDERE PRIMA DELL'ASTA: {len(needed)} giocatori"))
-        if needed:
-            self.stdout.write("   " + ", ".join(sorted(needed)[:25])
-                              + (" ..." if len(needed) > 25 else ""))
+            f"DA DECIDERE PRIMA DELL'ASTA: {len(relevant)} giocatori"))
+        if relevant:
+            self.stdout.write("   " + ", ".join(sorted(relevant)[:25])
+                              + (" ..." if len(relevant) > 25 else ""))
+        self.stdout.write(
+            f"   (altri {len(needed) - len(relevant)} ambigui sotto i "
+            f"{RELEVANCE_MIN_VALUE_EUR // 1_000_000}M: prendono la proposta "
+            f"del sistema, non passano dall'admin)")
 
         if o["dry_run"]:
             self.stdout.write("\n[dry-run] nulla e' stato scritto")
