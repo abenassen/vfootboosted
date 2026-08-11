@@ -298,9 +298,20 @@ export default function AppShell() {
   const isUserAdmin =
     location.pathname.startsWith('/league-admin') &&
     !['league', 'roster', 'competitions', 'matchdays', 'auction', 'market'].includes(adminTab);
+  // Le pagine sotto /league-admin/competitions non sono nessuna delle due
+  // schede: hanno un nome loro, ed e' quello scritto in cima alla pagina.
+  const competitionEditor = location.pathname.startsWith('/league-admin/competitions/')
+    ? location.pathname.endsWith('/new')
+      ? 'Nuova competizione'
+      : location.pathname.endsWith('/advanced')
+        ? 'Costruzione avanzata'
+        : 'Modifica competizione'
+    : null;
   // Only the mobile header shows a page title (no sidebar there to say where you
   // are). It has to match the words used in the menu and on the page itself.
-  const mobileTitle = location.pathname.startsWith('/league-admin')
+  const mobileTitle = competitionEditor
+    ? competitionEditor
+    : location.pathname.startsWith('/league-admin')
     ? isUserAdmin
       ? 'Le mie leghe'
       : 'Gestione lega'
