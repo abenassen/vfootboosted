@@ -89,8 +89,9 @@ i non misurati (metodo `sofa`/`default`) più Berardi, che è misurato e in bili
 
 ## 3. Migrazione e dati
 
-- [ ] **`0022_jobrun`** è una migrazione nuova: va applicata in produzione. Non è
-      distruttiva (aggiunge una tabella), ma va messa in conto nella finestra.
+- [ ] **`0022_jobrun`** e **`0023_maintenancerun_maintenanceproposal`** sono
+      migrazioni nuove: vanno applicate in produzione. Non sono distruttive
+      (aggiungono tabelle), ma vanno messe in conto nella finestra.
 - [ ] Backup del database **prima** della migrazione (`deploy/backup/`).
 - [ ] Verificare che `VFOOT_HEALTH_EMAIL` sia impostato nel `.env` di produzione:
       vuoto significa nessun allarme, che è il default giusto ovunque tranne lì.
