@@ -65,6 +65,18 @@ class SeasonEndTests(TestCase):
                                            team=Team.objects.create(external_id=f"r{i}",
                                                                     name=f"Real {i}"))
                  for i in range(8)]
+        self.admin = User.objects.create_user("admin", "admin@x.it", "x")
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+        # LA LEGA NASCE PRIMA DEL CALENDARIO, e non è un dettaglio dell'ordine: una
+        # lega si può creare solo su un campionato in corso (league_views, la POST
+        # rifiuta una stagione conclusa), e questa stagione qui sotto sta per essere
+        # riempita di sole partite finite. È anche l'ordine vero — si crea la lega
+        # ad agosto, la stagione finisce a maggio — mentre il contrario descriveva
+        # una lega che nasce a campionato chiuso, cioè il caso che ora è vietato.
+        r = self.client.post("/api/v1/leagues",
+                             {"name": "Lega Fine Stagione", "team_name": "Alpha",
+                              "reference_season_id": self.cs.id}, format="json")
         # A season already played: every match is over and its data settled, which is
         # what the conclusion asks for. The kickoffs are therefore in the PAST, and a
         # league on such a season is exactly the one that turns the lineup deadline
@@ -77,13 +89,6 @@ class SeasonEndTests(TestCase):
                   status=Match.STATUS_FINISHED, data_ready=True)
             for md in range(1, SEASON_MATCHDAYS + 1) for i in range(4)
         ])
-
-        self.admin = User.objects.create_user("admin", "admin@x.it", "x")
-        self.client = APIClient()
-        self.client.force_authenticate(user=self.admin)
-        r = self.client.post("/api/v1/leagues",
-                             {"name": "Lega Fine Stagione", "team_name": "Alpha",
-                              "reference_season_id": self.cs.id}, format="json")
         self.league = FantasyLeague.objects.get(id=r.json()["league_id"])
         self.league.enforce_lineup_deadline = False
         self.league.save(update_fields=["enforce_lineup_deadline"])

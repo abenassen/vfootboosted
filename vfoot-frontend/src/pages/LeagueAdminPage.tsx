@@ -257,8 +257,12 @@ export default function LeagueAdminPage() {
   }, [searchParams]);
 
   // Seasons available as a league's reference championship (for the create form).
+  // SOLO QUELLI IN CORSO: una lega si gioca su un campionato che si sta giocando,
+  // e la stagione non si cambia più dopo (v. LeagueReferenceSeasonView). Offrire
+  // l'anno scorso voleva dire offrire una lega che non può giocare una giornata;
+  // il server rifiuta comunque, questo è perché non lo si chieda nemmeno.
   useEffect(() => {
-    void getRealSeasons()
+    void getRealSeasons(true)
       .then((s) => {
         setRealSeasons(s);
         setCreateSeasonId((cur) => (cur === '' && s.length ? s[0].id : cur));

@@ -258,7 +258,10 @@ export default function CompetitionCreatePage() {
         const [d, comps, seasons] = await Promise.all([
           getLeagueDetail(selectedLeagueId),
           getCompetitions(selectedLeagueId),
-          getRealSeasons(),
+          // Solo i campionati in corso: qui si assegna la stagione a una lega che
+          // non ce l'ha (ripiego per le leghe vecchie), e vale la stessa regola
+          // della creazione — una conclusa il server la rifiuta.
+          getRealSeasons(true),
         ]);
         if (!alive) return;
         setDetail(d);

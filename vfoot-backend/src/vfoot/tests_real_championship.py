@@ -842,6 +842,21 @@ class ChampionshipWithoutALeagueTests(TestCase):
         only_open = self.client.get("/api/v1/real-seasons?open=1").json()
         self.assertEqual([s["id"] for s in only_open], [self.open_cs.id])
 
+    def test_a_league_cannot_be_created_on_a_concluded_season(self):
+        r = self.client.post(
+            "/api/v1/leagues",
+            {"name": "L", "team_name": "T", "reference_season_id": self.over_cs.id},
+            format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("reference_season_id", r.json())
+        self.assertFalse(FantasyLeague.objects.exists())
+        # e quella in corso passa
+        ok = self.client.post(
+            "/api/v1/leagues",
+            {"name": "L", "team_name": "T", "reference_season_id": self.open_cs.id},
+            format="json")
+        self.assertEqual(ok.status_code, 201)
+
     def test_a_season_without_a_calendar_yet_is_still_open(self):
         """L'edizione dell'anno prossimo esiste prima del suo calendario."""
         next_cs = CompetitionSeason.objects.create(

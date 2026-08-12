@@ -190,6 +190,16 @@ class LeagueListCreateView(APIView):
 
         reference_season = get_object_or_404(
             CompetitionSeason, id=data["reference_season_id"])
+        # A league is played ON a championship, and the tie is for life (see
+        # LeagueReferenceSeasonView): one created on a season that is over has no
+        # round it can ever play. The picker only offers open seasons; this is the
+        # same rule where it can actually be enforced.
+        if not matchday_state.season_is_open(reference_season.id):
+            return Response(
+                {"reference_season_id": [
+                    f"{reference_season} è concluso: una lega si lega a un "
+                    f"campionato in corso."]},
+                status=status.HTTP_400_BAD_REQUEST)
         league = FantasyLeague.objects.create(
             name=data["name"], owner=request.user, reference_season=reference_season,
             mode=data.get("mode", FantasyLeague.MODE_AURA),
@@ -1040,7 +1050,13 @@ class LeagueReferenceSeasonView(APIView):
             return Response({"detail": "Stagione di riferimento obbligatoria."},
                             status=status.HTTP_400_BAD_REQUEST)
         else:
-            league.reference_season = get_object_or_404(CompetitionSeason, id=season_id)
+            cs = get_object_or_404(CompetitionSeason, id=season_id)
+            if not matchday_state.season_is_open(cs.id):
+                return Response(
+                    {"detail": f"{cs} è concluso: una lega si lega a un campionato "
+                               f"in corso."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            league.reference_season = cs
             league.save(update_fields=["reference_season"])
         season = league.reference_season
         return Response(
