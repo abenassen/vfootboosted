@@ -210,13 +210,19 @@ Additive migrations are low-risk; the pg_dump is the real safety net.
 - **Frontend env.** Build with the three VITE_ vars above; the default base URL is
   `localhost:8000` (dev), wrong for prod.
 
-## Il benchmark del voto, pubblicato ma non collegato
+## Il benchmark del voto
 
 Le 40 pagine di `voto_benchmark/` (indice + 38 giornate + divergenze, ~32 MB) sono
-servite da nginx su **`https://vfoot.it/benchmark-voto/`**. Non è linkata da nessuna parte
-nell'app: si dà per link diretto a chi chiede conto di un voto o fa da collaudo.
+servite da nginx su **`https://vfoot.it/benchmark-voto/`**.
 Risponde `X-Robots-Tag: noindex, nofollow` e ha `autoindex off`, quindi non si arriva
 per caso né dai motori.
+
+**Dall'app ci si arriva da «Voto spiegato»** (`/voto-puro`, paragrafo «Quanto siamo
+d'accordo»), e il link NON è scritto a mano: la pagina fa una `HEAD` su
+`/benchmark-voto/` e si mostra solo se risponde `ok`. Quindi togliere la cartella dal
+server toglie anche il link, senza bisogno di ricordarsene qui — ma se un giorno la si
+sposta, il link segue l'indirizzo scritto in `VotoPuroPage.tsx` (`BENCHMARK_URL`) e va
+cambiato lì.
 
 Sta in **`/srv/vfoot-benchmark`, fuori da `/srv/vfoot-web`**, per la stessa ragione
 della pagina di manutenzione: il passo 5 del deploy fa `rsync --delete` su
