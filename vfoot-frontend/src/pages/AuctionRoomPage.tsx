@@ -152,9 +152,19 @@ export default function AuctionRoomPage() {
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
-                    const res = (await createAuction(selectedLeagueId)) as { auction_id: number };
+                    // NIENTE «(#3)» qui dietro: era `auction_id`, la chiave della
+                    // sessione nel database, che conta le aste di TUTTE le leghe
+                    // insieme — la prima asta di una lega nuova si presentava col
+                    // numero di quante ne erano state avviate altrove, e si legge
+                    // come «la mia seconda asta». Quello che serve sapere di
+                    // un'asta appena aperta è quanti giocatori ha in lista.
+                    const res = (await createAuction(selectedLeagueId)) as { players?: number };
                     await loadInfo();
-                    setMsg(`Asta avviata (#${res.auction_id}).`);
+                    setMsg(
+                      res.players
+                        ? `Asta avviata: ${res.players} giocatori in lista.`
+                        : 'Asta avviata.',
+                    );
                   })
                 }
               >
