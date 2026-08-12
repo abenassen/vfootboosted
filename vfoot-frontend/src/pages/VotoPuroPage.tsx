@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Badge, Card, SectionTitle } from '../components/ui';
 
@@ -44,13 +44,46 @@ const SECTIONS = [
   { id: 'zona', label: 'Il pericolo nella tua zona' },
   { id: 'portiere', label: 'Il portiere' },
   { id: 'sv', label: 'Quando non c’è voto' },
-  { id: 'differenze', label: 'Le differenze col fantacalcio' },
+  { id: 'differenze', label: 'Le differenze coi voti usuali' },
   { id: 'accordo', label: 'Quanto siamo d’accordo' },
   { id: 'limiti', label: 'Quello che non sappiamo' },
 ];
 
+/** IL BENCHMARK, SE C'È ANCORA.
+ *
+ *  Le 38 pagine con tutti i nostri voti a fianco di quelli di fantacalcio.it
+ *  (`manage.py build_voto_benchmark`) le serve nginx accanto all'app, non l'app:
+ *  sono materiale di verifica, e un giorno se ne andranno. Perciò il link non si
+ *  scrive, si CHIEDE — se la cartella non c'è più, nginx risponde 404 e il link
+ *  sparisce da sé invece di restare a puntare al nulla.
+ *
+ *  In sviluppo Vite risponde 200 a qualunque indirizzo (rimanda tutto all'app),
+ *  quindi lì il link si vede sempre e porta al 404 dell'applicazione. È il falso
+ *  positivo che ci si può permettere: in sviluppo quella cartella non c'è mai.
+ */
+const BENCHMARK_URL = '/benchmark-voto/';
+
+function useBenchmarkAvailable(): boolean {
+  const [there, setThere] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void fetch(BENCHMARK_URL, { method: 'HEAD', cache: 'no-store' })
+      .then((r) => {
+        if (alive) setThere(r.ok);
+      })
+      .catch(() => {
+        if (alive) setThere(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return there;
+}
+
 export default function VotoPuroPage() {
   const { hash } = useLocation();
+  const benchmark = useBenchmarkAvailable();
   // Arrivare con un'ancora (dal dettaglio di un voto, o da un link condiviso) deve
   // portare al paragrafo, non in cima: la pagina è lunga e chi ci arriva da una
   // pagella ha una domanda precisa.
@@ -91,10 +124,10 @@ export default function VotoPuroPage() {
 
       <Section id="cose" title="Che cos'è, e che cosa non è">
         <p>
-          Nel fantacalcio classico il punteggio di un giocatore è fatto di due pezzi:{' '}
+          Nei sistemi di voto usuali il punteggio di un giocatore è fatto di due pezzi:{' '}
           <b className="text-ink">voto puro</b> + <b className="text-ink">bonus e malus</b>. I bonus
-          e i malus sono i fatti contabili — il gol vale +3, l'assist +1, l'ammonizione −0,5 — e
-          quelli li applichiamo esattamente come li applica il fantacalcio.
+          e i malus sono gli episodi che hanno già un prezzo scritto — il gol vale +3, l'assist +1,
+          l'ammonizione −0,5 — e quelli li applichiamo esattamente come li applicano tutti.
         </p>
         <p>
           Il voto puro è l'altra metà: <i>quanto bene ha giocato</i>. È il numero che una pagella dà
@@ -112,7 +145,19 @@ export default function VotoPuroPage() {
         <Callout>
           Il voto puro <b>non contiene</b> il gol, l'assist o il cartellino: quelli si sommano dopo,
           in chiaro. Se un attaccante ha 6,0 di voto puro e ha segnato, il suo fantavoto è 9,0.
-          Contare il gol due volte sarebbe l'errore più facile da fare, e non lo facciamo.
+          Contare il gol automaticamente nel voto puro sarebbe un doppio conteggio, e non lo
+          facciamo. Noi valutiamo invece <b>quanto merito ci sia in quel gol</b>.
+        </Callout>
+        {/* IL RIFERIMENTO, DETTO UNA VOLTA SOLA E SUBITO. Sta qui e non più in
+            fondo perché le pastiglie «Redazione» e «Statistico» compaiono già nel
+            primo esempio, tre paragrafi sotto: chi leggeva le trovava senza sapere
+            di chi si stesse parlando, e scopriva a metà pagina che erano due voti
+            dello stesso sito. */}
+        <Callout>
+          Il metro di confronto di questa pagina è <b className="text-ink">fantacalcio.it</b>, il
+          riferimento più usato in Italia, che pubblica <b>due</b> voti per ogni giocatore: la{' '}
+          <b>Redazione</b> — la pagella scritta da una persona — e lo <b>Statistico</b>, il loro
+          voto calcolato. Ogni cifra e ogni esempio qui sotto è misurato contro tutt'e due.
         </Callout>
         <p className="text-xs text-ink-faint">
           Nelle leghe in modalità <b>Aura</b> il confronto si gioca sui duelli di zona: usa gli
@@ -173,7 +218,7 @@ export default function VotoPuroPage() {
             di gioco il voto vale quasi per intero, a un quarto d'ora conta meno della metà. Poi c'è
             il risultato: un voto alto in una sconfitta scende un po', un voto basso in una vittoria
             sale un po' — <b className="text-ink">mai il contrario</b>, quindi il risultato non
-            gonfia nessuno, tempera solo i casi stonati, e non può mai portarli fino al 6. E infine
+            gonfia nessuno e tempera solo i casi stonati. E infine
             i tre episodi che una pagella non può ignorare — espulsione, autogol, rigore sbagliato —
             che leggiamo{' '}
             <a href="#errori" className="font-semibold text-accent underline decoration-dotted">
@@ -200,7 +245,7 @@ export default function VotoPuroPage() {
               <li>Duelli e duelli aerei vinti, dribbling riusciti, falli subiti.</li>
               <li>Giocare nella metà campo avversaria: portare la squadra avanti.</li>
               <li>Intercetti, respinte, contrasti, salvataggi sulla linea, palloni recuperati.</li>
-              <li>Il rigore conquistato — che al fantacalcio non paga nulla a chi lo guadagna.</li>
+              <li>Il rigore conquistato — che di solito non paga nulla a chi lo guadagna.</li>
             </ul>
           </div>
           <div className="rounded-xl border border-line bg-surface-2 p-3">
@@ -209,7 +254,7 @@ export default function VotoPuroPage() {
               <li>Duelli persi, dribbling subiti, duelli aerei persi.</li>
               <li>Palloni perduti: passaggi sbagliati, controlli sbagliati, palla soffiata.</li>
               <li>L'errore che concede un tiro, e — molto di più — quello che concede un gol.</li>
-              <li>Il rigore regalato, che al fantacalcio non costa nulla a chi lo commette.</li>
+              <li>Il rigore regalato, che di solito non costa nulla a chi lo commette.</li>
               <li>
                 Tanti dribbling tentati e pochi riusciti: conta la percentuale, non il tentativo.
               </li>
@@ -220,19 +265,18 @@ export default function VotoPuroPage() {
         <p className="mt-3 text-xs text-ink-faint">
           Due voci meritano una riga per conto loro, perché il voto puro è <i>l'unico</i> posto in
           cui possono comparire: il rigore conquistato e il rigore concesso non hanno alcun bonus né
-          malus nel fantacalcio. Chi si procura il penalty non prende niente (il +3 va a chi lo
-          segna) e chi lo regala non paga niente.
+          malus nei sistemi di voto usuali. Chi si procura il penalty non prende niente (il +3 va a
+          chi lo segna) e chi lo regala non paga niente.
         </p>
       </Section>
 
       <Section id="errori" title="Espulsioni, autogol, rigori sbagliati: il merito dell'errore">
         <p>
-          Su questi tre episodi il fantacalcio ha già le sue tariffe, e noi le applichiamo intatte:
-          rosso −1, autogol −2, rigore sbagliato −3 sul fantavoto.{' '}
-          <b className="text-ink">Non aggiungiamo un secondo malus</b>. Nel voto puro c'è però anche
-          un calo, perché una pagella che dopo un'espulsione al 20' lascia il voto dov'era non è una
-          pagella — e quel calo prova a entrare nel merito: <i>quanto</i> è stato grave, e{' '}
-          <i>quanto</i> è costato alla squadra.
+          Su questi tre episodi ci sono già i malus ben noti, e noi li applichiamo intatti: rosso
+          −1, autogol −2, rigore sbagliato −3 sul fantavoto. Nel voto puro ne teniamo conto con una
+          sottrazione che <b className="text-ink">entra nel merito</b>: quanto è stato grave
+          l'evento, e quanto è costato alla squadra — per quanto tempo ha lasciato i compagni in
+          inferiorità numerica? C'era un buon motivo per farlo?
         </p>
         <ul className="list-disc space-y-1.5 pl-4 text-sm text-ink-soft marker:text-ink-faint">
           <li>
@@ -335,9 +379,9 @@ export default function VotoPuroPage() {
             pesante del ruolo.
           </li>
           <li>
-            <b className="text-ink">I gol presi non entrano nel voto</b>: al fantacalcio ogni gol
-            preso è già −1 sul fantavoto. Metterlo anche nel voto puro sarebbe contarlo due volte, e
-            il portiere di una squadra che perde 4-0 sarebbe condannato in partenza.
+            <b className="text-ink">I gol presi non entrano nel voto</b>: ogni gol preso è già −1
+            sul fantavoto. Metterlo anche nel voto puro sarebbe contarlo due volte, e il portiere di
+            una squadra che perde 4-0 sarebbe condannato in partenza.
           </li>
           <li>
             <b className="text-ink">L'autogol di un compagno pesa per quanto era parabile.</b> Un
@@ -350,7 +394,7 @@ export default function VotoPuroPage() {
           <li>
             <b className="text-ink">Il rigore parato non ha un premio fisso</b>: entra nel conto per
             quanto era difficile pararlo — un rigore angolato e forte vale la metà in più di uno
-            debole. Il +3 di bonus lo prende comunque, come da regolamento.
+            debole. Il +3 di bonus lo prende comunque, come dappertutto.
           </li>
           <li>
             <b className="text-ink">Se non ha avuto niente da fare, il voto resta vicino al 6.</b>{' '}
@@ -365,7 +409,7 @@ export default function VotoPuroPage() {
             chi="Bijlow"
             righe={[{ chi: '', noi: 8.0, red: 6.5, stat: 6.5, sofa: 10 }]}
             compatto
-            perche="Porta inviolata con otto parate, sette dentro l'area, in una partita in cui il pareggio è merito suo. Le due colonne del fantacalcio lo mettono a 6,5: uno 0-0 non fa notizia."
+            perche="Porta inviolata con otto parate, sette dentro l'area, in una partita in cui il pareggio è merito suo. Le due colonne di fantacalcio.it lo mettono a 6,5: uno 0-0 non fa notizia."
           />
           <Caso
             partita="Torino–Cagliari 1-2 · 17ª giornata"
@@ -400,9 +444,12 @@ export default function VotoPuroPage() {
 
       <Section id="sv" title="Quando non c'è voto (s.v.)">
         <p>
-          Come nel fantacalcio, chi entra per pochi minuti e tocca pochi palloni non prende un voto:
-          prende <b className="text-ink">s.v.</b>, e in formazione lo sostituisce un altro. La
-          regola che usiamo:
+          Chi entra per pochi minuti e tocca pochi palloni non prende un voto: prende{' '}
+          <b className="text-ink">s.v.</b>, e in formazione lo sostituisce un altro. Da noi non è un
+          giudizio ma <b className="text-ink">una regola scritta prima</b>, uguale per tutti e
+          verificabile sul tabellino: due numeri — i minuti giocati e i palloni toccati — e un
+          elenco chiuso di episodi che impongono comunque il voto. Non c'è nessun caso in cui
+          decidiamo lì per lì.
         </p>
         <ul className="list-disc space-y-1.5 pl-4 text-sm text-ink-soft marker:text-ink-faint">
           <li>
@@ -423,34 +470,35 @@ export default function VotoPuroPage() {
           </li>
         </ul>
         <p className="text-xs text-ink-faint">
-          Sui senza voto siamo d'accordo con la Redazione nel 98,2% delle presenze della stagione
-          scorsa. Il disaccordo è tutto nella fascia dei subentrati tra i 12 e i 16 minuti: sopra i
-          16 nessuno dei due tace più, sotto i 12 tacciono quasi sempre entrambi.
+          Sui senza voto arriviamo alla stessa conclusione nel <b className="text-ink">98,2%</b>{' '}
+          delle presenze della stagione scorsa. Il disaccordo è tutto nei subentrati tra i 12 e i 16
+          minuti, cioè esattamente dove una pagella decide caso per caso e noi invece applichiamo la
+          regola: sopra i 16 minuti nessuno tace più, sotto i 12 tacciono quasi tutti.
         </p>
       </Section>
 
-      <Section id="differenze" title="Le differenze tipiche col fantacalcio">
+      <Section id="differenze" title="Le differenze tipiche coi voti usuali">
         <p>
           Queste sono le discrepanze che tornano più spesso. Sono tutte volute: nascono da una
           scelta su come leggere il calcio, non da un difetto del calcolo — e l'ultima raccoglie i
           casi su cui si discute di più.
         </p>
         <Callout>
-          Come sono scelti gli esempi. Fantacalcio.it pubblica <b>due</b> voti — la Redazione (la
-          pagella umana) e lo Statistico (il loro voto algoritmico) — e quando i due non concordano,
-          stare in mezzo non è divergere. Quindi qui sotto ci sono solo partite vere del 2025-26 in
-          cui il nostro voto sta <b>fuori da entrambe</b> di almeno un punto. C'è anche il rating di
-          SofaScore, come terzo giudice indipendente: non entra nel nostro calcolo, e serve a vedere
-          chi ha ragione quando divergiamo.
+          Come sono scelti gli esempi. Quando le due colonne di fantacalcio.it non concordano tra
+          loro, stare in mezzo non è divergere: qui sotto ci sono quindi solo partite vere del
+          2025-26 in cui il nostro voto sta <b>fuori da entrambe</b> di almeno un punto. C'è anche
+          il rating di SofaScore, come terzo giudice indipendente: non entra nel nostro calcolo, e
+          serve a vedere chi ha ragione quando divergiamo.
         </Callout>
 
         <Differenza titolo="1. Il gol non vale un voto fisso">
           <p>
-            Nelle pagelle il gol è quasi una tariffa: tra gli attaccanti che hanno segnato una
-            volta, la Redazione ha scritto{' '}
+            Nei voti usuali il gol è quasi un bonus extra sul voto puro: tra gli attaccanti che
+            hanno segnato una volta, la Redazione di fantacalcio.it ha scritto{' '}
             <b className="text-ink">esattamente 7,0 in 261 casi su 357</b> (media 7,03, con
-            oscillazioni minime). Noi partiamo dalla stessa media — 6,86 — ma con il doppio della
-            dispersione, perché sotto il gol continuiamo a leggere la partita.
+            oscillazioni minime). Noi teniamo una media vicina — 6,86 — ma con il doppio della
+            dispersione (qualcuno prenderà 6, qualcuno prenderà 8), perché al di là del gol
+            continuiamo a valutare l'intera partita.
           </p>
           <Caso
             partita="Juventus–Parma 2-0 · 1ª giornata"
@@ -470,7 +518,7 @@ export default function VotoPuroPage() {
 
         <Differenza titolo="2. Chi crea e non viene ripagato">
           <p>
-            L'assist, nel fantacalcio, esiste solo se il compagno segna. Nel voto puro l'occasione
+            L'assist, di solito, esiste solo se il compagno segna. Nel voto puro l'occasione
             creata vale anche quando finisce male, perché il passaggio è stato fatto: è la voce che
             più spesso ci porta sopra le due pagelle.
           </p>
@@ -479,7 +527,7 @@ export default function VotoPuroPage() {
             chi="De Bruyne"
             righe={[{ chi: '', noi: 6.5, red: 5.0, stat: 5.0, sofa: 7.1 }]}
             compatto
-            perche="Un'occasione limpida servita a un compagno, altri palloni buoni e un'ora di partita senza perdere duelli. Entrambe le colonne del fantacalcio lo mettono a 5,0: in uno 0-0 chi crea e non viene ripagato non lascia traccia."
+            perche="Un'occasione limpida servita a un compagno, altri palloni buoni e un'ora di partita senza perdere duelli. Entrambe le colonne di fantacalcio.it lo mettono a 5,0: in uno 0-0 chi crea e non viene ripagato non lascia traccia."
           />
           <Caso
             partita="Atalanta–Pisa 1-1 · 1ª giornata"
@@ -494,10 +542,10 @@ export default function VotoPuroPage() {
           <p>
             Una pagella legge anche il risultato: chi perde 0-3 raramente prende più di 6, chi vince
             prende di più. Noi guardiamo il risultato solo per <i>temperare</i> i voti stonati (alto
-            in una sconfitta, basso in una vittoria) e mai per esaltarli — e il risultato non può
-            cancellare più di due terzi della distanza dal 6: quanto pesante sia stata la sconfitta,
-            una buona partita resta una buona partita. Il rovescio è che un difensore o un
-            centrocampista di una squadra in difficoltà, se ha tenuto la sua zona, resta alto.
+            in una sconfitta, basso in una vittoria) e mai per esaltarli: per quanto pesante sia
+            stata la sconfitta, una buona partita resta una buona partita. Il rovescio è che un
+            difensore o un centrocampista di una squadra in difficoltà, se ha tenuto la sua zona,
+            resta alto.
           </p>
           <Caso
             partita="Verona–Inter 1-2 · 10ª giornata"
@@ -511,7 +559,7 @@ export default function VotoPuroPage() {
         <Differenza titolo="4. Gli errori hanno un prezzo, anche senza cartellino">
           <p>
             Il pallone perso male da cui nasce il gol avversario, il dribbling subito, il rigore
-            regalato: nel fantacalcio non c'è nessun malus per queste cose, e nella pagella si
+            regalato: di norma non c'è nessun malus per queste cose, e nella pagella si
             vedono solo se il giornalista ha deciso di vederle. Da noi entrano nel conto sempre, con
             un peso proporzionato al danno — l'errore che porta a un gol è la voce negativa più
             pesante di tutte, dopo l'espulsione.
@@ -523,8 +571,9 @@ export default function VotoPuroPage() {
             Ci sono partite in cui la nostra lettura è quella di minoranza: la diamo diversa dalle
             pagelle <i>e</i> dal rating indipendente. Il caso tipico è l'attaccante che segna in una
             squadra travolta — il gol è suo e glielo paghiamo per intero col bonus, ma la mezz'ora
-            di gioco intorno al gol resta quella di una serata perduta. Sono i casi che apriamo uno
-            per uno quando ritariamo i pesi, ed è lì che il modello si difende o cambia.
+            di gioco intorno al gol resta quella di una serata perduta. Sono i casi che abbiamo
+            aperto uno per uno mentre sceglievamo i pesi: li abbiamo soppesati con cura, e la
+            lettura che ne è uscita è quella che leggi qui.
           </p>
           <Caso
             partita="Inter–Pisa 6-2 · 22ª giornata"
@@ -539,9 +588,9 @@ export default function VotoPuroPage() {
 
       <Section id="accordo" title="Quanto siamo d'accordo con le pagelle, in numeri">
         <p>
-          Non lavoriamo alla cieca: ogni volta che cambiamo qualcosa rigiochiamo l'ultima stagione
-          conclusa e confrontiamo tutti i nostri voti con i due di fantacalcio.it. Sulla 2025-26
-          sono <b className="text-ink">10.583 pagelle</b> confrontate una per una.
+          Non abbiamo lavorato alla cieca: a ogni messa a punto abbiamo rigiocato l'ultima stagione
+          conclusa e confrontato tutti i nostri voti con i due di fantacalcio.it. Sulla 2025-26 sono{' '}
+          <b className="text-ink">10.583 pagelle</b> confrontate una per una.
         </p>
         <div className="grid gap-2 sm:grid-cols-3">
           <Numero valore="89,8%" testo="dei nostri voti è entro mezzo punto dalla pagella" />
@@ -559,9 +608,10 @@ export default function VotoPuroPage() {
         </p>
         <p>
           Chi ha ragione, quando divergiamo? Un metro indipendente è il{' '}
-          <b className="text-ink">rating di SofaScore</b>, calcolato sugli eventi della partita e
-          mai usato nel nostro modello. Su chi <i>non</i> ha segnato — togliendo il gol, che mette
-          tutti d'accordo — il nostro voto gli somiglia più di quanto gli somigli la pagella:
+          <b className="text-ink">rating di SofaScore</b>: il punteggio che una piattaforma esterna
+          e consolidata calcola sugli eventi della partita, e che non entra mai nel nostro modello.
+          Qui sotto l'accordo con quel rating (1 = identico) del nostro voto e delle due colonne di
+          fantacalcio.it:
         </p>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[420px] text-sm">
@@ -591,13 +641,30 @@ export default function VotoPuroPage() {
           </table>
         </div>
         <p className="text-xs text-ink-faint">
-          Quanto il voto assomiglia al giudizio indipendente sugli eventi (1 = identico), sui
-          giocatori che non hanno segnato. Da leggere per quello che è: non dice che i nostri voti
-          sono «giusti», dice che quando ci allontaniamo dalla pagella non lo facciamo a caso.
-          Aggiungiamo il confronto che ci tiene onesti: Redazione e Statistico sono d'accordo tra
-          loro entro mezzo voto nel 99,3% dei casi — sono due letture della stessa tradizione, e noi
-          siamo una voce diversa, non una terza copia.
+          Misurato sui giocatori che non hanno segnato: il gol mette tutti d'accordo e coprirebbe il
+          resto. Da leggere per quello che è: non dice che i nostri voti sono «giusti», dice che
+          quando ci allontaniamo dalla pagella non lo facciamo a caso. Le due colonne di
+          fantacalcio.it sono d'altra parte vicinissime tra loro — d'accordo entro mezzo voto nel
+          99,3% dei casi — quindi il loro Statistico resta fortemente influenzato dalla redazione
+          tradizionale.
         </p>
+        {/* Le carte in tavola: non un riassunto del confronto, il confronto. */}
+        {benchmark ? (
+          <Callout>
+            Non ti fidare di queste cifre: <b className="text-ink">guardale</b>. Il confronto è
+            pubblicato per intero, giornata per giornata —{' '}
+            <a
+              href={BENCHMARK_URL}
+              className="font-semibold text-accent underline decoration-dotted"
+              target="_blank"
+              rel="noreferrer"
+            >
+              i nostri voti a fianco di quelli di fantacalcio.it
+            </a>
+            , con l'elenco di dove ci allontaniamo da entrambe le loro letture. È l'intera stagione
+            2025-26, senza scegliere gli esempi.
+          </Callout>
+        ) : null}
       </Section>
 
       <Section id="limiti" title="Quello che il voto puro non sa">
@@ -641,12 +708,13 @@ export default function VotoPuroPage() {
         </ul>
         <Callout>
           Se un voto ti sembra sbagliato, apri il suo dettaglio nella pagella della partita: vedrai
-          da quali voci è composto. È il modo migliore per segnalarci un problema — e, quando la
-          segnalazione ha ragione, per farci cambiare un peso.
+          da quali voci è composto. È il modo migliore per segnalarci un problema — le segnalazioni
+          le leggiamo, e pesano sulla prossima messa a punto del modello.
         </Callout>
         <p className="text-xs text-ink-faint">
-          Cifre e confronti misurati sulla stagione 2025-26, l'ultima conclusa, sulle 10.583
-          presenze che abbiamo potuto appaiare con entrambe le colonne di fantacalcio.it.
+          Tutte le cifre e i confronti di questa pagina sono stati misurati sulla stagione 2025-26,
+          l'ultima conclusa, sulle 10.583 presenze che abbiamo potuto appaiare con entrambe le
+          colonne di fantacalcio.it.
         </p>
       </Section>
 
