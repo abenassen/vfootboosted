@@ -38,7 +38,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from realdata.models import CompetitionSeason, JobRun, Match
-from realdata.services import shape_canary
+from realdata.services import roster_integrity, shape_canary
 
 # job -> (systemd unit, expected cadence, how late is too late).
 #
@@ -324,6 +324,35 @@ def _check_calendar_freshness(health: Health, now) -> None:
                        f"legge quegli orari.")
 
 
+def _check_roster_overlap(health: Health, now) -> None:
+    """Lo stesso giocatore tesserato per due club nello stesso momento.
+
+    E' un errore del fornitore, non nostro, e di solito si corregge da solo in
+    qualche ora — ma va detto, perche' nessuna altra parte del sistema lo
+    noterebbe: la risoluzione del club corrente prende il primo tesseramento
+    aperto che trova, quindi finche' dura il giocatore viene valutato sulla
+    partita di una delle due squadre, in modo non deterministico e senza errori
+    a schermo.
+
+    ``warn`` e non ``alarm``: non c'e' niente da fare a mano, e un allarme rosso
+    per una cosa che si ripara da se' e' il modo piu' rapido per insegnare a
+    ignorare il rosso. La segnalazione basta — con --mail il verdetto giallo
+    manda comunque la posta.
+    """
+    for cs in CompetitionSeason.objects.order_by("-id")[:2]:
+        overlaps = roster_integrity.overlapping_stints(
+            cs.id, active_on=now.date(), limit=20)
+        if not overlaps:
+            continue
+        health.add("warn", "roster:overlap",
+                   f"{len(overlaps)} giocatori risultano in due club insieme su "
+                   f"{cs}: probabile errore di Transfermarkt in finestra di "
+                   f"mercato. Finche' dura, il loro voto puo' finire sulla "
+                   f"partita della squadra sbagliata. Il primo: "
+                   f"{overlaps[0].describe()}.",
+                   players=[o.player_name for o in overlaps])
+
+
 def _check_shape(health: Health, now) -> None:
     report = shape_canary.run(now=now)
     for finding in report.findings:
@@ -349,6 +378,7 @@ def report(*, now=None, skip_shape: bool = False) -> Health:
     _check_egress_pool(health, now)
     _check_stuck_matches(health, now)
     _check_calendar_freshness(health, now)
+    _check_roster_overlap(health, now)
     if not skip_shape:
         _check_shape(health, now)
     return health

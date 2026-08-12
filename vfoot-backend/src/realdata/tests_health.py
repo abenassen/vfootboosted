@@ -278,3 +278,52 @@ class CanarinoFormaDati(TestCase):
         for eid in (1, 2):
             self._lineups(eid)
         self.assertTrue(self._run().ok)
+
+
+class DoppioTesseramento(TestCase):
+    """Lo stesso giocatore in due club insieme: si segnala, non si corregge.
+
+    E' un errore del fornitore (in finestra di mercato Transfermarkt tiene un
+    giocatore in due rose per qualche ora) e di norma si ripara da solo — ma
+    nessun'altra parte del sistema se ne accorgerebbe. La risoluzione del club
+    corrente prende il primo tesseramento aperto che trova, senza ordinamento:
+    finche' dura, il giocatore viene valutato sulla partita di una delle due
+    squadre in modo non deterministico, e senza un errore a schermo.
+
+    Sta a `warn` e non ad `alarm` di proposito: non c'e' niente da fare a mano, e
+    il rosso speso per una cosa che si ripara da se' e' rosso che poi non viene
+    piu' guardato. Il giallo basta — con --mail la posta parte lo stesso.
+    """
+
+    def setUp(self):
+        from realdata.models import Player, PlayerTeamStint
+        comp = Competition.objects.create(name="Serie A")
+        seas = Season.objects.create(code="2026-2027")
+        self.cs = CompetitionSeason.objects.create(
+            competition=comp, season=seas, name="Serie A 2026-2027")
+        self.inter = TeamSeason.objects.create(
+            competition_season=self.cs, team=Team.objects.create(name="Inter"))
+        self.milan = TeamSeason.objects.create(
+            competition_season=self.cs, team=Team.objects.create(name="Milan"))
+        self.p = Player.objects.create(full_name="Marco Rossi")
+        self._Stint = PlayerTeamStint
+
+    def _stint(self, ts, start, end=None):
+        self._Stint.objects.create(player=self.p, team_season=ts,
+                                   start_date=start, end_date=end)
+
+    def test_due_club_insieme_sono_un_avviso(self):
+        self._stint(self.inter, datetime(2026, 8, 1).date())
+        self._stint(self.milan, datetime(2026, 8, 10).date())
+        rep = health.report(now=NOW, skip_shape=True)
+        self.assertIn("roster:overlap", {c.code for c in rep.warns})
+        self.assertEqual(rep.verdict, "warn")
+
+    def test_un_trasferimento_regolare_non_dice_niente(self):
+        """Il confine che tiene in vita il controllo: se gridasse a ogni
+        trasferimento verrebbe spento entro una settimana."""
+        self._stint(self.inter, datetime(2026, 8, 1).date(),
+                    end=datetime(2026, 8, 10).date())
+        self._stint(self.milan, datetime(2026, 8, 10).date())
+        rep = health.report(now=NOW, skip_shape=True)
+        self.assertEqual(rep.verdict, "ok")
