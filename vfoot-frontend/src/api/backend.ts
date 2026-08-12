@@ -977,6 +977,12 @@ export async function cancelNomination(nominationId: number) {
   return auctionPost(`/nominations/${nominationId}/cancel`);
 }
 
+/** «Nessuno lo vuole»: chiude la chiamata senza venderlo e lo toglie dal giro.
+ *  Diverso da `cancelNomination`, che invece lo rimette nel sacchetto. */
+export async function markNominationUnsold(nominationId: number) {
+  return auctionPost(`/nominations/${nominationId}/unsold`);
+}
+
 export async function revertNomination(nominationId: number) {
   return auctionPost(`/nominations/${nominationId}/revert`);
 }

@@ -809,6 +809,14 @@ class AuctionNomination(models.Model):
     STATUS_OPEN = "open"
     STATUS_CLOSED = "closed"       # assigned to a winner (or admin direct-assign)
     STATUS_CANCELLED = "cancelled"  # withdrawn without assignment (undo) -> back in pool
+    # NESSUNO L'HA VOLUTO. Fuori dal giro, ma non venduto: il caso normale di
+    # un'asta, non un errore. Si distingue da "cancelled" per una ragione sola e
+    # concreta: un annullamento rimette il giocatore nel sacchetto e il sorteggio
+    # può ripescarlo (era la correzione di una chiamata sbagliata, e deve poter
+    # tornare), mentre uno che nessuno vuole ripescato non lo deve essere — o si
+    # ripropone all'infinito lo stesso giocatore che la stanza ha già scartato.
+    # Resta chiamabile a mano, che è come si recupera se qualcuno ci ripensa.
+    STATUS_UNSOLD = "unsold"
 
     # How the player was put up for auction, kept for the activity feed.
     CALL_MANUAL = "manual"          # admin picked this exact player
@@ -826,7 +834,8 @@ class AuctionNomination(models.Model):
     call_mode = models.CharField(max_length=16, choices=CALL_CHOICES, default=CALL_MANUAL)
     status = models.CharField(
         max_length=16,
-        choices=[(STATUS_OPEN, "Open"), (STATUS_CLOSED, "Closed"), (STATUS_CANCELLED, "Cancelled")],
+        choices=[(STATUS_OPEN, "Open"), (STATUS_CLOSED, "Closed"),
+                 (STATUS_CANCELLED, "Cancelled"), (STATUS_UNSOLD, "Invenduto")],
         default=STATUS_OPEN,
     )
     closed_winner_team = models.ForeignKey(
@@ -872,6 +881,7 @@ class AuctionEvent(models.Model):
     TYPE_BID_VOIDED = "bid_voided"
     TYPE_ASSIGNED = "assigned"          # nomination closed with a winner (or direct-assign)
     TYPE_NOMINATION_CANCELLED = "nomination_cancelled"
+    TYPE_NOMINATION_UNSOLD = "nomination_unsold"  # chiamato, nessuna offerta, si va avanti
     TYPE_ASSIGNMENT_REVERTED = "assignment_reverted"
     TYPE_SESSION_CLOSED = "session_closed"
 

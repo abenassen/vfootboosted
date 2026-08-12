@@ -3,6 +3,7 @@ from django.urls import path
 from vfoot.api.league_views import (
     AuctionAssignView,
     AuctionCancelNominationView,
+    AuctionMarkUnsoldView,
     AuctionCloseNominationView,
     AuctionCloseSessionView,
     AuctionCreateView,
@@ -285,6 +286,7 @@ urlpatterns = [
     path("nominations/<int:nomination_id>/bid", AuctionPlaceBidView.as_view(), name="auction-place-bid"),
     path("nominations/<int:nomination_id>/close", AuctionCloseNominationView.as_view(), name="auction-close-nomination"),
     path("nominations/<int:nomination_id>/cancel", AuctionCancelNominationView.as_view(), name="auction-cancel-nomination"),
+    path("nominations/<int:nomination_id>/unsold", AuctionMarkUnsoldView.as_view(), name="auction-mark-unsold"),
     path("nominations/<int:nomination_id>/revert", AuctionRevertNominationView.as_view(), name="auction-revert-nomination"),
     path("bids/<int:bid_id>/void", AuctionVoidBidView.as_view(), name="auction-void-bid"),
     path("players/search", PlayerSearchView.as_view(), name="player-search"),

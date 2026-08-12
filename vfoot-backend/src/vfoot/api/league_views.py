@@ -3745,12 +3745,16 @@ def _record_auction_event(session, event_type, actor, payload, nomination=None):
 
 
 def _called_player_ids(session) -> set[int]:
-    """Players no longer in the pool: currently up for auction (open) or already
-    assigned (closed). A cancelled nomination returns its player to the pool."""
+    """Players no longer in the pool: currently up for auction (open), already
+    assigned (closed), or passed over because nobody wanted them (unsold).
+
+    Un annullamento invece RIMETTE il giocatore nel sacchetto — è la correzione di
+    una chiamata sbagliata, quindi il sorteggio deve poterlo ripescare."""
     return set(
         AuctionNomination.objects.filter(
             session=session,
-            status__in=[AuctionNomination.STATUS_OPEN, AuctionNomination.STATUS_CLOSED],
+            status__in=[AuctionNomination.STATUS_OPEN, AuctionNomination.STATUS_CLOSED,
+                        AuctionNomination.STATUS_UNSOLD],
         ).values_list("player_id", flat=True))
 
 
@@ -3920,6 +3924,42 @@ def _cancel_nomination(nom, actor):
     _record_auction_event(
         nom.session, AuctionEvent.TYPE_NOMINATION_CANCELLED, actor,
         {"player_name": _player_label(nom.player)}, nomination=nom)
+    return {"nomination_id": nom.id}
+
+
+def _mark_unsold(nom, actor):
+    """Nessuno lo vuole: si passa al prossimo, e lui esce dal giro.
+
+    Le offerte eventuali (una chiamata può avere avuto un rilancio e poi essere
+    stata lasciata cadere per un ripensamento della stanza) si annullano come in
+    un ritiro, ma il risultato sul sacchetto è opposto: il giocatore NON torna
+    sorteggiabile. Resta chiamabile per nome, con l'etichetta «fuori lista»."""
+    if nom.status != AuctionNomination.STATUS_OPEN:
+        raise ValueError("La chiamata non e' aperta.")
+    nom.bids.filter(is_void=False).update(is_void=True)
+    nom.status = AuctionNomination.STATUS_UNSOLD
+    nom.save(update_fields=["status"])
+    _record_auction_event(
+        nom.session, AuctionEvent.TYPE_NOMINATION_UNSOLD, actor,
+        {"player_name": _player_label(nom.player), "player_id": nom.player_id},
+        nomination=nom)
+    return {"nomination_id": nom.id}
+
+
+def _undo_unsold(nom, actor):
+    """Rimetti nel sacchetto uno scartato per sbaglio.
+
+    Diventa un ritiro, non una riapertura: riaprire la chiamata rimetterebbe un
+    giocatore «in chiamata» mentre magari ce n'è già un altro sul banco, e di
+    aperte se ne regge una sola. Da annullata torna sorteggiabile, che è
+    esattamente «come se non fosse mai stato chiamato»."""
+    if nom.status != AuctionNomination.STATUS_UNSOLD:
+        raise ValueError("La chiamata non e' fra gli scartati.")
+    nom.status = AuctionNomination.STATUS_CANCELLED
+    nom.save(update_fields=["status"])
+    _record_auction_event(
+        nom.session, AuctionEvent.TYPE_NOMINATION_CANCELLED, actor,
+        {"player_name": _player_label(nom.player), "restored": True}, nomination=nom)
     return {"nomination_id": nom.id}
 
 
@@ -4229,7 +4269,7 @@ class AuctionCloseNominationView(APIView):
         top = _top_bid(nomination)
         if not top:
             return Response(
-                {"detail": "Nessuna offerta: usa 'Annulla chiamata' per rimettere il giocatore in lista."},
+                {"detail": "Nessuna offerta: usa 'Nessuno lo vuole' per passare al prossimo."},
                 status=status.HTTP_400_BAD_REQUEST)
 
         winner_team = _team_for_membership(top.bidder)
@@ -4340,6 +4380,31 @@ class AuctionCancelNominationView(APIView):
         return Response({"nomination_id": nomination.id, "status": nomination.status})
 
 
+class AuctionMarkUnsoldView(APIView):
+    """«Nessuno lo vuole»: chiude la chiamata senza assegnare e passa oltre.
+
+    È il caso PIÙ FREQUENTE di un'asta e non aveva un suo tasto: si finiva su
+    «Annulla chiamata», che però significa un'altra cosa — rimette il giocatore
+    nel sacchetto, e il sorteggio dopo poteva ritirare fuori quello che la stanza
+    aveva appena scartato."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, nomination_id: int):
+        nomination = get_object_or_404(
+            AuctionNomination.objects.select_related("player", "session__league"),
+            id=nomination_id)
+        _ensure_admin(nomination.session.league, request.user.id)
+        try:
+            _mark_unsold(nomination, request.user)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        broadcast_auction(nomination.session_id)
+        return Response({"nomination_id": nomination.id, "status": nomination.status})
+
+
 class AuctionRevertNominationView(APIView):
     """Undo a completed purchase: refund the credits, free the slot, reopen the
     player for auction."""
@@ -4395,12 +4460,25 @@ class AuctionUndoLastView(APIView):
         # refer to state already reverted, to find the last undoable action.
         UNDOABLE = {
             AuctionEvent.TYPE_BID, AuctionEvent.TYPE_NOMINATED, AuctionEvent.TYPE_ASSIGNED,
+            # Scartare qualcuno È una decisione, non un annullamento: se il tasto
+            # è partito per sbaglio deve poter essere ritirato, o l'unico modo di
+            # rimediare sarebbe richiamarlo a mano — e nel frattempo lui è già
+            # uscito dal sorteggio senza che nessuno l'abbia deciso.
+            AuctionEvent.TYPE_NOMINATION_UNSOLD,
         }
         for event in AuctionEvent.objects.filter(session=session)[:50]:
             if event.event_type not in UNDOABLE:
                 continue
             try:
-                if event.event_type == AuctionEvent.TYPE_BID:
+                if event.event_type == AuctionEvent.TYPE_NOMINATION_UNSOLD:
+                    if not event.nomination_id:
+                        continue
+                    nom = AuctionNomination.objects.get(id=event.nomination_id)
+                    if nom.status != AuctionNomination.STATUS_UNSOLD:
+                        continue
+                    _undo_unsold(nom, request.user)
+                    result = {"undone": "unsold", "nomination_id": nom.id}
+                elif event.event_type == AuctionEvent.TYPE_BID:
                     bid = AuctionBid.objects.filter(
                         id=event.payload.get("bid_id"), is_void=False).first()
                     if not bid:

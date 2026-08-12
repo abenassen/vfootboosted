@@ -123,6 +123,7 @@ type ApiImpl = {
   placeBid: typeof backendApi.placeBid;
   closeNomination: typeof backendApi.closeNomination;
   cancelNomination: typeof backendApi.cancelNomination;
+  markNominationUnsold: typeof backendApi.markNominationUnsold;
   revertNomination: typeof backendApi.revertNomination;
   voidBid: typeof backendApi.voidBid;
   undoLastAuctionAction: typeof backendApi.undoLastAuctionAction;
@@ -216,6 +217,7 @@ export const assignPlayer = typedImpl.assignPlayer;
 export const placeBid = typedImpl.placeBid;
 export const closeNomination = typedImpl.closeNomination;
 export const cancelNomination = typedImpl.cancelNomination;
+export const markNominationUnsold = typedImpl.markNominationUnsold;
 export const revertNomination = typedImpl.revertNomination;
 export const voidBid = typedImpl.voidBid;
 export const undoLastAuctionAction = typedImpl.undoLastAuctionAction;

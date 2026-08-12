@@ -258,6 +258,44 @@ class AuctionUndoTests(AuctionBase):
             f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": atk.id}, format="json")
         self.assertEqual(res.status_code, 201)
 
+    def test_unsold_leaves_the_draw_but_stays_callable(self):
+        """Scartato non è annullato: la differenza sta tutta nel sorteggio."""
+        a = self._player("Scartato", "ATT")
+        b = self._player("Altro", "ATT")
+        aid = self._create_auction([a, b])
+        nom_id = self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": a.id},
+            format="json").json()["nomination_id"]
+        res = self._as(self.admin).post(f"/api/v1/nominations/{nom_id}/unsold", format="json")
+        self.assertEqual(res.status_code, 200, res.content)
+
+        # Il sorteggio non lo ripesca più: resta solo l'altro.
+        for _ in range(5):
+            drawn = self._as(self.admin).post(
+                f"/api/v1/auctions/{aid}/nominate", {"mode": "random"}, format="json")
+            self.assertEqual(drawn.json()["player_id"], b.id)
+            self._as(self.admin).post(
+                f"/api/v1/nominations/{drawn.json()['nomination_id']}/cancel", format="json")
+
+        # Ma chiamato per nome torna sul banco, che è come si recupera.
+        again = self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": a.id}, format="json")
+        self.assertEqual(again.status_code, 201, again.content)
+
+    def test_undo_of_unsold_puts_him_back_in_the_draw(self):
+        a = self._player("Pentito", "ATT")
+        aid = self._create_auction([a])
+        nom_id = self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": a.id},
+            format="json").json()["nomination_id"]
+        self._as(self.admin).post(f"/api/v1/nominations/{nom_id}/unsold", format="json")
+        res = self._as(self.admin).post(f"/api/v1/auctions/{aid}/undo-last", format="json")
+        self.assertEqual(res.json()["undone"], "unsold")
+        # Ritirato lo scarto, il sorteggio lo rivede.
+        drawn = self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "random"}, format="json")
+        self.assertEqual(drawn.json()["player_id"], a.id)
+
     def test_void_bid(self):
         atk = self._player("X", "ATT")
         aid = self._create_auction([atk])

@@ -10,6 +10,7 @@ import {
   createAuction,
   getActiveAuction,
   getAuctionState,
+  markNominationUnsold,
   nominatePlayer,
   placeBid,
   revertNomination,
@@ -47,7 +48,11 @@ function eventLine(type: string, payload: Record<string, unknown>): string {
     case 'assigned':
       return `${p.player_name} → ${p.team_name} per ${p.amount}${p.via === 'assign' ? ' (diretta)' : ''}`;
     case 'nomination_cancelled':
-      return `Chiamata annullata: ${p.player_name} torna in lista`;
+      return p.restored
+        ? `${p.player_name} rimesso in lista`
+        : `Chiamata annullata: ${p.player_name} torna in lista`;
+    case 'nomination_unsold':
+      return `Nessuna offerta per ${p.player_name}: fuori dal giro`;
     case 'assignment_reverted':
       return `Acquisto revocato: ${p.player_name} (rimborso ${p.amount ?? '?'})`;
     case 'session_closed':
@@ -209,6 +214,12 @@ export default function AuctionRoomPage() {
               onCancel={() =>
                 run(() => cancelNomination(state.open_nomination!.nomination_id), 'Chiamata annullata.')
               }
+              onUnsold={() =>
+                run(
+                  () => markNominationUnsold(state.open_nomination!.nomination_id),
+                  'Nessuna offerta: si va avanti.',
+                )
+              }
               onVoidBid={(bidId) => run(() => voidBid(bidId), 'Offerta annullata.')}
               onAssignCurrent={(teamId, price) =>
                 run(() => assignPlayer(auctionId, state.open_nomination!.player_id, teamId, price), 'Assegnato.')
@@ -249,6 +260,7 @@ function CurrentPlayerPanel({
   onBid,
   onClose,
   onCancel,
+  onUnsold,
   onVoidBid,
   onAssignCurrent,
 }: {
@@ -258,6 +270,7 @@ function CurrentPlayerPanel({
   onBid: (amount: number, teamId?: number) => void;
   onClose: () => void;
   onCancel: () => void;
+  onUnsold: () => void;
   onVoidBid: (bidId: number) => void;
   onAssignCurrent: (teamId: number, price: number) => void;
 }) {
@@ -394,13 +407,45 @@ function CurrentPlayerPanel({
 
       {isAdmin ? (
         <div className="mt-4 space-y-3 border-t pt-3">
+          {/* COME SI CHIUDE UNA CHIAMATA, in due modi soli e nell'ordine in cui
+              capitano davvero.
+
+              Se c'è un'offerta si aggiudica. Se non ce n'è nessuna — che è la
+              situazione più frequente di un'asta, non l'eccezione — si passa al
+              prossimo, e prima non esisteva un tasto per farlo: restava «Annulla
+              chiamata», che vuol dire un'altra cosa e si legge come «ho sbagliato
+              a chiamarlo». Peggio, faceva davvero un'altra cosa: rimetteva il
+              giocatore nel sacchetto, e il sorteggio dopo poteva ritirare fuori
+              proprio quello che la stanza aveva appena scartato.
+
+              L'annullamento resta ma scende di rango: è la correzione di un
+              errore, e da qui in poi lo dice per esteso. */}
           <div className="flex flex-wrap gap-2">
             <Button disabled={busy || nom.top_bid < 1} onClick={onClose}>
               Aggiudica al migliore
             </Button>
-            <Button variant="secondary" disabled={busy} onClick={onCancel}>
-              Annulla chiamata
+            <Button
+              variant={nom.top_bid < 1 ? 'primary' : 'secondary'}
+              disabled={busy}
+              onClick={onUnsold}
+            >
+              Nessuno lo vuole →
             </Button>
+          </div>
+          <div className="flex flex-wrap items-baseline gap-2 text-xs text-ink-faint">
+            <span>
+              {nom.top_bid < 1
+                ? 'Nessuna offerta: «Nessuno lo vuole» chiude la chiamata e lo toglie dal sorteggio (resta chiamabile per nome).'
+                : 'Chiamato per sbaglio?'}
+            </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onCancel}
+              className="font-semibold text-ink-soft underline hover:text-ink disabled:opacity-50"
+            >
+              Annulla la chiamata e rimettilo nel sorteggio
+            </button>
           </div>
           {/* Verbal auction: assign THIS player to the winner at the agreed price,
               no in-app bids required. */}
