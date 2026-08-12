@@ -48,12 +48,25 @@ export function StandingsTable({
   const showAvg = rows.some((r) => typeof r.avgScore === 'number');
   const showCrest = rows.some((r) => r.crest !== undefined);
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+    // `w-full` e non `w-max`: la tabella non deve MAI essere più larga della sua
+    // scheda, o è la pagina intera a scorrere di lato e il menu in fondo scappa
+    // col resto. Quando le colonne non ci stanno scorre questo riquadro, da solo.
+    <div className="w-full max-w-full overflow-x-auto">
+      <table className="w-full min-w-max text-sm">
         <thead>
           <tr className="text-left text-[11px] uppercase tracking-wide text-ink-faint">
             <th className="py-2 pr-2">#</th>
             <th className="pr-2">Squadra</th>
+            {/* I PUNTI SUBITO, prima di tutto il resto.
+                Erano l'ultima colonna a destra — l'ordine della classifica di
+                giornale, che ha senso su una pagina larga quanto il foglio. Su un
+                telefono undici colonne non ci stanno, e la sola che decide la
+                classifica era quella che finiva fuori schermo: si vedeva chi
+                aveva pareggiato più partite e non con quanti punti stava primo.
+                Adesso ciò che non ci sta è il dettaglio (gol fatti, subiti,
+                media), che si va a cercare scorrendo — e si scorre per un
+                dettaglio, non per il dato principale. */}
+            <th className="px-1 text-center font-bold text-ink">Pt</th>
             <th className="px-1 text-center">G</th>
             <th className="px-1 text-center">V</th>
             <th className="px-1 text-center">N</th>
@@ -62,7 +75,6 @@ export function StandingsTable({
             <th className="px-1 text-center">GS</th>
             <th className="px-1 text-center">DR</th>
             {showAvg ? <th className="px-1 text-center">Media</th> : null}
-            <th className="px-1 text-center font-bold">Pt</th>
           </tr>
         </thead>
         <tbody>
@@ -91,9 +103,13 @@ export function StandingsTable({
                 </span>
               </td>
               <td className="pr-2 font-semibold text-ink">
-                <span className="flex items-center gap-2">
+                {/* Il nome si accorcia invece di allargare la tabella: un nome
+                    lungo spingeva da solo tutte le colonne fuori dallo schermo. */}
+                <span className="flex max-w-[10rem] items-center gap-2 sm:max-w-none">
                   {showCrest ? <Crest descriptor={s.crest} teamName={s.name} size={22} /> : null}
-                  <span className="truncate">{s.name}</span>
+                  <span className="min-w-0 truncate" title={s.name}>
+                    {s.name}
+                  </span>
                   {s.provisional ? (
                     <span
                       className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-live"
@@ -102,6 +118,7 @@ export function StandingsTable({
                   ) : null}
                 </span>
               </td>
+              <td className="px-1 text-center font-bold text-ink">{s.points}</td>
               <td className="px-1 text-center text-ink-soft">{s.played}</td>
               <td className="px-1 text-center text-ink-soft">{s.wins}</td>
               <td className="px-1 text-center text-ink-soft">{s.draws}</td>
@@ -116,7 +133,6 @@ export function StandingsTable({
                   {typeof s.avgScore === 'number' ? s.avgScore.toFixed(1) : '—'}
                 </td>
               ) : null}
-              <td className="px-1 text-center font-bold text-ink">{s.points}</td>
             </tr>
           ))}
         </tbody>
