@@ -41,6 +41,7 @@ from realdata.models import (
     PlayerTeamStint,
     TeamSeason, PROVIDER_SOFASCORE,
 )
+from realdata.services import roster_integrity
 from realdata.services.identity import (
     is_placeholder_dob, name_similarity, norm_name,
 )
@@ -299,8 +300,13 @@ class Command(BaseCommand):
 
         stats = {"relinked": 0, "dob": 0, "name": 0, "fuzzy": 0, "created": 0,
                  "unmatched_skipped": 0, "market_values": 0, "dob_fixed": 0, "stints": 0, "gk_tagged": 0,
-                 "role_set": 0, "departures_closed": 0, "unmapped_position": 0}
+                 "role_set": 0, "departures_closed": 0, "moved_closed": 0,
+                 "unmapped_position": 0}
         dob_changes, created_players, fuzzy_pairs, unmatched = [], [], [], []
+        # Chiusi perche' visti altrove (prova positiva) e giocatori che TM elenca
+        # in due rose lette: tenuti distinti dalle partenze perche' sono conclusioni
+        # di natura diversa, e chi legge il rapporto deve poterle distinguere.
+        moved_players, double_players = [], []
         unmapped_positions = set()
         # (player_id, team_season_id) pairs present in THIS scrape — drives the
         # departure check below. Players never seen here whose stint is still open
@@ -421,30 +427,77 @@ class Command(BaseCommand):
                         seen_pairs.add((player.id, ts.id))
                     tm_alias[tm_id] = player
 
-            # Close roster stints of players no longer in ANY scraped squad —
-            # transfers out / abroad. Guarded: a partial scrape (some club with an
-            # implausibly small roster) would wrongly flag a whole squad as departed,
-            # so we only close when every mapped club looks fully scraped.
-            min_squad = min((len(c["players"]) for c in tm_clubs), default=0)
-            complete = min_squad >= opts["min_squad"]
-            if close_departures:
-                open_stints = (PlayerTeamStint.objects
+            # -- chiusura dei tesseramenti che questo scrape contraddice --------
+            #
+            # Due prove di segno opposto, e la differenza fra le due e' tutto il
+            # motivo per cui questo blocco e' scritto cosi'.
+            #
+            # PRESENZA (prova positiva). Vedere un giocatore nella rosa del Milan
+            # dice che NON e' piu' all'Inter, e lo dice anche se l'Inter non l'
+            # abbiamo letta: un giocatore ha un club per volta. Non chiede nessuna
+            # guardia di completezza.
+            #
+            # ASSENZA (prova negativa). Non vederlo in una rosa dice che se n'e'
+            # andato SOLO SE quella rosa l'abbiamo letta davvero. Per un club che
+            # non ha risposto, l'assenza e' un artefatto nostro, non un fatto suo.
+            # Da qui la guardia — che pero' e' PER CLUB, non globale: chiudere le
+            # partenze di tutti e venti perche' uno solo e' andato storto tratta
+            # come ambiguo un dato che ambiguo non e'.
+            open_stints = list(PlayerTeamStint.objects
                                .filter(team_season__competition_season=cs,
                                        end_date__isnull=True)
                                .values_list("id", "player_id", "team_season_id"))
-                to_close = [(sid, pid) for sid, pid, tsid in open_stints
-                            if (pid, tsid) not in seen_pairs]
-                if to_close and complete:
-                    if not dry:
-                        PlayerTeamStint.objects.filter(
-                            id__in=[s for s, _ in to_close]).update(end_date=as_of)
-                    stats["departures_closed"] = len(to_close)
-                    departed.extend(pid for _, pid in to_close)
-                elif to_close and not complete:
-                    self.stdout.write(self.style.WARNING(
-                        f"Skipping departure-close: smallest squad has {min_squad} "
-                        f"players (< --min-squad {opts['min_squad']}); scrape looks "
-                        f"partial. {len(to_close)} stints would have been closed."))
+
+            seen_by_player: dict[int, set[int]] = {}
+            for pid, tsid in seen_pairs:
+                seen_by_player.setdefault(pid, set()).add(tsid)
+            # Elencato in due rose LETTE: e' l'errore di Transfermarkt in finestra
+            # di mercato. Qui la prova positiva si annulla da sola — non sappiamo
+            # quale delle due valga — e indovinare sarebbe peggio del problema.
+            # Si lascia com'e' e lo si riferisce.
+            double_listed = sorted(pid for pid, t in seen_by_player.items()
+                                   if len(t) > 1)
+
+            moved = [(sid, pid) for sid, pid, tsid in open_stints
+                     if len(seen_by_player.get(pid, ())) == 1
+                     and tsid not in seen_by_player[pid]]
+
+            # I club di cui ci fidiamo della fotografia. Un club che non ha
+            # risposto non ha nemmeno un file nella cache, quindi ``tm_clubs`` e'
+            # gia' l'insieme dei letti; --min-squad toglie in piu' quelli che hanno
+            # risposto con una rosa implausibile (una pagina che e' ancora una
+            # pagina e non e' piu' una rosa).
+            thin = [c for c in tm_clubs if len(c["players"]) < opts["min_squad"]]
+            trusted_ts = {mapping[c["id"]][0].id for c in tm_clubs
+                          if len(c["players"]) >= opts["min_squad"]}
+            departures = []
+            if close_departures:
+                moved_ids = {sid for sid, _ in moved}
+                departures = [(sid, pid) for sid, pid, tsid in open_stints
+                              if sid not in moved_ids and tsid in trusted_ts
+                              and (pid, tsid) not in seen_pairs]
+
+            to_close = moved + departures
+            if to_close and not dry:
+                PlayerTeamStint.objects.filter(
+                    id__in=[s for s, _ in to_close]).update(end_date=as_of)
+            stats["moved_closed"] = len(moved)
+            stats["departures_closed"] = len(departures)
+            departed.extend(pid for _, pid in departures)
+            moved_players.extend(pid for _, pid in moved)
+            double_players.extend(double_listed)
+            if thin:
+                self.stdout.write(self.style.WARNING(
+                    f"Rose implausibili (< --min-squad {opts['min_squad']}), "
+                    f"escluse dal controllo partenze: "
+                    + ", ".join(f"{c['name']} ({len(c['players'])})"
+                                for c in thin)))
+            untrusted = len(team_seasons) - len(trusted_ts)
+            if untrusted and close_departures:
+                self.stdout.write(self.style.WARNING(
+                    f"Partenze non controllate per {untrusted} club su "
+                    f"{len(team_seasons)}: non letti o rosa implausibile. Gli "
+                    f"altri {len(trusted_ts)} sono stati controllati normalmente."))
             if dry:
                 transaction.set_rollback(True)
 
@@ -528,6 +581,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(
                 f"POSIZIONI TM NON MAPPATE      : {s['unmapped_position']} giocatori "
                 f"restano SENZA ruolo -> {sorted(unmapped_positions)}"))
+        self.stdout.write(
+            f"Trasferiti (visto in altra rosa): {s['moved_closed']}"
+            f"{' (da chiudere)' if dry else ''}")
         if not close_departures:
             self.stdout.write("Departures (transfers out)   : not checked "
                               "(--no-close-departures)")
@@ -555,6 +611,43 @@ class Command(BaseCommand):
             for r in rows[:n]:
                 self.stdout.write("   " + fmt(r))
 
+        # -- la contraddizione: due club nello stesso momento -------------------
+        #
+        # Si GUARDA e si riferisce, non si corregge: se succede e' un errore di
+        # Transfermarkt (in finestra di mercato tiene un giocatore in due rose per
+        # qualche ora) e di norma lo corregge da solo. Ma va saputo, perche' nessun
+        # altro se ne accorgerebbe: ``match_resolver.player_team_season_id`` risolve
+        # il club con un ``.first()`` senza ordinamento, quindi un giocatore doppio
+        # non da' errore — viene valutato sulla partita di una delle due squadre, a
+        # caso. Il perche' del non-vincolo sta in roster_integrity.
+        # ``active_on``: interessa cio' che e' vero ADESSO. Una sovrapposizione di
+        # un giorno chiusasi a agosto e' un fatto concluso; ripeterlo a ogni
+        # importazione, due volte al giorno per sempre, insegna a saltare la riga.
+        overlaps = [] if dry else roster_integrity.overlapping_stints(
+            cs.id, active_on=as_of)
+        if dry:
+            self.stdout.write(
+                "Tesseramenti sovrapposti     : non controllati in dry-run.")
+        elif not overlaps:
+            self.stdout.write("Tesseramenti sovrapposti     : 0")
+        else:
+            self.stdout.write(self.style.ERROR(
+                f"TESSERAMENTI SOVRAPPOSTI     : {len(overlaps)} — lo stesso "
+                f"giocatore risulta in due club nello stesso momento. Va guardato: "
+                f"finche' dura, viene valutato sulla partita di una delle due "
+                f"squadre in modo non deterministico."))
+            for o in overlaps[:20]:
+                self.stdout.write("   " + o.describe())
+        if double_players:
+            names = dict(Player.objects.filter(id__in=double_players)
+                         .values_list("id", "full_name"))
+            self.stdout.write(self.style.ERROR(
+                f"ELENCATI IN DUE ROSE LETTE   : {len(double_players)} — Transfermarkt "
+                f"li da' in due squadre in questo stesso scrape. Nessuna delle due "
+                f"e' stata chiusa: non c'e' modo di sapere quale valga."))
+            for pid in double_players[:20]:
+                self.stdout.write(f"   {names.get(pid, pid)}")
+
         _show("DOB corrected", dob_changes,
               lambda r: f"{r[0]}: {r[1]} -> {r[2]}")
         _show("created (in TM squad, never played)", created_players,
@@ -563,6 +656,11 @@ class Command(BaseCommand):
               lambda r: f"TM '{r[0]}' == SS '{r[1]}'")
         _show("unmatched & skipped", unmatched,
               lambda r: f"{r[0]} ({r[1]}, {r[2]})")
+        if moved_players:
+            names = dict(Player.objects.filter(id__in=moved_players)
+                         .values_list("id", "full_name"))
+            _show("trasferiti (visti in un'altra rosa, vecchio club chiuso)",
+                  [names.get(pid, pid) for pid in moved_players], lambda r: str(r))
         if departed:
             names = dict(Player.objects.filter(id__in=departed)
                          .values_list("id", "full_name"))

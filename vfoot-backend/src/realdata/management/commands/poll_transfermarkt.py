@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+from datetime import date
 from pathlib import Path
 
 from django.core.management import call_command
@@ -40,7 +41,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from realdata.management.commands.import_transfermarkt_squads import PROVIDER_SOFASCORE
 from realdata.models import CompetitionSeason, TeamSeason
-from realdata.services import job_log
+from realdata.services import job_log, roster_integrity
 from realdata.services.scrape_transfermarkt_squads import TM
 
 
@@ -61,6 +62,10 @@ class Command(BaseCommand):
                             help="Scrape for real but import in report-only mode.")
         parser.add_argument("--delay", type=float, default=2.0)
         parser.add_argument("--jitter", type=float, default=1.5)
+        parser.add_argument("--attempts", type=int, default=3,
+                            help="Tentativi per pagina sui guasti passeggeri. Un "
+                                 "timeout senza ritentativo costa il club per 12 "
+                                 "ore, e con lui le partenze di quella rosa.")
         parser.add_argument("--min-map-score", type=float, default=0.5,
                             help="Abort if any club maps below this name score "
                                  "(unattended safety; default 0.5).")
@@ -132,28 +137,40 @@ class Command(BaseCommand):
                 raise CommandError("Scraped 0 clubs — TM unreachable or blocked. "
                                    "Nothing imported.")
 
-            # The guard the manual path leaves to human judgement: only trust a
-            # departure signal when the roster picture is COMPLETE. A missing club
-            # (transient failure) would otherwise mass-close its players' stints.
+            # Uno scrape incompleto NON spegne piu' le partenze di tutti. La
+            # guardia e' passata a valle ed e' per club: chi non ha risposto non
+            # entra nell'insieme di cui ci si fida, gli altri vengono controllati
+            # normalmente. Prima un solo timeout su venti costava a tutto il giro
+            # il trattamento delle uscite — non 1/20 del lavoro, ma tutto.
             all_present = (failed == 0 and expected and scraped == expected)
             if not all_present:
                 run.note(f"scrape incompleto ({scraped}/{expected} club): "
-                         f"partenze non applicate")
+                         f"partenze controllate solo sui club letti")
                 self.stdout.write(self.style.WARNING(
                     f"Incomplete scrape ({scraped}/{expected} clubs, {failed} "
-                    f"failed): closing departures is DISABLED this run to avoid "
-                    f"false transfers-out. Arrivals/updates still applied."))
+                    f"failed): departures are checked ONLY for the clubs actually "
+                    f"read. Arrivals/updates still applied."))
 
             call_command(
                 "import_transfermarkt_squads",
                 cache_dir=str(out),
                 competition_season=cs.id,
                 dry_run=opts["dry_run"],
-                no_close_departures=not all_present,
                 # Unattended: refuse a club that maps to the wrong TeamSeason at a
                 # low name score rather than importing a wrong roster silently.
                 min_map_score=opts["min_map_score"],
             )
+
+            # Il contatore di controllo. Va su JobRun anche a zero, di proposito:
+            # e' uno zero che deve restare visibile giorno per giorno, perche' e'
+            # il momento in cui risale sopra zero la notizia che serve — e senza
+            # una riga per ogni giro non si vedrebbe quando e' successo.
+            overlaps = roster_integrity.overlapping_stints(
+                cs.id, active_on=date.today())
+            run.did(stint_overlaps=len(overlaps))
+            if overlaps:
+                run.note(f"{len(overlaps)} tesseramenti sovrapposti: "
+                         + "; ".join(o.describe() for o in overlaps[:3]))
         finally:
             if opts["keep_cache"]:
                 self.stdout.write(f"(kept scrape cache at {out})")
@@ -164,7 +181,7 @@ class Command(BaseCommand):
                 opts) -> tuple[int, int, int]:
         """Fresh scrape into `out`. Returns (clubs_scraped, clubs_failed, players)."""
         tm = TM(out, min_delay=opts["delay"], jitter=opts["jitter"],
-                logger=self.stdout.write)
+                logger=self.stdout.write, attempts=opts["attempts"])
         scraped = failed = players = 0
         try:
             clubs = tm.clubs(competition, season)

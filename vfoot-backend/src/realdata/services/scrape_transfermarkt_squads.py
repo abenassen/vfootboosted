@@ -43,6 +43,15 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
+# Venti secondi bastano largamente a una pagina rosa (il tempo di risposta normale
+# e' sotto il secondo); il tetto serve a non restare appesi, non a dare tempo.
+REQUEST_TIMEOUT = 20.0
+# Codici che il tempo ripara: coda piena e guasti di server. Tutto il resto e' una
+# risposta, e una risposta non si ritenta.
+RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+# Attesa fra un tentativo e l'altro, moltiplicata per il numero del tentativo.
+RETRY_BACKOFF = 3.0
+
 # Transfermarkt's .com squad table renders DOB as DD/MM/YYYY, e.g. "12/04/1995 (31)".
 _DOB_RE = re.compile(r"(\d{2}/\d{2}/\d{4})")
 _SPIELER_RE = re.compile(r"/profil/spieler/(\d+)")
@@ -63,14 +72,15 @@ def _parse_dob(text: str) -> str | None:
 
 class TM:
     def __init__(self, cache_dir: Path, *, min_delay: float, jitter: float,
-                 logger=print) -> None:
+                 logger=print, attempts: int = 3) -> None:
         self.cache = Path(cache_dir)
         self.cache.mkdir(parents=True, exist_ok=True)
         self.min_delay = min_delay
         self.jitter = jitter
         self.log = logger
+        self.attempts = max(1, attempts)
         self._last = 0.0
-        self._client = httpx.Client(headers=HEADERS, timeout=20.0,
+        self._client = httpx.Client(headers=HEADERS, timeout=REQUEST_TIMEOUT,
                                     follow_redirects=True)
 
     def _throttle(self) -> None:
@@ -80,11 +90,49 @@ class TM:
             time.sleep(wait)
 
     def _get_html(self, url: str) -> str:
-        self._throttle()
-        r = self._client.get(url)
-        self._last = time.monotonic()
-        r.raise_for_status()
-        return r.text
+        """GET con ritentativo sui guasti passeggeri.
+
+        PERCHE'. L'11/08/2026 tre club su venti sono andati persi per
+        ``ReadTimeout``, e nello stesso giro le richieste RIUSCITE stavano
+        rispondendo in 10-15 secondi contro il decimo di secondo abituale: non un
+        blocco (ogni risposta arrivata era 200) ma Transfermarkt lento in quella
+        finestra, e il tetto fisso ha tagliato i tre piu' lenti. Senza ritentativo
+        un singolo timeout costa il club per dodici ore.
+
+        E costa molto piu' del club: un club mancante toglie fiducia alla sua
+        fotografia, quindi le partenze di QUELLA rosa non vengono chiuse. Il
+        ritentativo e' percio' la cosa piu' economica che tenga insieme il dato.
+
+        Si ritenta solo su cio' che il tempo ripara — timeout, guasti di
+        trasporto, 429 e 5xx. Un 404 e' una risposta, non un guasto: ritentarlo
+        vuol dire solo aspettare tre volte per la stessa notizia.
+        """
+        last: Exception | None = None
+        for attempt in range(1, self.attempts + 1):
+            self._throttle()
+            try:
+                r = self._client.get(url)
+                self._last = time.monotonic()
+                r.raise_for_status()
+                return r.text
+            except httpx.HTTPStatusError as exc:
+                self._last = time.monotonic()
+                if exc.response.status_code not in RETRY_STATUS:
+                    raise
+                last = exc
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                # Il timeout non passa da ``_client.get`` con un tempo di risposta,
+                # quindi ``_last`` va spostato a mano: senza, il throttle crede che
+                # l'ultima richiesta sia vecchia di venti secondi e riparte subito.
+                self._last = time.monotonic()
+                last = exc
+            if attempt < self.attempts:
+                pause = RETRY_BACKOFF * attempt + random.uniform(0, self.jitter)
+                self.log(f"  ritento fra {pause:.1f}s "
+                         f"({attempt}/{self.attempts - 1}): "
+                         f"{type(last).__name__} su {url}")
+                time.sleep(pause)
+        raise last  # type: ignore[misc]  # attempts >= 1, quindi last e' valorizzato
 
     def clubs(self, competition: str, season: int) -> list[dict[str, Any]]:
         """[{id, name, slug, url}] for every club in the competition+season."""
@@ -149,11 +197,14 @@ def main() -> None:
     ap.add_argument("--delay", type=float, default=2.0)
     ap.add_argument("--jitter", type=float, default=1.5)
     ap.add_argument("--limit", type=int, default=None, help="Max clubs (debug).")
+    ap.add_argument("--attempts", type=int, default=3,
+                    help="Tentativi per pagina sui guasti passeggeri (default 3).")
     args = ap.parse_args()
 
     out = Path(args.cache_dir) / args.competition / str(args.season)
     out.mkdir(parents=True, exist_ok=True)
-    tm = TM(out, min_delay=args.delay, jitter=args.jitter)
+    tm = TM(out, min_delay=args.delay, jitter=args.jitter,
+            attempts=args.attempts)
     try:
         clubs = tm.clubs(args.competition, args.season)
         print(f"{len(clubs)} clubs in {args.competition} {args.season}.")
