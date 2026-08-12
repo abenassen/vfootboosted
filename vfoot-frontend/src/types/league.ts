@@ -59,6 +59,10 @@ export interface ReferenceSeason {
 
 export interface RealSeasonItem extends ReferenceSeason {
   matchdays: number;
+  /** Si sta ancora giocando: c'è almeno una partita da giocare, oppure il
+   *  calendario non è ancora uscito. Una lega si può legare solo a una di queste
+   *  — vedi matchday_state.open_season_ids lato server. */
+  open: boolean;
 }
 
 export interface LeagueDetail {

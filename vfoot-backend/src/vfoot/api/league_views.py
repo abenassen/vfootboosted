@@ -113,6 +113,7 @@ from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic
 from vfoot.services.classic_pagella import (
     elapsed_minutes, get_reference, match_in_progress, pagella_for_match,
 )
+from vfoot.services.classic_rating import current_role_map
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
     open_role_decisions, resolve as resolve_decision, unavailable_players,
@@ -968,7 +969,16 @@ class LeagueSettingsUpdateView(APIView):
 
 
 class RealSeasonListView(APIView):
-    """Real competition seasons available to use as a league's reference."""
+    """Real competition seasons: the championships the site holds.
+
+    ``?open=1`` keeps only the ones still being played (see
+    ``matchday_state.open_season_ids``). That is what the two callers who ASK a
+    user to pick a championship both want — creating a league, and browsing the
+    real calendar/listone without one — because a concluded edition is not
+    something a league can be played on, nor the championship anybody means by
+    "il campionato". The unfiltered list stays the default so an existing league
+    on a past season is still described by this endpoint.
+    """
 
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -987,6 +997,9 @@ class RealSeasonListView(APIView):
             )
             .order_by("-season__code", "competition__name")
         )
+        open_ids = matchday_state.open_season_ids()
+        if request.query_params.get("open") in ("1", "true", "True"):
+            seasons = [cs for cs in seasons if cs.id in open_ids]
         return Response(
             [
                 {
@@ -995,6 +1008,7 @@ class RealSeasonListView(APIView):
                     "competition": cs.competition.name,
                     "season": cs.season.code,
                     "matchdays": int(cs._matchdays or 0),
+                    "open": cs.id in open_ids,
                 }
                 for cs in seasons
             ]
@@ -5197,6 +5211,95 @@ class LeagueTeamLineupSaveView(APIView):
 
 
 # -- Real reference-championship calendar & results ---------------------------
+#
+# THE CHAMPIONSHIP IS NOT THE LEAGUE'S. Serie A's calendar, its pagelle and its
+# player pool are facts about the season, identical for every reader; a league
+# only supplies the season to look at, plus — in the listone and the pagella —
+# the two things that ARE its own: who owns whom, and the roles it froze.
+#
+# Hence the shape below: a payload builder per view, taking a CompetitionSeason
+# and an optional league, and two thin views over each. The league-scoped one is
+# reached from inside a league; the season-scoped one lets somebody who has just
+# signed up and has no league yet read the same pages (see the empty home). They
+# have to be the same function, or the showcase would drift from the real thing.
+
+
+def real_fixtures_payload(cs, matchday: int | None = None) -> dict:
+    """Calendar + results of a real championship edition, grouped by matchday."""
+    qs = (Match.objects.filter(competition_season=cs)
+          .select_related("home_team__team", "away_team__team")
+          .annotate(_apps=Count("appearances"))
+          .order_by("matchday", "kickoff", "id"))
+    if matchday is not None:
+        qs = qs.filter(matchday=matchday)
+
+    # SofaScore keeps a postponed fixture AND its rescheduled replay as TWO
+    # events with different ids. Hide a postponed row once a non-postponed
+    # sibling (same teams, i.e. same leg) exists — but keep a genuinely
+    # postponed-and-not-yet-replayed match visible.
+    matches = list(qs)
+    played_legs = {(m.home_team_id, m.away_team_id)
+                   for m in matches if m.status != Match.STATUS_POSTPONED}
+    matches = [m for m in matches
+               if not (m.status == Match.STATUS_POSTPONED
+                       and (m.home_team_id, m.away_team_id) in played_legs)]
+
+    groups: dict = {}
+    for m in matches:
+        # Appearances, not the final whistle: the pagella already rates a
+        # match in progress (whoever is on the pitch is judged on what he has
+        # done so far, see classic_pagella.match_in_progress), so requiring
+        # FINISHED here withheld the one detail worth opening while it is
+        # being played. The votes are provisional and say so; no votes at all
+        # is what a 404 would be.
+        has_detail = m._apps > 0
+        item = {
+            "id": m.id,
+            "matchday": m.matchday,
+            "kickoff": m.kickoff.isoformat() if m.kickoff else None,
+            "kickoff_provisional": m.kickoff_provisional,
+            "status": m.status,
+            "home_team": m.home_team.team.name,
+            "away_team": m.away_team.team.name,
+            "home_short": m.home_team.team.short_name or m.home_team.team.name,
+            "away_short": m.away_team.team.short_name or m.away_team.team.name,
+            "home_goals": m.home_goals,
+            "away_goals": m.away_goals,
+            "has_detail": has_detail,
+        }
+        groups.setdefault(m.matchday, []).append(item)
+
+    matchdays = [{"matchday": md, "fixtures": fx}
+                 for md, fx in sorted(groups.items(),
+                                      key=lambda kv: (kv[0] is None, kv[0]))]
+    # A rough "current matchday": the earliest with any non-finished fixture,
+    # else the last one — lets the frontend open on the live round.
+    current = None
+    for g in matchdays:
+        if any(f["status"] != Match.STATUS_FINISHED for f in g["fixtures"]):
+            current = g["matchday"]
+            break
+    if current is None and matchdays:
+        current = matchdays[-1]["matchday"]
+
+    return {
+        "season": {"id": cs.id, "name": str(cs),
+                   "competition": cs.competition.name},
+        "current_matchday": current,
+        "matchdays": matchdays,
+    }
+
+
+def _matchday_param(request):
+    """(matchday, error_response). The round asked for, or None for the lot."""
+    raw = request.query_params.get("matchday")
+    if not raw:
+        return None, None
+    try:
+        return int(raw), None
+    except ValueError:
+        return None, Response({"detail": "matchday must be an integer"},
+                              status=status.HTTP_400_BAD_REQUEST)
 
 
 class LeagueRealFixturesView(APIView):
@@ -5213,74 +5316,82 @@ class LeagueRealFixturesView(APIView):
         cs = league.reference_season
         if cs is None:
             return Response({"season": None, "matchdays": []})
+        md, err = _matchday_param(request)
+        if err is not None:
+            return err
+        return Response(real_fixtures_payload(cs, md))
 
-        qs = (Match.objects.filter(competition_season=cs)
-              .select_related("home_team__team", "away_team__team")
-              .annotate(_apps=Count("appearances"))
-              .order_by("matchday", "kickoff", "id"))
-        md_param = request.query_params.get("matchday")
-        if md_param:
-            try:
-                qs = qs.filter(matchday=int(md_param))
-            except ValueError:
-                return Response({"detail": "matchday must be an integer"},
-                                status=status.HTTP_400_BAD_REQUEST)
 
-        # SofaScore keeps a postponed fixture AND its rescheduled replay as TWO
-        # events with different ids. Hide a postponed row once a non-postponed
-        # sibling (same teams, i.e. same leg) exists — but keep a genuinely
-        # postponed-and-not-yet-replayed match visible.
-        matches = list(qs)
-        played_legs = {(m.home_team_id, m.away_team_id)
-                       for m in matches if m.status != Match.STATUS_POSTPONED}
-        matches = [m for m in matches
-                   if not (m.status == Match.STATUS_POSTPONED
-                           and (m.home_team_id, m.away_team_id) in played_legs)]
+class SeasonRealFixturesView(APIView):
+    """The same calendar, asked for by SEASON instead of by league: what somebody
+    with no league yet reads on the Serie A page."""
 
-        groups: dict = {}
-        for m in matches:
-            # Appearances, not the final whistle: the pagella already rates a
-            # match in progress (whoever is on the pitch is judged on what he has
-            # done so far, see classic_pagella.match_in_progress), so requiring
-            # FINISHED here withheld the one detail worth opening while it is
-            # being played. The votes are provisional and say so; no votes at all
-            # is what a 404 would be.
-            has_detail = m._apps > 0
-            item = {
-                "id": m.id,
-                "matchday": m.matchday,
-                "kickoff": m.kickoff.isoformat() if m.kickoff else None,
-                "kickoff_provisional": m.kickoff_provisional,
-                "status": m.status,
-                "home_team": m.home_team.team.name,
-                "away_team": m.away_team.team.name,
-                "home_short": m.home_team.team.short_name or m.home_team.team.name,
-                "away_short": m.away_team.team.short_name or m.away_team.team.name,
-                "home_goals": m.home_goals,
-                "away_goals": m.away_goals,
-                "has_detail": has_detail,
-            }
-            groups.setdefault(m.matchday, []).append(item)
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
-        matchdays = [{"matchday": md, "fixtures": fx}
-                     for md, fx in sorted(groups.items(),
-                                          key=lambda kv: (kv[0] is None, kv[0]))]
-        # A rough "current matchday": the earliest with any non-finished fixture,
-        # else the last one — lets the frontend open on the live round.
-        current = None
-        for g in matchdays:
-            if any(f["status"] != Match.STATUS_FINISHED for f in g["fixtures"]):
-                current = g["matchday"]
-                break
-        if current is None and matchdays:
-            current = matchdays[-1]["matchday"]
+    def get(self, request, season_id: int):
+        cs = get_object_or_404(
+            CompetitionSeason.objects.select_related("competition", "season"),
+            id=season_id)
+        md, err = _matchday_param(request)
+        if err is not None:
+            return err
+        return Response(real_fixtures_payload(cs, md))
 
-        return Response({
-            "season": {"id": cs.id, "name": str(cs),
-                       "competition": cs.competition.name},
-            "current_matchday": current,
-            "matchdays": matchdays,
-        })
+
+def real_match_payload(match, league=None) -> dict | None:
+    """The pagella of a real match, shaped as a classic fixture detail so the
+    frontend's ClassicMatchDetail renders it. None when the match has no imported
+    appearances (nothing to rate yet). ``league`` only changes the ROLE LABELS —
+    the votes are the same for everyone, see classic_pagella.pagella_for_match."""
+    apps = list(MatchAppearance.objects.filter(match=match))
+    if not apps:
+        return None
+
+    pag = pagella_for_match(match, get_reference(match.competition_season_id),
+                            league=league)
+    hg, ag = int(match.home_goals or 0), int(match.away_goals or 0)
+    result = "home" if hg > ag else "away" if ag > hg else "draw"
+    # Two different kinds of "not settled", and collapsing them lies either way.
+    #
+    # IN PROGRESS: the ball is rolling. Every line can still move, and someone
+    # who has not played yet may still come on — so each line is marked too.
+    #
+    # OVER but not confirmed: nobody else is coming on and nobody's afternoon
+    # will be re-judged, but the provider can still move a number by a tenth
+    # until the +1h confirmation sets data_ready. The totals say so; the lines
+    # do not, because "may shift by a tenth" is not the same claim as "this
+    # player might still play".
+    live = match_in_progress(match)
+    provisional = (not match.data_ready
+                   and match.status in (Match.STATUS_LIVE, Match.STATUS_FINISHED))
+    for side in ("home", "away"):
+        pag[side]["provisional"] = provisional
+        if live:
+            for line in pag[side].get("starters", []) + pag[side].get("bench", []):
+                line["provisional"] = True
+    return {
+        "live": live,
+        "provisional": provisional,
+        # The clock, only while it is running: on a match that is over the
+        # number would be the final whistle dressed up as news.
+        "minute": elapsed_minutes(apps) if live else None,
+        "mode": "classic",
+        "fixture_id": match.id,
+        "fantasy_round": match.matchday,
+        "real_matchday": match.matchday,
+        "stage": None,
+        "home_team": match.home_team.team.name,
+        "away_team": match.away_team.team.name,
+        "home_goals": hg,
+        "away_goals": ag,
+        "home_total": pag["home"]["total"],
+        "away_total": pag["away"]["total"],
+        "defense_bonus_mode": None,
+        "result": result,
+        "home": pag["home"],
+        "away": pag["away"],
+    }
 
 
 class LeagueRealMatchDetailView(APIView):
@@ -5302,64 +5413,124 @@ class LeagueRealMatchDetailView(APIView):
             id=match_id)
         if cs is not None and match.competition_season_id != cs.id:
             raise Http404("Match is not in this league's reference season")
-        apps = list(MatchAppearance.objects.filter(match=match))
-        if not apps:
+        payload = real_match_payload(match, league=league)
+        if payload is None:
             return Response({"detail": "Nessun dato disponibile per questa partita."},
                             status=status.HTTP_404_NOT_FOUND)
+        return Response(payload)
 
-        pag = pagella_for_match(match, get_reference(match.competition_season_id),
-                                league=league)
-        hg, ag = int(match.home_goals or 0), int(match.away_goals or 0)
-        result = "home" if hg > ag else "away" if ag > hg else "draw"
-        # Two different kinds of "not settled", and collapsing them lies either way.
-        #
-        # IN PROGRESS: the ball is rolling. Every line can still move, and someone
-        # who has not played yet may still come on — so each line is marked too.
-        #
-        # OVER but not confirmed: nobody else is coming on and nobody's afternoon
-        # will be re-judged, but the provider can still move a number by a tenth
-        # until the +1h confirmation sets data_ready. The totals say so; the lines
-        # do not, because "may shift by a tenth" is not the same claim as "this
-        # player might still play".
-        live = match_in_progress(match)
-        provisional = (not match.data_ready
-                       and match.status in (Match.STATUS_LIVE, Match.STATUS_FINISHED))
-        for side in ("home", "away"):
-            pag[side]["provisional"] = provisional
-            if live:
-                for line in pag[side].get("starters", []) + pag[side].get("bench", []):
-                    line["provisional"] = True
-        return Response({
-            "live": live,
-            "provisional": provisional,
-            # The clock, only while it is running: on a match that is over the
-            # number would be the final whistle dressed up as news.
-            "minute": elapsed_minutes(apps) if live else None,
-            "mode": "classic",
-            "fixture_id": match.id,
-            "fantasy_round": match.matchday,
-            "real_matchday": match.matchday,
-            "stage": None,
-            "home_team": match.home_team.team.name,
-            "away_team": match.away_team.team.name,
-            "home_goals": hg,
-            "away_goals": ag,
-            "home_total": pag["home"]["total"],
-            "away_total": pag["away"]["total"],
-            "defense_bonus_mode": None,
-            "result": result,
-            "home": pag["home"],
-            "away": pag["away"],
+
+class SeasonRealMatchDetailView(APIView):
+    """The same pagella, read outside any league: the roles shown are then the
+    season's own (CurrentPlayerRole), which is also what the votes were scored
+    against."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, season_id: int, match_id: int):
+        match = get_object_or_404(
+            Match.objects.select_related("home_team__team", "away_team__team",
+                                         "competition_season"),
+            id=match_id, competition_season_id=season_id)
+        payload = real_match_payload(match)
+        if payload is None:
+            return Response({"detail": "Nessun dato disponibile per questa partita."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response(payload)
+
+
+def championship_players_payload(cs, league=None) -> dict:
+    """The 'listone': one row per currently-eligible player of a championship
+    edition (open real-club stint), with role, real club and a value signal
+    (average voto puro from the latest season with data).
+
+    With a ``league``, two columns are added that only exist inside one: who owns
+    the player, and the role that league froze. Without it the pool, the values
+    and the roles are the season's own — which is what the votes were scored
+    against anyway. The frontend does role / free-agent / search filtering and
+    value sorting over this list."""
+    pool = eligible_player_ids(cs.id)
+
+    # real club per player (open stint on this season)
+    team_by_player = {}
+    for pid, tname in (PlayerTeamStint.objects
+                       .filter(team_season__competition_season=cs,
+                               end_date__isnull=True, player_id__in=pool)
+                       .select_related("team_season__team")
+                       .values_list("player_id", "team_season__team__name")):
+        team_by_player[pid] = tname
+
+    # frozen listone role, fallback to the global classic role
+    lpr = (dict(LeaguePlayerRole.objects.filter(league=league)
+                .values_list("player_id", "role")) if league is not None else {})
+    # ownership in this league
+    owner_by_player = (dict(
+        FantasyRosterSlot.objects
+        .filter(team__league=league, released_at__isnull=True)
+        .values_list("player_id", "team__name")) if league is not None else {})
+
+    # Value blends last season's average with current-season form as the
+    # championship progresses (see player_values).
+    market = latest_market_values(pool)
+    values, prev_cs, fit = player_values(cs, market)
+
+    players = (Player.objects.filter(id__in=pool)
+               .values("id", "full_name", "short_name", "classic_role_seed"))
+    # Players whose role is still an open question: shown, but marked, so
+    # nobody plans an auction around someone they cannot actually buy. Outside a
+    # league nobody is buying, and there is no question open: the season role is
+    # simply what it is.
+    undecided = undecided_player_ids(league) if league is not None else set()
+    # Outside a league the frozen roles do not exist, so the season's measured
+    # role answers instead — the one the vote was scored against
+    # (AGENTS.md, "Classic Role Resolution"), never the raw provider seed alone.
+    season_roles = current_role_map() if league is None else {}
+    rows = []
+    for p in players:
+        pid = p["id"]
+        v = values.get(pid)
+        rows.append({
+            "market_value": market.get(pid),
+            "player_id": pid,
+            "name": p["short_name"] or p["full_name"] or str(pid),
+            # The list shows the short name ("L. Martinez"); searching for
+            # "Lautaro" found nothing because that string is all the client
+            # had. Sent alongside so the search can match either.
+            "full_name": p["full_name"] or "",
+            "role": (lpr.get(pid) or season_roles.get(pid)
+                     or p["classic_role_seed"] or ""),
+            "team": team_by_player.get(pid),
+            "owned": pid in owner_by_player,
+            "owner": owner_by_player.get(pid),
+            "role_undecided": pid in undecided,
+            "value": v["value"] if v else None,
+            "estimated_value": v["estimated_value"] if v else None,
+            "value_basis": v["basis"] if v else None,
+            "appearances": v["n_cur"] if v else 0,
+            "prev_appearances": v["n_prev"] if v else 0,
         })
+    # Default order = the HOMOGENEOUS estimated value, so newcomers rank among
+    # the rated players instead of forming an alphabetical tail. The frontend
+    # also offers the measured-voto-then-market order.
+    rows.sort(key=lambda x: (x["estimated_value"] is None,
+                             -(x["estimated_value"] or 0),
+                             -(x["market_value"] or 0), x["name"]))
+    return {
+        "value_season": str(prev_cs) if prev_cs else None,
+        "current_season": str(cs),
+        "count": len(rows),
+        # How the market->voto estimate was calibrated (r = fit quality on the
+        # players having both signals), so the UI can be honest about it.
+        "value_fit": ({"intercept": round(fit[0], 3), "slope": round(fit[1], 3),
+                       "r": round(fit[2], 3), "n": fit[3]} if fit else None),
+        "players": rows,
+    }
 
 
 class LeagueChampionshipPlayersView(APIView):
-    """Full player pool of the league's reference championship (the 'listone').
-
-    One row per currently-eligible player (open real-club stint), with role, real
-    club, ownership in THIS league (free agent vs owned + owner), and a value
-    signal (average voto puro from the latest season with data). The frontend does
-    role / free-agent / search filtering and value sorting over this list."""
+    """The listone of the league's reference championship, with the ownership and
+    the frozen roles of THIS league."""
 
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -5370,73 +5541,18 @@ class LeagueChampionshipPlayersView(APIView):
         cs = league.reference_season
         if cs is None:
             return Response({"value_season": None, "players": []})
+        return Response(championship_players_payload(cs, league=league))
 
-        pool = eligible_player_ids(cs.id)
 
-        # real club per player (open stint on this season)
-        team_by_player = {}
-        for pid, tname in (PlayerTeamStint.objects
-                           .filter(team_season__competition_season=cs,
-                                   end_date__isnull=True, player_id__in=pool)
-                           .select_related("team_season__team")
-                           .values_list("player_id", "team_season__team__name")):
-            team_by_player[pid] = tname
+class SeasonChampionshipPlayersView(APIView):
+    """The same listone read outside any league: no owners, no frozen roles — the
+    player pool of a championship and what our votes say each is worth."""
 
-        # frozen listone role, fallback to the global classic role
-        lpr = dict(LeaguePlayerRole.objects.filter(league=league)
-                   .values_list("player_id", "role"))
-        # ownership in this league
-        owner_by_player = dict(
-            FantasyRosterSlot.objects
-            .filter(team__league=league, released_at__isnull=True)
-            .values_list("player_id", "team__name"))
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
-        # Value blends last season's average with current-season form as the
-        # championship progresses (see player_values).
-        market = latest_market_values(pool)
-        values, prev_cs, fit = player_values(cs, market)
-
-        players = (Player.objects.filter(id__in=pool)
-                   .values("id", "full_name", "short_name", "classic_role_seed"))
-        # Players whose role is still an open question: shown, but marked, so
-        # nobody plans an auction around someone they cannot actually buy.
-        undecided = undecided_player_ids(league)
-        rows = []
-        for p in players:
-            pid = p["id"]
-            v = values.get(pid)
-            rows.append({
-                "market_value": market.get(pid),
-                "player_id": pid,
-                "name": p["short_name"] or p["full_name"] or str(pid),
-                # The list shows the short name ("L. Martinez"); searching for
-                # "Lautaro" found nothing because that string is all the client
-                # had. Sent alongside so the search can match either.
-                "full_name": p["full_name"] or "",
-                "role": lpr.get(pid) or p["classic_role_seed"] or "",
-                "team": team_by_player.get(pid),
-                "owned": pid in owner_by_player,
-                "owner": owner_by_player.get(pid),
-                "role_undecided": pid in undecided,
-                "value": v["value"] if v else None,
-                "estimated_value": v["estimated_value"] if v else None,
-                "value_basis": v["basis"] if v else None,
-                "appearances": v["n_cur"] if v else 0,
-                "prev_appearances": v["n_prev"] if v else 0,
-            })
-        # Default order = the HOMOGENEOUS estimated value, so newcomers rank among
-        # the rated players instead of forming an alphabetical tail. The frontend
-        # also offers the measured-voto-then-market order.
-        rows.sort(key=lambda x: (x["estimated_value"] is None,
-                                 -(x["estimated_value"] or 0),
-                                 -(x["market_value"] or 0), x["name"]))
-        return Response({
-            "value_season": str(prev_cs) if prev_cs else None,
-            "current_season": str(cs),
-            "count": len(rows),
-            # How the market->voto estimate was calibrated (r = fit quality on the
-            # players having both signals), so the UI can be honest about it.
-            "value_fit": ({"intercept": round(fit[0], 3), "slope": round(fit[1], 3),
-                           "r": round(fit[2], 3), "n": fit[3]} if fit else None),
-            "players": rows,
-        })
+    def get(self, request, season_id: int):
+        cs = get_object_or_404(
+            CompetitionSeason.objects.select_related("competition", "season"),
+            id=season_id)
+        return Response(championship_players_payload(cs))

@@ -1,4 +1,5 @@
 import type { LeagueDecisionsResponse } from '../types/decisions';
+import type { RealScope } from '../types/realChampionship';
 import type { LineupContextResponse, MatchDetailResponse, MatchListItem, SaveLineupRequest, SaveLineupResponse } from '../types/contracts';
 import type {
   AuthResponse,
@@ -930,22 +931,27 @@ export async function getFixtureDetail(_fixtureId: number | string): Promise<nev
   throw new Error('Dettaglio partita disponibile solo con il backend reale.');
 }
 
-export async function getRealFixtures(_leagueId: number, _matchday?: number): Promise<never> {
+export async function getRealFixtures(_scope: RealScope, _matchday?: number): Promise<never> {
   await sleep(80);
   throw new Error('Calendario Serie A disponibile solo con il backend reale.');
 }
 
 export async function getRealMatchDetail(
-  _leagueId: number,
+  _scope: RealScope,
   _matchId: number | string,
 ): Promise<never> {
   await sleep(80);
   throw new Error('Dettaglio partita disponibile solo con il backend reale.');
 }
 
-export async function getChampionshipPlayers(_leagueId: number): Promise<never> {
+export async function getChampionshipPlayers(_scope: RealScope): Promise<never> {
   await sleep(80);
   throw new Error('Listone disponibile solo con il backend reale.');
+}
+
+export async function getRealSeasons(_openOnly?: boolean): Promise<never> {
+  await sleep(80);
+  throw new Error('Campionati veri disponibili solo con il backend reale.');
 }
 
 export async function getTeamLineup(_leagueId: number, _matchday?: number): Promise<never> {

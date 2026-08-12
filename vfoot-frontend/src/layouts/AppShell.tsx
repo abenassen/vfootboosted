@@ -19,6 +19,7 @@ import Avatar from '../components/Avatar';
 import Crest from '../components/Crest';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
+import { useChampionship } from '../league/ChampionshipContext';
 import { compColor } from '../league/competitionColors';
 import { useDecisionAlerts } from '../league/useDecisionAlerts';
 import { PageErrorBoundary } from '../components/PageErrorBoundary';
@@ -119,12 +120,23 @@ const MOBILE_CHIPS_H = 40;
 
 const USER_ADMIN_TO = '/league-admin?tab=user';
 
-// Someone in NO league gets no league menu at all. Every entry of leagueNav needs
-// a selected league to show anything — /serie-a and /listone included, because
-// both are scoped to the league's reference season — so for a brand-new account
-// the whole menu is ten links that all answer "Seleziona una lega". What is left
-// is enough: the logo goes home, "Le mie leghe" is in the bar, and Home itself
-// carries the create/join call to action.
+/** QUELLO CHE SI PUÒ GUARDARE SENZA AVERE UNA LEGA.
+ *
+ *  Le otto voci di lega restano fuori — senza lega non hanno niente da dire — ma
+ *  queste tre sì: il campionato vero, il suo listone e la pagina che spiega i
+ *  voti non appartengono a nessuna lega (v. ChampionshipContext). Prima il menu
+ *  veniva svuotato del tutto, e un iscritto nuovo si trovava una sola cosa
+ *  possibile: creare una lega. Che è anche la ragione per cui «Crea o unisciti»
+ *  resta la PRIMA voce, in evidenza: queste tre si consultano, la lega si gioca.
+ */
+const browseNav: NavItem[] = [
+  // «Home» e non «Home lega»: di leghe non ce ne sono.
+  { to: '/home', label: 'Home', icon: Home, scope: 'league' },
+  { to: USER_ADMIN_TO, label: 'Crea o unisciti', icon: LayoutGrid, scope: 'league', flag: true },
+  { to: '/listone', label: 'Listone', icon: ClipboardList, scope: 'league' },
+  { to: '/serie-a', label: 'Serie A', icon: CircleDot, scope: 'league' },
+  { to: '/voto-puro', label: 'Voto spiegato', icon: BookOpen, scope: 'league' },
+];
 
 function usePageTitle(pathname: string) {
   return useMemo(() => {
@@ -177,6 +189,7 @@ export default function AppShell() {
     setSelectedCompetitionId,
     loading: competitionsLoading,
   } = useCompetitionContext();
+  const { season: browseSeason, loading: championshipLoading } = useChampionship();
   const activeTeamName = selectedLeague?.team_name?.trim() || null;
   // the current competition's accent colour (distinct per competition in the league)
   const color = compColor(competitions.findIndex((c) => c.competition_id === selectedCompetitionId));
@@ -244,10 +257,26 @@ export default function AppShell() {
     // selettore della competizione si vede cambiare il menu sotto le dita.
     return [HOME_ITEM, ...compNav, ...league];
   }, [compNav, refCompetition, alerts, leagueInSetup, isLeagueAdmin]);
-  // Also empty WHILE LOADING, not just when the list comes back empty: drawing the
-  // menu optimistically would flash ten dead links at exactly the brand-new
-  // account we are trying to spare them from.
-  const visibleNav = leaguesLoading || !hasLeagues ? [] : nav;
+  // Ancora vuoto MENTRE CARICA, e non solo quando l'elenco torna vuoto: disegnare
+  // il menu di lega ottimisticamente farebbe lampeggiare dieci link morti proprio
+  // all'account appena creato che stiamo cercando di risparmiare. Quando invece si
+  // sa che leghe non ce ne sono, il menu non è vuoto: è quello che si consulta.
+  const visibleNav = useMemo(() => {
+    if (leaguesLoading) return [];
+    if (hasLeagues) return nav;
+    // Le due voci del campionato spariscono se un campionato in corso non c'è
+    // (fuori stagione, prima che esca il calendario nuovo): sono l'unico caso in
+    // cui porterebbero a una pagina che dice soltanto che non c'è niente. Non
+    // mentre l'elenco sta arrivando, o lampeggerebbero a ogni apertura.
+    const nothingToWatch = !championshipLoading && !browseSeason;
+    return browseNav
+      .filter((it) => !(nothingToWatch && (it.to === '/serie-a' || it.to === '/listone')))
+      // Il campionato si chiama col suo nome anche qui: la voce prende quello
+      // dell'edizione che si sta guardando (oggi una sola, la Serie A).
+      .map((it) =>
+        it.to === '/serie-a' && browseSeason ? { ...it, label: browseSeason.competition } : it,
+      );
+  }, [leaguesLoading, hasLeagues, nav, browseSeason, championshipLoading]);
 
   // I CINQUE SLOT. I primi quattro dalla lista, il quinto è «Altro» e apre il
   // resto verso l'alto. Le voci che restano fuori non spariscono e soprattutto
@@ -294,13 +323,18 @@ export default function AppShell() {
   }, [anySheet]);
 
   const baseTitle = usePageTitle(location.pathname);
+  // Il nome del campionato vero: quello della lega quando c'è, quello che si sta
+  // consultando quando non c'è nessuna lega.
+  const shownCompetition = hasLeagues ? refCompetition : (browseSeason?.competition ?? 'Serie A');
   const title = location.pathname.startsWith('/standings')
     ? standingsLabel
     : location.pathname.startsWith('/serie-a/')
-      ? `Partita ${refCompetition}`
+      ? `Partita ${shownCompetition}`
       : location.pathname.startsWith('/serie-a')
-        ? refCompetition
-        : baseTitle;
+        ? shownCompetition
+        : !hasLeagues && location.pathname.startsWith('/home')
+          ? 'Home'
+          : baseTitle;
 
   // La pagina si apre sulla scheda «Le mie leghe», quindi e' l'indirizzo a dover
   // dire quando NON e' quella. Prima chiedeva il contrario (tab=user esplicito),
@@ -579,20 +613,14 @@ export default function AppShell() {
 
           {/* No "active league" card here: name and role are already in the top
               bar, where they can also be CHANGED. Only the empty state needs a
-              word, since then the sidebar links lead nowhere useful. */}
-          {!selectedLeague && !leaguesLoading ? (
-            hasLeagues ? (
-              <div className="mt-6 rounded-2xl border border-line bg-surface shadow-card p-4 text-xs text-ink-faint">
-                Seleziona una lega dal menu in alto.
-              </div>
-            ) : (
-              <Link
-                to={USER_ADMIN_TO}
-                className="mt-6 block rounded-2xl bg-brand p-4 text-center text-sm font-bold text-on-brand shadow-card hover:bg-brand-strong"
-              >
-                Crea o unisciti a una lega
-              </Link>
-            )
+              word, since then the sidebar links lead nowhere useful.
+              Chi non ha NESSUNA lega non trova più qui il pulsante per crearne
+              una: adesso è la prima voce del menu qui sopra, ed è anche il primo
+              bersaglio della home. Tre inviti identici sulla stessa schermata. */}
+          {!selectedLeague && !leaguesLoading && hasLeagues ? (
+            <div className="mt-6 rounded-2xl border border-line bg-surface shadow-card p-4 text-xs text-ink-faint">
+              Seleziona una lega dal menu in alto.
+            </div>
           ) : null}
         </aside>
 

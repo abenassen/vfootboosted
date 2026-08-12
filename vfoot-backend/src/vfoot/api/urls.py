@@ -62,6 +62,9 @@ from vfoot.api.league_views import (
     MemberRoleUpdateView,
     LeagueReferenceSeasonView,
     RealSeasonListView,
+    SeasonChampionshipPlayersView,
+    SeasonRealFixturesView,
+    SeasonRealMatchDetailView,
     TeamRosterAddView,
     TeamRosterSellView,
     TeamRosterVoidView,
@@ -188,6 +191,12 @@ urlpatterns = [
          CompetitionStructureView.as_view(), name="competition-structure"),
     path("leagues/<int:league_id>/reference-season", LeagueReferenceSeasonView.as_view(), name="league-reference-season"),
     path("real-seasons", RealSeasonListView.as_view(), name="real-seasons-list"),
+    # Le stesse tre letture di sopra, chieste per STAGIONE invece che per lega:
+    # il calendario, il listone e la pagella di un campionato vero non sono di
+    # nessuna lega. Servono a chi si è appena iscritto e non ne ha ancora una.
+    path("real-seasons/<int:season_id>/fixtures", SeasonRealFixturesView.as_view(), name="season-real-fixtures"),
+    path("real-seasons/<int:season_id>/matches/<int:match_id>", SeasonRealMatchDetailView.as_view(), name="season-real-match-detail"),
+    path("real-seasons/<int:season_id>/players", SeasonChampionshipPlayersView.as_view(), name="season-championship-players"),
     path("leagues/<int:league_id>/teams/<int:team_id>/roster", TeamRosterView.as_view(), name="team-roster"),
     path("leagues/<int:league_id>/teams/<int:team_id>/roster/add", TeamRosterAddView.as_view(), name="team-roster-add"),
     path(

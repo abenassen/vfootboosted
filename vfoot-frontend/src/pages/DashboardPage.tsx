@@ -4,6 +4,7 @@ import { Badge, Card, SectionTitle } from '../components/ui';
 import SetupBanner from '../components/SetupBanner';
 import Crest from '../components/Crest';
 import LeagueHome from '../components/LeagueHome';
+import NewcomerHome from '../components/NewcomerHome';
 import CopyButton from '../components/CopyButton';
 import { useCompetitionContext } from '../league/CompetitionContext';
 
@@ -15,34 +16,12 @@ export default function DashboardPage() {
   const { leagues, selectedLeagueId, selectedLeague } = useLeagueContext();
   const { competitions, loading: competitionsLoading } = useCompetitionContext();
 
-  // No league => there is exactly ONE thing to do here, so the page is that one
-  // thing and nothing else. The rest of the app is hidden from the menu too (see
-  // AppShell): every other page would only answer "Seleziona una lega".
-  if (!leagues.length) {
-    return (
-      <div className="space-y-4">
-        <SetupBanner />
-        <Card className="p-6 text-center md:p-10">
-          <div className="text-4xl">🏆</div>
-          <div className="mt-3 text-2xl font-black md:text-3xl">Benvenuto in Vfoot Boosted</div>
-          <p className="mx-auto mt-2 max-w-md text-sm text-ink-soft">
-            Non fai ancora parte di nessuna lega. Creane una e invita i tuoi amici col
-            codice che ti ritrovi, oppure entra in una lega esistente con il codice che
-            ti hanno dato.
-          </p>
-          <Link
-            to="/league-admin?tab=user"
-            className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-ink px-6 py-4 text-base font-bold text-paper shadow-card transition hover:opacity-90 active:scale-[0.99]"
-          >
-            <span className="text-xl">🏟️</span> Crea o unisciti a una lega
-          </Link>
-          <div className="mt-4 text-xs text-ink-faint">
-            Squadra, formazione, mercato e classifiche si attivano appena sei in una lega.
-          </div>
-        </Card>
-      </div>
-    );
-  }
+  // NESSUNA LEGA. La cosa da fare resta una — crearne o entrare in una — ma non è
+  // più l'unica cosa possibile: il campionato vero, il suo listone e la pagina che
+  // spiega i voti non appartengono a nessuna lega, e sono esattamente quello che
+  // uno vuole guardare PRIMA di decidere se giocare qui (v. ChampionshipContext).
+  // Finché non c'erano, questa pagina era un vicolo cieco con un bottone in mezzo.
+  if (!leagues.length) return <NewcomerHome />;
   if (!selectedLeagueId) {
     return (
       <div className="space-y-4">

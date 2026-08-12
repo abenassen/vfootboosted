@@ -282,6 +282,45 @@ def is_matchday_in_progress(league, now=None) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# The season itself: is there still football to be played in it?               #
+# --------------------------------------------------------------------------- #
+def open_season_ids() -> set[int]:
+    """The CompetitionSeasons a league can still be tied to: those with at least
+    one match left to play, plus those whose calendar we do not have yet.
+
+    A league lives ON a championship — its rosters, its listone and its own
+    calendar all hang off it — so binding one to a season that is over produces a
+    league that can never play a single round. The reference season is immutable
+    once set, so this has to be caught at the only moment it can be: the choice.
+
+    "Left to play" is read off the CALENDAR (a scheduled or live match) and not
+    off a date: the season's own start/end dates are optional in the schema and
+    are in fact empty for every season we hold, while the fixture list is the
+    thing the sync keeps fresh. A season with NO matches at all is open too — it
+    is next year's edition, minted by ``probe_next_season`` before its calendar
+    is published, which is precisely the one a league is being created for in
+    August. Postponed-and-never-replayed fixtures do not keep a season alive:
+    they outlive the last round by design and would make every past season read
+    as still running.
+    """
+    from realdata.models import CompetitionSeason
+
+    with_calendar = set(Match.objects.values_list("competition_season_id", flat=True).distinct())
+    still_to_play = set(
+        Match.objects.filter(status__in=(Match.STATUS_SCHEDULED, Match.STATUS_LIVE))
+        .values_list("competition_season_id", flat=True)
+        .distinct()
+    )
+    all_ids = set(CompetitionSeason.objects.values_list("id", flat=True))
+    return still_to_play | (all_ids - with_calendar)
+
+
+def season_is_open(competition_season_id: int) -> bool:
+    """``open_season_ids`` for a single season."""
+    return competition_season_id in open_season_ids()
+
+
+# --------------------------------------------------------------------------- #
 # The ledger: what has been counted.                                           #
 # --------------------------------------------------------------------------- #
 def ledger_matchday(league):

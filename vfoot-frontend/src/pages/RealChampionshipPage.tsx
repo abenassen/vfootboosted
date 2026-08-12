@@ -2,15 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getRealFixtures } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
+import { useChampionship } from '../league/ChampionshipContext';
+import ChampionshipPicker from '../components/ChampionshipPicker';
 import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { Badge, Card, SectionTitle } from '../components/ui';
 import type { RealFixtureItem, RealFixturesResponse } from '../types/realChampionship';
 
-// Calendar + results of the league's REAL reference championship (e.g. Serie A):
-// a matchday selector, the round's fixtures with live/finished/scheduled state,
-// each played match clickable to its vote-relevant pagella.
+// Calendar + results of a REAL championship (e.g. Serie A): a matchday selector,
+// the round's fixtures with live/finished/scheduled state, each played match
+// clickable to its vote-relevant pagella. Dentro una lega è il campionato su cui
+// si gioca; senza lega è il campionato in corso (v. ChampionshipContext).
 export default function RealChampionshipPage() {
   const { selectedLeagueId } = useLeagueContext();
+  const { scope, browsing, loading: scopeLoading } = useChampionship();
   const [data, setData] = useState<RealFixturesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,16 +26,18 @@ export default function RealChampionshipPage() {
   // only take over a page that has nothing to show yet.
   const loadedRef = useRef(false);
 
-  // Changing LEAGUE drops the chosen round — it belongs to the old calendar. A
-  // live nudge must NOT: you would be pulled back to the current matchday every
-  // time a vote moved, which is precisely while you are most likely to be reading
-  // another round. Hence two effects rather than one.
+  // Changing CHAMPIONSHIP drops the chosen round — it belongs to the old
+  // calendar. A live nudge must NOT: you would be pulled back to the current
+  // matchday every time a vote moved, which is precisely while you are most
+  // likely to be reading another round. Hence two effects rather than one.
+  // (`scope` regge come dipendenza perché il contesto lo memoizza: cambia
+  // identità solo quando cambia davvero la lega o la stagione guardata.)
   useEffect(() => {
     setMatchday(null);
-  }, [selectedLeagueId]);
+  }, [scope]);
 
   useEffect(() => {
-    if (!selectedLeagueId) {
+    if (!scope) {
       setData(null);
       return;
     }
@@ -39,14 +45,14 @@ export default function RealChampionshipPage() {
     // must not replace the calendar with "Caricamento…".
     if (!loadedRef.current) setLoading(true);
     setError(null);
-    void getRealFixtures(selectedLeagueId)
+    void getRealFixtures(scope)
       .then((res) => {
         setData(res);
         loadedRef.current = true;
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [selectedLeagueId, tick]);
+  }, [scope, tick]);
 
   // Same nudge the match detail listens to: every live import of a match in this
   // championship refreshes the scores and the in-corso marks in place.
@@ -62,20 +68,37 @@ export default function RealChampionshipPage() {
     [data, active],
   );
 
-  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega.</div>;
-  if (loading && !data) return <div className="text-sm text-ink-faint">Caricamento calendario…</div>;
+  if ((loading || scopeLoading) && !data)
+    return <div className="text-sm text-ink-faint">Caricamento calendario…</div>;
   if (error && !data) return <div className="text-sm text-bad">Errore: {error}</div>;
+  if (!scope)
+    return (
+      <div className="text-sm text-ink-faint">
+        Nessun campionato in corso da mostrare.
+      </div>
+    );
   if (!data?.season)
     return <div className="text-sm text-ink-faint">Questa lega non ha una stagione di riferimento.</div>;
 
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <SectionTitle>{data.season.competition}</SectionTitle>
           <Badge tone="blue">{data.season.name}</Badge>
+          <span className="ml-auto">
+            <ChampionshipPicker />
+          </span>
         </div>
         <div className="mt-1 text-sm text-ink-soft">Calendario e risultati reali · {matchdays.length} giornate</div>
+        {/* Chi non è ancora in una lega sta guardando il campionato vero da
+            fuori: la riga dice che cosa ci fa qui, e dove porta un click. */}
+        {browsing ? (
+          <div className="mt-1 text-[11px] text-ink-faint">
+            Apri una partita giocata per leggere le nostre pagelle: il voto di ogni giocatore,
+            calcolato dai dati della partita.
+          </div>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-1">
           {matchdays.map((m) => (
             <button

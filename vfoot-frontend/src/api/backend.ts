@@ -58,7 +58,11 @@ import type {
 } from '../types/league';
 import type { SimFixtureDetail } from '../types/simulation';
 import type { ClassicFixtureDetail } from '../types/classic';
-import type { ChampionshipPlayersResponse, RealFixturesResponse } from '../types/realChampionship';
+import type {
+  ChampionshipPlayersResponse,
+  RealFixturesResponse,
+  RealScope,
+} from '../types/realChampionship';
 import type { SaveTeamLineupRequest, TeamLineupContext } from '../types/lineup';
 import type {
   MarketActive,
@@ -710,8 +714,11 @@ export async function deleteCompetition(competitionId: number): Promise<void> {
   await parseJsonOrThrow(res);
 }
 
-export async function getRealSeasons(): Promise<RealSeasonItem[]> {
-  const res = await fetch(`${baseUrl()}/real-seasons`, {
+/** Le edizioni dei campionati veri. `openOnly` tiene solo quelle ancora in corso:
+ *  è quello che vuole chi deve SCEGLIERNE una — una lega si lega a un campionato
+ *  che si sta giocando, e «il campionato» da consultare è quello di quest'anno. */
+export async function getRealSeasons(openOnly = false): Promise<RealSeasonItem[]> {
+  const res = await fetch(`${baseUrl()}/real-seasons${openOnly ? '?open=1' : ''}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
@@ -1086,13 +1093,18 @@ export async function getFixtureDetail(
   return parseJsonOrThrow(res);
 }
 
-// Real reference-championship (Serie A) calendar + results.
+// Real championship (Serie A) calendar + results. Lo `scope` dice se lo si sta
+// chiedendo da dentro una lega o da fuori: v. RealScope.
 export async function getRealFixtures(
-  leagueId: number,
+  scope: RealScope,
   matchday?: number,
 ): Promise<RealFixturesResponse> {
   const qs = matchday ? `?matchday=${matchday}` : '';
-  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/real-fixtures${qs}`, {
+  const path =
+    'league' in scope
+      ? `/leagues/${scope.league}/real-fixtures`
+      : `/real-seasons/${scope.season}/fixtures`;
+  const res = await fetch(`${baseUrl()}${path}${qs}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
@@ -1100,20 +1112,29 @@ export async function getRealFixtures(
 
 // Vote-relevant detail of a real match (pagella), shaped as a classic fixture.
 export async function getRealMatchDetail(
-  leagueId: number,
+  scope: RealScope,
   matchId: number | string,
 ): Promise<ClassicFixtureDetail> {
-  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/real-matches/${matchId}`, {
+  const path =
+    'league' in scope
+      ? `/leagues/${scope.league}/real-matches/${matchId}`
+      : `/real-seasons/${scope.season}/matches/${matchId}`;
+  const res = await fetch(`${baseUrl()}${path}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
 }
 
-// Full player pool of the league's reference championship (the "listone").
+// Full player pool of a championship (the "listone"). Chiesto per lega porta con
+// sé i proprietari e i ruoli congelati; per stagione è il solo listone.
 export async function getChampionshipPlayers(
-  leagueId: number,
+  scope: RealScope,
 ): Promise<ChampionshipPlayersResponse> {
-  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/championship-players`, {
+  const path =
+    'league' in scope
+      ? `/leagues/${scope.league}/championship-players`
+      : `/real-seasons/${scope.season}/players`;
+  const res = await fetch(`${baseUrl()}${path}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);

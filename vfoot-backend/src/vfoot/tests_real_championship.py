@@ -1,6 +1,7 @@
 """Tests for the real reference-championship pagella service + views."""
 from __future__ import annotations
 
+from datetime import date
 from io import StringIO
 
 from django.contrib.auth.models import User
@@ -15,6 +16,7 @@ from realdata.models import (
     Match,
     MatchAppearance,
     MatchDisciplinaryEvent,
+    PlayerTeamStint,
     PlayerZoneFeature,
     Player,
     Season,
@@ -28,6 +30,7 @@ from vfoot.api.league_views import (
 from vfoot.models import (
     CurrentPlayerRole, FantasyLeague, LeagueMembership, LeaguePlayerRole,
 )
+from vfoot.services import matchday_state
 from vfoot.services.classic_pagella import pagella_for_match
 
 
@@ -749,3 +752,109 @@ class LeagueRoleDoesNotRescoreTests(TestCase):
         in_league = self._line(league=self.league)
         self.assertEqual(in_league["voto_puro"], 6.0)
         self.assertNotEqual(in_league["voto_puro"], 5.5)
+
+
+class ChampionshipWithoutALeagueTests(TestCase):
+    """Il campionato vero si legge anche senza una lega.
+
+    Chi si è appena iscritto non ne ha nessuna, e fino a ieri le uniche pagine che
+    poteva aprire dicevano «Seleziona una lega». Calendario, pagelle e listone di
+    un campionato però non appartengono a nessuna lega: sono la stagione. Qui si
+    verifica che le due strade — per lega e per stagione — passino dalla stessa
+    funzione, e che la sola differenza sia quello che la lega aggiunge di suo.
+    """
+
+    def setUp(self):
+        comp = Competition.objects.create(external_id="23", name="Serie A")
+        self.open_cs = CompetitionSeason.objects.create(
+            competition=comp, season=Season.objects.create(code="2026-2027"),
+            name="Serie A 2026-2027")
+        self.over_cs = CompetitionSeason.objects.create(
+            competition=comp, season=Season.objects.create(code="2025-2026"),
+            name="Serie A 2025-2026")
+        home = TeamSeason.objects.create(
+            competition_season=self.open_cs, team=Team.objects.create(name="Torino"))
+        away = TeamSeason.objects.create(
+            competition_season=self.open_cs, team=Team.objects.create(name="Sassuolo"))
+        self.match = Match.objects.create(
+            competition_season=self.open_cs, matchday=1, home_team=home,
+            away_team=away, home_goals=1, away_goals=2,
+            status=Match.STATUS_FINISHED, external_id="m1")
+        Match.objects.create(
+            competition_season=self.open_cs, matchday=2, home_team=home,
+            away_team=away, status=Match.STATUS_SCHEDULED, external_id="m2")
+        self.player = Player.objects.create(full_name="Uno Due", short_name="U. Due",
+                                            classic_role_seed="DIF")
+        MatchAppearance.objects.create(match=self.match, player=self.player,
+                                       team_season=home, side="home",
+                                       minutes_played=90, is_starter=True)
+        PlayerTeamStint.objects.create(player=self.player, team_season=home,
+                                       start_date=date(2026, 7, 1))
+        # La stagione conclusa: una sola partita, finita. Nessuna da giocare.
+        over_home = TeamSeason.objects.create(
+            competition_season=self.over_cs, team=Team.objects.create(name="Lecce"))
+        over_away = TeamSeason.objects.create(
+            competition_season=self.over_cs, team=Team.objects.create(name="Empoli"))
+        Match.objects.create(
+            competition_season=self.over_cs, matchday=38, home_team=over_home,
+            away_team=over_away, home_goals=0, away_goals=0,
+            status=Match.STATUS_FINISHED, external_id="old1")
+
+        self.user = User.objects.create_user("nuovo", password="x")
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_the_calendar_is_readable_without_a_league(self):
+        r = self.client.get(f"/api/v1/real-seasons/{self.open_cs.id}/fixtures")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["season"]["name"], "Serie A 2026-2027")
+        self.assertEqual([g["matchday"] for g in body["matchdays"]], [1, 2])
+        # e la giornata «corrente» è la prima non finita, come nella vista di lega
+        self.assertEqual(body["current_matchday"], 2)
+
+    def test_the_pagella_is_readable_without_a_league(self):
+        r = self.client.get(
+            f"/api/v1/real-seasons/{self.open_cs.id}/matches/{self.match.id}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["result"], "away")
+
+    def test_a_match_of_another_season_is_not_served_under_this_one(self):
+        r = self.client.get(
+            f"/api/v1/real-seasons/{self.over_cs.id}/matches/{self.match.id}")
+        self.assertEqual(r.status_code, 404)
+
+    def test_the_listone_without_a_league_has_no_owners(self):
+        r = self.client.get(f"/api/v1/real-seasons/{self.open_cs.id}/players")
+        self.assertEqual(r.status_code, 200)
+        rows = r.json()["players"]
+        self.assertEqual([p["name"] for p in rows], ["U. Due"])
+        self.assertFalse(rows[0]["owned"])
+        self.assertIsNone(rows[0]["owner"])
+        # nessuna decisione di ruolo in sospeso: fuori da una lega non si compra
+        self.assertFalse(rows[0]["role_undecided"])
+        self.assertEqual(rows[0]["role"], "DIF")
+
+    def test_only_the_open_seasons_are_offered(self):
+        every = self.client.get("/api/v1/real-seasons").json()
+        self.assertEqual({s["id"]: s["open"] for s in every},
+                         {self.open_cs.id: True, self.over_cs.id: False})
+        only_open = self.client.get("/api/v1/real-seasons?open=1").json()
+        self.assertEqual([s["id"] for s in only_open], [self.open_cs.id])
+
+    def test_a_season_without_a_calendar_yet_is_still_open(self):
+        """L'edizione dell'anno prossimo esiste prima del suo calendario."""
+        next_cs = CompetitionSeason.objects.create(
+            competition=self.open_cs.competition,
+            season=Season.objects.create(code="2027-2028"))
+        self.assertIn(next_cs.id, matchday_state.open_season_ids())
+
+    def test_a_postponed_leftover_does_not_keep_a_season_alive(self):
+        Match.objects.create(
+            competition_season=self.over_cs, matchday=38,
+            home_team=TeamSeason.objects.filter(
+                competition_season=self.over_cs).first(),
+            away_team=TeamSeason.objects.filter(
+                competition_season=self.over_cs).last(),
+            status=Match.STATUS_POSTPONED, external_id="old-pp")
+        self.assertNotIn(self.over_cs.id, matchday_state.open_season_ids())

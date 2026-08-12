@@ -2,6 +2,13 @@
 // GET /leagues/<id>/real-fixtures. The clickable per-match detail reuses the
 // ClassicFixtureDetail shape (see types/classic.ts).
 
+/** DA CHE PARTE SI CHIEDE IL CAMPIONATO VERO. Calendario, pagelle e listone sono
+ *  della stagione, non della lega: dentro una lega si chiedono per lega (che
+ *  aggiunge i proprietari nel listone e i ruoli congelati nelle pagelle), e senza
+ *  lega — chi si è appena iscritto — si chiedono per stagione. Stessa risposta,
+ *  stesso codice dietro (v. league_views.real_fixtures_payload). */
+export type RealScope = { league: number } | { season: number };
+
 export type RealMatchStatus =
   | 'scheduled'
   | 'live'

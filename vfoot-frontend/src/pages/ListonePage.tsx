@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getChampionshipPlayers, getLeagueDetail } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
+import { useChampionship } from '../league/ChampionshipContext';
+import ChampionshipPicker from '../components/ChampionshipPicker';
 import { foldedMatch } from '../utils/text';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import type { ChampionshipPlayer, ChampionshipPlayersResponse } from '../types/realChampionship';
 
-// Listone: the full player pool of the league's reference championship, with
-// role / free-agent / search filters and value sorting. Value = average voto
-// puro from the latest season with data.
+// Listone: the full player pool of a championship, with role / free-agent /
+// search filters and value sorting. Value = average voto puro from the latest
+// season with data.
+//
+// Senza lega la pagina resta la stessa meno quello che una lega ha di suo: chi
+// possiede chi, i ruoli congelati, l'esportazione per l'asta. È la vetrina di chi
+// si è appena iscritto — il valore dei giocatori secondo i nostri voti.
 type SortKey = 'name' | 'team' | 'value' | 'appearances' | 'market';
 
 const ROLES = ['POR', 'DIF', 'CEN', 'ATT'] as const;
@@ -26,6 +32,7 @@ const ROLE_CHIP: Record<string, string> = {
 
 export default function ListonePage() {
   const { selectedLeagueId } = useLeagueContext();
+  const { scope, browsing, loading: scopeLoading } = useChampionship();
   const [data, setData] = useState<ChampionshipPlayersResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,18 +99,20 @@ export default function ListonePage() {
     }
   }
 
+  // `scope` come dipendenza: il contesto lo memoizza, quindi cambia identità solo
+  // quando cambia davvero la lega o la stagione che si sta guardando.
   useEffect(() => {
-    if (!selectedLeagueId) {
+    if (!scope) {
       setData(null);
       return;
     }
     setLoading(true);
     setError(null);
-    void getChampionshipPlayers(selectedLeagueId)
+    void getChampionshipPlayers(scope)
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [selectedLeagueId]);
+  }, [scope]);
 
   const shown = useMemo(() => {
     let ps = data?.players ?? [];
@@ -142,9 +151,10 @@ export default function ListonePage() {
     return sorted;
   }, [data, role, freeOnly, ratedOnly, search, sort, desc]);
 
-  if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega.</div>;
-  if (loading) return <div className="text-sm text-ink-faint">Caricamento listone…</div>;
+  if (loading || scopeLoading) return <div className="text-sm text-ink-faint">Caricamento listone…</div>;
   if (error) return <div className="text-sm text-bad">Errore: {error}</div>;
+  if (!scope)
+    return <div className="text-sm text-ink-faint">Nessun campionato in corso da mostrare.</div>;
   if (!data) return null;
 
   return (
@@ -152,15 +162,21 @@ export default function ListonePage() {
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-2">
           <SectionTitle>Listone</SectionTitle>
-          <Button
-            size="sm"
-            variant="secondary"
-            className="ml-auto"
-            disabled={exporting || !data.players.length}
-            onClick={() => void exportXlsx()}
-          >
-            {exporting ? 'Preparo…' : '⬇ Scarica listone (xlsx)'}
-          </Button>
+          <ChampionshipPicker />
+          {/* L'esportazione prepara il foglio dell'asta, con una tendina per
+              assegnare ogni giocatore a una squadra: fuori da una lega non ci
+              sono squadre a cui assegnarlo. */}
+          {browsing ? null : (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="ml-auto"
+              disabled={exporting || !data.players.length}
+              onClick={() => void exportXlsx()}
+            >
+              {exporting ? 'Preparo…' : '⬇ Scarica listone (xlsx)'}
+            </Button>
+          )}
         </div>
         {/* Le due etichette dicevano la formula («media voto puro 2025-2026 →
             forma corrente», «r=0.38»): giusto per noi, illeggibile per chi
@@ -216,10 +232,12 @@ export default function ListonePage() {
               </button>
             ))}
           </div>
-          <label className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-soft">
-            <input type="checkbox" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} />
-            Solo svincolati
-          </label>
+          {browsing ? null : (
+            <label className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-soft">
+              <input type="checkbox" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} />
+              Solo svincolati
+            </label>
+          )}
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -249,7 +267,9 @@ export default function ListonePage() {
                 <Th k="value" label="Valore" sort={sort} desc={desc} onSort={toggleSort} right />
                 <Th k="appearances" label="Pres." sort={sort} desc={desc} onSort={toggleSort} right />
                 <Th k="market" label="Mercato" sort={sort} desc={desc} onSort={toggleSort} right />
-                <th className="px-2 py-1.5">Stato</th>
+                {/* Svincolato / di chi / ruolo da decidere: tutte e tre sono
+                    domande che esistono solo dentro una lega. */}
+                {browsing ? null : <th className="px-2 py-1.5">Stato</th>}
               </tr>
             </thead>
             <tbody>
@@ -261,6 +281,7 @@ export default function ListonePage() {
                   onToggle={() => setOpenId(openId === p.player_id ? null : p.player_id)}
                   seasons={{ current: data.current_season, previous: data.value_season }}
                   visibleWidth={visibleWidth}
+                  showStatus={!browsing}
                 />
               ))}
             </tbody>
@@ -319,12 +340,14 @@ function PlayerRow({
   onToggle,
   seasons,
   visibleWidth,
+  showStatus,
 }: {
   p: ChampionshipPlayer;
   open: boolean;
   onToggle: () => void;
   seasons: { current: string; previous: string | null };
   visibleWidth: number | null;
+  showStatus: boolean;
 }) {
   return (
     <>
@@ -368,26 +391,28 @@ function PlayerRow({
       </td>
       <td className="px-2 py-1.5 text-right text-ink-faint">{p.appearances || '—'}</td>
       <td className="px-2 py-1.5 text-right font-mono text-ink-soft">{fmtMarket(p.market_value)}</td>
-      <td className="px-2 py-1.5">
-        {p.owned ? (
-          <span className="text-xs text-ink-faint">
-            di <span className="font-medium text-ink-soft">{p.owner}</span>
-          </span>
-        ) : p.role_undecided ? (
-          /* Shown rather than hidden: planning an auction around someone you
-             cannot actually buy is worse than seeing why he is unavailable. */
-          <span
-            title="Non è ancora deciso in che ruolo schierarlo: lo stabilisce l'amministratore della lega, e fino ad allora non si può comprare."
-            className="rounded border border-dashed border-warn px-1.5 py-0.5 text-[10px] font-semibold text-warn"
-          >
-            Ruolo da decidere
-          </span>
-        ) : (
-          <span className="rounded bg-good-bg px-1.5 py-0.5 text-[10px] font-semibold text-good">Svincolato</span>
-        )}
-      </td>
+      {showStatus ? (
+        <td className="px-2 py-1.5">
+          {p.owned ? (
+            <span className="text-xs text-ink-faint">
+              di <span className="font-medium text-ink-soft">{p.owner}</span>
+            </span>
+          ) : p.role_undecided ? (
+            /* Shown rather than hidden: planning an auction around someone you
+               cannot actually buy is worse than seeing why he is unavailable. */
+            <span
+              title="Non è ancora deciso in che ruolo schierarlo: lo stabilisce l'amministratore della lega, e fino ad allora non si può comprare."
+              className="rounded border border-dashed border-warn px-1.5 py-0.5 text-[10px] font-semibold text-warn"
+            >
+              Ruolo da decidere
+            </span>
+          ) : (
+            <span className="rounded bg-good-bg px-1.5 py-0.5 text-[10px] font-semibold text-good">Svincolato</span>
+          )}
+        </td>
+      ) : null}
     </tr>
-    {open ? <ValueDetail p={p} seasons={seasons} visibleWidth={visibleWidth} /> : null}
+    {open ? <ValueDetail p={p} seasons={seasons} visibleWidth={visibleWidth} colSpan={showStatus ? 6 : 5} /> : null}
     </>
   );
 }
@@ -397,10 +422,12 @@ function ValueDetail({
   p,
   seasons,
   visibleWidth,
+  colSpan,
 }: {
   p: ChampionshipPlayer;
   seasons: { current: string; previous: string | null };
   visibleWidth: number | null;
+  colSpan: number;
 }) {
   const estimated = p.value_basis === 'stimato';
   return (

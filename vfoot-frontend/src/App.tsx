@@ -21,6 +21,7 @@ import NewPasswordPage from './pages/NewPasswordPage';
 import { useAuth } from './auth/AuthContext';
 import { LeagueProvider } from './league/LeagueContext';
 import { CompetitionProvider } from './league/CompetitionContext';
+import { ChampionshipProvider } from './league/ChampionshipContext';
 import ClassificaPage from './pages/ClassificaPage';
 import RealChampionshipPage from './pages/RealChampionshipPage';
 import RealMatchDetailPage from './pages/RealMatchDetailPage';
@@ -63,7 +64,11 @@ export default function App() {
           <RequireAuth>
             <LeagueProvider>
               <CompetitionProvider>
-                <AppShell />
+                {/* Dentro le leghe perché la stagione da guardare la dice la lega
+                    quando ce n'è una — e quando non ce n'è, è questo a dirla. */}
+                <ChampionshipProvider>
+                  <AppShell />
+                </ChampionshipProvider>
               </CompetitionProvider>
             </LeagueProvider>
           </RequireAuth>

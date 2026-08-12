@@ -4,6 +4,7 @@ import { getRealMatchDetail } from '../api';
 import { Card } from '../components/ui';
 import { ClassicMatchDetail } from '../components/match/ClassicMatchDetail';
 import { useLeagueContext } from '../league/LeagueContext';
+import { useChampionship } from '../league/ChampionshipContext';
 import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { useAsync } from '../utils/useAsync';
 
@@ -11,17 +12,24 @@ import { useAsync } from '../utils/useAsync';
 // (voto puro + bonus/malus = fantavoto) for both squads, rendered with the same
 // ClassicMatchDetail component used by classic fantasy fixtures. (Aura zone
 // breakdown enrichment is a planned follow-up.)
+//
+// Si legge anche senza lega: i voti sono gli stessi per tutti, e cambiano solo le
+// etichette dei ruoli — dentro una lega quelli che ha congelato lei, fuori quelli
+// della stagione (v. classic_pagella.pagella_for_match).
 export default function RealMatchDetailPage() {
   const { matchId } = useParams();
   const { selectedLeagueId } = useLeagueContext();
+  const { scope } = useChampionship();
   // Bumped by the socket; the only reason this page ever re-fetches on its own.
   const [tick, setTick] = useState(0);
   const { data, loading, error } = useAsync(
     () =>
-      selectedLeagueId && matchId
-        ? getRealMatchDetail(selectedLeagueId, matchId)
-        : Promise.reject(new Error('Lega o partita non selezionata')),
-    [selectedLeagueId, matchId, tick],
+      scope && matchId
+        ? getRealMatchDetail(scope, matchId)
+        : Promise.reject(new Error('Campionato o partita non selezionati')),
+    // `scope` è memoizzato dal contesto: cambia identità solo quando cambia la
+    // lega o la stagione, non a ogni render.
+    [scope, matchId, tick],
   );
   // The tick nudges every league following this real match on each live import
   // (realdata/management/commands/tick.py), so the votes of a match being played
