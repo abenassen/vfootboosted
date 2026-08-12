@@ -41,9 +41,9 @@ export type PushState = {
 const READY_TIMEOUT_MS = 6000;
 
 const NO_WORKER =
-  'Le notifiche non sono disponibili in questa copia dell\'app: il componente che le '
-  + 'riceve non si è avviato. Prova a ricaricare la pagina; se il messaggio resta, '
-  + 'è un problema nostro, non tuo.';
+  "Le notifiche non sono disponibili in questa copia dell'app: il componente che le " +
+  'riceve non si è avviato. Prova a ricaricare la pagina; se il messaggio resta, ' +
+  'è un problema nostro, non tuo.';
 
 async function readyRegistration(): Promise<ServiceWorkerRegistration | null> {
   return Promise.race([
@@ -86,6 +86,72 @@ function keyMatches(sub: PushSubscription, publicKey: string): boolean {
   return mine.length === theirs.length && mine.every((b, i) => b === theirs[i]);
 }
 
+/** Crea (o rimette a posto) l'iscrizione e la salva sul nostro server.
+ *
+ *  Estratta perche' i due modi di arrivarci devono fare la STESSA cosa: il bottone
+ *  «Attiva», dopo aver chiesto il permesso, e la riparazione silenziosa qui sotto.
+ *  Quando erano due copie di codice, la seconda non esisteva affatto — e il
+ *  risultato era il banner che chiedeva un permesso già dato.
+ */
+async function ensureSubscription(
+  reg: ServiceWorkerRegistration,
+  publicKey: string,
+): Promise<void> {
+  let existing = await reg.pushManager.getSubscription();
+  if (existing && !keyMatches(existing, publicKey)) {
+    // Riusarla vorrebbe dire risalvare un endpoint che risponde 403 per sempre, e
+    // il browser non lascia iscriversi con un'altra chiave mentre questa vive. Il
+    // nostro server lo sa per primo: un endpoint buttato qui e tenuto la' e' uno su
+    // cui spingeremmo nel vuoto.
+    await unsubscribePush(existing.endpoint).catch(() => {});
+    await existing.unsubscribe();
+    existing = null;
+  }
+  const sub =
+    existing ??
+    (await reg.pushManager.subscribe({
+      // Obbligatorio: promettiamo che ogni push produce qualcosa di visibile. Le push
+      // silenziose sul web non sono ammesse, e iOS revoca per quello.
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    }));
+  await subscribePush(sub.toJSON() as { endpoint: string; keys: Record<string, string> });
+}
+
+/** Una riparazione per caricamento di pagina, e condivisa fra tutti i componenti che
+ *  usano questo hook: SetupBanner e NotificationsCard vivono insieme in Home, e due
+ *  `subscribe()` in volo contemporaneamente sono un endpoint buttato via appena creato. */
+let repairing: Promise<boolean> | null = null;
+
+/** CHI HA SPENTO LE NOTIFICHE DI PROPOSITO non le vuole riaccese da noi.
+ *
+ *  Il permesso del browser resta concesso anche dopo che l'utente ha premuto
+ *  «Disattiva» qui dentro — quello che si spegne è l'iscrizione — quindi per la
+ *  riparazione silenziosa quel caso è indistinguibile da un'iscrizione perduta, e
+ *  senza questa memoria le riaccenderebbe al ricaricamento della pagina, cioè
+ *  rimetterebbe in piedi una cosa che l'utente aveva appena spento. Sta nel browser
+ *  e non sul server perché è una decisione su QUESTO dispositivo, come l'iscrizione.
+ */
+const OFF_BY_USER = 'vfoot_push_spente_dall_utente';
+
+function turnedOffHere(): boolean {
+  try {
+    return window.localStorage.getItem(OFF_BY_USER) === '1';
+  } catch {
+    // Storage negato (modalità privata): meglio NON riparare che insistere.
+    return true;
+  }
+}
+
+function rememberChoice(off: boolean): void {
+  try {
+    if (off) window.localStorage.setItem(OFF_BY_USER, '1');
+    else window.localStorage.removeItem(OFF_BY_USER);
+  } catch {
+    /* niente in cui ricordarlo: al massimo si torna a chiedere col bottone */
+  }
+}
+
 export function usePush() {
   const [state, setState] = useState<PushState>({
     available: false,
@@ -118,13 +184,61 @@ export function usePush() {
           // Attiva button back, and pressing it repairs the whole thing — with no
           // permission prompt, since that was granted long ago.
           subscribed = sub !== null && keyMatches(sub, cfg.public_key ?? '');
+
+          // E SE IL PERMESSO C'E' GIA', quella riparazione non deve chiederla a
+          // nessuno: la si fa qui, in silenzio. `subscribe()` col permesso concesso
+          // non mostra alcun prompt e non ha bisogno di un gesto dell'utente --
+          // l'unica cosa che va chiesta una volta sola e' il PERMESSO, e quello e'
+          // già stato dato.
+          //
+          // Segnalato il 12/08/2026: il browser diceva «notifiche: consentite» e
+          // l'app continuava a mostrare «Ci sei quasi: attiva le notifiche». Erano
+          // entrambi nel giusto — il permesso c'era, l'iscrizione no (persa con un
+          // cambio di chiavi VAPID, una cancellazione dei dati del sito, un worker
+          // deregistrato) — ma l'unico che poteva rimetterla a posto senza disturbare
+          // nessuno era il codice, e chiedeva all'utente di ridare una cosa che aveva
+          // già dato. Un banner che ricompare a ogni visita, per di piu', insegna a
+          // ignorare i banner.
+          //
+          // Solo con 'granted': con 'default' un subscribe() qui farebbe comparire la
+          // richiesta di permesso al caricamento della pagina, che e' precisamente
+          // quello che tutto questo modulo evita (si chiede una volta, e un rifiuto e'
+          // definitivo). Se la riparazione non riesce, si torna al banner e al
+          // bottone: niente errori a schermo per qualcosa che l'utente non ha chiesto.
+          if (
+            !subscribed &&
+            !turnedOffHere() &&
+            Notification.permission === 'granted' &&
+            cfg.public_key
+          ) {
+            const key = cfg.public_key;
+            repairing =
+              repairing ??
+              ensureSubscription(reg, key).then(
+                () => true,
+                () => false,
+              );
+            subscribed = await repairing;
+          }
         }
       }
-      setState({ available: cfg.enabled, subscribed, blocked, busy: false, loaded: true,
-                 error: null });
+      setState({
+        available: cfg.enabled,
+        subscribed,
+        blocked,
+        busy: false,
+        loaded: true,
+        error: null,
+      });
     } catch {
-      setState({ available: false, subscribed: false, blocked, busy: false, loaded: true,
-                 error: null });
+      setState({
+        available: false,
+        subscribed: false,
+        blocked,
+        busy: false,
+        loaded: true,
+        error: null,
+      });
     }
   }, []);
 
@@ -158,9 +272,9 @@ export function usePush() {
           error:
             permission === 'denied'
               ? 'Notifiche negate. Per riattivarle serve passare dalle impostazioni del browser.'
-              : "Il browser non ha mostrato la richiesta. Cerca l'icona della campanella "
-                + 'sbarrata nella barra degli indirizzi, in alto a destra: cliccala e '
-                + 'scegli di consentire le notifiche.',
+              : "Il browser non ha mostrato la richiesta. Cerca l'icona della campanella " +
+                'sbarrata nella barra degli indirizzi, in alto a destra: cliccala e ' +
+                'scegli di consentire le notifiche.',
         }));
         return;
       }
@@ -175,26 +289,10 @@ export function usePush() {
       // press of a button into a spinner that never came back.
       const reg = await readyRegistration();
       if (!reg) throw new Error(NO_WORKER);
-      let existing = await reg.pushManager.getSubscription();
-      if (existing && !keyMatches(existing, cfg.public_key)) {
-        // Reusing it would re-save an endpoint that answers 403 for ever, and the
-        // browser refuses to re-subscribe with a different key while this one
-        // lives. Our server is told first, for the same reason `disable` does:
-        // an endpoint dropped here and kept there is one we would push into the
-        // void.
-        await unsubscribePush(existing.endpoint).catch(() => {});
-        await existing.unsubscribe();
-        existing = null;
-      }
-      const sub =
-        existing ??
-        (await reg.pushManager.subscribe({
-          // Required: we promise every push results in something visible. Silent
-          // pushes are not allowed on the web, and iOS revokes for it.
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(cfg.public_key),
-        }));
-      await subscribePush(sub.toJSON() as { endpoint: string; keys: Record<string, string> });
+      // Lo stesso lavoro della riparazione silenziosa, non una seconda copia: v.
+      // ``ensureSubscription``. Qui ci si arriva dopo il gesto e dopo il permesso.
+      await ensureSubscription(reg, cfg.public_key);
+      rememberChoice(false);
       setState((s) => ({ ...s, subscribed: true, busy: false, error: null }));
     } catch (e) {
       setState((s) => ({
@@ -217,6 +315,11 @@ export function usePush() {
         await unsubscribePush(sub.endpoint);
         await sub.unsubscribe();
       }
+      // Prima dello stato: se la pagina non si ricarica, un refresh successivo
+      // troverebbe il permesso concesso e l'iscrizione mancante -- cioe' la
+      // fotografia esatta di un'iscrizione perduta -- e la riaccenderebbe.
+      rememberChoice(true);
+      repairing = null;
       setState((s) => ({ ...s, subscribed: false, busy: false, error: null }));
     } catch (e) {
       setState((s) => ({

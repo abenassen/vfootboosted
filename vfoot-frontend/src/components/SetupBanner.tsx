@@ -121,20 +121,34 @@ export default function SetupBanner() {
   //    bottone occupato e la riga dei venti secondi.
   if (!push.loaded || dismissedPush || !push.available || push.subscribed || push.blocked)
     return null;
+  // IL PERMESSO PUO' ESSERCI GIA'. Segnalato il 12/08/2026: il browser diceva
+  // «notifiche: consentite» e questo banner chiedeva di attivarle, cioe' di ridare una
+  // cosa gia' data — e chi legge conclude che l'app non sa quello che dice. Ora
+  // l'iscrizione perduta col permesso concesso la rimette a posto usePush da solo, in
+  // silenzio; se il banner compare COMUNQUE vuol dire che quella riparazione non e'
+  // riuscita, e allora le parole devono dire quello. Le due situazioni hanno rimedi
+  // diversi: una e' un permesso da dare, l'altra un collegamento da rifare.
+  const permessoGiaDato = typeof Notification !== 'undefined'
+    && Notification.permission === 'granted';
   return (
-    <Frame title="🔔 Ci sei quasi: attiva le notifiche"
+    <Frame title={permessoGiaDato
+      ? '🔔 Avvisi da ricollegare su questo dispositivo'
+      : '🔔 Ci sei quasi: attiva le notifiche'}
       closeLabel="Chiudi l'invito alle notifiche"
       onClose={() => { setDismissedPush(true); remember(DISMISSED_PUSH); }}>
       <div className="mt-1 text-sm text-accent">
-        {isStandalone()
-          ? 'L’app è installata, ma gli avvisi sono ancora spenti: vanno accesi una volta, da qui.'
-          : 'Ti avvisiamo di quello che succede nella tua lega, anche quando non sei sul sito.'}
-        {' '}Solo quello che ti riguarda.
+        {permessoGiaDato
+          ? 'Il permesso c’è già, ma questo dispositivo non risulta collegato agli avvisi — '
+            + 'può succedere dopo una pulizia dei dati del browser. Si rimette con un tocco.'
+          : isStandalone()
+            ? 'L’app è installata, ma gli avvisi sono ancora spenti: vanno accesi una volta, da qui.'
+            : 'Ti avvisiamo di quello che succede nella tua lega, anche quando non sei sul sito.'
+              + ' Solo quello che ti riguarda.'}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <Button size="sm" variant="primary" disabled={push.busy}
           onClick={() => void push.enable()}>
-          {push.busy ? 'Attivo…' : 'Attiva le notifiche'}
+          {push.busy ? 'Attivo…' : permessoGiaDato ? 'Ricollega gli avvisi' : 'Attiva le notifiche'}
         </Button>
         {push.busy && (
           // Misurati ~30s a browser freddo: mezzo minuto muto sembra un bottone rotto.
