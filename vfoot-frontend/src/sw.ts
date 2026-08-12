@@ -55,7 +55,18 @@ if (manifest.length) {
       // one machine and fine on another. pwa-check.html is the same kind of file, and
       // failing that way would be worse: it is the page you open precisely when you
       // suspect the worker, so the worker eating it would answer the question wrong.
+      //
+      // /benchmark-voto/ è lo stesso caso ma di un'altra natura: non un file in
+      // public/, una CARTELLA che serve nginx da fuori l'app (40 pagine statiche in
+      // /srv/vfoot-benchmark, il confronto dei nostri voti con quelli di
+      // fantacalcio.it, che si dà per link diretto a chi chiede conto di un voto).
+      // Il 12/08/2026 quel link ha risposto il 404 DELL'APP a chi lo apriva, e non
+      // serve avere la PWA installata per finirci: il worker si registra alla prima
+      // visita normale, quindi riguarda chiunque abbia aperto il sito una volta.
+      // L'indirizzo vive in due posti che devono restare d'accordo — qui e nella
+      // location di vfoot.it.conf: se un giorno cambia, va cambiato in entrambi.
       denylist: [/^\/api\//, /^\/admin\//, /^\/ws\//, /^\/static\//, /^\/media\//,
+                 /^\/benchmark-voto\//,
                  /^\/mobile-frame\.html/, /^\/pwa-check\.html/],
     }),
   );

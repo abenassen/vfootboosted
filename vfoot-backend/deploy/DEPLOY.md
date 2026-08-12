@@ -213,7 +213,7 @@ Additive migrations are low-risk; the pg_dump is the real safety net.
 ## Il benchmark del voto, pubblicato ma non collegato
 
 Le 40 pagine di `voto_benchmark/` (indice + 38 giornate + divergenze, ~32 MB) sono
-servite da nginx su **`https://vfoot.it/benchmark-voto-7a1dbf30ec1d/`**. Non è linkata da nessuna parte
+servite da nginx su **`https://vfoot.it/benchmark-voto/`**. Non è linkata da nessuna parte
 nell'app: si dà per link diretto a chi chiede conto di un voto o fa da collaudo.
 Risponde `X-Robots-Tag: noindex, nofollow` e ha `autoindex off`, quindi non si arriva
 per caso né dai motori.
@@ -231,9 +231,24 @@ manage.py build_voto_benchmark --season 2
 rsync -az --delete voto_benchmark/ root@139.162.144.123:/srv/vfoot-benchmark/
 ssh root@139.162.144.123 'chown -R vfoot:vfoot /srv/vfoot-benchmark'
 ```
-Il blocco nginx è in `location ^~ /benchmark-voto-7a1dbf30ec1d/` di `vfoot.it.conf`: `^~` serve a battere
-il fallback della SPA (`location /`), che altrimenti risponderebbe `index.html` a ogni
-file. Backup della conf precedente in `/root/backups/vfoot.it.conf.pre-benchmark-*`.
+Il blocco nginx è in `location ^~ /benchmark-voto/` di `vfoot.it.conf` (copia versionata
+in `deploy/nginx/`): `^~` serve a battere il fallback della SPA (`location /`), che
+altrimenti risponderebbe `index.html` a ogni file. Backup delle conf precedenti in
+`/root/backups/vfoot.it.conf.pre-benchmark-*`.
+
+**E nginx non basta — questo è costato un 404 il 12/08/2026.** Il service worker della
+PWA risponde a OGNI navigazione con il guscio dell'app, tranne i percorsi nella sua
+`denylist` (`vfoot-frontend/src/sw.ts`): pubblicato senza l'eccezione, il link dava il
+**404 dell'app**, non di nginx. E non serve avere la PWA installata per finirci — il
+worker si registra alla prima visita normale del sito, quindi riguarda chiunque abbia
+aperto vfoot.it una volta. Quindi: **ogni indirizzo statico servito da nginx fuori
+dall'app va aggiunto alla denylist del worker**, e i due file devono restare d'accordo.
+
+Attenzione anche alla propagazione: un utente che ha già il worker VECCHIO continua a
+vedere il 404 dell'app finché quel worker non viene sostituito — cosa che avviene
+aprendo l'app e accettando l'avviso di aggiornamento, oppure chiudendo tutte le schede
+di vfoot.it e riaprendo il link. In finestra anonima funziona sempre, perché lì non c'è
+nessun worker registrato.
 
 ## Deployare il CALCOLO DEI VOTI — la parte che i sei passi sopra non coprono
 
