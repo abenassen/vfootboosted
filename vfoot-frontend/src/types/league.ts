@@ -36,6 +36,8 @@ export interface LeagueTeam {
   manager_username: string;
   // W/D/L and goals aggregated across ALL competitions (no single table exists).
   record?: TeamRecord;
+  /** Giocatori sotto contratto adesso. Zero = rosa ancora da fare. */
+  roster_count?: number;
 }
 
 /** Chi schiera una delle due squadre di un tabellino. Arriva col referto ma non

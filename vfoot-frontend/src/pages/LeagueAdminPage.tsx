@@ -505,6 +505,10 @@ export default function LeagueAdminPage() {
             <LeagueSetupChecklist
               league={league}
               competitions={competitions}
+              // I bottoni portano tutti a schede di questa pagina che a un
+              // manager non si aprono: senza questo, la lista gliene mostrava
+              // uno azzurro e premibile che finiva su «serve il ruolo admin».
+              canAct={isAdmin}
               onGoToInvite={() => {
                 // The invite code lives in the league card ABOVE the tab bar, so
                 // there is no tab to switch to — just scroll to it.
@@ -515,6 +519,12 @@ export default function LeagueAdminPage() {
                 // The tab BAR, not the panel: it lands with "Competizioni" visibly
                 // selected and the form starting right underneath, instead of
                 // dropping the user into the middle of a form with no context.
+                revealAfterRender('vfoot-league-tabs');
+              }}
+              onGoToRoster={() => {
+                // L'asta in classic, la rosa a mano in aura: sono i due modi in
+                // cui una rosa si riempie, e ognuno ha la sua scheda.
+                setLeagueTab(league.mode === 'classic' ? 'auction' : 'roster');
                 revealAfterRender('vfoot-league-tabs');
               }}
             />

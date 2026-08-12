@@ -334,7 +334,13 @@ class LeagueDetailView(APIView):
         _membership_or_404(league, request.user.id)
 
         members = LeagueMembership.objects.filter(league=league).select_related("user")
-        teams = FantasyTeam.objects.filter(league=league).select_related("manager__user")
+        # `roster_count` in una sola interrogazione, e non uno `.count()` dentro
+        # il ciclo: le squadre di una lega sono dieci o venti, e sarebbero
+        # altrettanti giri al database su una pagina che si apre in continuazione.
+        teams = (FantasyTeam.objects.filter(league=league)
+                 .select_related("manager__user")
+                 .annotate(roster_count=Count(
+                     "roster_slots", filter=Q(roster_slots__released_at__isnull=True))))
         records = _league_wide_records(league)
 
         season = league.reference_season
@@ -393,6 +399,11 @@ class LeagueDetailView(APIView):
                         "record": records.get(t.id, {"played": 0, "wins": 0, "draws": 0,
                                                      "losses": 0, "goals_for": 0,
                                                      "goals_against": 0}),
+                        # Quanti giocatori ha sotto contratto ADESSO. Serve a dire
+                        # se le rose sono state fatte — che è un passo della messa
+                        # in piedi di una lega, e prima non era visibile da
+                        # nessuna parte se non aprendo una rosa alla volta.
+                        "roster_count": t.roster_count,
                     }
                     for t in teams
                 ],

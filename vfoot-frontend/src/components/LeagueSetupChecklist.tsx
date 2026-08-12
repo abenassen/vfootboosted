@@ -9,17 +9,29 @@ import type { CompetitionItem, LeagueDetail } from '../types/league';
  *  had to guess. Derived from data we already load rather than from a "created
  *  just now" flag, so it keeps being right if the admin walks away and comes back
  *  a week later, and disappears on its own once the league is ready.
+ *
+ *  LO LEGGONO IN DUE, e non vogliono dire la stessa cosa. Per l'amministratore è
+ *  una lista di cose da fare, coi bottoni per farle. Per chiunque altro è il
+ *  motivo per cui la lega è ancora vuota, e i bottoni erano un imbroglio: si
+ *  vedevano, sembravano premibili, e portavano a una pagina che rispondeva «serve
+ *  il ruolo admin». Da lì in poi la lista dice CHI se ne occupa e non offre
+ *  niente da premere.
  */
 export default function LeagueSetupChecklist({
   league,
   competitions,
+  /** Chi guarda può agire, cioè è amministratore di questa lega. */
+  canAct = true,
   onGoToInvite,
   onGoToCompetitions,
+  onGoToRoster,
 }: {
   league: LeagueDetail;
   competitions: CompetitionItem[];
+  canAct?: boolean;
   onGoToInvite?: () => void;
   onGoToCompetitions?: () => void;
+  onGoToRoster?: () => void;
 }) {
   type Step = {
     done: boolean;
@@ -34,6 +46,14 @@ export default function LeagueSetupChecklist({
     actionLabel?: string;
   };
 
+  const enoughTeams = league.teams.length > 1;
+  // Una rosa fatta è una rosa con dei giocatori dentro. Non si pretende che siano
+  // tutte piene — un'asta finisce spesso con qualche casella libera, e il mercato
+  // serve a quello — ma una lega in cui NESSUNO ha un giocatore non ha ancora
+  // fatto l'asta, ed è la sola cosa che qui si vuole distinguere.
+  const withRoster = league.teams.filter((t) => (t.roster_count ?? 0) > 0).length;
+  const rosterDone = league.teams.length > 0 && withRoster === league.teams.length;
+
   const steps: Step[] = [
     {
       done: true,
@@ -41,12 +61,11 @@ export default function LeagueSetupChecklist({
       hint: `${league.name} · campionato di riferimento ${league.reference_season?.name ?? '—'}`,
     },
     {
-      done: league.teams.length > 1,
+      done: enoughTeams,
       label: 'Invita i partecipanti',
-      hint:
-        league.teams.length > 1
-          ? `${league.teams.length} squadre iscritte`
-          : `Sei l'unica squadra. Passa il codice ${league.invite_code} a chi deve entrare.`,
+      hint: enoughTeams
+        ? `${league.teams.length} squadre iscritte`
+        : `Sei l'unica squadra. Passa il codice ${league.invite_code} a chi deve entrare.`,
       action: onGoToInvite,
       actionLabel: 'Codice invito',
     },
@@ -57,7 +76,7 @@ export default function LeagueSetupChecklist({
       // services/competition_stages.py). Run it alone and the round robin pairs
       // your only team with a BYE, so the competition comes out with zero
       // fixtures — and you would have to know to rebuild it after people join.
-      blocked: league.teams.length <= 1,
+      blocked: !enoughTeams,
       blockedReason:
         'Prima invita i partecipanti: il calendario si genera dalle squadre presenti in quel momento, quindi creandola adesso resterebbe senza partite.',
       label: 'Crea la competizione',
@@ -66,6 +85,27 @@ export default function LeagueSetupChecklist({
           ? competitions.map((c) => c.name).join(', ')
           : 'Campionato, coppa o entrambi: è qui che nasce il calendario.',
       action: onGoToCompetitions,
+      actionLabel: 'Vai',
+    },
+    {
+      // LE ROSE, che mancavano da questa lista pur essendo la ragione più comune
+      // per cui una lega appena creata non si può giocare: c'è il calendario,
+      // c'è la classifica a zero, e alla prima giornata non si schiera nessuno
+      // perché nessuno ha giocatori. Chi guarda dà per fatto tutto quello che la
+      // lista non nomina, e questo non era nominato da nessuna parte.
+      done: rosterDone,
+      blocked: !enoughTeams,
+      blockedReason:
+        "Prima invita i partecipanti: all'asta si presentano le squadre iscritte in quel momento.",
+      label: 'Fai le rose',
+      hint: rosterDone
+        ? `${league.teams.length} rose formate`
+        : withRoster > 0
+          ? `${withRoster} rose su ${league.teams.length}: ne mancano ${league.teams.length - withRoster}.`
+          : league.mode === 'classic'
+            ? "Nessuna squadra ha giocatori. Si riempiono con l'asta — oppure caricando le rose da un foglio."
+            : 'Nessuna squadra ha giocatori: senza, alla prima giornata non si schiera nessuno.',
+      action: onGoToRoster,
       actionLabel: 'Vai',
     },
   ];
@@ -87,7 +127,19 @@ export default function LeagueSetupChecklist({
       </div>
       <p className="mt-1 text-xs text-accent">
         Le impostazioni qui sotto sono già attive, ma la lega non è ancora giocabile.
-        {next ? <> Il prossimo passo è <b>{next.label.toLowerCase()}</b>.</> : null}
+        {canAct ? (
+          next ? (
+            <>
+              {' '}
+              Il prossimo passo è <b>{next.label.toLowerCase()}</b>.
+            </>
+          ) : null
+        ) : (
+          // Non «cosa devi fare» ma «cosa si sta aspettando»: chi legge questa
+          // versione non può muovere niente, e sapere di chi è il turno è
+          // l'unica informazione che gli serve davvero.
+          <> Se ne occupa l’amministratore della lega: qui sotto cosa manca ancora.</>
+        )}
       </p>
 
       <ol className="mt-3 space-y-2">
@@ -125,7 +177,7 @@ export default function LeagueSetupChecklist({
                   {locked ? s.blockedReason : s.hint}
                 </div>
               </div>
-              {!s.done && !locked && s.action ? (
+              {canAct && !s.done && !locked && s.action ? (
                 <button
                   type="button"
                   onClick={s.action}
