@@ -89,6 +89,53 @@ export default function ClassificaPage() {
   const phases = groupByOrder(structure.sections);
   const anyBracket = structure.sections.some((s) => s.type === 'knockout');
 
+  // SOPRA O SOTTO LA CLASSIFICA, e lo decide il fatto che siano stati assegnati.
+  //
+  // Il blocco premi stava sempre in cima, col ragionamento che un premio è la
+  // ragione per cui la tabella conta. Finché nessuno l'ha vinto però è un elenco
+  // che non cambia da agosto a maggio, e stava davanti all'unica cosa per cui
+  // quella pagina si apre: chi apriva la classifica doveva scorrere ogni volta
+  // oltre un riquadro che aveva già letto. Ad assegnazione avvenuta si ribalta —
+  // lì i premi sono il verdetto della stagione, e la classifica è la prova.
+  const anyAwarded = prizes.some((p) => p.winner_team_names.length > 0);
+  const prizeCard = prizes.length ? (
+    <Card className="p-4">
+      <SectionTitle>Premi</SectionTitle>
+      {anyAwarded ? null : (
+        <div className="mt-1 text-[11px] text-ink-faint">Si assegnano da soli a fine stagione.</div>
+      )}
+      <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+        {prizes.map((p) => (
+          <li
+            key={p.prize_id}
+            className={
+              'flex items-start gap-2 rounded-xl border px-3 py-2 ' +
+              (p.winner_team_names.length
+                ? 'border-warn/40 bg-warn-bg/60'
+                : 'border-line border-dashed')
+            }
+          >
+            <span className="text-xl leading-none" aria-hidden>
+              {p.icon}
+            </span>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-ink">{p.name}</div>
+              <div className="truncate text-[11px] text-ink-faint">{p.condition_label}</div>
+              <div
+                className={
+                  'truncate text-[11px] font-semibold ' +
+                  (p.winner_team_names.length ? 'text-warn' : 'text-ink-faint')
+                }
+              >
+                {p.winner_team_names.length ? p.winner_team_names.join(', ') : 'ancora da assegnare'}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  ) : null;
+
   return (
     <div className="space-y-4">
       <Card className="p-4">
@@ -103,43 +150,7 @@ export default function ClassificaPage() {
         ) : null}
       </Card>
 
-      {/* What is at stake, and who has already taken it. Above the table because
-          a prize is the reason the table matters; a prize nobody has won yet is
-          still worth reading — it says what the season is being played for. */}
-      {prizes.length ? (
-        <Card className="p-4">
-          <SectionTitle>Premi</SectionTitle>
-          <ul className="mt-2 grid gap-2 sm:grid-cols-2">
-            {prizes.map((p) => (
-              <li
-                key={p.prize_id}
-                className={
-                  'flex items-start gap-2 rounded-xl border px-3 py-2 ' +
-                  (p.winner_team_names.length
-                    ? 'border-warn/40 bg-warn-bg/60'
-                    : 'border-line border-dashed')
-                }
-              >
-                <span className="text-xl leading-none" aria-hidden>
-                  {p.icon}
-                </span>
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-ink">{p.name}</div>
-                  <div className="truncate text-[11px] text-ink-faint">{p.condition_label}</div>
-                  <div
-                    className={
-                      'truncate text-[11px] font-semibold ' +
-                      (p.winner_team_names.length ? 'text-warn' : 'text-ink-faint')
-                    }
-                  >
-                    {p.winner_team_names.length ? p.winner_team_names.join(', ') : 'ancora da assegnare'}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ) : null}
+      {anyAwarded ? prizeCard : null}
 
       {phases.map((group) =>
         group[0].type === 'round_robin' ? (
@@ -162,6 +173,8 @@ export default function ClassificaPage() {
           group.map((s) => <Bracket key={s.name} section={s} />)
         ),
       )}
+
+      {anyAwarded ? null : prizeCard}
     </div>
   );
 }
