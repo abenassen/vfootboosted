@@ -957,20 +957,34 @@ export default function CompetitionCreatePage() {
                       ✕
                     </button>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {PRIZE_ICONS.map((icon) => (
-                      <button
-                        key={icon}
-                        type="button"
-                        onClick={() => setPrizes((prev) => prev.map((p, i) => (i === idx ? { ...p, icon } : p)))}
-                        className={
-                          'h-9 w-9 rounded-lg border text-lg ' +
-                          (prize.icon === icon ? 'border-line bg-surface-2' : 'border-line')
-                        }
-                      >
-                        {icon}
-                      </button>
-                    ))}
+                  {/* QUALE ICONA È SCELTA si deve vedere anche al buio. Selezionato
+                      e non selezionato differivano per `bg-surface-2` sopra
+                      `surface`, cioè due grigi separati da un niente: in tema
+                      scuro su un telefono la scelta era invisibile. Ora il bordo
+                      è del colore del marchio e c'è un anello attorno, che è
+                      l'unica differenza che regge su qualunque sfondo. */}
+                  <div className="mt-2 flex flex-wrap gap-1" role="radiogroup" aria-label="Icona del premio">
+                    {PRIZE_ICONS.map((icon) => {
+                      const chosen = prize.icon === icon;
+                      return (
+                        <button
+                          key={icon}
+                          type="button"
+                          role="radio"
+                          aria-checked={chosen}
+                          aria-label={`Icona ${icon}`}
+                          onClick={() => setPrizes((prev) => prev.map((p, i) => (i === idx ? { ...p, icon } : p)))}
+                          className={
+                            'h-9 w-9 rounded-lg border-2 text-lg transition ' +
+                            (chosen
+                              ? 'border-brand bg-brand/20 ring-2 ring-brand'
+                              : 'border-line hover:border-brand/40')
+                          }
+                        >
+                          {icon}
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className="mt-2">
                     <select

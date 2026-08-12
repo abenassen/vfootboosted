@@ -343,15 +343,23 @@ export default function CompetitionEditPage() {
             value={prizeName}
             onChange={(e) => setPrizeName(e.target.value)}
           />
-          <div className="flex flex-wrap gap-1">
+          {/* Selezionato = bordo e anello del marchio, non un grigio appena più
+              scuro: quello, in tema scuro, non si distingueva affatto. Stessa
+              scelta della creazione competizione. */}
+          <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Icona del premio">
             {PRIZE_ICONS.map((icon) => (
               <button
                 key={icon}
                 type="button"
+                role="radio"
+                aria-checked={prizeIcon === icon}
+                aria-label={`Icona ${icon}`}
                 onClick={() => setPrizeIcon(icon)}
                 className={
-                  'h-9 w-9 rounded-lg border text-lg ' +
-                  (prizeIcon === icon ? 'border-line bg-surface-2' : 'border-line')
+                  'h-9 w-9 rounded-lg border-2 text-lg transition ' +
+                  (prizeIcon === icon
+                    ? 'border-brand bg-brand/20 ring-2 ring-brand'
+                    : 'border-line hover:border-brand/40')
                 }
               >
                 {icon}
