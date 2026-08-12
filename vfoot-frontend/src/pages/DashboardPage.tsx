@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Card, SectionTitle } from '../components/ui';
 import SetupBanner from '../components/SetupBanner';
@@ -15,6 +15,10 @@ import { useCompetitionContext } from '../league/CompetitionContext';
 export default function DashboardPage() {
   const { leagues, selectedLeagueId, selectedLeague } = useLeagueContext();
   const { competitions, loading: competitionsLoading } = useCompetitionContext();
+  // «Sei entrato in X con Y», detto qui perché è qui che si arriva subito dopo
+  // (v. JoinLeaguePage e il modulo col codice in Gestione lega): la pagina che
+  // scrive la conferma non è più a schermo un istante dopo averla scritta.
+  const joined = (useLocation().state as { joined?: { league: string; team: string } } | null)?.joined;
 
   // NESSUNA LEGA. La cosa da fare resta una — crearne o entrare in una — ma non è
   // più l'unica cosa possibile: il campionato vero, il suo listone e la pagina che
@@ -35,6 +39,11 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
+      {joined ? (
+        <div className="rounded-xl border border-good/40 bg-good-bg px-3 py-2 text-sm font-semibold text-good">
+          Sei entrato in «{joined.league}» con {joined.team}.
+        </div>
+      ) : null}
       {/* Above everything else on purpose: e' l'unico invito che su iOS il browser
           non fara' mai — ne' a installare, ne' ad accendere le notifiche — e sparisce
           per sempre una volta chiuso. */}

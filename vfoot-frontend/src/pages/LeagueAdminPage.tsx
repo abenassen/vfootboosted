@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import {
   addRosterPlayer,
@@ -54,6 +54,7 @@ type LeagueTab = 'roster' | 'competitions' | 'matchdays' | 'auction' | 'market';
 
 export default function LeagueAdminPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { leagues, selectedLeagueId, selectedLeague, setSelectedLeagueId, refreshLeagues } = useLeagueContext();
   const isAdmin = selectedLeague?.role === 'admin';
@@ -762,6 +763,15 @@ export default function LeagueAdminPage() {
                     setJoinTeam('');
                     await refreshLeagues();
                     setSelectedLeagueId(res.league_id);
+                    // E POI DENTRO. Restare qui era il difetto: la pagina che si
+                    // aveva davanti dopo un ingresso riuscito era ancora il
+                    // modulo per entrare in una lega, col nome della lega appena
+                    // presa scritto in una riga di conferma sopra — sembrava di
+                    // non aver concluso niente. La domanda dopo «sono entrato» è
+                    // «cosa c'è qui dentro», e la risposta sta nella home. La
+                    // conferma viaggia con la navigazione, o si perderebbe
+                    // insieme alla pagina che l'ha scritta.
+                    navigate('/home', { state: { joined: { league: res.name, team } } });
                   });
                 }}
               >
