@@ -23,6 +23,22 @@ import { expect, test } from '@playwright/test';
 
 const ORIGIN = process.env.VFOOT_E2E_BASE_URL || 'http://127.0.0.1:5173';
 
+/** Chiude le notifiche che il test ha appena verificato.
+ *
+ *  Queste prove girano in Chrome VERO (il guscio headless non ha il dominio DevTools
+ *  del service worker), quindi `showNotification` produce una notifica di sistema che
+ *  resta nel centro notifiche di chi lancia i test. Il 12/08/2026 sono state
+ *  segnalate come un difetto dell'app da chi se le e' trovate sul desktop: due
+ *  esecuzioni della suite, due «Ruolo di D. Berardi» e due payload illeggibili. Il
+ *  test non cambia quello che verifica -- la notifica c'e' e la si legge -- ma non
+ *  deve lasciare tracce dietro di se'. */
+async function chiudiNotifiche(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(async () => {
+    const r = await navigator.serviceWorker.ready;
+    for (const n of await r.getNotifications()) n.close();
+  });
+}
+
 test.describe('@pwa PWA', () => {
   test('il manifest è servito e dice come installarsi', async ({ request }) => {
     const res = await request.get('/manifest.webmanifest');
@@ -137,6 +153,7 @@ test.describe('@pwa PWA', () => {
     expect(list[0].data.url).toBe('/decisioni');
     // Per-subject tag: three updates on one decision stay one line in the shade.
     expect(list[0].tag).toBe('decision-1');
+    await chiudiNotifiche(page);
   });
 
   test('una push illeggibile mostra comunque qualcosa', async ({ page, context }) => {
@@ -161,7 +178,12 @@ test.describe('@pwa PWA', () => {
     await cdp.send('ServiceWorker.deliverPushMessage', {
       origin: ORIGIN,
       registrationId: registrations.find((r) => r.scopeURL.startsWith(ORIGIN))!.registrationId,
-      data: 'questo non è json',
+      // Si dichiara una prova: il fallback mostra il testo GREZZO nel corpo, e
+      // questa notifica finisce davvero nel centro notifiche di chi lancia i test
+      // (serve Chrome vero, v. playwright.config). Un payload che diceva solo
+      // "questo non è json" è stato segnalato come un difetto dell'app, il
+      // 12/08/2026, da chi l'aveva vista comparire.
+      data: 'prova end-to-end: payload non JSON, atteso',
     });
 
     const shown = await page.waitForFunction(async () => {
@@ -170,6 +192,7 @@ test.describe('@pwa PWA', () => {
       return ns.length ? ns.map((n) => n.title) : null;
     });
     expect((await shown.jsonValue()) as string[]).toEqual(['Vfoot Boosted']);
+    await chiudiNotifiche(page);
   });
 });
 
