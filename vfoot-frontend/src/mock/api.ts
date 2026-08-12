@@ -270,6 +270,23 @@ export async function createLeague(req: CreateLeagueRequest) {
   return { league_id: id, invite_code: league.invite_code };
 }
 
+export async function getLeagueInvite(code: string) {
+  await sleep(80);
+  const l = mockLeagues.find((x) => x.invite_code === code);
+  if (!l) throw new Error('Codice invito non valido.');
+  return {
+    league_id: l.league_id,
+    invite_code: l.invite_code,
+    name: l.name,
+    mode: l.mode,
+    teams: l.teams.length,
+    reference_season: l.reference_season ? l.reference_season.name : null,
+    admin_username: l.members.find((m) => m.role === 'admin')?.username ?? null,
+    already_member: l.members.some((m) => m.username === 'mock-user'),
+    team_name: l.teams.find((t) => t.manager_username === 'mock-user')?.name ?? null,
+  };
+}
+
 export async function joinLeague(req: JoinLeagueRequest) {
   await sleep(120);
   const l = mockLeagues.find((x) => x.invite_code === req.invite_code);
@@ -277,7 +294,7 @@ export async function joinLeague(req: JoinLeagueRequest) {
   const teamId = l.teams.length + l.league_id * 10 + 1;
   l.teams.push({ team_id: teamId, name: req.team_name, manager_user_id: 2, manager_username: 'mock-user' });
   l.members.push({ membership_id: teamId, user_id: 2, username: 'mock-user', role: 'manager' });
-  return { league_id: l.league_id, team_id: teamId };
+  return { league_id: l.league_id, team_id: teamId, name: l.name };
 }
 
 export async function updateMyTeam(leagueId: number, patch: { name?: string; crest?: string }) {

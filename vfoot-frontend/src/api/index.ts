@@ -71,6 +71,7 @@ type ApiImpl = {
   getLeagues: typeof backendApi.getLeagues;
   createLeague: (req: CreateLeagueRequest) => ReturnType<typeof backendApi.createLeague>;
   joinLeague: (req: JoinLeagueRequest) => ReturnType<typeof backendApi.joinLeague>;
+  getLeagueInvite: typeof backendApi.getLeagueInvite;
   getLeagueDetail: typeof backendApi.getLeagueDetail;
   updateMyTeam: typeof backendApi.updateMyTeam;
   getLeagueActivity: typeof backendApi.getLeagueActivity;
@@ -171,6 +172,7 @@ export const getMatchDetail = typedImpl.getMatchDetail;
 export const getLeagues = typedImpl.getLeagues;
 export const createLeague = typedImpl.createLeague;
 export const joinLeague = typedImpl.joinLeague;
+export const getLeagueInvite = typedImpl.getLeagueInvite;
 export const getLeagueDetail = typedImpl.getLeagueDetail;
 export const updateMyTeam = typedImpl.updateMyTeam;
 export const getLeagueActivity = typedImpl.getLeagueActivity;

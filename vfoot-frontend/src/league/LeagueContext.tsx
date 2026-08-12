@@ -14,6 +14,24 @@ type LeagueContextValue = {
 const STORAGE_KEY = 'vfoot_selected_league_id';
 const LeagueContext = createContext<LeagueContextValue | undefined>(undefined);
 
+/** Scegliere la lega da FUORI dal provider.
+ *
+ *  La pagina dell'invito sta sulle rotte pubbliche — deve poter rispondere anche
+ *  a chi non ha ancora fatto l'accesso — quindi non ha il contesto sotto mano, e
+ *  però appena finito manda l'utente dentro l'app: se non lasciasse detto in
+ *  quale lega è appena entrato, il provider si monterebbe e sceglierebbe la
+ *  prima della lista, cioè un'altra. È la stessa chiave che usa il provider, e
+ *  la si scrive da qui invece che a mano perché di posti che la conoscono ne
+ *  basta uno. */
+export function rememberSelectedLeague(leagueId: number) {
+  if (typeof window === 'undefined' || !leagueId) return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, String(leagueId));
+  } catch {
+    /* niente spazio: si finisce sulla lega di prima, non è un errore fatale */
+  }
+}
+
 export function LeagueProvider({ children }: { children: React.ReactNode }) {
   const [leagues, setLeagues] = useState<LeagueSummary[]>([]);
   const [loading, setLoading] = useState(true);

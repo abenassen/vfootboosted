@@ -4,6 +4,7 @@ import { Badge, Button, Card } from '../components/ui';
 import { ApiError, googleSignIn, resendVerification } from '../api/backend';
 import { useAuth } from '../auth/AuthContext';
 import GoogleSignInButton from '../components/GoogleSignInButton';
+import { afterLoginPath, peekInvite } from '../league/pendingInvite';
 import logo from '../assets/logo.png';
 
 type Mode = 'login' | 'register';
@@ -26,8 +27,13 @@ export default function LandingPage() {
   const [unconfirmed, setUnconfirmed] = useState<string | null>(null);
 
   const ctaLabel = useMemo(() => (mode === 'login' ? 'Accedi' : 'Crea account'), [mode]);
+  // Chi è arrivato da un link d'invito torna nella LEGA che lo aspettava, non
+  // sulla home generica: il giro di registrazione + conferma via mail può durare
+  // dei minuti e passare da un'altra scheda, e senza questo il link — che serviva
+  // proprio a non dover ricopiare niente — andrebbe perso proprio alla fine.
+  const invitedTo = peekInvite();
 
-  if (user) return <Navigate to="/home" replace />;
+  if (user) return <Navigate to={afterLoginPath()} replace />;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -38,7 +44,7 @@ export default function LandingPage() {
     try {
       if (mode === 'login') {
         await login({ username, password });
-        navigate('/home', { replace: true });
+        navigate(afterLoginPath(), { replace: true });
       } else {
         // No navigation: the account is not usable until the link is opened.
         const res = await register({ username, email, password, password_confirm: passwordConfirm });
@@ -72,7 +78,7 @@ export default function LandingPage() {
     try {
       await googleSignIn(credential);
       await refresh();
-      navigate('/home', { replace: true });
+      navigate(afterLoginPath(), { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Accesso con Google non riuscito.');
     } finally {
@@ -147,6 +153,19 @@ export default function LandingPage() {
                 <div className="mt-1 text-xl font-black">Accedi a Vfoot</div>
               </div>
             </div>
+
+            {/* Perché si sta facendo l'accesso, quando la ragione è un invito.
+                Senza, questa pagina è indistinguibile da un accesso qualunque e
+                chi arriva da un link non sa più se il giro sta funzionando. */}
+            {invitedTo ? (
+              <div className="mb-4 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-ink-soft">
+                <b className="text-accent">Hai un invito in attesa.</b> Appena entri, ti riporto alla
+                lega che ti aspetta.{' '}
+                <Link to={`/join/${encodeURIComponent(invitedTo)}`} className="font-semibold underline">
+                  Vedi quale
+                </Link>
+              </div>
+            ) : null}
 
             <div className="mb-4 grid grid-cols-2 rounded-xl bg-surface-2 p-1 text-sm font-semibold">
               <button

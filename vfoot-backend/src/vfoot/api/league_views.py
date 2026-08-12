@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.authentication import TokenAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -235,6 +235,46 @@ class LeagueListCreateView(APIView):
         )
 
 
+class LeagueInvitePreviewView(APIView):
+    """Che lega c'è dietro un codice invito, PRIMA di entrarci.
+
+    Serve al link cliccabile (`/join/<codice>`): chi lo apre deve vedere il nome
+    della lega e in che modalità si gioca prima di scegliere il nome della
+    squadra, e chi è già iscritto deve essere riconosciuto invece di ricevere un
+    «sei già iscritto» dopo aver compilato un modulo.
+
+    Aperta anche a chi non ha ancora fatto l'accesso — il segreto è il codice, e
+    chi ce l'ha può entrare comunque: nascondergli il nome della lega finché non
+    si registra vorrebbe dire chiedergli un account al buio. Restituisce il
+    minimo indispensabile: nome, modalità, quante squadre, il campionato. Nessun
+    elenco di iscritti, nessun dato di gioco.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
+    def get(self, request, invite_code: str):
+        league = get_object_or_404(FantasyLeague, invite_code=invite_code)
+        membership = None
+        if request.user.is_authenticated:
+            membership = LeagueMembership.objects.filter(
+                league=league, user=request.user).first()
+        team = (FantasyTeam.objects.filter(manager=membership).first()
+                if membership else None)
+        season = league.reference_season
+        return Response({
+            "league_id": league.id,
+            "invite_code": league.invite_code,
+            "name": league.name,
+            "mode": league.mode,
+            "teams": FantasyTeam.objects.filter(league=league).count(),
+            "reference_season": str(season) if season else None,
+            "admin_username": league.owner.username if league.owner_id else None,
+            "already_member": membership is not None,
+            "team_name": team.name if team else None,
+        })
+
+
 class LeagueJoinView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -247,8 +287,25 @@ class LeagueJoinView(APIView):
 
         league = get_object_or_404(FantasyLeague, invite_code=data["invite_code"])
 
-        if LeagueMembership.objects.filter(league=league, user=request.user).exists():
-            return Response({"detail": "Sei già iscritto a questa lega."}, status=status.HTTP_200_OK)
+        existing = LeagueMembership.objects.filter(league=league, user=request.user).first()
+        if existing:
+            # Non è un errore ed è ANZI il caso normale del link d'invito, che si
+            # apre più di una volta: chi ci ritorna deve essere portato dentro la
+            # sua lega, non lasciato davanti a un messaggio senza appiglio. Per
+            # questo la risposta è la stessa di un ingresso riuscito — chi ha
+            # chiamato non deve distinguere i due casi per sapere dove andare.
+            existing_team = FantasyTeam.objects.filter(manager=existing).first()
+            return Response(
+                {
+                    "league_id": league.id,
+                    "team_id": existing_team.id if existing_team else None,
+                    "name": league.name,
+                    "role": existing.role,
+                    "already_member": True,
+                    "detail": "Sei già iscritto a questa lega.",
+                },
+                status=status.HTTP_200_OK,
+            )
 
         membership = LeagueMembership.objects.create(
             league=league,

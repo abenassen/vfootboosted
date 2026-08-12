@@ -34,7 +34,7 @@ import { ROLE_ORDER } from '../utils/market';
 import type { PrizeChange, RecomputeResult } from '../api/backend';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
-import CopyButton from '../components/CopyButton';
+import InviteShare from '../components/InviteShare';
 import MarketAdminPanel from '../components/MarketAdminPanel';
 import LeagueSetupChecklist from '../components/LeagueSetupChecklist';
 import Crest from '../components/Crest';
@@ -79,8 +79,10 @@ export default function LeagueAdminPage() {
   // asta, ruoli, vincoli di formazione — was unreachable from the interface.
   const [createMode, setCreateMode] = useState<'classic' | 'aura'>('classic');
   const [realSeasons, setRealSeasons] = useState<RealSeasonItem[]>([]);
-  // Invite code of the league we just created, shown with a copy button until dismissed.
-  const [createdInvite, setCreatedInvite] = useState<string | null>(null);
+  // L'invito della lega appena creata, mostrato finché non lo si chiude. Col nome
+  // accanto al codice: serve a comporre il messaggio che si manda agli altri, e
+  // il campo del modulo a quel punto è già stato svuotato.
+  const [createdInvite, setCreatedInvite] = useState<{ code: string; name: string } | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [joinTeam, setJoinTeam] = useState('');
 
@@ -621,7 +623,7 @@ export default function LeagueAdminPage() {
                       reference_season_id: createSeasonId,
                       mode: createMode,
                     });
-                    setCreatedInvite(res.invite_code);
+                    setCreatedInvite({ code: res.invite_code, name: createName });
                     setMsg('Lega creata. Seguendo i passi qui sotto diventa giocabile.');
                     setCreateName('');
                     setCreateTeam('');
@@ -724,18 +726,20 @@ export default function LeagueAdminPage() {
                 <Button type="submit" disabled={busy}>Crea</Button>
               </form>
               {createdInvite ? (
-                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-good/40 bg-good-bg px-3 py-2 text-sm">
-                  <span className="text-good">
-                    Invite code: <span className="font-mono font-semibold">{createdInvite}</span>
-                  </span>
-                  <CopyButton value={createdInvite} label="Copia codice" />
-                  <button
-                    type="button"
-                    onClick={() => setCreatedInvite(null)}
-                    className="ml-auto text-xs font-semibold text-ink-faint hover:text-ink-soft"
-                  >
-                    Chiudi
-                  </button>
+                <div className="mt-3 rounded-xl border border-good/40 bg-good-bg px-3 py-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="text-sm font-semibold text-good">Manda questo a chi deve giocare</div>
+                    <button
+                      type="button"
+                      onClick={() => setCreatedInvite(null)}
+                      className="text-xs font-semibold text-ink-faint hover:text-ink-soft"
+                    >
+                      Chiudi
+                    </button>
+                  </div>
+                  <div className="mt-2">
+                    <InviteShare code={createdInvite.code} leagueName={createdInvite.name} compact />
+                  </div>
                 </div>
               ) : null}
             </Card>
@@ -799,12 +803,12 @@ export default function LeagueAdminPage() {
 
             {league ? (
               <div className="mt-3 space-y-3 text-sm">
-                <div id="vfoot-invite-code" className="flex flex-wrap items-center gap-2 scroll-mt-24">
-                  <span>
-                    <span className="font-semibold">Invite code:</span>{' '}
-                    <span className="font-mono font-semibold text-ink">{league.invite_code}</span>
-                  </span>
-                  <CopyButton value={league.invite_code} label="Copia codice" />
+                <div id="vfoot-invite-code" className="scroll-mt-24">
+                  <InviteShare
+                    code={league.invite_code}
+                    path={league.invite_link}
+                    leagueName={league.name}
+                  />
                 </div>
                 {/* Qui stava "Modifiche manuali alla rosa: abilitate / bloccate".
                     Chiudeva soltanto add/rimuovi/import — tutte azioni dell'admin,

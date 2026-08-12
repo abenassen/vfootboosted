@@ -432,11 +432,33 @@ export async function createLeague(req: CreateLeagueRequest): Promise<{ league_i
 
 export async function joinLeague(
   req: JoinLeagueRequest,
-): Promise<{ league_id: number; team_id: number; name: string }> {
+): Promise<{ league_id: number; team_id: number | null; name: string; already_member?: boolean }> {
   const res = await fetch(`${baseUrl()}/leagues/join`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(req),
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** Cosa c'è dietro un codice d'invito, prima di entrarci. Senza sessione risponde
+ *  lo stesso (chi ha il codice può entrare comunque): `already_member` è la sola
+ *  parte che dipende da chi chiede, e senza token è sempre falsa. */
+export interface LeagueInvitePreview {
+  league_id: number;
+  invite_code: string;
+  name: string;
+  mode: 'aura' | 'classic';
+  teams: number;
+  reference_season: string | null;
+  admin_username: string | null;
+  already_member: boolean;
+  team_name: string | null;
+}
+
+export async function getLeagueInvite(code: string): Promise<LeagueInvitePreview> {
+  const res = await fetch(`${baseUrl()}/leagues/invite/${encodeURIComponent(code)}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);
 }

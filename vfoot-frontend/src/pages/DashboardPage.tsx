@@ -5,7 +5,7 @@ import SetupBanner from '../components/SetupBanner';
 import Crest from '../components/Crest';
 import LeagueHome from '../components/LeagueHome';
 import NewcomerHome from '../components/NewcomerHome';
-import CopyButton from '../components/CopyButton';
+import InviteShare from '../components/InviteShare';
 import { useCompetitionContext } from '../league/CompetitionContext';
 
 // This page no longer fetches the standings or the fixtures. Both existed only to
@@ -118,13 +118,14 @@ export default function DashboardPage() {
                 <div className="text-xs font-bold uppercase tracking-wide text-ink-faint">
                   1 — Fai entrare gli altri
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <code className="rounded-lg bg-surface-2 px-2 py-1 font-mono text-sm font-bold text-ink">
-                    {selectedLeague.invite_code}
-                  </code>
-                  <CopyButton value={selectedLeague.invite_code} label="Copia il codice" />
+                <div className="mt-2">
+                  <InviteShare
+                    code={selectedLeague.invite_code}
+                    leagueName={selectedLeague.name}
+                    compact
+                  />
                 </div>
-                <div className="mt-1.5 text-xs text-ink-faint">
+                <div className="mt-2 text-xs text-ink-faint">
                   Prima loro, poi la competizione: il calendario si costruisce sulle squadre presenti
                   quando lo generi, quindi creandola adesso resterebbe senza partite.
                 </div>

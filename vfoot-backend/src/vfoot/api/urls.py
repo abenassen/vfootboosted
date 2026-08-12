@@ -41,6 +41,7 @@ from vfoot.api.league_views import (
     ManagerHonoursView,
     ManagerProfileView,
     LeagueMyTeamView,
+    LeagueInvitePreviewView,
     LeagueJoinView,
     LeagueListCreateView,
     LeagueMatchdayConcludeView,
@@ -131,6 +132,10 @@ urlpatterns = [
          LeagueDecisionConsultView.as_view(), name="league-decision-consult"),
     path("leagues", LeagueListCreateView.as_view(), name="league-list-create"),
     path("leagues/join", LeagueJoinView.as_view(), name="league-join"),
+    # Prima di "leagues/<int:league_id>" non per ordine ma perché il convertitore
+    # int non prenderebbe comunque "invite"; sta qui per stare accanto a join.
+    path("leagues/invite/<str:invite_code>", LeagueInvitePreviewView.as_view(),
+         name="league-invite-preview"),
     path("leagues/<int:league_id>", LeagueDetailView.as_view(), name="league-detail"),
     path("leagues/<int:league_id>/team", LeagueMyTeamView.as_view(), name="league-my-team"),
     path("leagues/<int:league_id>/activity", LeagueActivityView.as_view(), name="league-activity"),

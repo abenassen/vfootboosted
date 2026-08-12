@@ -18,6 +18,7 @@ import LandingPage from './pages/LandingPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import NewPasswordPage from './pages/NewPasswordPage';
+import JoinLeaguePage from './pages/JoinLeaguePage';
 import { useAuth } from './auth/AuthContext';
 import { LeagueProvider } from './league/LeagueContext';
 import { CompetitionProvider } from './league/CompetitionContext';
@@ -59,6 +60,9 @@ export default function App() {
       <Route path="/verifica-email" element={<VerifyEmailPage />} />
       <Route path="/recupera-password" element={<ForgotPasswordPage />} />
       <Route path="/nuova-password" element={<NewPasswordPage />} />
+      {/* FUORI da RequireAuth: un invito lo apre anche chi non ha un account, e
+          l'indirizzo è quello che il backend pubblica già come `invite_link`. */}
+      <Route path="/join/:code" element={<JoinLeaguePage />} />
       <Route
         element={
           <RequireAuth>
