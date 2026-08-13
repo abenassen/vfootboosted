@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import logo from '../assets/logo.png';
+import { applyUpdate, onUpdateReady } from '../pwa/registerSW';
 
 /** IL CARTELLO DELL'APERTURA — pagina temporanea, fatta per essere cancellata.
  *
@@ -99,6 +100,18 @@ export default function CountdownPage({ onOpen }: { onOpen: () => void }) {
       document.title = previous;
     };
   }, [label]);
+
+  /** IL CARTELLO SI AGGIORNA DA SOLO, senza chiedere.
+   *
+   *  Ovunque nell'app l'aggiornamento è una scelta dell'utente (UpdateBanner):
+   *  ricaricare sotto chi sta rilanciando a un'asta sarebbe peggio che restare
+   *  indietro di una versione. Qui non c'è niente da perdere in un
+   *  ricaricamento — e soprattutto questa pagina sta FUORI dall'app, quindi
+   *  quel banner non la raggiunge: chi l'aveva aperta una volta restava sulla
+   *  copia del service worker per sempre. È già successo il 13/08/2026, con una
+   *  correzione al testo che sembrava non arrivare mentre il server la serviva
+   *  da un pezzo. */
+  useEffect(() => onUpdateReady((ready) => ready && applyUpdate()), []);
 
   // Passata l'ora: qualche secondo di festa, poi la pagina si fa da parte anche
   // se nessuno tocca il pulsante — una scheda lasciata aperta deve ritrovarsi
