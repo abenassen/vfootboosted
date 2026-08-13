@@ -157,9 +157,14 @@ resta `scheduled`, né `data_ready`, che resta falso. Su un database ricostruito
 da zero escono 380 partite di una stagione conclusa in stato `scheduled`.
 
 Non è cosmetico. `player_ratings._compute_season_player_ratings` filtra
-`status=FINISHED`: con tutte a `scheduled` trova zero partite, **ritorna `{}` e il
-listone ripiega sullo snapshot** senza dire niente — la stessa forma di guasto di
+`status=FINISHED`: con tutte a `scheduled` trova zero partite e **ritorna `{}`**,
+cioè il listone ripiega sullo snapshot — la stessa forma di guasto di
 `export_dev_db` (voti plausibili e sbagliati, nessun allarme).
+
+Dal 14/08/2026 lo snapshot in quel caso si rifiuta di rispondere, perché è stato
+costruito su 380 partite giocate e qui ne risultano zero (v. `snapshot_ratings`).
+Il listone resta vuoto, che si vede subito. Il passo qui sotto serve lo stesso, e
+per la stessa ragione di prima: una stagione conclusa dev'essere `finished`.
 
 ```sh
 sudo -u vfoot ../.venv/bin/python manage.py sync_calendar --year 25/26 --offline

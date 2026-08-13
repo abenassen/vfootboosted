@@ -328,6 +328,33 @@ posizione certa vince sulla misura. Dopo aver sistemato i quattro punti sopra re
 esattamente un caso così su 11.902 presenze (L. Pellegrini, `attacking midfield` in
 produzione e niente in locale): quello si spiega, non si ripara.
 
+### L'unico numero che il `git pull` porta davvero: lo snapshot del listone
+
+`vfoot/data/player_ratings_snapshot.json` è l'eccezione alla frase con cui si apre
+questo capitolo. Non è codice: sono i valori del listone, calcolati in locale dove
+ci sono le zone feature, e spediti col sorgente perché **il database magro** di chi
+collabora non può ricalcolarli. Il lettore lo usa solo quando dalle zone non esce
+niente (`season_player_ratings`), e in produzione — dove le zone ci sono — non
+dovrebbe entrare mai. Su una stagione **non ancora giocata** invece entrava, perché
+lì non c'è niente da calcolare.
+
+Il 13/08/2026 quel file, indicizzato sulle chiavi primarie di chi lo scriveva,
+raccontava alla 26-27 di produzione la 25-26 di locale, giocatore per giocatore
+sbagliato: 554 con presenze e media in un campionato non cominciato. Adesso le
+chiavi sono quelle del provider (`sofascore:76457`) e il file viene servito solo se
+questa installazione ha giocato le stesse partite su cui è stato costruito, quindi
+il caso non si ripresenta da sé. Restano due cose da fare a mano, e sono qui perché
+nessuna delle due si vede da fuori:
+
+* **rigenerarlo quando cambia il modello**, in locale e subito dopo
+  `calibrate_vote_reference`:
+  `manage.py build_player_ratings_snapshot` (poi commit del file). Se resta indietro
+  `tests_player_ratings_snapshot` fallisce, e in produzione il log lo dice — ma i
+  numeri intanto si vedono;
+* **non spedirci mai una stagione simulata.** Il comando salta da solo le stagioni
+  con partite "finite" che il calendario mette nel futuro, che è la firma di
+  `simulate_sofascore_season`. Se un giorno stampa `SALTATA`, è quello che deve fare.
+
 ### Il deploy del calcolo dei voti, in ordine
 
 ```sh

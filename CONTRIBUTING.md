@@ -116,8 +116,39 @@ puro viene **ricalcolato a ogni lettura**. Senza di loro:
 Le giornate **già** concluse si vedono normalmente: i tabellini sono salvati in
 `FantasyFixtureDetail` e non vengono ricalcolati.
 
+Il **listone** invece i valori li ha lo stesso, e non vengono dal database: li
+porta `vfoot/data/player_ratings_snapshot.json`, versionato nel repository, che
+`season_player_ratings` legge quando dalle zone non esce niente.
+
 Se ti serve lavorare sul modello di scoring e non sulla UI, chiedi il dump
 completo: si genera con `manage.py export_dev_db --keep-zones`.
+
+## Lo snapshot del listone si rigenera, e va rigenerato
+
+```sh
+../.venv/bin/python manage.py build_player_ratings_snapshot
+```
+
+Serve **ogni volta che cambia il modello di voto**, subito dopo
+`calibrate_vote_reference`: il file porta l'impronta del modello che l'ha
+prodotto e `tests_player_ratings_snapshot` fallisce quando non è più quella nel
+repository.
+
+Il comando **salta da solo** la 2026-27 simulata da `simulate_sofascore_season`.
+Vale la pena sapere perché, perché è un guasto già successo: quel file viaggia
+col sorgente, quindi finisce in produzione con un `git pull`, e fino al 13/08/2026
+era indicizzato sulle **chiavi primarie** del database che lo scriveva. Ma un id
+autoincrementale non vuol dire niente altrove: qui la stagione `2` è la 25-26 e il
+giocatore `957` è Nico Paz, in produzione — che non ha né la 2015-16 di StatsBomb
+né la 26-27 simulata — sono la 26-27 e Matteo Barbini. Risultato: in produzione il
+listone di un campionato **non ancora cominciato** mostrava 554 giocatori con
+presenze e medie, ognuna del giocatore sbagliato.
+
+Adesso stagioni e giocatori sono scritti con l'identità del provider
+(`sofascore:76457`), che è la stessa ovunque, e il lettore serve i numeri solo se
+questo database ha giocato **le stesse partite** su cui il file è stato costruito.
+Fuori da quelle due condizioni non ripiega su niente: il listone resta vuoto, che
+è la risposta vera.
 
 ## Rigenerare il dump (per chi ha il database completo)
 

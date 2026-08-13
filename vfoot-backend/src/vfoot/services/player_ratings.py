@@ -23,6 +23,7 @@ The SNAPSHOT below is the source of last resort — see ``snapshot_ratings``.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -43,6 +44,13 @@ log = logging.getLogger(__name__)
 # the same reason: it is a computed artefact that has to travel with the SOURCE
 # rather than with the database.
 SNAPSHOT_PATH = Path(settings.BASE_DIR) / "vfoot" / "data" / "player_ratings_snapshot.json"
+
+# Bumped when the SHAPE of the file changes. Version 1 keyed seasons and players on
+# the primary keys of the database that produced it, and shipping it to a different
+# database is what this number exists to prevent — see ``_portable_key``. A file
+# whose format is not this one is ignored rather than interpreted: reading version 1
+# with version 2's rules would be exactly the silent misattribution being fixed.
+SNAPSHOT_FORMAT = 2
 
 # Rated appearances at which current form and last season's value weigh the same.
 SHRINKAGE_APPEARANCES = 5
@@ -117,13 +125,65 @@ def _compute_season_player_ratings(cs_id: int) -> dict:
             for pid, (s, n) in agg.items() if n}
 
 
+def _portable_key(obj) -> str:
+    """``source:external_id`` — the identity of a season or a player OUTSIDE this
+    database.
+
+    The reason this function exists, and the bug it comes from. The snapshot used to
+    key on ``CompetitionSeason.id`` and ``Player.id``, which are autoincrement
+    surrogates: they mean something only in the database that assigned them. The
+    development database carries the 2015-16 StatsBomb season and the simulated
+    2026-27 one, production carries neither, so the SAME number is a different
+    season and a different person on the two machines. Shipped to production on
+    2026-08-11, the file said "season 2, player 957 = 6.66 over 35 appearances":
+    locally that is Nico Paz in the concluded 2025-26 season, in production it is
+    Matteo Barbini in the 2026-27 season, which had not kicked off. Every one of the
+    211 ids that existed on both sides landed on the wrong player — not one match —
+    and the remaining 343 vanished. Nothing in the interface could show it: the
+    numbers were real votes, plausibly distributed, on real players.
+
+    Provider ids are the opposite kind of identifier: they come from the source both
+    databases imported, so 76457 is the 2025-26 Serie A everywhere, and a season or a
+    player this database never imported simply fails to resolve — which is the
+    behaviour we want, because an entry that cannot be resolved must disappear, never
+    be handed to whoever happens to sit at that row number.
+    """
+    return f"{obj.external_source}:{obj.external_id}"
+
+
+def _resolve_player_keys(keys) -> dict[str, int]:
+    """{provider key: local Player.id} for the keys this database knows."""
+    by_source: dict[str, list[str]] = defaultdict(list)
+    for key in keys:
+        source, _, external_id = str(key).partition(":")
+        if source and external_id:
+            by_source[source].append(external_id)
+    out: dict[str, int] = {}
+    for source, external_ids in by_source.items():
+        for pid, external_id in (Player.objects
+                                 .filter(external_source=source,
+                                         external_id__in=external_ids)
+                                 .values_list("id", "external_id")):
+            out[f"{source}:{external_id}"] = pid
+    return out
+
+
+def _finished_match_count(cs_id: int) -> int:
+    """How many matches of this season are played here — the count inside
+    ``data_version``, which is the half of it that has to AGREE with the snapshot."""
+    return Match.objects.filter(competition_season_id=cs_id,
+                                status=Match.STATUS_FINISHED).count()
+
+
 _snapshot_memo: dict | None = None
+_snapshot_digest_memo: str | None = None
 
 
 def clear_snapshot_cache() -> None:
     """Drop the in-process copy of the snapshot (after regenerating it, or in tests)."""
-    global _snapshot_memo
+    global _snapshot_memo, _snapshot_digest_memo
     _snapshot_memo = None
+    _snapshot_digest_memo = None
 
 
 def _snapshot() -> dict:
@@ -135,10 +195,35 @@ def _snapshot() -> dict:
             # A missing or unreadable snapshot is not an error: a full database
             # never needs it.
             _snapshot_memo = {}
+        if _snapshot_memo.get("format") != SNAPSHOT_FORMAT:
+            # Not a warning at import time on purpose: a checkout without the file,
+            # or with an older one, must keep working. It becomes a warning in
+            # snapshot_ratings, where somebody is actually asking for the numbers.
+            _snapshot_memo = {}
     return _snapshot_memo
 
 
-def snapshot_ratings(cs_id: int) -> dict:
+def snapshot_digest() -> str:
+    """Short hash of the snapshot FILE, for cache keys.
+
+    The scoring fingerprint does not cover this: regenerating the snapshot without
+    touching the model — which is exactly what fixing a wrong snapshot looks like —
+    leaves every derived cache key identical, and the machines that had already
+    served the old numbers keep serving them after the deploy. There is nothing to
+    notice: the page is fast and the values are believable. Same failure the
+    fingerprint was added to close, one layer further out.
+    """
+    global _snapshot_digest_memo
+    if _snapshot_digest_memo is None:
+        try:
+            _snapshot_digest_memo = hashlib.sha256(
+                SNAPSHOT_PATH.read_bytes()).hexdigest()[:12]
+        except OSError:
+            _snapshot_digest_memo = "-"
+    return _snapshot_digest_memo
+
+
+def snapshot_ratings(cs) -> dict:
     """Season ratings read from the versioned snapshot, or {} if it cannot serve.
 
     The reason this file exists rather than a database table: the slim copy from
@@ -148,26 +233,56 @@ def snapshot_ratings(cs_id: int) -> dict:
     a plain ``git pull`` and without replacing anyone's database (and the local
     leagues, rosters and test data in it). 9 KB of JSON against 54 MB of SQLite.
 
-    Used ONLY when computing from zone features yields nothing, so a real database
-    always wins: this can never mask fresh data with a stale figure. Both the
-    scoring fingerprint and the played-data version are checked and any mismatch is
-    logged — a snapshot from a different model, or from a different set of matches,
-    is still better than an empty listone, but nobody should discover that silently.
+    Travelling with the source is exactly what makes it dangerous, and the three
+    rules below are what make it safe:
+
+      * it is a FALLBACK, never an override — a database that can compute always
+        wins, so fresh data can never be masked by a stored figure;
+      * it is addressed by PROVIDER identity, never by primary key, so a season or
+        a player this database does not have simply does not resolve
+        (``_portable_key``, and the misattribution it comes from);
+      * it must describe THIS season's played data. A snapshot built on 380 matches
+        answers only where 380 matches have been played. The season not started, the
+        season half played, the season simulated somewhere else: all refused, because
+        for them the honest listone is the empty one, and a plausible wrong one has
+        no way of being noticed from the outside.
+
+    A stale scoring fingerprint only warns: those numbers are the previous model's,
+    which is a worse listone but still this season's football.
     """
-    season = (_snapshot().get("seasons") or {}).get(str(cs_id))
+    season = (_snapshot().get("seasons") or {}).get(_portable_key(cs))
     if not season:
         return {}
+
+    played = _finished_match_count(cs.id)
+    stored_played = int(str(season.get("data_version") or "0:-").split(":")[0])
+    if played != stored_played:
+        log.warning("player_ratings snapshot NOT used for %s: it was built on %d "
+                    "played matches and this database has %d.",
+                    cs, stored_played, played)
+        return {}
+    if season.get("data_version") != data_version(cs.id):
+        # Same number of matches, different last check: the data is the same, the
+        # stamp moved. Worth a line, not worth refusing the numbers.
+        log.info("player_ratings snapshot for %s carries a different data stamp "
+                 "(%s != %s).", cs, season.get("data_version"), data_version(cs.id))
+
     stored_fp = _snapshot().get("scoring_fingerprint")
     if stored_fp != scoring_fingerprint():
         log.warning("player_ratings snapshot was built by a different scoring model "
                     "(%s != %s); rebuild it with `manage.py "
                     "build_player_ratings_snapshot`.", stored_fp, scoring_fingerprint())
-    if season.get("data_version") != data_version(cs_id):
-        log.warning("player_ratings snapshot for season %s describes a different set "
-                    "of played matches (%s != %s).", cs_id,
-                    season.get("data_version"), data_version(cs_id))
-    return {int(pid): {"avg": avg, "n": n}
-            for pid, (avg, n) in (season.get("ratings") or {}).items()}
+
+    ratings = season.get("ratings") or {}
+    local_id = _resolve_player_keys(ratings)
+    if len(local_id) < len(ratings):
+        # Normal in itself — a squad list is never identical across databases — but
+        # a collapse here means the two sides do not share a provider, and the
+        # listone would come out mostly empty without a word.
+        log.info("player_ratings snapshot for %s: %d of %d players resolved in this "
+                 "database.", cs, len(local_id), len(ratings))
+    return {local_id[key]: {"avg": avg, "n": n}
+            for key, (avg, n) in ratings.items() if key in local_id}
 
 
 def season_player_ratings(cs_id: int) -> dict:
@@ -179,9 +294,13 @@ def season_player_ratings(cs_id: int) -> dict:
     with no expiry, outlived every change to the model. The 25-26 listone served
     ratings computed on 2026-07-21 straight through the v3 retuning — believable
     numbers, silently pre-tuning, and no way to tell from the outside.
+
+    And on the snapshot FILE, for the same reason one layer out: a value that came
+    from the file has to fall the moment the file changes, or correcting the file
+    corrects nothing on the machines that already answered from it.
     """
     key = (f"vfoot:player_ratings:{cs_id}:{data_version(cs_id)}"
-           f":{scoring_fingerprint()}")
+           f":{scoring_fingerprint()}:{snapshot_digest()}")
     hit = cache.get(key)
     if hit is not None:
         return hit
@@ -190,7 +309,8 @@ def season_player_ratings(cs_id: int) -> dict:
         # Nothing computable: either a season this model cannot score at all, or a
         # database whose zone features were stripped. The snapshot answers the
         # second case and stays empty for the first.
-        data = snapshot_ratings(cs_id)
+        cs = CompetitionSeason.objects.filter(id=cs_id).first()
+        data = snapshot_ratings(cs) if cs else {}
         if data:
             log.info("season %s scored from the versioned snapshot (%d players): "
                      "no zone features in this database.", cs_id, len(data))
