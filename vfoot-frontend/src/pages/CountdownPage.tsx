@@ -22,9 +22,15 @@ export function isLaunched(): boolean {
   return Date.now() >= LAUNCH_AT;
 }
 
-/** La scorciatoia per chi un account ce l'ha già: `?entra` nell'indirizzo, o il
- *  link discreto in fondo alla pagina. Vale per la scheda aperta e basta — non
- *  è un cancello, è una cortesia verso i pochi che stanno già provando l'app. */
+/** LA CHIAVE DI CHI FA IL SITO: `vfoot.it/?entra`, e nient'altro. Non è scritta
+ *  da nessuna parte nella pagina di proposito — un link «hai già un account?»
+ *  c'era, e faceva saltare il conto alla rovescia a chiunque ci passasse sopra,
+ *  che è esattamente ciò che il cartello serve a non far succedere.
+ *
+ *  Chi ha già una sessione non ne ha comunque bisogno: entra e basta. Serve nel
+ *  caso opposto — sessione scaduta prima dell'ora — e vale per la scheda aperta
+ *  e basta. Resta una cortesia, non una serratura: chi conosce l'indirizzo entra
+ *  lo stesso, e a chiudere davvero sarebbe nginx, non questa pagina. */
 const BYPASS_KEY = 'vfoot.apertura.entra';
 
 export function wantsBypass(): boolean {
@@ -141,8 +147,8 @@ export default function CountdownPage({ onOpen }: { onOpen: () => void }) {
         </h1>
 
         <p className="vfc-claim">
-          Il fantacalcio con i voti calcolati dai dati veri di ogni partita di Serie A.
-          Non copiati dai giornali: nostri.
+          Il gioco sul calcio con i voti indipendenti calcolati dai dati veri di ogni
+          partita di Serie A.
         </p>
 
         {done ? (
@@ -178,14 +184,6 @@ export default function CountdownPage({ onOpen }: { onOpen: () => void }) {
           <span className="vfc-chip vfc-chip--on">Classic · pronta</span>
           <span className="vfc-chip">Aura · in arrivo</span>
         </div>
-
-        {/* Solo prima dell'ora: dopo, «Entra ora» dice già la stessa cosa e più
-            forte, e due porte accanto sono una porta di troppo. */}
-        {done ? null : (
-          <button type="button" className="vfc-quiet" onClick={onOpen}>
-            Hai già un account? Entra
-          </button>
-        )}
       </main>
     </div>
   );
@@ -522,19 +520,6 @@ const CSS = `
   background: rgba(46,204,113,.12);
   color: #9ff0c1;
 }
-
-.vfc-quiet {
-  margin-top: .6rem;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: .82rem;
-  color: rgba(234,247,239,.5);
-  text-decoration: underline;
-  text-underline-offset: 4px;
-  cursor: pointer;
-}
-.vfc-quiet:hover { color: rgba(234,247,239,.85); }
 
 .vfc button:focus-visible {
   outline: 2px solid #7dd3fc;
