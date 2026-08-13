@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import type { ReactElement } from 'react';
+import { useCallback, useState, type ReactElement } from 'react';
 import AppShell from './layouts/AppShell';
 import DashboardPage from './pages/DashboardPage';
 import SquadPage from './pages/SquadPage';
@@ -33,6 +33,7 @@ import ProfilePage from './pages/ProfilePage';
 import ManagerProfilePage from './pages/ManagerProfilePage';
 import MaintenancePage from './pages/MaintenancePage';
 import VotoPuroPage from './pages/VotoPuroPage';
+import CountdownPage, { isLaunched, rememberBypass, wantsBypass } from './pages/CountdownPage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -53,10 +54,37 @@ function RequireStaff({ children }: { children: ReactElement }) {
   return children;
 }
 
+/** LA PORTA D'INGRESSO, finché il sito non è annunciato: prima dell'ora
+ *  dell'apertura chi arriva senza sessione trova il conto alla rovescia, dopo
+ *  trova la pagina di benvenuto di sempre. Il passaggio non ha bisogno di un
+ *  deploy — è l'orologio a farlo, e la pagina stessa si fa da parte allo
+ *  scoccare dell'ora.
+ *
+ *  È l'UNICO punto tappato, di proposito: le API rispondono come sempre, un
+ *  link d'invito porta ancora alla lega che aspetta, e chi è già dentro non
+ *  incontra mai il cartello. Passata l'apertura si può togliere questa funzione
+ *  e cancellare CountdownPage: la rotta torna a essere una riga. */
+function PublicEntry() {
+  const { user, loading } = useAuth();
+  const [open, setOpen] = useState(() => isLaunched() || wantsBypass());
+  const reveal = useCallback(() => {
+    rememberBypass();
+    setOpen(true);
+  }, []);
+
+  if (open) return <LandingPage />;
+  // La sessione si legge in locale quando non c'è (nessuna chiamata), quindi
+  // questa attesa riguarda solo chi è già registrato: meglio un istante di
+  // fondo scuro che un lampo di conto alla rovescia prima della sua home.
+  if (loading) return <div className="min-h-screen bg-[#04120b]" />;
+  if (user) return <LandingPage />;
+  return <CountdownPage onOpen={reveal} />;
+}
+
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
+      <Route path="/" element={<PublicEntry />} />
       <Route path="/verifica-email" element={<VerifyEmailPage />} />
       <Route path="/recupera-password" element={<ForgotPasswordPage />} />
       <Route path="/nuova-password" element={<NewPasswordPage />} />
