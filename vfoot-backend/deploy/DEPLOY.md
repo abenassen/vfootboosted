@@ -399,14 +399,33 @@ table within twelve hours. Promote a finding by changing the constant in
 Everything is staged and **disabled**. Turn it on at launch.
 
 ### Data sourcing recap
-- **Transfermarkt** (listone): reachable directly from the Linode; `poll_transfermarkt`
-  wraps scrape+import. Unit: `vfoot-tm-poll.{service,timer}` (twice daily).
-- **SofaScore** (match data): the Linode IP is Cloudflare-blocked, so it egresses
-  through a **Surfshark WireGuard tunnel in a netns** (`egress/`), rotating over a
-  self-refreshing **pool of good exit IPs**. Dedicated client key at
-  `/etc/wireguard/surfshark_wg.conf`. Pool/cache live outside the repo
-  (`/var/lib/vfoot-egress/`, `/var/cache/sofascore`). Unit:
-  `vfoot-egress-refill.{service,timer}` tops the pool up.
+**Both** sources now egress through a **Surfshark WireGuard tunnel in a netns**
+(`egress/`), rotating over self-refreshing pools of good exit IPs. Dedicated client
+key at `/etc/wireguard/surfshark_wg.conf`; pools and cache live outside the repo
+(`/var/lib/vfoot-egress/`, `/var/cache/sofascore`).
+
+- **SofaScore** (match data): the Linode IP is Cloudflare-blocked. Pool:
+  `sofa_pool.json`. Units: `vfoot-tick`, `vfoot-calendar`.
+- **Transfermarkt** (listone): *used to* be reachable straight from the Linode.
+  Since **13/08/2026** it sits behind CloudFront + AWS WAF, which challenges the
+  datacenter IP with a `202` and an empty body — a 2xx, so it arrives looking like
+  a competition with no teams rather than like a block. Pool: `tm_pool.json`.
+  Unit: `vfoot-tm-poll.{service,timer}`.
+
+**One pool per site, and it is not tidiness.** Sweeping 26 exits against both sites
+through the same tunnel (14/08/2026): 3 of 8 IPs SofaScore 403s serve TM perfectly,
+and 2 IPs SofaScore accepts cannot even open a connection to TM. A shared pool
+throws away capacity in one direction and hands the TM scrape a wall in the other.
+
+`vfoot-egress-refill.{service,timer}` tops **both** pools up (two `ExecStart` lines).
+
+**One netns, so one lock.** `NS = "sofa"` is a single OS object and `netns_up()`
+opens by destroying it, so any two egress users collide over the *namespace* even
+when they want different IPs and write different files. Everything goes through
+`egress_lock()` on `/run/vfoot-egress.lock`: the tick asks with `wait=0` (a skipped
+minute is cheaper than a queue), batch jobs wait. The TM scrape takes it **per
+page**, not per run — at 90s a page a full scrape spans half an hour, and holding
+the namespace throughout would starve the tick for the whole window.
 
 The **DB-aware wiring IS built** (`realdata/services/live_ingest.py` + `egress_client.py`,
 wired into `tick` and `sync_calendar --egress`, tested in `tests_live_pipeline`). The

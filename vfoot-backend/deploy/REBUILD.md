@@ -330,19 +330,32 @@ Resta mezzo backup — scrive sullo stesso disco (vedi `systemd/README.md`).
 
 ### 1. L'egress, che è il collo di bottiglia di tre job
 
+Due pool, uno per sito: le reputazioni sono indipendenti (misurato il 14/08/2026 —
+3 IP su 8 respinti da SofaScore servono TM benissimo, e 2 accettati da SofaScore su
+TM non aprono nemmeno la connessione).
+
 ```sh
 cd /srv/vfoot-app/vfoot-backend
-python3 egress/sofascore_egress.py status          # cosa resta del pool di luglio
-python3 egress/sofascore_egress.py refill          # ne cerca di nuovi, tiene i promossi
-python3 egress/sofascore_egress.py status          # quanti ne sono passati
+python3 egress/sofascore_egress.py status --for all             # cosa resta dei due pool
+python3 egress/sofascore_egress.py refill --for sofascore --target 6
+python3 egress/sofascore_egress.py refill --for transfermarkt --target 2
+python3 egress/sofascore_egress.py status --for all             # quanti ne sono passati
 ```
 
-Poi la prova che conta, che non è "il tunnel sale" ma "SofaScore ci risponde":
+Poi la prova che conta, che non è "il tunnel sale" ma "il sito ci risponde":
 
 ```sh
 python3 egress/sofascore_egress.py fetch --kind final --match-ids <un_id_partita>
 ls /var/cache/sofascore | head        # devono comparire dei file
+
+python3 egress/sofascore_egress.py tm-squads --season 2026 \
+        --cache-dir /tmp/tmcheck --delay 6      # ~3 min a questa cadenza
+ls /tmp/tmcheck | wc -l                          # 21 = clubs.json + 20 rose
 ```
+
+Da qui in poi TM **non si raggiunge più dall'IP del server**: se `tm-squads` dice
+zero club, guardare l'intestazione `x-amzn-waf-action` prima di sospettare il
+codice.
 
 L'id partita va su `--match-ids`, non posizionale. E i file di prova conviene
 cancellarli dopo: `/var/cache/sofascore` è quello che legge il canarino sulla

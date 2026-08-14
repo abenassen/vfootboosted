@@ -32,8 +32,11 @@ import httpx
 from bs4 import BeautifulSoup
 
 BASE = "https://www.transfermarkt.com"
-# A real browser UA is REQUIRED — Transfermarkt 403s the default httpx UA, but it
-# has no JS/TLS challenge beyond that, so this is all it takes.
+# A real browser UA is REQUIRED — Transfermarkt 403s the default httpx UA. It used
+# to be enough: until 13/08/2026 the origin was bare nginx with no challenge at all.
+# It is now behind CloudFront + AWS WAF, which challenges by IP reputation (the
+# Linode datacenter IP is on the list, our ~42 requests a day never were the
+# trigger), so the UA is necessary and no longer sufficient — see TransfermarktBlocked.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -52,10 +55,43 @@ RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 # Attesa fra un tentativo e l'altro, moltiplicata per il numero del tentativo.
 RETRY_BACKOFF = 3.0
 
+
+class TransfermarktBlocked(RuntimeError):
+    """The WAF answered instead of the site — a different animal from a bad page.
+
+    IT LOOKS LIKE SUCCESS, which is why it needs a name. The AWS WAF challenge is
+    ``202 Accepted`` with an empty body: a 2xx, so ``raise_for_status`` stays
+    quiet, the empty HTML parses into zero clubs, and the caller reads "the
+    competition has no teams". On 13/08/2026 that is exactly how the poll failed —
+    the only reason it did not close five hundred players' stints as departures
+    was the separate ``scraped == 0`` guard downstream.
+
+    Raised, never retried: the retry loop is for what time repairs, and a
+    reputation verdict on our exit IP is not that. The orchestrator rotates to
+    another exit instead.
+    """
+
+
 # Transfermarkt's .com squad table renders DOB as DD/MM/YYYY, e.g. "12/04/1995 (31)".
 _DOB_RE = re.compile(r"(\d{2}/\d{2}/\d{4})")
 _SPIELER_RE = re.compile(r"/profil/spieler/(\d+)")
 _VEREIN_RE = re.compile(r"/verein/(\d+)")
+
+
+def _raise_if_challenged(r: httpx.Response) -> None:
+    """Turn a WAF verdict into an exception before anyone can mistake it for HTML.
+
+    ``x-amzn-waf-action`` is the header AWS WAF explicitly exposes to the client
+    (it is listed in ``access-control-expose-headers`` on the very same response),
+    so this reads the site's own statement rather than guessing from the body. The
+    403 arm covers the older, plainer refusal.
+    """
+    if r.headers.get("x-amzn-waf-action"):
+        raise TransfermarktBlocked(
+            f"WAF {r.headers['x-amzn-waf-action']} su {r.request.url} "
+            f"(HTTP {r.status_code}, {len(r.content)}b)")
+    if r.status_code == 403:
+        raise TransfermarktBlocked(f"HTTP 403 su {r.request.url}")
 
 
 def _parse_dob(text: str) -> str | None:
@@ -113,6 +149,7 @@ class TM:
             try:
                 r = self._client.get(url)
                 self._last = time.monotonic()
+                _raise_if_challenged(r)
                 r.raise_for_status()
                 return r.text
             except httpx.HTTPStatusError as exc:

@@ -70,8 +70,18 @@ MIN_FIXTURES_PER_ROUND = 5   # Serie A ships 10; half of that is already a sympt
 DROP_RATIO = 0.6          # a counter at <60% of its own median is a collapse
 DROP_MIN_HISTORY = 4      # ...but only once there is a median worth the name
 
-EGRESS_POOL = Path("/var/lib/vfoot-egress/sofa_pool.json")
-POOL_LOW = 2              # good exit IPs below which SofaScore is about to bite
+# One pool per site, because the two reputations are independent (see the egress
+# module's header for the measurement). Watching only SofaScore's would let the
+# Transfermarkt pool empty in total silence until a poll fails.
+#   path -> (how many good IPs before it is a problem, what goes wrong without them)
+EGRESS_POOLS = {
+    "sofascore": (Path("/var/lib/vfoot-egress/sofa_pool.json"), 2,
+                  "SofaScore sta per tornare a bloccarci"),
+    # TM needs far fewer: twenty-odd pages twice a day, and tm-squads refills on
+    # demand when it finds the pool empty. One good exit is genuinely enough.
+    "transfermarkt": (Path("/var/lib/vfoot-egress/tm_pool.json"), 1,
+                      "il polling del listone resta senza uscita"),
+}
 BLIND_STREAK = 5          # consecutive ticks owed work that imported nothing
 SETTLE_AFTER = timedelta(hours=4)   # from kickoff, by when a match should be ready
 
@@ -272,24 +282,25 @@ def _check_calendar_yield(health: Health, now) -> None:
 
 
 def _check_egress_pool(health: Health, now) -> None:
-    if not EGRESS_POOL.exists():
-        return          # not this machine's job; the silent-timer check covers it
-    try:
-        data = json.loads(EGRESS_POOL.read_text())
-    except (OSError, ValueError):
-        health.add("warn", "egress:pool-unreadable",
-                   f"il file del pool egress ({EGRESS_POOL}) non si legge.")
-        return
-    good = [s for s in data.get("servers", []) if s.get("last_ok")]
-    if len(good) < POOL_LOW:
-        health.add("alarm", "egress:pool-low",
-                   f"solo {len(good)} IP di uscita buoni nel pool (soglia "
-                   f"{POOL_LOW}): SofaScore sta per tornare a bloccarci. "
-                   f"Rimedio: systemctl start vfoot-egress-refill.service",
-                   good=len(good))
-    else:
-        health.add("info", "egress:pool",
-                   f"pool egress: {len(good)} IP buoni.")
+    for site, (path, low, consequence) in EGRESS_POOLS.items():
+        if not path.exists():
+            continue    # not this machine's job; the silent-timer check covers it
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            health.add("warn", f"egress:pool-unreadable:{site}",
+                       f"il file del pool egress {site} ({path}) non si legge.")
+            continue
+        good = [s for s in data.get("servers", []) if s.get("last_ok")]
+        if len(good) < low:
+            health.add("alarm", f"egress:pool-low:{site}",
+                       f"solo {len(good)} IP di uscita buoni nel pool {site} "
+                       f"(soglia {low}): {consequence}. "
+                       f"Rimedio: systemctl start vfoot-egress-refill.service",
+                       good=len(good), site=site)
+        else:
+            health.add("info", f"egress:pool:{site}",
+                       f"pool egress {site}: {len(good)} IP buoni.", good=len(good))
 
 
 def _check_stuck_matches(health: Health, now) -> None:

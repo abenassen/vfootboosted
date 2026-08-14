@@ -5,7 +5,13 @@ Description=Polling Transfermarkt due volte al giorno (mercato)
 # soprattutto a mercato aperto (agosto/gennaio). Lo scrape e' leggero (~21
 # richieste), quindi si lascia attivo tutto l'anno. Il jitter evita di colpire
 # TM allo stesso secondo esatto; Persistent recupera un run saltato (server giu').
-OnCalendar=*-*-* 06,18:00:00
+#
+# FUORI DALLA FINESTRA LIVE, e da qui non si sposta. Da quando TM passa
+# dall'egress, il giro tiene il netns a intermittenza per una mezz'ora buona (una
+# pagina ogni 90s), e il tick ha bisogno dello stesso namespace ogni minuto. Le
+# 18:00 UTC erano le 20:00 italiane, cioe' in mezzo alle partite. Gli orari sono
+# UTC: 04:00 e 13:00 qui sono le 06:00 e le 15:00 in Italia d'estate.
+OnCalendar=*-*-* 04,13:00:00
 RandomizedDelaySec=20m
 Persistent=true
 [Install]

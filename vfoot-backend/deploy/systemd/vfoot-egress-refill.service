@@ -1,9 +1,14 @@
 [Unit]
-Description=Vfoot egress: refill the pool of good Surfshark exit IPs for SofaScore
+Description=Vfoot egress: refill the pools of good Surfshark exit IPs (SofaScore + Transfermarkt)
 [Service]
 Type=oneshot
 # root: brings WireGuard tunnels up in a netns (host route untouched). Writes only
-# the pool file + cache, never the DB. See vfoot-backend/egress/.
+# the pool files + cache, never the DB. See vfoot-backend/egress/.
 User=root
 WorkingDirectory=/srv/vfoot-app/vfoot-backend/egress
-ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python sofascore_egress.py refill --target 6 --max-probes 20 --delay 3
+# Due pool, due selezioni: un IP che SofaScore accetta non e' detto che
+# Transfermarkt lo lasci passare (e viceversa, misurato il 14/08/2026). Girano in
+# fila nello stesso oneshot perche' prendono lo stesso lock a turno, una sonda
+# alla volta: il tick continua a infilarsi fra una sonda e l'altra.
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python sofascore_egress.py refill --for sofascore --target 6 --max-probes 20 --delay 3
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python sofascore_egress.py refill --for transfermarkt --target 2 --max-probes 12 --delay 3

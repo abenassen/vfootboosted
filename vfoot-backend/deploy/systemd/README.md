@@ -23,8 +23,8 @@ questi file ne sono la copia versionata. L'ambiente (DB, SMTP, VAPID) arriva da
 |---|---|---|---|
 | `vfoot-tick` | ogni minuto | `tick` | i risultati reali non entrano mai: niente live, niente `data_ready`, quindi nessuna giornata concludibile |
 | `vfoot-calendar` | ogni ora, ma decide da sé | `sync_calendar --egress --if-due --auto-rounds` | orari e rinvii restano quelli vecchi: le formazioni si bloccano all'ora sbagliata |
-| `vfoot-tm-poll` | 06 e 18 | `poll_transfermarkt` | il listone invecchia: i trasferimenti non compaiono |
-| `vfoot-egress-refill` | 03/09/15/21 | `sofascore_egress.py refill` | il pool di IP si esaurisce e SofaScore torna a bloccarci (**root**) |
+| `vfoot-tm-poll` | 04 e 13 UTC | `poll_transfermarkt` | il listone invecchia: i trasferimenti non compaiono |
+| `vfoot-egress-refill` | 03/09/15/21 | `sofascore_egress.py refill` ×2 | i pool di IP si esauriscono e SofaScore/TM tornano a bloccarci (**root**) |
 | `vfoot-market` | ogni 90 s | `market_tick` | il mercato resta corretto ma **muto**: nessuno viene avvisato di una chiusura o di un sorpasso |
 | `vfoot-nudge` | 10:00 | `nudge_conclusions` | l'admin distratto non viene mai richiamato: classifica ferma finché non se ne accorge da solo |
 | `vfoot-backup` | 03:15 | `/usr/local/sbin/vfoot-backup` | **nessuna copia dei dati** fra un deploy e l'altro (**root**) |

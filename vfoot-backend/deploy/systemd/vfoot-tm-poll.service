@@ -4,4 +4,9 @@ Description=Vfoot polling rose Transfermarkt (aggiorna listone + ruoli congelati
 Type=oneshot
 User=vfoot
 WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+# Il giro dura ora una mezz'ora abbondante: lo scrape passa dall'egress e mette
+# ~90s fra una pagina e l'altra per non bruciare l'uscita Surfshark condivisa.
+# Type=oneshot non ha un tetto di default, ma val la pena scriverlo: un giro che
+# sfora di gran lunga questo e' appeso, non lento.
+TimeoutStartSec=90min
 ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py poll_transfermarkt

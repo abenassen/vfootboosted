@@ -55,6 +55,25 @@ def warm_matches(event_ids: Iterable[int], kind: str) -> bool:
                        "--cache-dir", str(settings.VFOOT_SOFASCORE_CACHE)])
 
 
+def scrape_tm_squads(cache_dir, competition: str, season: int, *,
+                     delay: float, attempts: int, timeout: float) -> bool:
+    """Scrape Transfermarkt squads into `cache_dir`, through the egress.
+
+    Transfermarkt used to be reachable straight from the server and this call did
+    not exist. Since 13/08/2026 it sits behind AWS WAF, which challenges the
+    datacenter IP with a 202 and an empty body, so the TM scrape now takes the
+    same road SofaScore always has: root, netns, a pooled Surfshark exit — and its
+    OWN pool, because an exit SofaScore likes is not one Transfermarkt does.
+
+    The timeout has to cover the whole run and the run is deliberately slow (one
+    page per `delay`, twenty-odd pages), so the caller sizes it from those two.
+    """
+    return run_egress(["tm-squads", "--competition", competition,
+                       "--season", str(season), "--cache-dir", str(cache_dir),
+                       "--delay", str(delay), "--attempts", str(attempts)],
+                      timeout=timeout)
+
+
 def warm_schedule(year: str, rounds: Iterable[int] | None = None) -> bool:
     """Warm the cache for a season's fixture list (e.g. year='26/27').
 

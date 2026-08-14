@@ -41,7 +41,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from realdata.management.commands.import_transfermarkt_squads import PROVIDER_SOFASCORE
 from realdata.models import CompetitionSeason, TeamSeason
-from realdata.services import job_log, roster_integrity
+from realdata.services import egress_client, job_log, roster_integrity
 from realdata.services.scrape_transfermarkt_squads import TM
 
 
@@ -60,7 +60,15 @@ class Command(BaseCommand):
                                  "latest sofascore Serie A).")
         parser.add_argument("--dry-run", action="store_true",
                             help="Scrape for real but import in report-only mode.")
-        parser.add_argument("--delay", type=float, default=2.0)
+        parser.add_argument("--no-egress", action="store_true",
+                            help="Scrape in-process instead of through the egress. "
+                                 "For a dev machine on a residential line: from the "
+                                 "server TM's WAF challenges the datacenter IP and "
+                                 "this reads zero clubs.")
+        parser.add_argument("--delay", type=float, default=None,
+                            help="Seconds between pages. Default: 90 through the "
+                                 "egress (the shared VPN exit is the thing worth "
+                                 "protecting), 2 in-process.")
         parser.add_argument("--jitter", type=float, default=1.5)
         parser.add_argument("--attempts", type=int, default=3,
                             help="Tentativi per pagina sui guasti passeggeri. Un "
@@ -180,7 +188,66 @@ class Command(BaseCommand):
     def _scrape(self, out: Path, competition: str, season: int,
                 opts) -> tuple[int, int, int]:
         """Fresh scrape into `out`. Returns (clubs_scraped, clubs_failed, players)."""
-        tm = TM(out, min_delay=opts["delay"], jitter=opts["jitter"],
+        if opts["no_egress"]:
+            return self._scrape_in_process(out, competition, season, opts)
+        return self._scrape_via_egress(out, competition, season, opts)
+
+    def _scrape_via_egress(self, out: Path, competition: str, season: int,
+                           opts) -> tuple[int, int, int]:
+        """Hand the scrape to the root egress, then count what landed on disk.
+
+        The counting moved to THIS side on purpose. The egress prints a summary,
+        but a return code and a printed line are a thinner promise than the files
+        themselves — and the files are what the import will actually read. So the
+        numbers that reach JobRun are measured from the cache dir, not parsed back
+        out of another process's stdout.
+        """
+        delay = opts["delay"] if opts["delay"] is not None else 90.0
+        expected = TeamSeason.objects.filter(
+            competition_season=self._resolve_season(
+                opts["competition_season"])).count() or 20
+        # One page per `delay`, plus a handshake and the fetch itself, plus room
+        # for a rotation or two. Generous: the unit is oneshot and off the live path.
+        timeout = 300.0 + (expected + 2) * (delay + 40.0)
+        self.stdout.write(f"scrape via egress (una pagina ogni ~{delay:.0f}s, "
+                          f"tetto {timeout / 60:.0f} min)")
+        ok = egress_client.scrape_tm_squads(
+            out, competition, season, delay=delay,
+            attempts=opts["attempts"], timeout=timeout)
+        if not ok:
+            self.stdout.write(self.style.WARNING(
+                "l'egress ha restituito un errore; conto comunque cio' che ha "
+                "lasciato in cache."))
+        return self._count_cache(out)
+
+    def _count_cache(self, out: Path) -> tuple[int, int, int]:
+        """(scraped, failed, players) read off the cache dir the egress wrote.
+
+        ``failed`` needs ``clubs.json`` to mean anything: without the list of what
+        SHOULD be there, a club that never answered is indistinguishable from a
+        club that does not exist, and the poll would call a half scrape complete.
+        """
+        scraped = players = 0
+        for f in sorted(out.glob("club_*.json")):
+            try:
+                roster = json.loads(f.read_text()).get("players") or []
+            except (OSError, ValueError):
+                continue
+            scraped += 1
+            players += len(roster)
+        try:
+            listed = len(json.loads((out / "clubs.json").read_text()))
+        except (OSError, ValueError):
+            listed = 0
+        self.stdout.write(f"{listed} club elencati, {scraped} letti, "
+                          f"{players} giocatori.")
+        return scraped, max(0, listed - scraped), players
+
+    def _scrape_in_process(self, out: Path, competition: str, season: int,
+                           opts) -> tuple[int, int, int]:
+        """The old path, kept for a machine that can reach TM directly."""
+        delay = opts["delay"] if opts["delay"] is not None else 2.0
+        tm = TM(out, min_delay=delay, jitter=opts["jitter"],
                 logger=self.stdout.write, attempts=opts["attempts"])
         scraped = failed = players = 0
         try:
