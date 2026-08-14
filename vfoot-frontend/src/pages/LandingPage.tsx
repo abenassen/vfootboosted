@@ -148,6 +148,24 @@ export default function LandingPage() {
                   text="La sfida tattica per zone: copri il campo giusto e vinci i duelli casa/trasferta."
                 />
               </div>
+
+              {/* «Voti calcolati dai dati reali» è la frase su cui si regge tutta
+                  la pagina, ed è anche l'unica che qui il visitatore deve
+                  prendere per buona. Questo è il modo di controllarla senza
+                  iscriversi: la spiegazione serve a chi non ha ancora deciso. */}
+              <Link
+                to="/come-nasce-il-voto"
+                className="block rounded-xl border border-accent/40 bg-accent/5 p-3 hover:bg-accent/10"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-black text-accent-strong">Come nasce il voto →</div>
+                  <Badge tone="slate">2 minuti</Badge>
+                </div>
+                <div className="mt-1 text-xs text-ink-soft">
+                  Nessuno lo assegna a mano: lo calcoliamo dai dati della partita. Qui c'è come, dove
+                  ci allontaniamo dalle pagelle e quanto siamo d'accordo con loro — senza iscriverti.
+                </div>
+              </Link>
             </div>
           </Card>
 

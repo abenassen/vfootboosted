@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Badge, Card, SectionTitle } from '../components/ui';
+import { BENCHMARK_URL, VOTO, useBenchmarkAvailable } from '../content/votoPuro';
 
 /** COME NASCE IL VOTO PURO — la pagina di consultazione.
  *
@@ -11,14 +12,14 @@ import { Badge, Card, SectionTitle } from '../components/ui';
  *  errore del sito. Questa pagina è la risposta: dice come si arriva al numero,
  *  dove ci si allontana dal fantacalcio tradizionale e perché.
  *
- *  Contenuto FERMO, non chiamate al backend. Le cifre vengono dal benchmark della
- *  stagione 2025-26 (`manage.py build_voto_benchmark`, cartella voto_benchmark/,
- *  più `voto_puro_discrepancies` per il confronto col rating SofaScore): sono
- *  affermazioni sul modello, non dati vivi, e un endpoint che le ricalcolasse a
- *  ogni apertura costerebbe secondi di server per ripetere gli stessi numeri.
- *  QUANDO SI RITARA IL MODELLO SI RIFANNO I DUE COMANDI E SI AGGIORNA QUI: la riga
- *  in fondo dice a quando risale la verifica, ed è l'unico modo che ha il lettore
- *  di sapere se sta leggendo il modello di oggi.
+ *  Contenuto FERMO, non chiamate al backend: sono affermazioni sul modello, non
+ *  dati vivi, e un endpoint che le ricalcolasse a ogni apertura costerebbe
+ *  secondi di server per ripetere gli stessi numeri. Le misure di sintesi — le
+ *  quote d'accordo, lo scarto, la correlazione col rating indipendente — stanno
+ *  in `content/votoPuro.ts` insieme all'istruzione per rifarle, perché le mostra
+ *  anche la pagina pubblica (VotoPubblicoPage) e due copie a mano divergono al
+ *  primo ritaraggio. Gli esempi e le cifre di dettaglio restano qui: appartengono
+ *  a questa pagina e a nessun'altra.
  *
  *  Una scelta di sostanza sugli ESEMPI. Divergenza non vuol dire «diversi dalla
  *  Redazione»: fantacalcio.it pubblica due voti (Redazione e Statistico) e quando
@@ -48,38 +49,6 @@ const SECTIONS = [
   { id: 'accordo', label: 'Quanto siamo d’accordo' },
   { id: 'limiti', label: 'Quello che non sappiamo' },
 ];
-
-/** IL BENCHMARK, SE C'È ANCORA.
- *
- *  Le 38 pagine con tutti i nostri voti a fianco di quelli di fantacalcio.it
- *  (`manage.py build_voto_benchmark`) le serve nginx accanto all'app, non l'app:
- *  sono materiale di verifica, e un giorno se ne andranno. Perciò il link non si
- *  scrive, si CHIEDE — se la cartella non c'è più, nginx risponde 404 e il link
- *  sparisce da sé invece di restare a puntare al nulla.
- *
- *  In sviluppo Vite risponde 200 a qualunque indirizzo (rimanda tutto all'app),
- *  quindi lì il link si vede sempre e porta al 404 dell'applicazione. È il falso
- *  positivo che ci si può permettere: in sviluppo quella cartella non c'è mai.
- */
-const BENCHMARK_URL = '/benchmark-voto/';
-
-function useBenchmarkAvailable(): boolean {
-  const [there, setThere] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    void fetch(BENCHMARK_URL, { method: 'HEAD', cache: 'no-store' })
-      .then((r) => {
-        if (alive) setThere(r.ok);
-      })
-      .catch(() => {
-        if (alive) setThere(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return there;
-}
 
 export default function VotoPuroPage() {
   const { hash } = useLocation();
@@ -345,7 +314,7 @@ export default function VotoPuroPage() {
           perche="Le pagelle danno lo stesso voto a entrambi: la difesa ha preso quattro gol. Noi li separiamo di un voto e mezzo, perché il rigore lo concede Bianchetti ed è dalla sua parte che passa la maggior parte del pericolo. Il rating di SofaScore, che non entra nel nostro calcolo, mette i due nello stesso ordine (5,4 e 6,7)."
         />
         <p className="text-xs text-ink-faint">
-          Nella stagione 2025-26 è andata così in 17 partite: due difensori della stessa difesa, lo
+          Nella stagione {VOTO.stagione} è andata così in 17 partite: due difensori della stessa difesa, lo
           stesso voto dalla Redazione, e da noi più di un voto e mezzo di differenza. Non è un caso
           limite: è il motivo per cui un difensore, da noi, può prendere 6,5 in una serata da tre
           gol presi.
@@ -486,7 +455,7 @@ export default function VotoPuroPage() {
         <Callout>
           Come sono scelti gli esempi. Quando le due colonne di fantacalcio.it non concordano tra
           loro, stare in mezzo non è divergere: qui sotto ci sono quindi solo partite vere del
-          2025-26 in cui il nostro voto sta <b>fuori da entrambe</b> di almeno un punto. C'è anche
+          {VOTO.stagione} in cui il nostro voto sta <b>fuori da entrambe</b> di almeno un punto. C'è anche
           il rating di SofaScore, come terzo giudice indipendente: non entra nel nostro calcolo, e
           serve a vedere chi ha ragione quando divergiamo.
         </Callout>
@@ -589,19 +558,21 @@ export default function VotoPuroPage() {
       <Section id="accordo" title="Quanto siamo d'accordo con le pagelle, in numeri">
         <p>
           Non abbiamo lavorato alla cieca: a ogni messa a punto abbiamo rigiocato l'ultima stagione
-          conclusa e confrontato tutti i nostri voti con i due di fantacalcio.it. Sulla 2025-26 sono{' '}
-          <b className="text-ink">10.583 pagelle</b> confrontate una per una.
+          conclusa e confrontato tutti i nostri voti con i due di fantacalcio.it. Sulla{' '}
+          {VOTO.stagione} sono <b className="text-ink">{VOTO.pagelle} pagelle</b> confrontate una per
+          una.
         </p>
         <div className="grid gap-2 sm:grid-cols-3">
-          <Numero valore="89,8%" testo="dei nostri voti è entro mezzo punto dalla pagella" />
-          <Numero valore="99,1%" testo="è entro un punto" />
+          <Numero valore={VOTO.entroMezzo} testo="dei nostri voti è entro mezzo punto dalla pagella" />
+          <Numero valore={VOTO.entroUno} testo="è entro un punto" />
           <Numero
-            valore="596"
-            testo="i casi (5,6%) fuori da entrambe le letture di almeno un punto: 368 verso l'alto, 228 verso il basso"
+            valore={VOTO.divergenze.casi}
+            testo={`i casi (${VOTO.divergenze.quota}) fuori da entrambe le letture di almeno un punto: ${VOTO.divergenze.alto} verso l'alto, ${VOTO.divergenze.basso} verso il basso`}
           />
         </div>
         <p>
-          Lo scarto medio è 0,34 punti: siamo <i>vicini</i> alle pagelle, non allineati. Per ruolo:
+          Lo scarto medio è {VOTO.scartoMedio} punti: siamo <i>vicini</i> alle pagelle, non
+          allineati. Per ruolo:
           0,33 portieri e centrocampisti, 0,34 i difensori, 0,35 gli attaccanti. E la parte in cui
           non siamo allineati è quella che ci interessa, perché è dove i dati dicono qualcosa che
           l'impressione non aveva registrato.
@@ -624,17 +595,14 @@ export default function VotoPuroPage() {
               </tr>
             </thead>
             <tbody className="text-ink-soft">
-              {[
-                ['Portieri', '0,78', '0,62', '0,66'],
-                ['Difensori', '0,76', '0,58', '0,64'],
-                ['Centrocampisti', '0,69', '0,50', '0,57'],
-                ['Attaccanti', '0,62', '0,48', '0,51'],
-              ].map(([r, a, b, c]) => (
-                <tr key={r} className="border-t border-line">
-                  <td className="py-1.5 pr-3">{r}</td>
-                  <td className="py-1.5 pr-3 text-right font-mono font-semibold text-good">{a}</td>
-                  <td className="py-1.5 pr-3 text-right font-mono">{b}</td>
-                  <td className="py-1.5 text-right font-mono">{c}</td>
+              {VOTO.correlazione.map((r) => (
+                <tr key={r.ruolo} className="border-t border-line">
+                  <td className="py-1.5 pr-3">{r.ruolo}</td>
+                  <td className="py-1.5 pr-3 text-right font-mono font-semibold text-good">
+                    {r.noi}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right font-mono">{r.redazione}</td>
+                  <td className="py-1.5 text-right font-mono">{r.statistico}</td>
                 </tr>
               ))}
             </tbody>
@@ -662,7 +630,7 @@ export default function VotoPuroPage() {
               i nostri voti a fianco di quelli di fantacalcio.it
             </a>
             , con l'elenco di dove ci allontaniamo da entrambe le loro letture. È l'intera stagione
-            2025-26, senza scegliere gli esempi.
+            {VOTO.stagione}, senza scegliere gli esempi.
           </Callout>
         ) : null}
       </Section>
@@ -685,8 +653,9 @@ export default function VotoPuroPage() {
             resta una stima.
           </li>
           <li>
-            <b className="text-ink">Siamo prudenti.</b> Il 45% dei nostri voti è esattamente 6,
-            contro il 36% delle pagelle: quando i dati non dicono niente di netto, noi non
+            <b className="text-ink">Siamo prudenti.</b> Il {VOTO.quotaSei.noi} dei nostri voti è
+            esattamente 6, contro il {VOTO.quotaSei.pagelle} delle pagelle: quando i dati non
+            dicono niente di netto, noi non
             inventiamo un giudizio. È una scelta, ma vuol dire anche qualche 6 dove un occhio umano
             avrebbe visto una sfumatura.
           </li>
@@ -712,9 +681,9 @@ export default function VotoPuroPage() {
           le leggiamo, e pesano sulla prossima messa a punto del modello.
         </Callout>
         <p className="text-xs text-ink-faint">
-          Tutte le cifre e i confronti di questa pagina sono stati misurati sulla stagione 2025-26,
-          l'ultima conclusa, sulle 10.583 presenze che abbiamo potuto appaiare con entrambe le
-          colonne di fantacalcio.it.
+          Tutte le cifre e i confronti di questa pagina sono stati misurati sulla stagione{' '}
+          {VOTO.stagione}, l'ultima conclusa, sulle {VOTO.pagelle} presenze che abbiamo potuto
+          appaiare con entrambe le colonne di fantacalcio.it.
         </p>
       </Section>
 

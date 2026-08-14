@@ -33,6 +33,7 @@ import ProfilePage from './pages/ProfilePage';
 import ManagerProfilePage from './pages/ManagerProfilePage';
 import MaintenancePage from './pages/MaintenancePage';
 import VotoPuroPage from './pages/VotoPuroPage';
+import VotoPubblicoPage from './pages/VotoPubblicoPage';
 import CountdownPage, { isLaunched, rememberBypass, wantsBypass } from './pages/CountdownPage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
@@ -85,6 +86,11 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<PublicEntry />} />
+      {/* FUORI da RequireAuth, come l'invito: il voto calcolato è il motivo per
+          cui uno dovrebbe iscriversi, e chiedere l'iscrizione per spiegarlo è
+          l'ordine sbagliato. È la versione breve; quella lunga resta dentro, a
+          `/voto-puro`, dove la si apre da una pagella con una domanda precisa. */}
+      <Route path="/come-nasce-il-voto" element={<VotoPubblicoPage />} />
       <Route path="/verifica-email" element={<VerifyEmailPage />} />
       <Route path="/recupera-password" element={<ForgotPasswordPage />} />
       <Route path="/nuova-password" element={<NewPasswordPage />} />
