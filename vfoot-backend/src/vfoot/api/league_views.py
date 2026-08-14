@@ -3,7 +3,9 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as dtime
+from datetime import timezone as dt_timezone
 from random import Random
 
 from django.contrib.auth.models import User
@@ -114,6 +116,7 @@ from vfoot.services.classic_pagella import (
     elapsed_minutes, get_reference, match_in_progress, pagella_for_match,
 )
 from vfoot.services.classic_rating import current_role_map
+from vfoot.services import league_decisions
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
     open_role_decisions, resolve as resolve_decision, unavailable_players,
@@ -425,6 +428,15 @@ _COMPETITION_END_DETAIL = {
 # league's own life underneath it. Only the genuine coups.
 NEWS_MIN_VALUE_EUR = 10_000_000
 
+# Cambiare maglia ha una soglia SUA, e piu' bassa. Non e' incoerenza: chi si
+# trasferisce e' gia' nel listone, cioe' ha gia' passato il vaglio di rilevanza,
+# e soprattutto puo' essere in una rosa di questa lega — il fantallenatore che ce
+# l'ha vuole saperlo a prescindere da quanto vale. La popolazione poi e' di un
+# altro ordine: gli arrivi piovono per settimane ad agosto, i trasferimenti fra
+# due squadre di Serie A sono una manciata per finestra, quindi la stessa soglia
+# alta li cancellerebbe quasi tutti senza guadagnare silenzio.
+NEWS_MIN_TRANSFER_VALUE_EUR = league_decisions.RELEVANCE_MIN_VALUE_EUR
+
 
 def _eur_short(value: int) -> str:
     """12_500_000 -> "12,5 M€". Italian decimal comma, and no decimals when round."""
@@ -490,6 +502,8 @@ def _real_signings(league, limit: int) -> list[dict]:
     # queue, because "worth deciding a role for" and "worth telling the league
     # about" are different questions and the second is much rarer.
     values = latest_market_values([r.player_id for r in fresh])
+    clubs = _current_clubs(league.reference_season_id,
+                           [r.player_id for r in fresh])
     out = []
     for r in fresh:
         # `or 0`, not a default: latest_market_values KEYS a player whose latest
@@ -498,11 +512,110 @@ def _real_signings(league, limit: int) -> list[dict]:
         if value < NEWS_MIN_VALUE_EUR:
             continue
         name = r.player.short_name or r.player.full_name
+        # La squadra sta nel dettaglio e non nel testo: il testo e' troncato a una
+        # riga dal frontend, e "entra nel listone" e' la notizia — di quale
+        # squadra e' la circostanza. Chi non ha un tesseramento aperto (raro:
+        # letto dal listone ma non da nessuna rosa) perde solo la circostanza.
+        club = clubs.get(r.player_id)
         out.append({
             "kind": "mercato_reale",
             "at": r.created_at.isoformat(),
             "text": f"{name} entra nel listone",
-            "detail": _eur_short(value),
+            "detail": " · ".join(x for x in (_eur_short(value), club) if x),
+            "team_id": None,
+            "crest": None,
+        })
+    return out
+
+
+def _current_clubs(competition_season_id, player_ids) -> dict[int, str]:
+    """player_id -> nome della squadra REALE in cui è tesserato ora."""
+    if not competition_season_id or not player_ids:
+        return {}
+    rows = (PlayerTeamStint.objects
+            .filter(player_id__in=list(player_ids),
+                    team_season__competition_season_id=competition_season_id,
+                    end_date__isnull=True)
+            .select_related("team_season__team"))
+    return {s.player_id: (s.team_season.team.short_name
+                          or s.team_season.team.name) for s in rows}
+
+
+def _real_transfers(league, limit: int) -> list[dict]:
+    """Chi ha CAMBIATO MAGLIA dentro la Serie A da quando il listone è stato tratto.
+
+    Il buco che colma: un giocatore che passa dal Parma alla Fiorentina è già nel
+    listone, quindi non nasce nessun ``LeaguePlayerRole`` e ``_real_signings`` non
+    lo vede — a nessuna cifra. Il 14/08/2026 tre si sono mossi e la home non ha
+    detto niente, mentre annunciava riempi-rose da 0,1 M€ che entravano.
+
+    Si legge dai tesseramenti, che per gli ARRIVI erano la trappola (il primo
+    import di stagione ne apre 660 nello stesso giorno, e diventerebbero 660 falsi
+    trasferimenti). Qui la trappola non scatta, e non per la data ma per la FORMA:
+    un trasferimento è un tesseramento aperto in una squadra mentre ne esiste uno
+    CHIUSO in un'altra della stessa stagione. Al caricamento iniziale nessuno ha
+    un tesseramento chiuso precedente, quindi la condizione li esclude tutti da
+    sé, senza doversi fidare di una data.
+
+    Solo giocatori del listone di QUESTA lega: un movimento fra due squadre che
+    qui nessuno può schierare non è notizia di questa lega.
+    """
+    season_id = league.reference_season_id
+    if not season_id:
+        return []
+    listone = set(LeaguePlayerRole.objects.filter(league=league)
+                  .values_list("player_id", flat=True))
+    if not listone:
+        return []
+
+    aperti = list(PlayerTeamStint.objects
+                  .filter(player_id__in=listone,
+                          team_season__competition_season_id=season_id,
+                          end_date__isnull=True,
+                          start_date__isnull=False)
+                  .select_related("player", "team_season__team")
+                  .order_by("-start_date")[:limit * 4])
+    if not aperti:
+        return []
+
+    chiusi: dict[int, list] = {}
+    for s in (PlayerTeamStint.objects
+              .filter(player_id__in=[a.player_id for a in aperti],
+                      team_season__competition_season_id=season_id,
+                      end_date__isnull=False)
+              .select_related("team_season__team")):
+        chiusi.setdefault(s.player_id, []).append(s)
+
+    values = latest_market_values([a.player_id for a in aperti])
+    out = []
+    for a in aperti:
+        prima = [s for s in chiusi.get(a.player_id, [])
+                 if s.team_season_id != a.team_season_id]
+        if not prima:
+            continue
+        value = values.get(a.player_id) or 0
+        if value < NEWS_MIN_TRANSFER_VALUE_EUR:
+            continue
+        # Il più recente dei chiusi: chi ne ha due alle spalle viene dall'ultimo.
+        prima.sort(key=lambda s: s.end_date or date.min, reverse=True)
+        vecchia = prima[0].team_season.team
+        nuova = a.team_season.team
+        name = a.player.short_name or a.player.full_name
+        out.append({
+            "kind": "trasferimento_reale",
+            # Data e non data-ora: il tesseramento porta un giorno, non un istante.
+            # Mezzanotte lo colloca nel giorno giusto senza fingere una precisione
+            # che il dato non ha.
+            "at": datetime.combine(a.start_date, dtime.min,
+                                   tzinfo=dt_timezone.utc).isoformat(),
+            "text": f"{name} → {nuova.short_name or nuova.name}",
+            # "ex Fiorentina", non "dal Fiorentina". L'articolo italiano si accorda
+            # col nome del club — la Fiorentina, l'Udinese, il Bologna — e una
+            # tabella di generi per venti squadre e' una cosa che si rompe al primo
+            # neopromosso. "ex" non prende articolo e vale per tutte.
+            "detail": " · ".join(x for x in (
+                f"ex {vecchia.short_name or vecchia.name}",
+                _eur_short(value) if value else "") if x),
             "team_id": None,
             "crest": None,
         })
@@ -551,6 +664,7 @@ class LeagueActivityView(APIView):
             })
 
         items.extend(_real_signings(league, limit))
+        items.extend(_real_transfers(league, limit))
 
         for d in (LeagueDecision.objects
                   .filter(league=league, status=LeagueDecision.STATUS_RESOLVED)

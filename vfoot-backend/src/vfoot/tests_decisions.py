@@ -942,3 +942,138 @@ class RealSigningFeedTests(DecisionQueueTests):
         for i in range(3):
             self._in_listone(f"Colpo {i}", 25_000_000, created_at=when)
         self.assertEqual(len(self._feed()), 3)
+
+    def test_a_signing_says_which_club_he_joined(self):
+        """"Entra nel listone / 15 M€" non diceva DOVE. La squadra sta nel
+        dettaglio, non nel testo: il testo il frontend lo tronca a una riga."""
+        self._opening_squad()
+        p = self._in_listone("Colpo", 25_000_000,
+                             created_at=timezone.now() - timedelta(days=2))
+        PlayerTeamStint.objects.create(player=p, team_season=self.ts,
+                                       start_date=date(2026, 8, 14))
+        feed = self._feed()
+        self.assertEqual(len(feed), 1)
+        self.assertEqual(feed[0]["detail"], "25 M€ · Torino")
+
+    def test_without_a_stint_the_signing_keeps_its_line(self):
+        """Letto dal listone ma da nessuna rosa: si perde la circostanza, non la
+        notizia."""
+        self._opening_squad()
+        self._in_listone("Colpo", 25_000_000,
+                         created_at=timezone.now() - timedelta(days=2))
+        self.assertEqual(self._feed()[0]["detail"], "25 M€")
+
+
+class RealTransferFeedTests(DecisionQueueTests):
+    """Chi CAMBIA MAGLIA dentro la Serie A, che prima non compariva a nessuna cifra.
+
+    Il 14/08/2026 Pellegrino, Kristensen e Piccoli si sono mossi fra due squadre di
+    Serie A e la home non ha detto niente: erano gia' nel listone, quindi nessun
+    ``LeaguePlayerRole`` nuovo e ``_real_signings`` non poteva vederli. Intanto la
+    stessa home annunciava riempi-rose da 0,1 M€ che entravano.
+
+    Qui i tesseramenti si possono leggere — trappola dei 660 compresa — perche' la
+    prova non e' una data ma una FORMA: aperto qui, chiuso altrove.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+        self.altra = TeamSeason.objects.create(
+            competition_season=self.cs, team=Team.objects.create(name="Parma"))
+
+    def _listone(self, name, value_eur=25_000_000):
+        p = Player.objects.create(full_name=name, short_name=name)
+        if value_eur is not None:
+            PlayerMarketValue.objects.create(player=p, provider="transfermarkt",
+                                             value_eur=value_eur,
+                                             as_of=date(2026, 7, 1))
+        LeaguePlayerRole.objects.create(league=self.league, player=p, role="ATT",
+                                        source=LeaguePlayerRole.SOURCE_SEED)
+        return p
+
+    def _transfer(self, p, *, da, a, quando=date(2026, 8, 14)):
+        PlayerTeamStint.objects.create(player=p, team_season=da,
+                                       start_date=date(2026, 7, 1),
+                                       end_date=quando)
+        PlayerTeamStint.objects.create(player=p, team_season=a, start_date=quando)
+
+    def _feed(self):
+        return [i for i in self.client.get(
+            f"/api/v1/leagues/{self.league.id}/activity?limit=50").json()
+            if i["kind"] == "trasferimento_reale"]
+
+    def test_un_trasferimento_e_notizia_e_dice_le_due_squadre(self):
+        self._transfer(self._listone("Piccoli"), da=self.altra, a=self.ts)
+        feed = self._feed()
+        self.assertEqual(len(feed), 1)
+        self.assertEqual(feed[0]["text"], "Piccoli → Torino")
+        self.assertEqual(feed[0]["detail"], "ex Parma · 25 M€")
+
+    def test_la_provenienza_non_prende_l_articolo(self):
+        """Visto sui dati veri: "dal Fiorentina", "dal Udinese". L'articolo si
+        accorda col nome del club e una tabella di generi si rompe al primo
+        neopromosso; "ex" vale per tutte."""
+        viola = TeamSeason.objects.create(
+            competition_season=self.cs, team=Team.objects.create(name="Fiorentina"))
+        self._transfer(self._listone("Piccoli"), da=viola, a=self.ts)
+        detail = self._feed()[0]["detail"]
+        self.assertTrue(detail.startswith("ex Fiorentina"), detail)
+        self.assertNotIn("dal ", detail)
+
+    def test_il_caricamento_iniziale_non_e_una_valanga_di_trasferimenti(self):
+        """La trappola che ha gia' morso una volta dall'altra parte: il primo
+        import di stagione apre 660 tesseramenti nello stesso giorno. Nessuno di
+        loro ha un tesseramento CHIUSO alle spalle, ed e' quello a salvarci —
+        non la data, di cui non ci si potrebbe fidare."""
+        for i in range(30):
+            PlayerTeamStint.objects.create(
+                player=self._listone(f"Titolare {i}"), team_season=self.ts,
+                start_date=date(2026, 8, 14))
+        self.assertEqual(self._feed(), [])
+
+    def test_chi_resta_dove_era_non_e_notizia(self):
+        """Un tesseramento riaperto nella STESSA squadra (rinnovo, rientro da
+        prestito) non e' un cambio di maglia."""
+        p = self._listone("Fedele")
+        self._transfer(p, da=self.ts, a=self.ts)
+        self.assertEqual(self._feed(), [])
+
+    def test_la_soglia_e_piu_bassa_di_quella_degli_ingressi(self):
+        """Chi si trasferisce e' gia' nel listone e puo' essere in una rosa di
+        questa lega: 7 M€ non basta per annunciare un ingresso, basta per dire a
+        chi ce l'ha che ha cambiato squadra."""
+        self._transfer(self._listone("Fra le due soglie", 7_000_000),
+                       da=self.altra, a=self.ts)
+        self.assertEqual(len(self._feed()), 1)
+
+    def test_sotto_la_soglia_di_rilevanza_resta_fuori(self):
+        self._transfer(self._listone("Riserva", 800_000),
+                       da=self.altra, a=self.ts)
+        self.assertEqual(self._feed(), [])
+
+    def test_chi_non_e_nel_listone_di_questa_lega_non_e_notizia_di_questa_lega(self):
+        p = Player.objects.create(full_name="Estraneo", short_name="Estraneo")
+        PlayerMarketValue.objects.create(player=p, provider="transfermarkt",
+                                         value_eur=50_000_000,
+                                         as_of=date(2026, 7, 1))
+        self._transfer(p, da=self.altra, a=self.ts)
+        self.assertEqual(self._feed(), [])
+
+    def test_senza_quotazione_non_fa_saltare_il_feed(self):
+        """latest_market_values CHIAVA un giocatore senza quotazione con None: e'
+        il difetto che aveva gia' rotto la pagina dall'altra parte."""
+        self._transfer(self._listone("Senza quotazione", None),
+                       da=self.altra, a=self.ts)
+        self.assertEqual(self._feed(), [])
+
+    def test_con_due_squadre_alle_spalle_viene_dall_ultima(self):
+        p = self._listone("Girovago")
+        terza = TeamSeason.objects.create(
+            competition_season=self.cs, team=Team.objects.create(name="Genoa"))
+        PlayerTeamStint.objects.create(player=p, team_season=terza,
+                                       start_date=date(2026, 7, 1),
+                                       end_date=date(2026, 7, 20))
+        self._transfer(p, da=self.altra, a=self.ts)
+        self.assertEqual(self._feed()[0]["detail"], "ex Parma · 25 M€")

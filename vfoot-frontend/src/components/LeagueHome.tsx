@@ -53,6 +53,10 @@ const ACTIVITY_ICON: Record<LeagueActivityItem['kind'], string> = {
   // Not the same glyph as `acquisto`: one is a manager spending credits, the
   // other is a real club signing a player, and the feed shows them side by side.
   mercato_reale: '✍️',
+  // A third glyph, not a reuse of either: this is a player ALREADY in the listone
+  // changing club — possibly one sitting in your own roster — which is a different
+  // fact from a new name arriving, and the two sit next to each other in the feed.
+  trasferimento_reale: '🧳',
   decisione: '🗳️',
   giornata: '🏁',
   competizione: '🎌',

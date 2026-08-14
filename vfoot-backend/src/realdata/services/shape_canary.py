@@ -76,6 +76,15 @@ KNOWN_EXTRA: frozenset[str] = frozenset({
     "blockedScoringAttempt", "defensiveValueNormalized", "dribbleValueNormalized",
     "expectedGoals", "goalAssist", "goalkeeperValueNormalized", "goals",
     "hitWoodwork", "keeperSaveValue", "passValueNormalized", "penaltyFaced",
+    # penaltyMiss: comparsa per la prima volta il 14/08/2026, e non e' un rinomino
+    # (quel giro non aveva perso nessuna colonna). E' rara perche' lo e' il fatto:
+    # esiste solo nelle partite in cui qualcuno sbaglia un rigore, quindi il
+    # campione da sei partite la incontra di tanto in tanto e senza questa riga
+    # tornerebbe a dirsi "mai vista" ogni volta. Non la mappiamo di proposito: i
+    # rigori sbagliati li leggiamo dalla mappa dei tiri (MatchShot situation=
+    # 'penalty', is_goal=False — v. classic_pagella), che distingue anche il parato
+    # dal fuori bersaglio e vale piu' di un contatore.
+    "penaltyMiss",
     "progressiveBallCarriesCount", "rating", "ratingVersions", "shotOffTarget",
     "shotValueNormalized", "statisticsType", "totalBallCarriesDistance",
     "totalCross", "totalKeeperSweeper", "totalLongBalls", "totalOffside",

@@ -478,9 +478,19 @@ export async function updateMyTeam(
 }
 
 export interface LeagueActivityItem {
-  /** `acquisto` is the FANTASY market (a manager buying); `mercato_reale` is a
-   *  real Serie A transfer into the reference championship. */
-  kind: 'acquisto' | 'mercato_reale' | 'decisione' | 'giornata' | 'competizione' | 'premio';
+  /** `acquisto` is the FANTASY market (a manager buying); the other two are the
+   *  REAL one, and they are separate because they answer different questions:
+   *  `mercato_reale` is a player ENTERING the listone (someone you could not own
+   *  before), `trasferimento_reale` is one already in it CHANGING club (someone
+   *  you may own right now). */
+  kind:
+    | 'acquisto'
+    | 'mercato_reale'
+    | 'trasferimento_reale'
+    | 'decisione'
+    | 'giornata'
+    | 'competizione'
+    | 'premio';
   at: string | null;
   text: string;
   detail: string | null;
