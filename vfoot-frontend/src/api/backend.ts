@@ -1396,6 +1396,16 @@ export async function acceptAllLeagueDecisions(
   return parseJsonOrThrow(res);
 }
 
+/** L'admin apre una domanda su un ruolo che per noi era deciso. `created` è falso
+ *  se la domanda c'era già: premere due volte non accumula code. */
+export async function openRoleDecision(
+  leagueId: number,
+  playerId: number,
+): Promise<LeagueDecision & { created: boolean }> {
+  const res = await authedPost(`/leagues/${leagueId}/decisions/open`, { player_id: playerId });
+  return parseJsonOrThrow(res);
+}
+
 // --- Web Push ---------------------------------------------------------------
 
 /** Public: the VAPID key identifies this server to the push service, it does not

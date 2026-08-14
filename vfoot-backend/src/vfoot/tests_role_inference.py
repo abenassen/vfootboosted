@@ -1,6 +1,7 @@
 """Tests for the data-driven classic role inference."""
 from __future__ import annotations
 
+import numpy as np
 from django.contrib.auth.models import User
 from django.test import TestCase
 
@@ -10,8 +11,8 @@ from realdata.models import (
 )
 from vfoot.models import CurrentPlayerRole, FantasyLeague, LeaguePlayerRole
 from vfoot.services.role_inference import (
-    TM_AMBIGUOUS, TM_DEFAULT, TM_DETERMINISTIC, infer_roles, player_profiles,
-    refresh_current_roles, tm_positions,
+    ROLE_MARGIN_REVIEW, TM_AMBIGUOUS, TM_DEFAULT, TM_DETERMINISTIC, infer_roles,
+    player_profiles, refresh_current_roles, role_margins, tm_positions,
 )
 
 
@@ -140,6 +141,55 @@ class RoleInferenceTests(TestCase):
     def test_ambiguous_set_and_deterministic_set_do_not_overlap(self):
         self.assertFalse(TM_AMBIGUOUS & set(TM_DETERMINISTIC))
         self.assertEqual(set(TM_DEFAULT), TM_AMBIGUOUS)
+
+
+class RoleMarginTests(TestCase):
+    """The margin is read against the role we ASSIGN, not between the top two.
+
+    Four players, two categories: 0 and 3 are 'centrocampista offensivo' (CEN),
+    1 and 2 are 'ala offensiva' (ATT). The matrix is the co-association the runs
+    would have produced.
+    """
+
+    BY_LABEL = {0: "centrocampista offensivo", 1: "ala offensiva"}
+    LABELS = np.array([0, 1, 1, 0])
+
+    def _margins(self, M):
+        return role_margins(np.array(M), self.LABELS, self.BY_LABEL)
+
+    def test_a_contradicted_assignment_is_negative_not_confident(self):
+        """Guðmundsson's case: assigned CEN while the runs put him with the
+        attackers three times out of four. Read as top-minus-runner-up that was a
+        margin of +0.56 — "settled" — about a role we are not giving him."""
+        m = self._margins([[0.30, 0.70, 0.70, 0.10],    # CEN by label, ATT by mass
+                           [0.70, 1.00, 0.80, 0.10],
+                           [0.70, 0.80, 1.00, 0.10],
+                           [0.10, 0.10, 0.10, 1.00]])
+        self.assertAlmostEqual(m[0], -0.556, places=3)
+        self.assertLess(m[0], ROLE_MARGIN_REVIEW)       # hence: ask a human
+
+    def test_an_uncontradicted_assignment_is_the_old_number(self):
+        """The whole population save a handful is in this case, and it must not
+        move: when the assigned role already wins the mass, its lead over the
+        runner-up IS top-minus-second."""
+        M = [[0.30, 0.70, 0.70, 0.10],
+             [0.70, 1.00, 0.80, 0.10],
+             [0.70, 0.80, 1.00, 0.10],
+             [0.10, 0.10, 0.10, 1.00]]
+        m = self._margins(M)
+        # riga 1: massa CEN = 0.70 + 0.10 (colonne 0 e 3), ATT = 1.00 + 0.80
+        share = np.array([0.80 / 2.60, 1.80 / 2.60])    # CEN, ATT
+        self.assertAlmostEqual(m[1], abs(share[1] - share[0]), places=3)
+        self.assertGreater(m[1], 0)
+
+    def test_a_player_alone_with_his_own_role_is_fully_determined(self):
+        """Player 3 co-associates with nobody but himself: all the mass is on his
+        own role, no rival at all."""
+        m = self._margins([[1.0, 0.0, 0.0, 0.0],
+                           [0.0, 1.0, 0.8, 0.0],
+                           [0.0, 0.8, 1.0, 0.0],
+                           [0.0, 0.0, 0.0, 1.0]])
+        self.assertAlmostEqual(m[3], 1.0, places=6)
 
 
 class CurrentRoleRefreshTests(RoleInferenceTests):

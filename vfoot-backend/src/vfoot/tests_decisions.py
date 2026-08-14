@@ -513,15 +513,15 @@ class QueueCriterionTests(TestCase):
         self.assertTrue(r.needs_decision)
 
     def test_a_player_far_from_every_other_role_does_not(self):
-        """Zaniolo: ambiguous position, but 0.79 from the nearest category of
-        another role and a margin of 0.67. Nothing to arbitrate — where we differ
+        """Pulisic: ambiguous position, but 0.55 from the nearest category of
+        another role and a margin of 0.87. Nothing to arbitrate — where we differ
         from the listone on him it is a convention, not a doubt, and conventions
         are not the queue's business."""
         from vfoot.services.role_inference import PlayerRoleResult
-        r = PlayerRoleResult(player_id=1, category="ala offensiva", confidence=0.76,
+        r = PlayerRoleResult(player_id=1, category="ala offensiva", confidence=0.52,
                              role_data="ATT", role_mitigated="ATT", method="category",
-                             tm_position="second striker",
-                             role_margin=0.67, role_boundary=0.79)
+                             tm_position="left winger",
+                             role_margin=0.87, role_boundary=0.55)
         self.assertFalse(r.needs_decision)
 
     def test_a_certain_tm_position_ends_the_question_however_close_the_border(self):
@@ -534,6 +534,174 @@ class QueueCriterionTests(TestCase):
                              method="category", tm_position="centre-forward",
                              role_margin=0.9, role_boundary=0.99)
         self.assertFalse(r.needs_decision)
+
+
+class ManualDecisionTests(DecisionQueueTests):
+    """The admin raising a question we did not ask.
+
+    Our criterion is deliberately narrow — it fires only where the measurement
+    itself is in doubt — so a league that disagrees with a role we consider
+    settled had no way in at all. This is that way in, and it reuses the queue
+    rather than adding a second mechanism.
+    """
+
+    def _open(self, player):
+        from vfoot.services.league_decisions import open_manual_decision
+        return open_manual_decision(self.league, player, opened_by=self.admin)
+
+    def test_a_settled_player_can_be_put_back_on_the_table(self):
+        p = self._player("Misurato", method=CurrentPlayerRole.METHOD_CATEGORY,
+                         role="ATT")
+        self.assertEqual(open_role_decisions(self.league), 0)   # we had no doubt
+        d, created = self._open(p)
+        self.assertTrue(created)
+        self.assertTrue(d.blocks_market)
+        self.assertEqual(d.proposed, "ATT")                     # our answer, on the record
+        self.assertIn("Rimesso in discussione", d.rationale)
+        # ...and he is in limbo like any other open question.
+        self.assertEqual(undecided_player_ids(self.league), {p.id})
+
+    def test_the_frozen_role_is_what_gets_proposed(self):
+        """Not the current inference: inside a league the frozen role is the
+        authority, and a question that proposed something else would be asking
+        about a listone nobody is playing with."""
+        p = self._player("Congelato", method=CurrentPlayerRole.METHOD_CATEGORY,
+                         role="ATT")
+        LeaguePlayerRole.objects.create(league=self.league, player=p, role="CEN",
+                                        source=LeaguePlayerRole.SOURCE_SEED)
+        d, _ = self._open(p)
+        self.assertEqual(d.proposed, "CEN")
+
+    def test_asking_twice_does_not_pile_up_questions(self):
+        p = self._player("Misurato", method=CurrentPlayerRole.METHOD_CATEGORY)
+        first, created = self._open(p)
+        self.assertTrue(created)
+        again, created = self._open(p)
+        self.assertFalse(created)
+        self.assertEqual(first.id, again.id)
+
+    def test_a_player_already_on_a_roster_is_refused(self):
+        """The invariant the whole freezing design rests on: a role that has been
+        paid for does not go back to being a question."""
+        from vfoot.models import FantasyRosterSlot, FantasyTeam
+        p = self._player("Comprato", method=CurrentPlayerRole.METHOD_CATEGORY)
+        membership = LeagueMembership.objects.get(league=self.league, user=self.member)
+        team = FantasyTeam.objects.create(league=self.league, manager=membership,
+                                          name="RosaFC")
+        FantasyRosterSlot.objects.create(team=team, player=p, purchase_price=50)
+        with self.assertRaises(ValueError) as ctx:
+            self._open(p)
+        self.assertIn("RosaFC", str(ctx.exception))
+        self.assertEqual(undecided_player_ids(self.league), set())
+
+    def _team(self, name="RosaFC"):
+        from vfoot.models import FantasyTeam
+        membership = LeagueMembership.objects.get(league=self.league, user=self.member)
+        return FantasyTeam.objects.create(league=self.league, manager=membership,
+                                          name=name)
+
+    def test_a_running_auction_refuses_it(self):
+        """Mid-room the roles are arithmetic everyone is bidding against; the pool
+        must not move under people who cannot see why."""
+        from vfoot.models import AuctionSession
+        p = self._player("Misurato", method=CurrentPlayerRole.METHOD_CATEGORY)
+        session = AuctionSession.objects.create(
+            league=self.league, created_by=self.admin,
+            status=AuctionSession.STATUS_ACTIVE)
+        with self.assertRaises(ValueError) as ctx:
+            self._open(p)
+        self.assertIn("asta in corso", str(ctx.exception))
+        # ...and once it is over the question can be asked.
+        session.status = AuctionSession.STATUS_CLOSED
+        session.save(update_fields=["status"])
+        _, created = self._open(p)
+        self.assertTrue(created)
+
+    def test_a_live_offer_on_him_refuses_it(self):
+        """A bid already placed on THIS player: limbo would void it under the
+        bidder. An open session with no bid on him is no obstacle — the market
+        gate is per player, which is the point of it."""
+        from vfoot.models import MarketOffer, MarketSession
+        target = self._player("Obiettivo", method=CurrentPlayerRole.METHOD_CATEGORY)
+        other = self._player("Estraneo", method=CurrentPlayerRole.METHOD_CATEGORY)
+        team = self._team()
+        released = self._player("Ceduto", method=CurrentPlayerRole.METHOD_CATEGORY)
+        session = MarketSession.objects.create(
+            league=self.league, created_by=self.admin,
+            status=MarketSession.STATUS_OPEN)
+        offer = MarketOffer.objects.create(
+            session=session, team=team, target_player=target,
+            release_player=released, amount=10, role="CEN",
+            deadline_at=timezone.now() + timedelta(hours=24),
+            status=MarketOffer.STATUS_LEADING)
+
+        with self.assertRaises(ValueError) as ctx:
+            self._open(target)
+        self.assertIn("offerta in corso", str(ctx.exception))
+        # The pledged player is protected too, not only the target.
+        with self.assertRaises(ValueError):
+            self._open(released)
+        # ...while an open session alone stops nobody else.
+        _, created = self._open(other)
+        self.assertTrue(created)
+        # ...and once the offer is off the board, the target is askable again.
+        offer.status = MarketOffer.STATUS_REJECTED
+        offer.save(update_fields=["status"])
+        _, created = self._open(target)
+        self.assertTrue(created)
+
+    def test_the_rest_of_the_listone_stays_frozen_throughout(self):
+        """The load-bearing property: raising one question must not disturb a
+        single other frozen role, and must not disturb THIS one either until it
+        is answered. A re-poll in the middle changes nothing."""
+        from vfoot.services.listone import snapshot_league_listone
+        asked = self._player("Discusso", method=CurrentPlayerRole.METHOD_CATEGORY,
+                             role="ATT")
+        quiet = self._player("Tranquillo", method=CurrentPlayerRole.METHOD_CATEGORY,
+                             role="CEN")
+        snapshot_league_listone(self.league)
+        before = dict(LeaguePlayerRole.objects.filter(league=self.league)
+                      .values_list("player_id", "role"))
+        self.assertEqual(before, {asked.id: "ATT", quiet.id: "CEN"})
+
+        self._open(asked)
+        snapshot_league_listone(self.league)      # the Transfermarkt poll runs
+        after = dict(LeaguePlayerRole.objects.filter(league=self.league)
+                     .values_list("player_id", "role"))
+        # The frozen listone is untouched, the asked player included: his row
+        # stays what it was until somebody answers.
+        self.assertEqual(after, before)
+        self.assertEqual(undecided_player_ids(self.league), {asked.id})
+
+    def test_a_player_outside_the_listone_is_refused(self):
+        stranger = Player.objects.create(full_name="Estraneo", short_name="Estraneo")
+        with self.assertRaises(ValueError) as ctx:
+            self._open(stranger)
+        self.assertIn("non è nel listone", str(ctx.exception))
+
+    def test_resolving_it_writes_the_league_role_as_an_admin_choice(self):
+        p = self._player("Misurato", method=CurrentPlayerRole.METHOD_CATEGORY,
+                         role="ATT")
+        d, _ = self._open(p)
+        resolve(d, "CEN", user=self.admin)
+        row = LeaguePlayerRole.objects.get(league=self.league, player=p)
+        self.assertEqual(row.role, "CEN")
+        self.assertEqual(row.source, LeaguePlayerRole.SOURCE_ADMIN)
+        self.assertEqual(undecided_player_ids(self.league), set())
+
+    def test_only_the_admin_can_raise_one(self):
+        p = self._player("Misurato", method=CurrentPlayerRole.METHOD_CATEGORY)
+        api = APIClient()
+        api.force_authenticate(user=self.member)
+        r = api.post(f"/api/v1/leagues/{self.league.id}/decisions/open",
+                     {"player_id": p.id}, format="json")
+        self.assertEqual(r.status_code, 403)
+        api.force_authenticate(user=self.admin)
+        r = api.post(f"/api/v1/leagues/{self.league.id}/decisions/open",
+                     {"player_id": p.id}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(r.json()["created"])
+        self.assertTrue(r.json()["blocks_market"])
 
 
 class LimboSurvivesRepollTests(DecisionQueueTests):

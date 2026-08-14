@@ -12,12 +12,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from realdata.models import Player
 from vfoot.models import (
     FantasyLeague, LeagueDecision, LeagueDecisionVote, LeagueMembership,
 )
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
-    resolve, set_consultation,
+    open_manual_decision, resolve, set_consultation,
 )
 
 
@@ -136,6 +137,32 @@ class LeagueDecisionConsultView(APIView):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(_serialize(d, request.user))
+
+
+class LeagueDecisionOpenView(APIView):
+    """Admin raises a question about a role the system considered settled.
+
+    The counterpart of the queue: that one asks where WE are in doubt, this one
+    where the league is. Same object, same consultation, same market gate — the
+    only difference is who noticed.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        if not _is_admin(league, request.user.id):
+            return Response({"detail": "Solo l'amministratore puo' aprire una domanda."},
+                            status=status.HTTP_403_FORBIDDEN)
+        player = get_object_or_404(Player, id=request.data.get("player_id"))
+        try:
+            decision, created = open_manual_decision(league, player,
+                                                     opened_by=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({**_serialize(decision, request.user), "created": created},
+                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 class LeagueDecisionAcceptAllView(APIView):

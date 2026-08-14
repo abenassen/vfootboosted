@@ -111,10 +111,18 @@ ROLE_MARGIN_REVIEW = 0.25
 
 # ...and the same question asked again in the space where the first one goes blind.
 # See ``role_boundaries``: above this ratio a player sits nearly as close to a
-# category of ANOTHER role as to his own. 0.80 was read off the 44 measured players
-# whose TM position is ambiguous — the only ones this can ever fire on — and it is
-# where the queue stops growing faster than what it catches.
-BOUNDARY_REVIEW = 0.80
+# category of ANOTHER role as to his own. Read off the measured players whose TM
+# position is ambiguous — the only ones this can ever fire on.
+#
+# Lowered from 0.80 to 0.70 (2026-08-14) on the 2026-27 listone: at 0.80 the door
+# was grazing its own cases, with Cambiaghi inside by 0.002 and Zalewski outside by
+# 0.036 — a distinction the measurement cannot carry. 0.70 takes in Zalewski, Boga
+# and Addai, three questions for eleven, and stops before 0.65 where the yield
+# turns: down there the wide attackers arrive by the handful (Politano, Orsolini,
+# Zaniolo, Conceição, Pulisic), all measured firmly and all disagreeing with the
+# fantacalcio listone for the same reason — the winger convention, which is not a
+# doubt of ours and cannot be fixed by asking the admin one player at a time.
+BOUNDARY_REVIEW = 0.70
 
 
 @dataclass
@@ -126,8 +134,9 @@ class PlayerRoleResult:
     role_mitigated: str      # TM wins where it is unambiguous
     method: str              # category | tm | default | unknown
     tm_position: str = ""
-    # How far the winning fantasy role is ahead of the runner-up, 0..1 (see
-    # ``role_margin``). 1.0 when the role did not come from the clustering at all.
+    # How far the fantasy role we assign leads the best rival, -1..1 (see
+    # ``role_margin``); negative when the runs contradict the role we assign.
+    # 1.0 when the role did not come from the clustering at all.
     role_margin: float = 1.0
     # How close he sits to a category of ANOTHER role, as a ratio of the distance
     # to his own (see ``role_boundaries``). 0.0 when the role did not come from
@@ -175,9 +184,11 @@ class PlayerRoleResult:
 
           Measured against the 2026-27 listone on the 44 players this can fire on:
           the margin alone asks 7 questions and lands on 1 real disagreement; the
-          boundary asks 11 and lands on 6. They are kept in OR — the margin still
-          catches players the boundary does not (Ngonge, Cancellieri, Cambiaghi),
-          and nobody the queue holds today is dropped by adding a criterion.
+          boundary at 0.80 asks 11 and lands on 6. They are kept in OR — the margin
+          still catches players the boundary does not (Ngonge, Cancellieri,
+          Cambiaghi), and nobody the queue holds today is dropped by adding a
+          criterion. At the 0.70 the boundary now runs at, it asks 15 of the 43
+          measured and ambiguous, 14 of them above the relevance gate.
 
         Note that ``confidence`` answers neither question: it measures how firmly
         he sits in his CATEGORY, and oscillating between two styles that condense
@@ -456,10 +467,21 @@ def role_margins(M: np.ndarray, labels: np.ndarray, by_label: dict) -> np.ndarra
     across the CEN/ATT line, which is the only kind of doubt worth a human's time.
 
     So the co-association mass is re-aggregated BY ROLE (how often, over the runs,
-    he lands with players who end up in that role) and the margin is the gap
-    between the top role and the runner-up. Berardi comes out at CEN 56% / ATT 35%
+    he lands with players who end up in that role) and the margin is how far the
+    role we ASSIGN him leads the best rival. Berardi comes out at CEN 56% / ATT 35%
     — margin 0.21, below ROLE_MARGIN_REVIEW — where his category confidence of
     0.336 said nothing about which role was at stake.
+
+    Measured against the assigned role, and not simply top-minus-runner-up, because
+    the two are not the same statement. The gap between the top two says the mass
+    has made up its mind; it does not say it made it up in OUR favour, and on 10 of
+    the 370 measured players of 2025-26 it had not: Guðmundsson is assigned CEN
+    while the runs put him with the attackers 71% of the time against 25%, which
+    read as a margin of 0.462 — "settled, do not ask" — about a role we are not
+    giving him. Signed this way he comes out at -0.46 and any contradiction is
+    negative, hence under every threshold. For everyone whose assignment already
+    wins the mass — 360 of 370 — the value is unchanged by construction, since the
+    leader's lead over the runner-up IS top-minus-second.
     """
     role_of = {lab: _role_for_category(name) for lab, name in by_label.items()}
     roles = sorted(set(role_of.values()))
@@ -469,8 +491,12 @@ def role_margins(M: np.ndarray, labels: np.ndarray, by_label: dict) -> np.ndarra
                      for r in roles], axis=1)
     total = mass.sum(1, keepdims=True)
     share = np.divide(mass, total, out=np.zeros_like(mass), where=total > 0)
-    top2 = np.sort(share, axis=1)[:, -2:]
-    return top2[:, 1] - top2[:, 0]
+    own = np.array([roles.index(role_of[int(lab)]) for lab in labels])
+    rows = np.arange(len(share))
+    mine = share[rows, own]
+    rivals = share.copy()
+    rivals[rows, own] = -np.inf
+    return mine - rivals.max(1)
 
 
 def role_boundaries(Z: np.ndarray, labels: np.ndarray, by_label: dict) -> np.ndarray:

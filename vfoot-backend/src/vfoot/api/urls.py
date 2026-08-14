@@ -106,6 +106,7 @@ from vfoot.api.decision_views import (
     LeagueDecisionAcceptAllView,
     LeagueDecisionConsultView,
     LeagueDecisionListView,
+    LeagueDecisionOpenView,
     LeagueDecisionResolveView,
     LeagueDecisionVoteView,
 )
@@ -125,6 +126,8 @@ urlpatterns = [
          name="league-decisions"),
     path("leagues/<int:league_id>/decisions/accept-all",
          LeagueDecisionAcceptAllView.as_view(), name="league-decisions-accept-all"),
+    path("leagues/<int:league_id>/decisions/open",
+         LeagueDecisionOpenView.as_view(), name="league-decision-open"),
     path("leagues/<int:league_id>/decisions/<int:decision_id>/vote",
          LeagueDecisionVoteView.as_view(), name="league-decision-vote"),
     path("leagues/<int:league_id>/decisions/<int:decision_id>/resolve",

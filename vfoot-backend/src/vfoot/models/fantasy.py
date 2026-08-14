@@ -516,10 +516,12 @@ class CurrentPlayerRole(models.Model):
     category = models.CharField(max_length=40, blank=True, default="")
     # How firmly he belongs to that category (co-association with its core).
     confidence = models.FloatField(default=0.0)
-    # How far his winning FANTASY ROLE is ahead of the runner-up (0..1). This, not
+    # How far the FANTASY ROLE we assign him leads the best rival (-1..1). This, not
     # ``confidence``, is what the admin is asked to review: bouncing between two
     # styles that condense to the same role is harmless, being split across the
-    # CEN/ATT line is not. 1.0 when the role did not come from the clustering.
+    # CEN/ATT line is not. Negative where the runs contradict the role we assign,
+    # which is a doubt like any other and reads as one. 1.0 when the role did not
+    # come from the clustering.
     role_margin = models.FloatField(default=1.0)
     # The same question asked in the feature space: how close he sits to a
     # category of ANOTHER role, as a ratio of the distance to his own. Above

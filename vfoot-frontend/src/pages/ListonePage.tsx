@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getChampionshipPlayers, getLeagueDetail } from '../api';
+import { getChampionshipPlayers, getLeagueDetail, openRoleDecision } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useChampionship } from '../league/ChampionshipContext';
+import { DECISIONS_CHANGED, useDecisionAlerts } from '../league/useDecisionAlerts';
 import ChampionshipPicker from '../components/ChampionshipPicker';
 import { foldedMatch } from '../utils/text';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
@@ -33,6 +34,7 @@ const ROLE_CHIP: Record<string, string> = {
 export default function ListonePage() {
   const { selectedLeagueId } = useLeagueContext();
   const { scope, browsing, loading: scopeLoading } = useChampionship();
+  const { isAdmin } = useDecisionAlerts(selectedLeagueId);
   const [data, setData] = useState<ChampionshipPlayersResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +100,36 @@ export default function ListonePage() {
       setDesc(key !== 'name' && key !== 'team');
     }
   }
+
+  // Il ruolo si può rimettere in discussione solo DENTRO la lega che si
+  // amministra: fuori non c'è un listone congelato su cui aprire una domanda, e
+  // la stessa pagina serve anche a chi sta solo guardando un altro campionato.
+  const canQuestionRoles = isAdmin && !browsing && selectedLeagueId != null;
+
+  const questionRole = useCallback(
+    async (playerId: number) => {
+      if (selectedLeagueId == null) return;
+      await openRoleDecision(selectedLeagueId, playerId);
+      // La riga si aggiorna qui invece di ricaricare tutto il listone: la
+      // risposta dice già com'è finita, e una tabella da 632 righe che sfarfalla
+      // per un pulsante è un prezzo che non serve pagare.
+      setData((d) =>
+        d
+          ? {
+              ...d,
+              players: d.players.map((p) =>
+                p.player_id === playerId ? { ...p, role_undecided: true } : p,
+              ),
+            }
+          : d,
+      );
+      // ...e il badge nella barra laterale, che conta le domande aperte.
+      window.dispatchEvent(
+        new CustomEvent(DECISIONS_CHANGED, { detail: { leagueId: selectedLeagueId } }),
+      );
+    },
+    [selectedLeagueId],
+  );
 
   // `scope` come dipendenza: il contesto lo memoizza, quindi cambia identità solo
   // quando cambia davvero la lega o la stagione che si sta guardando.
@@ -282,6 +314,7 @@ export default function ListonePage() {
                   seasons={{ current: data.current_season, previous: data.value_season }}
                   visibleWidth={visibleWidth}
                   showStatus={!browsing}
+                  onQuestionRole={canQuestionRoles ? questionRole : null}
                 />
               ))}
             </tbody>
@@ -341,6 +374,7 @@ function PlayerRow({
   seasons,
   visibleWidth,
   showStatus,
+  onQuestionRole,
 }: {
   p: ChampionshipPlayer;
   open: boolean;
@@ -348,6 +382,7 @@ function PlayerRow({
   seasons: { current: string; previous: string | null };
   visibleWidth: number | null;
   showStatus: boolean;
+  onQuestionRole: ((playerId: number) => Promise<void>) | null;
 }) {
   return (
     <>
@@ -412,7 +447,15 @@ function PlayerRow({
         </td>
       ) : null}
     </tr>
-    {open ? <ValueDetail p={p} seasons={seasons} visibleWidth={visibleWidth} colSpan={showStatus ? 6 : 5} /> : null}
+    {open ? (
+      <ValueDetail
+        p={p}
+        seasons={seasons}
+        visibleWidth={visibleWidth}
+        colSpan={showStatus ? 6 : 5}
+        onQuestionRole={onQuestionRole}
+      />
+    ) : null}
     </>
   );
 }
@@ -423,13 +466,17 @@ function ValueDetail({
   seasons,
   visibleWidth,
   colSpan,
+  onQuestionRole,
 }: {
   p: ChampionshipPlayer;
   seasons: { current: string; previous: string | null };
   visibleWidth: number | null;
   colSpan: number;
+  onQuestionRole: ((playerId: number) => Promise<void>) | null;
 }) {
   const estimated = p.value_basis === 'stimato';
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
   return (
     <tr className="bg-surface-2">
       {/* Il padding passa alla div interna: la cella resta larga quanto la tabella
@@ -459,8 +506,30 @@ function ValueDetail({
           {p.market_value ? <span>Valore di mercato: <b className="text-ink-soft">{fmtMarket(p.market_value)}</b></span> : null}
           {p.role_undecided ? (
             <Badge tone="amber">Ruolo da decidere</Badge>
+          ) : onQuestionRole && !p.owned ? (
+            /* La coda automatica chiede solo dove il dubbio è NOSTRO, ed è una
+               soglia stretta apposta. Questo è il modo per l'admin di dire che il
+               dubbio è suo: stesso meccanismo, stessa consultazione. Non compare
+               su chi è già in rosa — un ruolo pagato non torna una domanda, e il
+               server rifiuterebbe comunque. */
+            <button
+              type="button"
+              disabled={asking}
+              onClick={() => {
+                setAsking(true);
+                setAskError(null);
+                onQuestionRole(p.player_id)
+                  .catch((e) => setAskError(e instanceof Error ? e.message : String(e)))
+                  .finally(() => setAsking(false));
+              }}
+              className="rounded border border-dashed border-line px-1.5 py-0.5 text-[11px] text-ink-faint hover:border-warn hover:text-warn disabled:opacity-50"
+              title="Apre una domanda sul suo ruolo: finché non è decisa non è acquistabile, e puoi metterla ai voti."
+            >
+              {asking ? 'Apro…' : 'Metti in discussione il ruolo'}
+            </button>
           ) : null}
         </div>
+        {askError ? <div className="mb-2 text-xs text-bad">{askError}</div> : null}
         <div className="font-semibold text-ink-soft">
           {p.estimated_value === null
             ? 'Su questo giocatore non abbiamo dati'

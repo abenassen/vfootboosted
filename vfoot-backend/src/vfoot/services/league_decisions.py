@@ -66,6 +66,15 @@ def decision_rationale(row) -> str:
         # sono accordati su un giocatore che sta sul confine" are different
         # questions, and an admin who reads the wrong one is being told a number
         # that contradicts the threshold it is quoted against.
+        if row.role_margin < 0:
+            # Un margine negativo non e' un margine stretto: i giri mettono il
+            # giocatore in un ruolo DIVERSO da quello che gli assegniamo. Dirlo
+            # "stacca il secondo di appena -46%" sarebbe una frase senza senso, e
+            # soprattutto nasconderebbe l'unica informazione che conta qui.
+            gap = f"{-row.role_margin * 100:.0f}%"
+            return (f"Posizione del provider ambigua e misura in contrasto con il ruolo "
+                    f"proposto{style}: i raggruppamenti lo mettono con un altro ruolo, "
+                    f"e lo fanno con {gap} di scarto.")
         if row.role_margin < ROLE_MARGIN_REVIEW:
             # Saying by how much is the whole point: 34% contro 30% is a different
             # question from 60% contro 15%.
@@ -235,6 +244,109 @@ def open_role_decisions(league, *, opened_by=None, notify: bool = False,
     if made and notify:
         _push_new_decisions(league, len(made))
     return len(made)
+
+
+def manual_rationale(row, frozen_role: str) -> str:
+    """What we think of a player the admin is putting back on the table.
+
+    The point of showing it is that the consultation starts from the facts rather
+    than from an impression: the admin is overruling a judgement, and the league
+    should be able to see what the judgement was.
+    """
+    head = "Rimesso in discussione dall'amministratore. "
+    if row is None:
+        return head + ("Non abbiamo una misura su questo giocatore: il ruolo nel "
+                       "listone viene dalla posizione del provider.")
+    if row.method == CurrentPlayerRole.METHOD_CATEGORY:
+        style = f" ({row.category})" if row.category else ""
+        return head + (
+            f"La nostra misura lo dava per definito{style}: dai raggruppamenti esce "
+            f"{ROLE_LABELS.get(row.role_for('data'), row.role_for('data')).lower()} "
+            f"con {row.role_margin * 100:.0f}% di distacco sul secondo ruolo, e dal "
+            f"gruppo di un altro ruolo dista il {row.role_boundary * 100:.0f}% di "
+            f"quanto dista dal proprio. Nel listone è "
+            f"{ROLE_LABELS.get(frozen_role, frozen_role).lower()}.")
+    return head + METHOD_REASON.get(row.method, "")
+
+
+@transaction.atomic
+def open_manual_decision(league, player, *, opened_by=None) -> tuple:
+    """Put a settled role back on the table because the admin says so.
+    Returns ``(decision, created)``.
+
+    The automatic queue asks only where OUR criterion is in doubt, and that is
+    deliberately narrow — the winger convention alone would put fifty names in
+    front of the admin every August, and none of them would be a doubt of ours.
+    Narrow is not the same as right for every league, though: a league may well
+    want to argue about a player we measure as a textbook wide attacker and the
+    official listone calls a midfielder. So the admin can raise anyone in the
+    listone, through the same machinery — proposal, consultation, and a market
+    that stops for that player until it is settled.
+
+    Refused wherever the answer could move ground somebody is already standing on.
+    Three of those, and the first is the whole design speaking:
+
+    * **he is on a roster.** A squad must never find itself holding someone whose
+      role turned back into a question after it was paid for. Moving a rostered
+      player's role is a rectification, not a question, and it is not this door.
+    * **an auction is running.** There the roles are load-bearing for everyone at
+      once — the slot counts per role are what every bid is arithmetic against —
+      and pulling a player out of the pool mid-room changes the plan of people who
+      cannot see why. It costs nothing to ask before the auction opens or after it
+      closes.
+    * **an offer is live on him.** The offer market is per-player by design, so a
+      session being open is no obstacle; a bid already placed on THIS player is,
+      because limbo would void it under the bidder.
+    """
+    from vfoot.models import (
+        AuctionSession, FantasyRosterSlot, MarketOffer,
+    )
+    from vfoot.services.listone import eligible_player_ids
+
+    name = player.short_name or player.full_name or str(player.id)
+    if league.reference_season_id is None:
+        raise ValueError("Questa lega non ha un listone su cui aprire una domanda.")
+    if player.id not in eligible_player_ids(league.reference_season_id):
+        raise ValueError(f"{name} non è nel listone di questa lega.")
+    owner = (FantasyRosterSlot.objects
+             .filter(team__league=league, player=player, released_at__isnull=True)
+             .select_related("team").first())
+    if owner is not None:
+        raise ValueError(
+            f"{name} è in rosa a {owner.team.name}: un ruolo già pagato non torna "
+            "una domanda aperta. Serve una rettifica, non una consultazione.")
+    if AuctionSession.objects.filter(
+            league=league, status=AuctionSession.STATUS_ACTIVE).exists():
+        raise ValueError(
+            "C'è un'asta in corso: i ruoli tengono in piedi i conti degli slot di "
+            "tutti, e non si spostano mentre si sta battendo. Riprova a asta chiusa.")
+    if (MarketOffer.objects
+            .filter(session__league=league, status__in=MarketOffer.LIVE_STATUSES)
+            .filter(Q(target_player=player) | Q(release_player=player)).exists()):
+        raise ValueError(
+            f"C'è un'offerta in corso su {name}: mettere il ruolo in discussione la "
+            "annullerebbe sotto chi l'ha fatta. Prima si chiude l'offerta.")
+    existing = (LeagueDecision.objects
+                .filter(league=league, kind=LeagueDecision.KIND_PLAYER_ROLE,
+                        player=player, status=LeagueDecision.STATUS_OPEN).first())
+    if existing is not None:
+        return existing, False
+
+    row = CurrentPlayerRole.objects.filter(player=player).first()
+    frozen = (LeaguePlayerRole.objects.filter(league=league, player=player)
+              .values_list("role", flat=True).first())
+    proposed = frozen or (row.role_for(league.role_mode) if row else "") \
+        or player.classic_role_seed
+    position = row.tm_position if row else ""
+    decision = LeagueDecision.objects.create(
+        league=league, kind=LeagueDecision.KIND_PLAYER_ROLE, player=player,
+        title=f"Ruolo di {name}",
+        question=(f"Che ruolo assegnare a {name}"
+                  f"{f' ({position})' if position else ''} nel listone?"),
+        options=ROLE_OPTIONS, proposed=proposed,
+        rationale=manual_rationale(row, frozen or proposed),
+        blocks_market=True, opened_by=opened_by)
+    return decision, True
 
 
 def _push_new_decisions(league, n: int) -> int:
