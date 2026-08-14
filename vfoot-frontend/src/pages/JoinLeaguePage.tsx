@@ -112,7 +112,7 @@ export default function JoinLeaguePage() {
     // Sfondo dal tema e non l'azzurro fisso delle altre pagine pubbliche: chi
     // apre un invito al buio si troverebbe una scheda scura appoggiata su un
     // fondo chiaro, e questa è la prima pagina del sito che vede.
-    <div className="min-h-screen bg-paper px-4 py-10 text-ink md:py-16">
+    <div className="min-h-screen bg-paper px-4 py-10 pt-[calc(2.5rem_+_var(--vf-safe-top))] text-ink md:py-16 md:pt-[calc(4rem_+_var(--vf-safe-top))]">
       <Card className="mx-auto max-w-md p-6 md:p-8">
         <div className="flex items-center gap-3">
           <img src={logo} alt="" className="h-10 w-10 rounded-xl object-cover shadow-card" />

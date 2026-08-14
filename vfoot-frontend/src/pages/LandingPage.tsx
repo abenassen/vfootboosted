@@ -99,7 +99,12 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_20%_20%,#dbeafe_0%,#eff6ff_45%,#f8fafc_100%)] text-ink">
-      <div className="mx-auto max-w-6xl px-4 py-10 md:py-16">
+      {/* I quaranta pixel in cima non bastano su un iPhone installato: la barra
+          di stato ne prende una sessantina e ci si mangia la riga del logo. La
+          riserva si somma al respiro, non lo sostituisce, e fuori da iOS vale
+          zero. Il fondo sta sul riquadro di sopra, quindi la sfumatura arriva
+          comunque fino al bordo. */}
+      <div className="mx-auto max-w-6xl px-4 py-10 pt-[calc(2.5rem_+_var(--vf-safe-top))] md:py-16 md:pt-[calc(4rem_+_var(--vf-safe-top))]">
         {/* `[&>*]:min-w-0`: una cella di griglia non scende sotto la larghezza
             minima del proprio contenuto, e su un telefono da 390 le due schede
             restavano larghe 370 dentro una colonna da 343 — la pagina di

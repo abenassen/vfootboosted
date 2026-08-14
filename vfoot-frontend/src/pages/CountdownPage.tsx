@@ -320,7 +320,9 @@ const CSS = `
   align-items: center;
   justify-content: center;
   gap: 1.1rem;
-  padding: 2.5rem 1.25rem;
+  /* La pagina occupa lo schermo intero anche sotto l'orologio, quando è
+     installata: il respiro in cima e in fondo si somma alla sua riserva. */
+  padding: calc(2.5rem + var(--vf-safe-top)) 1.25rem calc(2.5rem + var(--vf-safe-bottom));
   text-align: center;
   animation: vfc-enter .9s cubic-bezier(.2,.8,.2,1) both;
 }

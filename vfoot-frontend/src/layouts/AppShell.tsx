@@ -462,7 +462,14 @@ export default function AppShell() {
       <UpdateBanner />
       {/* Desktop top bar — cross-league: switcher + user admin + account */}
       <div className="vf-hero hidden border-b border-black/10 md:block">
-        <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+        {/* La riserva sta DENTRO la barra, non sopra: così il verde arriva fino
+            al bordo dello schermo e sotto l'orologio c'è la barra, non una
+            striscia di carta. Riguarda l'iPad installato — il telefono qui non
+            arriva mai, questa barra è nascosta sotto md. */}
+        <div
+          className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between"
+          style={{ paddingTop: 'calc(var(--vf-safe-top) + 0.75rem)' }}
+        >
           {/* Logo + wordmark are the way home, as everywhere else on the web —
               so Home needs no menu entry of its own. No page title beside it:
               the page already titles itself, and the two disagreed (this bar said
@@ -637,7 +644,16 @@ export default function AppShell() {
               che si fa meno di tutte e stava accanto a quelle che si fanno di
               più — e la scheda non c'è: il nome della lega lo scriveva già questa
               riga, e adesso quella riga È il modo di cambiarla. */}
-          <div className="md:hidden mb-3 flex items-center justify-between gap-2">
+          {/* IL MARGINE È L'OROLOGIO. Su iPhone installato la pagina passa
+              SOTTO la barra di stato: senza questa riga la faccia dell'avatar
+              finisce dietro batteria e tacche del segnale, e il tocco non
+              arriva. Margine e non padding perché il fondo di questa striscia
+              lo dà già la pagina, ed è lo stesso; il genitore ha un padding
+              suo, quindi il margine non collassa verso l'alto. */}
+          <div
+            className="md:hidden mb-3 flex items-center justify-between gap-2"
+            style={{ marginTop: 'var(--vf-safe-top)' }}
+          >
             <div className="flex min-w-0 items-center gap-2">
               <Link to="/home" aria-label="Vai alla home" className="shrink-0">
                 <img src={logo} alt="Vfoot logo" className="h-8 w-8 rounded-lg object-cover" />
@@ -727,7 +743,7 @@ export default function AppShell() {
             className="md:hidden"
             aria-hidden
             style={{
-              height: `calc(env(safe-area-inset-bottom, 0px) + ${mobileBarBlock + 16}px)`,
+              height: `calc(var(--vf-safe-bottom) + ${mobileBarBlock + 16}px)`,
             }}
           />
         </main>
@@ -748,7 +764,7 @@ export default function AppShell() {
           />
           <div
             className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-3xl border-t border-line bg-surface shadow-lift"
-            style={{ paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${mobileBarBlock}px)` }}
+            style={{ paddingBottom: `calc(var(--vf-safe-bottom) + ${mobileBarBlock}px)` }}
           >
             <div className="sticky top-0 flex items-center justify-between bg-surface px-4 pt-3">
               <span className="font-cond text-xs font-bold uppercase tracking-wide text-ink-faint">Le tue leghe</span>
@@ -821,7 +837,7 @@ export default function AppShell() {
           />
           <div
             className="absolute inset-x-0 bottom-0 rounded-t-3xl border-t border-line bg-surface shadow-lift"
-            style={{ paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${mobileBarBlock}px)` }}
+            style={{ paddingBottom: `calc(var(--vf-safe-bottom) + ${mobileBarBlock}px)` }}
           >
             <div className="flex items-center justify-between px-4 pt-3">
               <span className="font-cond text-xs font-bold uppercase tracking-wide text-ink-faint">Altro</span>
@@ -917,7 +933,7 @@ export default function AppShell() {
           in alto, invece che in cima alla pagina dove non si collega a niente. */}
       <div
         className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-line bg-surface"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        style={{ paddingBottom: 'var(--vf-safe-bottom)' }}
       >
         {showCompetitionChips ? (
           <div

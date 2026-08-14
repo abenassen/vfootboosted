@@ -83,6 +83,25 @@
   --vf-on-brand: 8 16 12;
 }
 
+/* LA RISERVA IN CIMA (e in fondo).
+ *
+ *  L'app installata su iPhone prende TUTTO lo schermo — `viewport-fit=cover`
+ *  più `apple-mobile-web-app-status-bar-style: black-translucent` — quindi la
+ *  pagina comincia sopra l'orologio e la batteria, non sotto di loro. L'avatar
+ *  del profilo, che sta nell'angolo in alto a destra, finiva esattamente lì:
+ *  mezzo coperto dai simboli di sistema e fuori dalla portata del dito, perché
+ *  quella striscia i tocchi non li passa. Android non ha mai avuto il problema:
+ *  la sua barra di stato resta fuori dalla pagina. Nel browser vale zero, come
+ *  su ogni telefono senza tacca.
+ *
+ *  Le due misure passano da una variabile invece di essere `env(...)` sparsi
+ *  per i file: si leggono in un posto solo, e un test può fingere il notch
+ *  riscrivendo la variabile (`env()` non si può simulare). */
+:root {
+  --vf-safe-top: env(safe-area-inset-top, 0px);
+  --vf-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 html, body {
   height: 100%;
 }
