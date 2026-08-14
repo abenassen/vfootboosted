@@ -115,6 +115,8 @@ from vfoot.api.push_views import (
     PushConfigView, PushSubscribeView, PushUnsubscribeView,
 )
 
+from vfoot.api.feedback_views import FeedbackCreateView
+
 urlpatterns = [
     # Web Push. The config is open (the public VAPID key identifies us, it does
     # not authorise anything); subscribing needs the token, since a subscription
@@ -122,6 +124,9 @@ urlpatterns = [
     path("push/config", PushConfigView.as_view(), name="push-config"),
     path("push/subscribe", PushSubscribeView.as_view(), name="push-subscribe"),
     path("push/unsubscribe", PushUnsubscribeView.as_view(), name="push-unsubscribe"),
+    # Le segnalazioni degli utenti: si scrivono e basta, non si rileggono da qui
+    # (si smistano dall'admin di Django).
+    path("feedback", FeedbackCreateView.as_view(), name="feedback-create"),
     path("leagues/<int:league_id>/decisions", LeagueDecisionListView.as_view(),
          name="league-decisions"),
     path("leagues/<int:league_id>/decisions/accept-all",

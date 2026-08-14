@@ -395,6 +395,13 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL",
 # command by hand never posts an alarm to anybody.
 VFOOT_HEALTH_EMAIL = os.environ.get("VFOOT_HEALTH_EMAIL", "")
 
+# Dove arriva una segnalazione lasciata dalla home (virgole per più indirizzi).
+# Ricade su VFOOT_HEALTH_EMAIL perché è la stessa domanda — a chi si dicono le
+# notizie sul sito — e in fase di prova una segnalazione che aspetta di essere
+# scoperta in un elenco è una segnalazione persa. Vuota: nessuna mail, e le
+# segnalazioni si leggono solo dall'admin (restano salvate comunque).
+VFOOT_FEEDBACK_EMAIL = os.environ.get("VFOOT_FEEDBACK_EMAIL", "") or VFOOT_HEALTH_EMAIL
+
 
 # --- Maintenance agent ----------------------------------------------------
 # The agent PROPOSES and this code EXECUTES; see realdata/services/maintenance.py

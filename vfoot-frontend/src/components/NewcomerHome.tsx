@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Card } from './ui';
 import SetupBanner from './SetupBanner';
 import ChampionshipPicker from './ChampionshipPicker';
+import FeedbackCard from './FeedbackCard';
 import { useChampionship } from '../league/ChampionshipContext';
 
 /** LA HOME DI CHI SI È APPENA ISCRITTO.
@@ -90,6 +91,11 @@ export default function NewcomerHome() {
           )}
         </div>
       </Card>
+
+      {/* Anche qui, e non solo nella home di chi ha una lega: chi si è appena
+          iscritto e non ha ancora creato niente è proprio la persona che incontra
+          per prima le cose che non funzionano. */}
+      <FeedbackCard />
     </div>
   );
 }

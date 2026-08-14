@@ -29,6 +29,7 @@ from vfoot.models.fantasy import (
     MarketEvent,
 )
 from vfoot.models.decisions import LeagueDecision, LeagueDecisionVote
+from vfoot.models.feedback import Feedback
 from vfoot.models.heatmap import HeatmapGrid
 from vfoot.models.lineup import SavedLineupSnapshot
 from vfoot.models.presence import PlayerZonePresence, ZoneDuel
@@ -57,6 +58,7 @@ __all__ = [
     "FantasyLineupSubmission",
     "FantasyRosterSlot",
     "FantasyTeam",
+    "Feedback",
     "HeatmapGrid",
     "LeagueMembership",
     "LeaguePlayerRole",

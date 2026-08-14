@@ -6,6 +6,7 @@ import Crest from '../components/Crest';
 import LeagueHome from '../components/LeagueHome';
 import NewcomerHome from '../components/NewcomerHome';
 import InviteShare from '../components/InviteShare';
+import FeedbackCard from '../components/FeedbackCard';
 import { useCompetitionContext } from '../league/CompetitionContext';
 
 // This page no longer fetches the standings or the fixtures. Both existed only to
@@ -160,6 +161,10 @@ export default function DashboardPage() {
           competition, how each stands, and who is in the league. */}
       <LeagueHome competitions={competitions} />
 
+      {/* In fondo, e non più in alto: non è il motivo per cui si apre l'app, ma
+          la home è l'unica pagina su cui si torna sempre — quindi è l'unico posto
+          in cui una segnalazione si può lasciare senza doverla prima cercare. */}
+      <FeedbackCard />
     </div>
   );
 }

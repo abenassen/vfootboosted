@@ -1430,6 +1430,25 @@ export async function unsubscribePush(endpoint: string): Promise<{ removed: numb
   return parseJsonOrThrow(res);
 }
 
+// --- Segnalazioni --------------------------------------------------------------
+
+export type FeedbackKind = 'bug' | 'idea' | 'altro';
+
+/** Manda una segnalazione. Il contesto (dove eri, che schermo) lo mette questa
+ *  funzione, non chi la chiama: è il dato che serve a riprodurre un problema ed è
+ *  quello che nessuno pensa a scrivere. Il browser lo legge il server dalla sua
+ *  intestazione. */
+export async function sendFeedback(kind: FeedbackKind, message: string): Promise<{ id: number }> {
+  const res = await authedPost('/feedback', {
+    kind,
+    message,
+    page: typeof window === 'undefined' ? '' : `${window.location.pathname}${window.location.search}`,
+    viewport:
+      typeof window === 'undefined' ? '' : `${window.innerWidth}x${window.innerHeight}`,
+  });
+  return parseJsonOrThrow(res);
+}
+
 // --- Manutenzione del sito (solo staff) --------------------------------------
 
 /** Read the maintenance state: the verdict, what is waiting, recent agent passes.
