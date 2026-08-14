@@ -110,6 +110,13 @@ def snapshot_league_listone(league, *, reset: bool = False,
             summary["created"] += 1
         elif row.source == LeaguePlayerRole.SOURCE_ADMIN:
             summary["preserved_admin"] += 1
+        elif p.id in undecidable:
+            # Ha già una riga E una domanda aperta: è il giocatore che l'admin ha
+            # rimesso in discussione. Il ruolo resta quello finché non si risponde
+            # — un `--reset` che lo spostasse adesso lascerebbe la domanda a
+            # proporre una cosa e il listone a mostrarne un'altra, sotto una
+            # consultazione già in corso.
+            summary["awaiting_decision"] = summary.get("awaiting_decision", 0) + 1
         elif reset and seed and row.role != seed:
             row.role = seed
             row.save(update_fields=["role", "updated_at"])

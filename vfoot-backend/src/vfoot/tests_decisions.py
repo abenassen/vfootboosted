@@ -673,6 +673,59 @@ class ManualDecisionTests(DecisionQueueTests):
         self.assertEqual(after, before)
         self.assertEqual(undecided_player_ids(self.league), {asked.id})
 
+    def test_a_reset_does_not_move_the_role_under_an_open_question(self):
+        """``freeze_league_listone --reset`` re-seeds frozen roles from the current
+        inference. A player under discussion must be exempt: moving his role while
+        the consultation runs would leave the question proposing one thing and the
+        listone showing another."""
+        from vfoot.services.listone import snapshot_league_listone
+        p = self._player("Discusso", method=CurrentPlayerRole.METHOD_CATEGORY,
+                         role="ATT")
+        snapshot_league_listone(self.league)
+        d, _ = self._open(p)
+        self.assertEqual(d.proposed, "ATT")
+
+        # L'inferenza cambia idea sotto i piedi, e arriva un reset esplicito.
+        CurrentPlayerRole.objects.filter(player=p).update(role_data="CEN",
+                                                          role_mitigated="CEN")
+        snapshot_league_listone(self.league, reset=True)
+
+        row = LeaguePlayerRole.objects.get(league=self.league, player=p)
+        self.assertEqual(row.role, "ATT")           # fermo su ciò che si discute
+        d.refresh_from_db()
+        self.assertEqual(d.status, LeagueDecision.STATUS_OPEN)
+        self.assertEqual(d.proposed, "ATT")
+
+    def test_the_listone_shows_the_proposal_not_the_provider_seed(self):
+        """Un giocatore in limbo non ha riga congelata, e il listone ripiegava sul
+        seme grezzo: Chukwueze appariva CENTROCAMPISTA mentre la schermata delle
+        decisioni, per lo stesso giocatore, proponeva ATTACCANTE. Le due schermate
+        devono dire la stessa cosa."""
+        from vfoot.api.league_views import championship_players_payload
+        p = self._player("In limbo", method=CurrentPlayerRole.METHOD_SOFA,
+                         role="ATT")
+        Player.objects.filter(id=p.id).update(classic_role_seed="CEN")  # il seme TM
+        self.assertEqual(open_role_decisions(self.league), 1)
+
+        row = next(r for r in championship_players_payload(self.cs, league=self.league)
+                   ["players"] if r["player_id"] == p.id)
+        self.assertTrue(row["role_undecided"])
+        self.assertEqual(row["role"], "ATT")      # la proposta, non il seme
+        d = LeagueDecision.objects.get(league=self.league, player=p)
+        self.assertEqual(d.proposed, row["role"])
+
+    def test_a_frozen_role_still_wins_over_the_season_one(self):
+        """La riga congelata resta l'autorità dentro la lega: il ripiego stagionale
+        sta SOTTO di lei, non al suo posto."""
+        from vfoot.api.league_views import championship_players_payload
+        p = self._player("Congelato", method=CurrentPlayerRole.METHOD_CATEGORY,
+                         role="ATT")
+        LeaguePlayerRole.objects.create(league=self.league, player=p, role="CEN",
+                                        source=LeaguePlayerRole.SOURCE_ADMIN)
+        row = next(r for r in championship_players_payload(self.cs, league=self.league)
+                   ["players"] if r["player_id"] == p.id)
+        self.assertEqual(row["role"], "CEN")
+
     def test_a_player_outside_the_listone_is_refused(self):
         stranger = Player.objects.create(full_name="Estraneo", short_name="Estraneo")
         with self.assertRaises(ValueError) as ctx:

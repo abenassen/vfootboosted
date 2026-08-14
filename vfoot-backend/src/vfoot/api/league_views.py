@@ -5773,10 +5773,15 @@ def championship_players_payload(cs, league=None) -> dict:
     # league nobody is buying, and there is no question open: the season role is
     # simply what it is.
     undecided = undecided_player_ids(league) if league is not None else set()
-    # Outside a league the frozen roles do not exist, so the season's measured
-    # role answers instead — the one the vote was scored against
-    # (AGENTS.md, "Classic Role Resolution"), never the raw provider seed alone.
-    season_roles = current_role_map() if league is None else {}
+    # The season's measured role, second in line behind the league's frozen one
+    # (AGENTS.md, "Classic Role Resolution"), and never the raw provider seed
+    # alone. It used to be read only OUTSIDE a league, on the grounds that inside
+    # one the frozen role always answers — which is true of everyone except the
+    # players in limbo, who deliberately have no frozen row. For those the row fell
+    # through to ``classic_role_seed``, the provider map where every winger is a
+    # midfielder: the listone showed Chukwueze as a midfielder while the decision
+    # screen, for the same player, proposed attacker. Shown here, the two agree.
+    season_roles = current_role_map()
     rows = []
     for p in players:
         pid = p["id"]
