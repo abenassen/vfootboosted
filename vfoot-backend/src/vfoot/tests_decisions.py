@@ -18,6 +18,7 @@ from vfoot.models import (
     CurrentPlayerRole,
 )
 from vfoot.services import push_channel
+from vfoot.api.league_views import _real_transfers
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
     open_role_decisions, resolve, unavailable_players, undecided_player_ids,
@@ -1077,3 +1078,26 @@ class RealTransferFeedTests(DecisionQueueTests):
                                        end_date=date(2026, 7, 20))
         self._transfer(p, da=self.altra, a=self.ts)
         self.assertEqual(self._feed()[0]["detail"], "ex Parma · 25 M€")
+
+    def test_un_trasferimento_non_lo_schiacciano_fuori_i_pari_data(self):
+        """Il difetto trovato in produzione: troncare PRIMA di filtrare.
+
+        Il caricamento iniziale dà la STESSA start_date a seicento tesseramenti
+        aperti. Ordinandoli per data e prendendone qualche decina si pesca fra i
+        pari-data a caso, e un trasferimento vero il cui tesseramento nuovo cade in
+        quel giorno sparisce. B. Domínguez, passato al Sassuolo l'11/08 come i 622
+        del caricamento, non compariva — mentre i tre del 14/08 restavano solo
+        perche' quel giorno erano i piu' recenti di tutti.
+        """
+        stesso_giorno = date(2026, 8, 11)
+        for i in range(12):
+            PlayerTeamStint.objects.create(
+                player=self._listone(f"Fermo {i}"), team_season=self.ts,
+                start_date=stesso_giorno)
+        mosso = self._listone("Domínguez")
+        self._transfer(mosso, da=self.altra, a=self.ts, quando=stesso_giorno)
+
+        # Chiamata diretta con una finestra stretta: e' il rapporto fra finestra e
+        # pari-data a fare il danno, non il numero assoluto.
+        feed = _real_transfers(self.league, 2)
+        self.assertEqual([i["text"] for i in feed], ["Domínguez → Torino"])

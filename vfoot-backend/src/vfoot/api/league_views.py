@@ -568,8 +568,23 @@ def _real_transfers(league, limit: int) -> list[dict]:
     if not listone:
         return []
 
+    # PRIMA chi ha un passato, POI la finestra — e non e' un dettaglio di
+    # efficienza. Avere un tesseramento CHIUSO e' la condizione selettiva (una
+    # manciata di giocatori su seicento); troncare prima di applicarla riempie la
+    # finestra di gente che non si e' mossa. Il caricamento iniziale dà a 622
+    # tesseramenti LA STESSA start_date, quindi ordinare per data e prenderne
+    # qualche decina pesca fra i pari-data a caso: B. Domínguez, passato al
+    # Sassuolo l'11/08, spariva cosi' — mentre i tre del 14/08 restavano solo
+    # perche' quel giorno erano i piu' recenti.
+    con_passato = set(PlayerTeamStint.objects
+                      .filter(player_id__in=listone,
+                              team_season__competition_season_id=season_id,
+                              end_date__isnull=False)
+                      .values_list("player_id", flat=True))
+    if not con_passato:
+        return []
     aperti = list(PlayerTeamStint.objects
-                  .filter(player_id__in=listone,
+                  .filter(player_id__in=con_passato,
                           team_season__competition_season_id=season_id,
                           end_date__isnull=True,
                           start_date__isnull=False)
