@@ -60,10 +60,19 @@ export default function FeedbackCard() {
 
   return (
     <Card className="p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <div className="font-cond text-lg font-bold text-ink">Com'è andata?</div>
-        <div className="text-xs text-ink-faint">Il sito è in prova: quello che ci scrivi lo leggiamo.</div>
+      {/* IL TITOLO NOMINA LA COSA, non la chiede. «Com'è andata?» — che è quello
+          che c'era scritto — in un sito di fantacalcio non si legge come una
+          domanda sul sito: si legge come una domanda sulla GIORNATA, in fondo
+          alla pagina che parla appunto della giornata. E una domanda a cui si
+          risponde «bene» non fa venire in mente di segnalare un pulsante rotto. */}
+      <div className="flex items-baseline gap-2">
+        <span aria-hidden>💬</span>
+        <h2 className="font-cond text-lg font-bold text-ink">Segnalazioni e idee</h2>
       </div>
+      <p className="mt-0.5 text-xs text-ink-faint">
+        Il sito è in prova: se qualcosa non funziona, o lo faresti diverso, scrivilo qui. Lo
+        leggiamo.
+      </p>
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {KINDS.map((k) => (
