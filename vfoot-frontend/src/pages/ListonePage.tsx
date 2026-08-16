@@ -511,9 +511,14 @@ function ValueDetail({
                soglia stretta apposta. Questo è il modo per l'admin di dire che il
                dubbio è suo: stesso meccanismo, stessa consultazione. Non compare
                su chi è già in rosa — un ruolo pagato non torna una domanda, e il
-               server rifiuterebbe comunque. */
-            <button
-              type="button"
+               server rifiuterebbe comunque.
+               Tinto del giallo della decisione che produce, e non di grigio: la
+               prima versione aveva un tratteggio tenue in mezzo a etichette
+               altrettanto tenui, e si leggeva come una scritta spenta invece che
+               come l'unica cosa cliccabile della riga. */
+            <Button
+              size="sm"
+              variant="secondary"
               disabled={asking}
               onClick={() => {
                 setAsking(true);
@@ -522,11 +527,14 @@ function ValueDetail({
                   .catch((e) => setAskError(e instanceof Error ? e.message : String(e)))
                   .finally(() => setAsking(false));
               }}
-              className="rounded border border-dashed border-line px-1.5 py-0.5 text-[11px] text-ink-faint hover:border-warn hover:text-warn disabled:opacity-50"
+              className="gap-1.5 border-warn/50 bg-warn-bg text-warn hover:brightness-95"
               title="Apre una domanda sul suo ruolo: finché non è decisa non è acquistabile, e puoi metterla ai voti."
             >
+              {/* La stessa urna della notifica «nuovi ruoli da decidere»: l'azione
+                  e la coda in cui finisce si riconoscono a colpo d'occhio. */}
+              <span aria-hidden="true">🗳️</span>
               {asking ? 'Apro…' : 'Metti in discussione il ruolo'}
-            </button>
+            </Button>
           ) : null}
         </div>
         {askError ? <div className="mb-2 text-xs text-bad">{askError}</div> : null}
