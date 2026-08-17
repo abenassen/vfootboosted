@@ -4,7 +4,7 @@ import { useLeagueContext } from '../league/LeagueContext';
 import { useChampionship } from '../league/ChampionshipContext';
 import { DECISIONS_CHANGED, useDecisionAlerts } from '../league/useDecisionAlerts';
 import ChampionshipPicker from '../components/ChampionshipPicker';
-import { foldedMatch } from '../utils/text';
+import { foldedMatch, surnameFirst } from '../utils/text';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import type { ChampionshipPlayer, ChampionshipPlayersResponse } from '../types/realChampionship';
 
@@ -166,7 +166,10 @@ export default function ListonePage() {
       if (sort === 'appearances') return p.appearances ?? 0;
       return null;
     };
-    const text = (p: ChampionshipPlayer) => (sort === 'team' ? (p.team ?? '') : p.name);
+    // Il nome si ordina per cognome: la riga mostra "L. Martínez", e cercarlo
+    // alla L non lo troverebbe mai nessuno. Ordina, non cambia cosa si legge.
+    const text = (p: ChampionshipPlayer) =>
+      sort === 'team' ? (p.team ?? '') : surnameFirst(p.name);
 
     const sorted = [...ps].sort((a, b) => {
       if (sort === 'name' || sort === 'team') {

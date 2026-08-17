@@ -1,4 +1,7 @@
-/** Text matching for name search: forgiving about how a name is spelled.
+/** Player names as text: matching what was typed, and putting a name in the
+ *  order a list wants to be read in.
+ *
+ *  Matching is forgiving about how a name is spelled.
  *
  *  Player names are a minefield of things nobody types the way they are stored —
  *  diacritics ("Leão", "Martínez", "Süle"), apostrophes that vary by source
@@ -79,4 +82,38 @@ export function foldedMatch(needle: string, fields: Array<string | null | undefi
   const q = fold(needle);
   if (!q) return true;
   return fields.some((f) => matchesField(q, f));
+}
+
+/** Words that belong to the surname they precede, so the split does not cut
+ *  "de Roon" in half. Compared folded, hence lowercase and unaccented. */
+const SURNAME_PARTICLES = new Set([
+  'de', 'del', 'della', 'delle', 'delli', 'dello', 'dei', 'degli', 'di',
+  'da', 'dal', 'dalla', 'dalle', 'dallo', 'do', 'dos', 'das', 'du',
+  'van', 'von', 'der', 'den', 'ten', 'ter', 'la', 'le', 'lo',
+  'af', 'av', 'bin', 'ibn', 'al', 'el', 'mac', 'mc', 'st', 'san', 'santa', 'ait',
+]);
+
+/** Surname first, so a list of players sorts the way a rubrica does:
+ *  "L. Martínez" → "Martínez L.", "Antonio Raimondo" → "Raimondo Antonio",
+ *  "Dodô" → "Dodô".
+ *
+ *  Two shapes arrive here, both from the provider. Most names are already
+ *  abbreviated ("C. De Ketelaere"), and those are the easy ones: whatever
+ *  follows the initials IS the surname, particles included — no guessing. The
+ *  rest come through unabbreviated ("Gonçalo Ramos"), and there the last word
+ *  has to stand in for the surname, dragging along the particles in front of it.
+ *  A given name is never consumed by that walk, so the worst case reorders a
+ *  compound surname instead of losing part of it. */
+export function surnameFirst(name: string | null | undefined): string {
+  const words = (name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return words.join('');
+
+  let firstNames = 0;
+  while (firstNames < words.length - 1 && /^\p{L}\.$/u.test(words[firstNames])) firstNames++;
+
+  if (firstNames === 0) {
+    firstNames = words.length - 1;
+    while (firstNames > 1 && SURNAME_PARTICLES.has(fold(words[firstNames - 1]))) firstNames--;
+  }
+  return `${words.slice(firstNames).join(' ')} ${words.slice(0, firstNames).join(' ')}`;
 }

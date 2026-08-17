@@ -7,6 +7,7 @@ import {
   downloadWorkbook,
   slug,
 } from './xlsx';
+import { surnameFirst } from './text';
 
 // Listone export (#13): one "complessivo" sheet the admin can fill in — each row
 // has the player_id, a per-player TEAM dropdown ("Assegnato a") and a price — plus
@@ -48,7 +49,9 @@ function cellValue(p: ChampionshipPlayer, key: string): string | number | null {
     case COL_PLAYER_ID:
       return p.player_id;
     case 'name':
-      return p.name;
+      // Cognome davanti: sul foglio la colonna serve soprattutto a ordinare, e
+      // "L. Martínez" ordina sotto la L. Sullo schermo il nome resta com'è.
+      return surnameFirst(p.name);
     case 'role':
       return p.role || '';
     case 'team':
