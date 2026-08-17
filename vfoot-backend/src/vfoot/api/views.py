@@ -209,6 +209,37 @@ class GoogleAuthView(APIView):
                         status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
+def resolve_login_identifier(identifier: str) -> User | None:
+    """L'account a cui si riferisce quello che e' stato scritto nel campo unico
+    «Email o username».
+
+    Entrambe le ricerche sono a meno del maiuscolo. Django confronta l'username
+    carattere per carattere (``ModelBackend`` chiama ``get_by_natural_key``), e
+    su un nome come «PeppAndre» quel confronto esatto vuol dire che una sola
+    grafia su tutte funziona, mentre ogni altra restituisce lo stesso errore di
+    una password sbagliata: chi non ricorda le maiuscole va a resettare una
+    password che non era il problema. La ricerca insensibile e' del resto la
+    convenzione gia' adottata ovunque nel progetto — unicita' in registrazione,
+    cambio username, import delle rose, nomi squadra.
+
+    **L'email ha la precedenza sull'username, di proposito.** I due spazi di
+    nomi possono in teoria sovrapporsi (qualcuno che registra l'username
+    "tizio@example.com"); quando succede, deve entrare chi possiede davvero
+    quella casella. L'indirizzo e' verificato e non modificabile dall'utente,
+    l'username e' auto-assegnato e si cambia dal profilo: fra i due, la
+    precedenza va a quello di cui abbiamo una prova.
+
+    Restituisce una sola riga per costruzione: gli indici unici funzionali su
+    ``LOWER(username)`` e ``LOWER(email)`` (migrazione 0046) rendono impossibile
+    che ``iexact`` ne trovi due.
+    """
+    identifier = identifier.strip()
+    if not identifier:
+        return None
+    return (User.objects.filter(email__iexact=identifier).first()
+            or User.objects.filter(username__iexact=identifier).first())
+
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -217,20 +248,32 @@ class LoginView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        user = authenticate(username=data["username"], password=data["password"])
+        # authenticate() riceve la grafia MEMORIZZATA, non quella digitata: il
+        # confronto di Django resta esatto, e' la ricerca qui sopra a essere
+        # tollerante.
+        candidate = resolve_login_identifier(data["username"])
+        if candidate is not None:
+            user = authenticate(username=candidate.username, password=data["password"])
+        else:
+            # Nessun account: si calcola comunque un hash, come fa il ModelBackend
+            # di Django. Senza, la risposta per un indirizzo sconosciuto tornerebbe
+            # molto prima di quella per uno esistente, e la differenza di tempo
+            # direbbe a un estraneo chi e' iscritto.
+            User().set_password(data["password"])
+            user = None
         if not user:
             # authenticate() rejects inactive users too, so a correct password on
             # an unconfirmed account would otherwise read as "wrong password" and
             # send the user off resetting a password that was never the problem.
-            pending = User.objects.filter(username__iexact=data["username"],
-                                          is_active=False).first()
-            if pending and pending.check_password(data["password"]):
+            if (candidate is not None and not candidate.is_active
+                    and candidate.check_password(data["password"])):
                 return Response(
                     {"detail": "Account non ancora confermato. Controlla la tua "
                                "email e apri il link di conferma.",
                      "email_unconfirmed": True},
                     status=status.HTTP_403_FORBIDDEN)
-            return Response({"detail": "Username o password non corretti."}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({"detail": "Email, username o password non corretti."},
+                            status=status.HTTP_401_UNAUTHORIZED)
 
         token = issue_token(user)
         return Response({"token": token.key, "user": UserSerializer(user).data}, status=status.HTTP_200_OK)

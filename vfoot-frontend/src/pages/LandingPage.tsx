@@ -53,7 +53,12 @@ export default function LandingPage() {
         setPasswordConfirm('');
       }
     } catch (err) {
-      if (err instanceof ApiError && err.status === 403) setUnconfirmed(username);
+      if (err instanceof ApiError && err.status === 403) {
+        setUnconfirmed(username);
+        // Il campo d'accesso ora accetta anche l'indirizzo: se e' quello che ha
+        // scritto, il riquadro «rimandami l'email» lo trova gia' compilato.
+        if (username.includes('@') && !email) setEmail(username);
+      }
       // ApiError already carries a message written for the user; a bare TypeError
       // here means fetch never reached the server (backend down / wrong address).
       setError(
@@ -209,13 +214,24 @@ export default function LandingPage() {
 
             <form onSubmit={onSubmit} className="space-y-3">
               <label className="block text-sm">
-                <div className="mb-1 font-semibold text-ink-soft">Username</div>
+                <div className="mb-1 font-semibold text-ink-soft">
+                  {mode === 'login' ? 'Email o username' : 'Username'}
+                </div>
+                {/* autoCapitalize/autoCorrect: su iPhone un campo di testo nudo
+                    rende maiuscola la prima lettera e passa l'autocorrettore su
+                    una parola inventata come «PeppAndre». Il server ora cerca
+                    senza guardare le maiuscole, ma il campo non deve comunque
+                    riscrivere quello che uno ha digitato. */}
                 <input
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  autoComplete="username"
                   className="w-full rounded-xl border border-line px-3 py-2 outline-none ring-accent/40 focus:ring"
-                  placeholder="nomeutente"
+                  placeholder={mode === 'login' ? 'tu@email.com oppure nomeutente' : 'nomeutente'}
                 />
               </label>
 

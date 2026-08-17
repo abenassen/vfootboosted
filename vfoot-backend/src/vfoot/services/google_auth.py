@@ -81,15 +81,20 @@ def verify_id_token(raw_token: str) -> GoogleIdentity:
 
 
 def _unique_username(email: str) -> str:
+    # Il confronto e' insensibile al maiuscolo perche' lo e' l'unicita': la parte
+    # locale di un indirizzo arriva quasi sempre minuscola, e un controllo esatto
+    # non vedrebbe l'utente «Marco» gia' iscritto, coniando un secondo «marco».
+    # Due account che differiscono solo per una maiuscola sono indistinguibili in
+    # una classifica di lega, e renderebbero ambigua la ricerca del login.
     base = "".join(ch for ch in email.split("@")[0] if ch.isalnum() or ch in "._-")
     base = (base or "utente")[:140]
-    if not User.objects.filter(username=base).exists():
+    if not User.objects.filter(username__iexact=base).exists():
         return base
     # A counter would leak how many people share a local part, and races between
     # two concurrent signups would collide; a short random suffix does neither.
     while True:
         candidate = f"{base}-{get_random_string(5).lower()}"
-        if not User.objects.filter(username=candidate).exists():
+        if not User.objects.filter(username__iexact=candidate).exists():
             return candidate
 
 

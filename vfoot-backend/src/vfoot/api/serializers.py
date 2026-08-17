@@ -46,6 +46,15 @@ class UserSerializer(serializers.ModelSerializer):
         return profile.avatar if profile else ""
 
 
+# Si entra con l'email OPPURE con l'username, dallo stesso campo. Se un username
+# potesse contenere la chiocciola, quel campo avrebbe due letture per la stessa
+# stringa; il login risolve comunque l'ambiguita' dando la precedenza all'email,
+# ma e' piu' onesto non crearla. Vale solo per i nuovi: nessuno degli username
+# esistenti contiene una @.
+NO_AT_IN_USERNAME = ("L'username non può contenere il carattere @. "
+                     "Per accedere puoi comunque usare la tua email.")
+
+
 class ProfileUpdateSerializer(serializers.Serializer):
     """Edits the caller's own account: display username and/or avatar. Email is
     intentionally NOT here — changing it re-opens email verification, handled
@@ -64,6 +73,8 @@ class ProfileUpdateSerializer(serializers.Serializer):
         value = value.strip()
         if not value:
             raise serializers.ValidationError("Username cannot be empty.")
+        if "@" in value:
+            raise serializers.ValidationError(NO_AT_IN_USERNAME)
         qs = User.objects.filter(username__iexact=value)
         if self._user is not None:
             qs = qs.exclude(pk=self._user.pk)
@@ -100,6 +111,8 @@ class RegisterSerializer(serializers.Serializer):
     password_confirm = serializers.CharField(write_only=True, min_length=8)
 
     def validate_username(self, value: str) -> str:
+        if "@" in value:
+            raise serializers.ValidationError(NO_AT_IN_USERNAME)
         if User.objects.filter(username__iexact=value).exists():
             raise serializers.ValidationError("Username already exists.")
         return value
