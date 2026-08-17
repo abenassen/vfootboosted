@@ -1,0 +1,56 @@
+# Jail fail2ban per il traffico HTTP.  Va in /etc/fail2ban/jail.d/vfoot.local
+#
+# La jail `sshd` esiste gia' e funziona (874 IP bannati al 17/08/2026): questo
+# file NON la tocca.  Qui si aggiunge solo il web.
+#
+# Ragionamento completo in docs/rate_limit_plan.md.  Installazione e verifica
+# in ../README.md.
+
+# --------------------------------------------------------------------------- #
+# 1. Chi insiste sul login dopo essere gia' stato rifiutato                     #
+# --------------------------------------------------------------------------- #
+# Senza questa jail il rate limit di nginx e' una porta girevole: l'attaccante
+# paga un 429 da microsecondi e riprova per sempre.  Con questa, dopo un po'
+# smette di costarci anche quello.
+#
+# LA COSA IMPORTANTE E' `ngx_limit_req_zones`.  Il filtro nginx-limit-req legge
+# l'error log di nginx, dove ogni rifiuto porta scritto il nome della zona che
+# lo ha prodotto; limitandolo a `vfoot_auth` questa jail NON PUO' vedere i 429
+# della zona generale.  Non e' una precauzione teorica: un'asta o una domenica
+# di campionato sono decine di dispositivi dietro un IP solo, e un ban al
+# firewall non chiuderebbe fuori solo l'API — farebbe cadere anche il
+# WebSocket, che ci si e' preoccupati di non limitare.  La stanza resterebbe
+# fuori dall'asta a ritentare contro un pacchetto scartato.
+#
+# maxretry alto di proposito: con rate=20r/m un IP puo' fare ~220 richieste di
+# auth in dieci minuti PRIMA di vedere un solo 429, quindi una lega intera che
+# entra non ci arriva nemmeno vicino.  Un attaccante invece ne colleziona 60 in
+# pochi secondi.  La soglia separa i due casi di due ordini di grandezza.
+[vfoot-auth-limit]
+enabled  = true
+filter   = nginx-limit-req[ngx_limit_req_zones="vfoot_auth"]
+port     = http,https
+logpath  = /var/log/nginx/error.log
+findtime = 600
+maxretry = 60
+bantime  = 3600
+
+# --------------------------------------------------------------------------- #
+# 2. Gli scanner a caccia di WordPress                                          #
+# --------------------------------------------------------------------------- #
+# Non urgente per la CPU: nginx li chiude con un 404 statico e non arrivano mai
+# a Django.  Ma sono ~230.000 richieste in otto giorni, e finche' ci sono
+# dentro non si legge nulla nei log — che e' un problema il giorno in cui
+# bisogna capire in fretta cosa sta succedendo.
+#
+# Nessun rischio per i nostri: un utente vero non chiede /wp-content/ ne'
+# /.env, e comunque un 404 nella SPA non passa di qui (le rotte lato client le
+# serve `try_files ... /index.html` con stato 200).
+[vfoot-botsearch]
+enabled  = true
+filter   = nginx-botsearch
+port     = http,https
+logpath  = /var/log/nginx/access.log
+findtime = 600
+maxretry = 10
+bantime  = 86400

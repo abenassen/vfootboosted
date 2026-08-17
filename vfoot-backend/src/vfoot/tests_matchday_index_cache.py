@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from realdata.models import (
     Competition, CompetitionSeason, Match, MatchAppearance, Player,
@@ -33,6 +33,13 @@ from vfoot.services import classic_matchday_scoring as cms
 from vfoot.services.classic_pagella import matchday_data_version
 
 
+# La suite gira su una cache finta, perche' un contatore di throttle che
+# sopravvive fra un test e l'altro fa fallire il test dopo (vedi settings.py).
+# Qui la cache e' l'oggetto in esame, quindi ce ne vuole una vera.
+@override_settings(
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                        "LOCATION": "matchday-index-tests"}},
+)
 class MatchdayIndexCacheTests(TestCase):
     def setUp(self):
         cache.clear()

@@ -53,6 +53,11 @@ from vfoot.services.duel_engine import compute_match_zone_duels
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
+    # Hashes a password like the login does, and on top of that answers "Email
+    # already registered", which makes it the most direct way to find out who is
+    # signed up. Same backstop scope.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_hash"
 
     @transaction.atomic
     def post(self, request):
@@ -108,6 +113,13 @@ class VerifyEmailView(APIView):
 
 class ResendVerificationView(APIView):
     permission_classes = [AllowAny]
+    # Same abuse as PasswordResetRequestView and so the same scope: anyone can
+    # make this send mail to an address they do not own. The counter is shared
+    # between the two on purpose — 5 an hour is generous for a person who is
+    # having trouble getting in, whichever of the two buttons they press, and
+    # what has to be bounded is our sender's reputation, which they share too.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
 
     def post(self, request):
         serializer = ResendVerificationSerializer(data=request.data)
@@ -193,6 +205,11 @@ class PasswordResetConfirmView(APIView):
 
 class GoogleAuthView(APIView):
     permission_classes = [AllowAny]
+    # No PBKDF2 here, but it does a network round trip to Google to verify the
+    # id token — which is its own kind of expensive, and on one vCPU an unbounded
+    # stream of them is just as good a way to make the site unusable.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_hash"
 
     def post(self, request):
         serializer = GoogleAuthSerializer(data=request.data)
@@ -242,6 +259,12 @@ def resolve_login_identifier(identifier: str) -> User | None:
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    # See the `auth_hash` comment in settings.py: a backstop, not the defence.
+    # The real filter is nginx, which rejects for microseconds instead of paying
+    # the ~5ms it costs to get this far. Here for the day the nginx config is
+    # lost in a rebuild, which is exactly the day nobody would notice.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_hash"
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -308,6 +331,13 @@ class MeView(APIView):
 class PasswordChangeView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
+    # Two hashes per call (check the old one, make the new one) on a box with one
+    # vCPU. Being authenticated it does NOT pass through the strict nginx
+    # location — it lands in the general one, whose limit is per token and sized
+    # for auction traffic — so this scope is the only thing bounding it. Counted
+    # per user, which is the bit nginx cannot do at all.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_change"
 
     def post(self, request):
         serializer = PasswordChangeSerializer(data=request.data, user=request.user)

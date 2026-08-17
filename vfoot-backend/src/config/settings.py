@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -110,14 +111,42 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
-    # No DEFAULT_THROTTLE_CLASSES: the rate below applies only to the views that
-    # ask for it by scope. A global default would also meter the live polling and
-    # the auction, where many requests in a minute are the normal shape.
+    # One proxy sits in front of us (nginx), and this number is what makes the
+    # per-IP throttling below actually per-IP. Without it DRF keys on the WHOLE
+    # X-Forwarded-For string, and nginx APPENDS to whatever the client sent
+    # rather than replacing it — so anyone could mint a fresh bucket per request
+    # just by varying a header they control. With 1, DRF takes the last entry:
+    # the address nginx itself observed, which a client cannot forge.
+    # In development there is no proxy and no XFF, so this falls back to
+    # REMOTE_ADDR and behaves the same.
+    "NUM_PROXIES": 1,
+    # No DEFAULT_THROTTLE_CLASSES: the rates below apply only to the views that
+    # ask for one by scope. A global default would also meter the live polling and
+    # the auction, where many requests in a minute are the normal shape — an
+    # auction makes one state read per connected device on every single bid.
     "DEFAULT_THROTTLE_RATES": {
         # Sending mail to an address the caller does not own, on demand. Generous
         # for a person (a first try, a typo, a resend) and useless for a script.
         # Counted per IP for anonymous callers, which is what these all are.
         "password_reset": os.environ.get("DJANGO_PASSWORD_RESET_RATE", "5/hour"),
+        # The endpoints that compute a PBKDF2 hash: ~0.5s of CPU each on a box
+        # with one vCPU, paid even when the account does not exist (and it must
+        # be, or the response time would say who is registered).
+        #
+        # This is DELIBERATELY looser than the nginx limit in front of it
+        # (20r/m + burst 20, deploy/nginx/vfoot-limits.conf), so that in normal
+        # operation nginx is what rejects and this never fires on real people.
+        # It earns its keep in one case: if the nginx config is lost in a
+        # rebuild. Then it is the only thing standing between a laptop with a
+        # loop and the whole site — 40/min bounds it to a third of the machine
+        # instead of all of it.
+        "auth_hash": os.environ.get("DJANGO_AUTH_HASH_RATE", "40/min"),
+        # Changing your own password also hashes, and being authenticated it goes
+        # through the general nginx location, where the limit is per token and
+        # generous (20r/s) — sized for auction traffic, not for something that
+        # costs half a second. This is the only layer that can bound it, and it
+        # is counted PER USER, which is something nginx cannot express at all.
+        "password_change": os.environ.get("DJANGO_PASSWORD_CHANGE_RATE", "10/hour"),
     },
 }
 
@@ -315,6 +344,18 @@ CACHES = {
         'OPTIONS': {'MAX_ENTRIES': 500},
     }
 }
+
+# Under `manage.py test` the cache above is the wrong tool twice over: it is the
+# DEVELOPER'S real cache directory, so a test run pollutes it, and it survives
+# between tests — which with throttling turned on means the counter of one test
+# rejects the next one, and a suite that hits the login a few dozen times starts
+# failing on 429 for no reason anyone can see from the failure message.
+#
+# A dummy cache stores nothing, so every throttle check reads an empty history
+# and lets the request through. Throttling itself is NOT left untested: the tests
+# in tests_throttling.py point at a real in-memory cache on purpose.
+if "test" in sys.argv:
+    CACHES = {"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}}
 
 
 # Password validation

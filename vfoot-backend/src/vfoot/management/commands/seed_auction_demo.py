@@ -1,8 +1,12 @@
-"""Seed a CLASSIC league ready for an AUCTION test: 3 users, empty rosters, a
-frozen listone. Prints login credentials + DRF tokens so the room can be driven
-from two browsers (or a browser + API).
+"""Seed a CLASSIC league ready for an AUCTION test: an admin plus N managers,
+empty rosters, a frozen listone. Prints login credentials + DRF tokens so the room
+can be driven from two browsers (or a browser + API).
 
-    python manage.py seed_auction_demo
+    python manage.py seed_auction_demo                 # 2 managers, hand testing
+    python manage.py seed_auction_demo --managers 10   # a real-sized room
+
+The manager count matters for load: the socket only nudges, so every event makes
+EVERY connected client re-read the state over REST (see auction_load_test).
 
 Idempotent: drops and recreates the league named 'Asta Test' owned by the demo admin.
 """
@@ -18,15 +22,25 @@ from vfoot.models import (
     AuctionSession, FantasyLeague, FantasyTeam, LeagueMembership, LeaguePlayerRole,
 )
 from vfoot.services.league_decisions import accept_all_proposals
-from vfoot.services.listone import snapshot_league_listone
+from vfoot.services.listone import eligible_player_ids, snapshot_league_listone
 
-USERS = [
-    ("asta_admin", "Banditore", LeagueMembership.ROLE_ADMIN),
-    ("asta_mario", "Mario", LeagueMembership.ROLE_MANAGER),
-    ("asta_luigi", "Luigi", LeagueMembership.ROLE_MANAGER),
-]
 PASSWORD = "astatest123"
 LEAGUE_NAME = "Asta Test"
+
+# The first two keep the names they have always had, so a browser with the old
+# credentials saved still works; beyond that they are numbered.
+FIRST_NAMES = ["Mario", "Luigi", "Gigi", "Nando", "Ciro", "Bruno",
+               "Dino", "Enzo", "Rocco", "Sandro", "Tonino", "Vito"]
+
+
+def _users(n_managers: int):
+    """[(username, first_name, role)] — the admin, then n_managers."""
+    rows = [("asta_admin", "Banditore", LeagueMembership.ROLE_ADMIN)]
+    for i in range(n_managers):
+        first = FIRST_NAMES[i] if i < len(FIRST_NAMES) else f"Manager{i + 1}"
+        username = "asta_mario" if i == 0 else "asta_luigi" if i == 1 else f"asta_m{i + 1:02d}"
+        rows.append((username, first, LeagueMembership.ROLE_MANAGER))
+    return rows
 
 
 class Command(BaseCommand):
@@ -35,23 +49,35 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--season", type=int, default=None,
                             help="CompetitionSeason id (default: the one with the most frozen roles).")
+        parser.add_argument("--managers", type=int, default=2,
+                            help="How many managers besides the admin (default 2).")
 
     @transaction.atomic
     def handle(self, *args, **opts):
+        n_managers = opts["managers"]
+        if n_managers < 1:
+            raise CommandError("--managers must be at least 1.")
+        users_spec = _users(n_managers)
         season_id = opts.get("season")
         if season_id:
             season = CompetitionSeason.objects.filter(id=season_id).first()
+            if not season:
+                raise CommandError(f"No CompetitionSeason with id={season_id}.")
         else:
-            # Prefer a season that actually has season-wide roles to snapshot.
-            season = (CompetitionSeason.objects
-                      .filter(player_roles__isnull=False).distinct()
-                      .order_by("-id").first())
+            # The listone is built from the players ELIGIBLE in the season (an open
+            # stint), so pick the most recent season that actually has some. The
+            # old filter here was on a `player_roles` relation that no longer
+            # exists — roles moved to CurrentPlayerRole, which has no season
+            # dimension at all — and made this command fail outright.
+            season = next(
+                (cs for cs in CompetitionSeason.objects.order_by("-id")
+                 if eligible_player_ids(cs.id)), None)
         if not season:
-            raise CommandError("No CompetitionSeason with roles found; import data first.")
+            raise CommandError("No CompetitionSeason with eligible players; import data first.")
 
         # Users (verified, so they can log in through the SPA).
         users = {}
-        for username, first, _role in USERS:
+        for username, first, _role in users_spec:
             u, _ = User.objects.get_or_create(
                 username=username, defaults={"first_name": first, "email": f"{username}@example.com"})
             u.set_password(PASSWORD)
@@ -71,7 +97,7 @@ class Command(BaseCommand):
             reference_season=season, initial_budget=1000,
             slots_gk=3, slots_def=8, slots_mid=8, slots_fwd=6)
 
-        for username, _first, role in USERS:
+        for username, _first, role in users_spec:
             m = LeagueMembership.objects.create(league=league, user=users[username], role=role)
             FantasyTeam.objects.create(league=league, manager=m, name=f"{users[username].first_name} FC")
 
@@ -88,7 +114,7 @@ class Command(BaseCommand):
         self.stdout.write(f"snapshot: {summary} (auto-accepted {accepted} role decisions)")
         self.stdout.write("")
         self.stdout.write("Users (password: %s):" % PASSWORD)
-        for username, _first, role in USERS:
+        for username, _first, role in users_spec:
             token, _ = Token.objects.get_or_create(user=users[username])
             self.stdout.write(f"  {username:12s} [{role:7s}] token={token.key}")
         # Make sure no stale active auction lingers from a previous run.

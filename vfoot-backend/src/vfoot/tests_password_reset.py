@@ -162,7 +162,14 @@ class PasswordResetTests(TestCase):
         self.assertTrue(google.check_password(NEW))
 
 
-@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+# A REAL cache, because the suite runs against a dummy one: throttling counts by
+# remembering, and there is nothing to test when nothing is remembered. See the
+# `if "test" in sys.argv` block in settings.py for why the default is dummy.
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                        "LOCATION": "throttle-tests"}},
+)
 class PasswordResetThrottleTests(TestCase):
     def setUp(self):
         ScopedRateThrottle.cache.clear()
