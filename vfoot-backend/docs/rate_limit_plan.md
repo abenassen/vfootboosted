@@ -1,21 +1,25 @@
 # Reggere il carico ostile — piano
 
-Stato: **DA FARE**. Analisi dei log del 17/08/2026, niente ancora implementato.
-Numeri dell'asta misurati il 17/08/2026 (vedi «Quanto costa un'asta vera»): quelli
-sì, e hanno cambiato la configurazione proposta.
+Analisi dei log del 17/08/2026; numeri dell'asta **misurati** lo stesso giorno
+(vedi «Quanto costa un'asta vera»), ed è quella misura che ha cambiato la
+configurazione proposta.
 
 | pezzo | dove | stato |
 |---|---|---|
-| `limit_req` in nginx, **con chiave per token** | `deploy/nginx/vfoot-limits.conf`, `vfoot.it.conf` | **scritto, da installare** |
-| jail fail2ban sui 429 **di auth** e sui probe PHP | `deploy/fail2ban/jail.d/vfoot.local` | **scritto, da installare** |
-| throttle DRF sugli endpoint che calcolano hash | `config/settings.py`, `vfoot/api/views.py` | **fatto** |
+| `limit_req` in nginx, **con chiave per token** | `deploy/nginx/vfoot-limits.conf`, `vfoot.it.conf` | **in produzione** dal 17/08 |
+| throttle DRF sugli endpoint che calcolano hash | `config/settings.py`, `vfoot/api/views.py` | **in produzione** dal 17/08 |
 | prova di carico dell'asta | `manage.py auction_load_test` | **fatto** |
+| jail fail2ban sui 429 **di auth** e sui probe PHP | `deploy/fail2ban/jail.d/vfoot.local` | scritta, **spenta apposta** |
 | avviso quando la CPU sta al muro | `deploy/systemd/vfoot-health.*` | da fare |
 | Cloudflare davanti / seconda vCPU | decisione, non lavoro | da decidere |
 
-**Niente di questo è ancora in produzione**: i file di nginx e fail2ban sono
-scritti e versionati, ma vanno copiati sul server (vedi «Come si installa»). Il
-throttle DRF parte da solo al prossimo deploy del codice.
+Prod al commit `5c41726`. Backup di nginx in `/root/vfoot.it.conf.bak-20260817-124859`,
+commit di rollback in `/root/ROLLBACK_COMMIT-*.txt`.
+
+⚠️ **Il pezzo in sospeso ha una scadenza.** La jail di fail2ban aspetta di sapere
+quanti 429 produce la vita normale, e l'error log di nginx ruota ogni giorno
+conservandone 14: le prove per decidere **spariscono da sole il 31/08/2026**.
+Cosa guardare e come leggerlo: **`fail2ban_completamento.md`**.
 
 ## Il problema, in una riga
 
@@ -247,6 +251,11 @@ guardare il tasso di 429 durante un'asta e una giornata di campionato vere, e
 solo dopo accendere il 2 con una soglia tarata su dati veri. Accenderli insieme
 significa scegliere quella soglia a occhio.
 
+> **Questo è il pezzo rimasto in sospeso**, e ha una scadenza: l'error log di
+> nginx ruota ogni giorno e ne conserva 14, quindi le prove per decidere
+> **spariscono da sole il 31/08/2026**. Cosa guardare, come, e come leggere il
+> risultato: **`fail2ban_completamento.md`**.
+
 **SCRITTO**, versionato in `deploy/fail2ban/jail.d/vfoot.local` come si è fatto
 per systemd e nginx, non scritto a mano sul server. Istruzioni e verifica in
 `deploy/fail2ban/README.md`.
@@ -359,11 +368,15 @@ con i livelli 1 e 4, non svalutando gli hash.
 polling live e all'asta. La scelta di non averlo è già documentata in
 `settings.py` ed è giusta.
 
-## Come si installa
+## Come si è installato
 
-I file sono scritti e versionati; questi passi vanno fatti sul Linode. **Uno alla
-volta, verificando fra uno e l'altro** — l'ordine è quello che permette di
-tornare indietro senza aver rotto niente.
+Fatto il 17/08/2026 per i punti 1 e 2; il 3 aspetta (vedi
+`fail2ban_completamento.md`). Resta scritto perché è la procedura da ripetere
+dopo una ricostruzione del server, dove nginx torna com'era e **queste conf non
+tornano da sole**: il `git pull` porta il codice, non i file in `/etc`.
+
+**Uno alla volta, verificando fra uno e l'altro** — l'ordine è quello che
+permette di tornare indietro senza aver rotto niente.
 
 ```bash
 # 1. nginx — le zone e le location. Il -t non è una formalità: una virgola
@@ -382,8 +395,21 @@ ssh root@139.162.144.123 'fail2ban-client -t && systemctl reload fail2ban'
 
 Il livello 3 non ha passi propri: è codice, parte col deploy normale.
 
-**`nginx -t` non è stato eseguito** su questi file — in locale nginx non c'è.
-È la prima cosa da fare sul server, prima del reload.
+**`nginx -t` non si può eseguire in locale**, nginx qui non è installato: è
+sempre la prima cosa da fare sul server, prima di ogni reload.
+
+Cosa ha dato la verifica il 17/08/2026, sul server vero:
+
+- raffica su `/auth/register` con corpo vuoto — il serializer risponde 400
+  **prima** di calcolare l'hash, quindi provare il limite su un sito in uso costa
+  zero: passano 23, poi 429, **load rimasto a 0.00**;
+- **secchielli separati per token**, che è la prova che riguarda l'asta: 400
+  richieste con un token → 169 rifiuti, e un token diverso subito dopo passa
+  tutte e 10;
+- l'error log scrive il **nome della zona** (`by zone "vfoot_api"` /
+  `"vfoot_auth"`), che è ciò a cui si aggancia la jail;
+- **WebSocket intatto**: l'handshake arriva a uvicorn (il 403 è di Channels per
+  token mancante, non un blocco di nginx).
 
 ## Come si verifica che funzioni
 
