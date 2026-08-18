@@ -456,24 +456,36 @@ def resolve(decision, option: str, *, user=None) -> LeagueDecision:
     decision.resolved_by = user
     decision.resolved_at = timezone.now()
     decision.save(update_fields=["outcome", "status", "resolved_by", "resolved_at"])
-    # Whoever was asked is owed the answer. After the commit, never inside it.
-    from vfoot.services import league_notifications as notify
-    notify.on_commit(notify.notify_decision_resolved, decision, user)
+    # Whoever was asked is owed the answer — but not one email per player. The row
+    # is now in the outcome queue; `decision_digest` decides when the league hears
+    # about it, and sends one message for everything settled in the same sitting.
     return decision
 
 
 @transaction.atomic
 def set_consultation(decision, is_open: bool, *, user=None) -> LeagueDecision:
-    """Ask the league, or stop asking. Mails the members on the way IN only:
-    opening is a question addressed to them, closing is housekeeping."""
+    """Ask the league, or stop asking. Queues a question on the way IN only:
+    opening is a question addressed to them, closing is housekeeping.
+
+    Nothing is sent from here. The click leaves a mark and `decision_digest`
+    carries it out later, with everything else the admin asked in the same
+    sitting — one message for a queue of forty players instead of forty. Which
+    also means an admin who opens a consultation and thinks better of it within
+    the window has bothered nobody.
+    """
     if decision.status != LeagueDecision.STATUS_OPEN:
         raise ValueError("La decisione e' chiusa: non si puo' piu' consultare.")
     was_open = decision.consultation_open
     decision.consultation_open = bool(is_open)
-    decision.save(update_fields=["consultation_open"])
+    fields = ["consultation_open"]
     if decision.consultation_open and not was_open:
-        from vfoot.services import league_notifications as notify
-        notify.on_commit(notify.notify_consultation_opened, decision, user)
+        decision.consult_opened_at = timezone.now()
+        decision.consult_opened_by = user
+        # The mark is what the digest reads; it is cleared of any previous send so
+        # that a question asked again is asked again.
+        decision.consult_notified_at = None
+        fields += ["consult_opened_at", "consult_opened_by", "consult_notified_at"]
+    decision.save(update_fields=fields)
     return decision
 
 

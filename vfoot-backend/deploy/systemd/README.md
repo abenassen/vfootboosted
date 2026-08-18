@@ -27,6 +27,7 @@ questi file ne sono la copia versionata. L'ambiente (DB, SMTP, VAPID) arriva da
 | `vfoot-egress-refill` | 03/09/15/21 | `sofascore_egress.py refill` ×2 | i pool di IP si esauriscono e SofaScore/TM tornano a bloccarci (**root**) |
 | `vfoot-market` | ogni 90 s | `market_tick` | il mercato resta corretto ma **muto**: nessuno viene avvisato di una chiusura o di un sorpasso |
 | `vfoot-nudge` | 10:00 | `nudge_conclusions` | l'admin distratto non viene mai richiamato: classifica ferma finché non se ne accorge da solo |
+| `vfoot-digest` | ogni 5 min | `send_decision_digests` | **i membri non vengono avvisati di nessuna consultazione**: la domanda resta solo sullo schermo di chi apre l'app |
 | `vfoot-backup` | 03:15 | `/usr/local/sbin/vfoot-backup` | **nessuna copia dei dati** fra un deploy e l'altro (**root**) |
 | `vfoot-health` | 07:30 | `health_report --mail --prune` | nessuno si accorge che uno degli altri sette ha smesso di girare, o che gira e non riporta piu' niente |
 | `vfoot-agent` | ogni ora, ma decide da sé | `maintenance_run` | niente diagnosi automatica: il guasto lo scopri lo stesso dalla mail, ma lo capisci e lo correggi tu |
@@ -35,6 +36,25 @@ questi file ne sono la copia versionata. L'ambiente (DB, SMTP, VAPID) arriva da
 Fuori da questa tabella, ma schedulato lo stesso: il rinnovo dei certificati TLS,
 che è il timer di sistema `certbot.timer` (vedi `DEPLOY.md`) — di nostro non ha
 niente, ma se un giorno il sito diventa irraggiungibile in HTTPS, si guarda lì.
+
+### Il digest è l'unica strada, non un di più
+
+Gli altri job qui sopra rendono automatico qualcosa che comunque succederebbe
+(il mercato si sincronizza alla prima richiesta, la giornata si conclude a mano).
+`vfoot-digest` no: da quando le consultazioni sono raggruppate, aprirne una
+**non spedisce niente**, lascia solo un segno sulla riga. Se questa unità non
+gira, nessuno riceve né mail né push, e non c'è niente di rotto da vedere —
+l'admin ha cliccato, la domanda è sul sito, i membri semplicemente non lo sanno.
+
+Per questo `health_report` non si limita a controllare che il timer scatti (cosa
+che, per la regola «non allarmo su ciò che è spento», tacerebbe se il timer non
+fosse mai stato installato): guarda **la coda**, e se una consultazione aspetta da
+più di tre ore lo dice come allarme (`digest:stuck`).
+
+La finestra di raggruppamento non sta nel timer ma in `settings.py`
+(`VFOOT_DIGEST_QUIET_MINUTES`, dieci minuti di silenzio dopo l'ultimo click;
+`VFOOT_DIGEST_MAX_WAIT_MINUTES` è il tetto per chi ne apre uno ogni tanto). Il
+timer dice solo ogni quanto si va a vedere se è scaduta.
 
 ### Il backup è ancora mezzo backup
 

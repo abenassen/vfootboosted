@@ -1,0 +1,7 @@
+[Unit]
+Description=Vfoot digest: spedisce le consultazioni di lega raccolte, una mail per raffica
+[Service]
+Type=oneshot
+User=vfoot
+WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py send_decision_digests

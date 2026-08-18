@@ -525,8 +525,12 @@ ssh root@139.162.144.123 'cd /srv/vfoot-app/vfoot-backend/deploy/systemd
 ```
 `--enable-all` accende anche `agent` e `maintenance`. Se vuoi il go-live senza
 agente, elencali a mano: `--enable tick --enable calendar --enable tm-poll
---enable egress-refill --enable market --enable nudge --enable backup
---enable health`.
+--enable egress-refill --enable market --enable nudge --enable digest
+--enable backup --enable health`.
+
+`--enable digest` non è opzionale come gli altri: senza, aprire una consultazione
+di lega non avvisa più nessuno (né mail né push) e non c'è nulla di visibilmente
+rotto. Vedi `systemd/README.md`, «Il digest è l'unica strada».
 `vfoot-backup` deserves to go on **before** launch, not at it: it is the only copy
 of the data between one deploy and the next, and it depends on nothing.
 

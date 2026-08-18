@@ -143,6 +143,18 @@ export default function DecisionsPage() {
             </label>
           </div>
         </div>
+        {/* L'avviso non parte al click, e l'admin deve saperlo: altrimenti apre
+            una consultazione, nessuno riceve niente per dieci minuti e ne
+            conclude che le notifiche sono rotte. Le domande aperte nella stessa
+            sessione vengono spedite insieme, una mail sola — che e' esattamente
+            il motivo per cui esiste il ritardo. */}
+        {data?.is_admin && open.some((d) => d.consultation_open) ? (
+          <div className="mt-2 text-xs text-ink-faint">
+            Chi deve dare un parere viene avvisato in blocco: le consultazioni che
+            apri di seguito partono in un messaggio solo, qualche minuto dopo
+            l'ultima.
+          </div>
+        ) : null}
         {open.length === 0 ? (
           <div className="mt-3 text-sm text-ink-faint">
             Nessuna decisione in sospeso.

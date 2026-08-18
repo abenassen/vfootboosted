@@ -486,6 +486,18 @@ VFOOT_FRONTEND_BASE_URL = os.environ.get("VFOOT_FRONTEND_BASE_URL",
 # testing against a real relay.
 VFOOT_NOTIFY_EMAILS = _env_bool("VFOOT_NOTIFY_EMAILS", True)
 
+# Le consultazioni di lega non partono al click: si accumulano e partono in un
+# messaggio solo (vedi services/decision_digest.py). Una decisione sul ruolo
+# riguarda UN giocatore, quindi un import che ne porta quaranta faceva quaranta
+# mail a testa.
+#   quiet  = quanto silenzio serve per considerare finita la raffica di click;
+#   max    = quanto puo' aspettare al massimo il piu' vecchio della coda, perche'
+#            un admin che ne apre uno ogni tanto non tenga in ostaggio il primo.
+# Alzare `quiet` raggruppa di piu' e ritarda; l'unita' systemd che spedisce
+# (vfoot-digest, ogni 5 minuti) e' il passo minimo, non la finestra.
+VFOOT_DIGEST_QUIET_MINUTES = int(os.environ.get("VFOOT_DIGEST_QUIET_MINUTES", "10"))
+VFOOT_DIGEST_MAX_WAIT_MINUTES = int(os.environ.get("VFOOT_DIGEST_MAX_WAIT_MINUTES", "60"))
+
 # --- Web Push (VAPID) -----------------------------------------------------
 # Generate once with `manage.py vapid_keys` and put both in the environment. The
 # PUBLIC key is handed to every browser that subscribes — it identifies this

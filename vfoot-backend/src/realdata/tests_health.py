@@ -188,6 +188,31 @@ class ControlliDiSalute(TestCase):
 
         self.assertIn("matches:stuck", self._codes("alarm"))
 
+    def _pending_consultation(self, *, hours_ago):
+        """Una consultazione aperta e mai spedita, vecchia di N ore."""
+        from django.contrib.auth.models import User
+        from vfoot.models import FantasyLeague, LeagueDecision
+        owner = User.objects.create_user(f"boss{hours_ago}", password="x")
+        league = FantasyLeague.objects.create(name="L", owner=owner, mode="classic")
+        return LeagueDecision.objects.create(
+            league=league, title="Ruolo di X", options=[], consultation_open=True,
+            created_at=NOW - timedelta(hours=hours_ago),
+            consult_opened_at=NOW - timedelta(hours=hours_ago))
+
+    def test_una_consultazione_ferma_in_coda_e_un_allarme(self):
+        """Il caso che il controllo dei timer NON prende. Un'unità mai installata
+        non è fra quelle abilitate, quindi la regola «non allarmo su ciò che è
+        spento» la lascia passare in silenzio — ma il digest è l'unica strada per
+        cui una consultazione raggiunge qualcuno, e quella coda che si allunga è
+        il solo sintomo che esista."""
+        self._pending_consultation(hours_ago=9)
+        self.assertIn("digest:stuck", self._codes("alarm"))
+
+    def test_una_consultazione_appena_aperta_non_allarma(self):
+        """La finestra deve poter fare il suo lavoro senza essere un guasto."""
+        self._pending_consultation(hours_ago=0)
+        self.assertNotIn("digest:stuck", self._codes())
+
     # -- utilità ----------------------------------------------------------
 
     def _systemd(self, units):

@@ -52,6 +52,8 @@ JOBS: dict[str, tuple[str, timedelta, timedelta]] = {
                       timedelta(hours=3)),
     "poll_transfermarkt": ("vfoot-tm-poll.timer", timedelta(hours=12),
                            timedelta(hours=30)),
+    "send_decision_digests": ("vfoot-digest.timer", timedelta(minutes=5),
+                              timedelta(hours=1)),
 }
 
 # Counters whose collapse means the scrape broke rather than the week being quiet.
@@ -321,6 +323,31 @@ def _check_stuck_matches(health: Health, now) -> None:
                    matches=[m.external_id for m in stuck])
 
 
+def _check_pending_digests(health: Health, now) -> None:
+    """Consultazioni chieste alla lega e mai spedite a nessuno.
+
+    Il controllo dei job qui sopra non basta, ed e' il caso in cui serve di piu':
+    un timer che non e' MAI stato installato non e' fra quelli abilitati, quindi
+    la regola di questo modulo — non allarmare su cio' che l'operatore ha spento —
+    lo classifica «non lo controllo» e tace. Ma il digest e' l'unica strada per
+    cui una consultazione esce di qui: se non gira, gli utenti non ricevono
+    niente e sullo schermo e' tutto normale. La coda che si allunga e' l'unico
+    sintomo, e va guardata a prescindere da chi doveva svuotarla.
+    """
+    from vfoot.services import decision_digest      # realdata non dipende da vfoot
+    waiting = decision_digest.oldest_pending(now=now)
+    if waiting is None:
+        return
+    ceiling = decision_digest.max_wait()
+    if waiting > max(ceiling * 3, timedelta(hours=3)):
+        health.add("alarm", "digest:stuck",
+                   f"c'e' una consultazione di lega in coda da {_human(waiting)} e "
+                   f"non e' mai partita: la finestra piu' lunga e' "
+                   f"{_human(ceiling)}. Controlla vfoot-digest.timer "
+                   f"(`systemctl status vfoot-digest.timer`) — i membri non sono "
+                   f"stati avvisati di niente.")
+
+
 def _check_calendar_freshness(health: Health, now) -> None:
     floor = timedelta(minutes=float(
         getattr(settings, "VFOOT_CALENDAR_SYNC_MINUTES", 360)))
@@ -389,6 +416,7 @@ def report(*, now=None, skip_shape: bool = False) -> Health:
     _check_egress_pool(health, now)
     _check_stuck_matches(health, now)
     _check_calendar_freshness(health, now)
+    _check_pending_digests(health, now)
     _check_roster_overlap(health, now)
     if not skip_shape:
         _check_shape(health, now)

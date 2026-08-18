@@ -71,6 +71,26 @@ class LeagueDecision(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     resolved_at = models.DateTimeField(null=True, blank=True)
 
+    # -- notification bookkeeping ------------------------------------------
+    # Nobody is told about a consultation by the click that opens it: the league
+    # is told by a DIGEST, one message for everything that happened in a window
+    # (see services/decision_digest.py). These stamps are that queue, and they
+    # live here rather than in a table of their own because what they hold is
+    # about this decision — "the league has been asked", "the league has been
+    # told how it ended" — and there is exactly one of each per row.
+    #
+    # A role decision is per PLAYER, so an import that lands forty questions used
+    # to become forty emails to every member. The window is what turns that back
+    # into one.
+    consult_opened_at = models.DateTimeField(null=True, blank=True)
+    consult_opened_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True,
+                                          blank=True, related_name="+")
+    # Null while pending. Stamped when the digest carrying the question went out —
+    # never before, so a consultation withdrawn inside the window is one nobody is
+    # ever bothered with.
+    consult_notified_at = models.DateTimeField(null=True, blank=True)
+    outcome_notified_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         indexes = [models.Index(fields=["league", "status"]),
                    models.Index(fields=["league", "blocks_market", "status"])]

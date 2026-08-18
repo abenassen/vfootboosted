@@ -24,7 +24,7 @@ MAINT_SUDOERS_SRC="$HERE/../agent/vfoot-maintenance.sudoers"
 MAINT_SUDOERS_DST=/etc/sudoers.d/vfoot-maintenance
 
 # L'inventario. Aggiungere un job = una riga qui + i due file dell'unita'.
-ALL_UNITS=(tick calendar tm-poll egress-refill market nudge backup health agent maintenance)
+ALL_UNITS=(tick calendar tm-poll egress-refill market nudge digest backup health agent maintenance)
 
 DRY=""
 ENABLE=()

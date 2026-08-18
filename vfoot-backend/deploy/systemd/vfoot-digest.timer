@@ -1,0 +1,21 @@
+[Unit]
+Description=Spedisce i digest delle decisioni di lega ogni 5 minuti
+[Timer]
+# Questo timer NON e' la finestra: la finestra sta in settings.py
+# (VFOOT_DIGEST_QUIET_MINUTES, 10 minuti di silenzio). Qui c'e' solo ogni quanto
+# si guarda se e' scaduta, cioe' il ritardo massimo che si aggiunge.
+#
+# A differenza degli altri timer, questo non e' un lusso: aprire una
+# consultazione non spedisce piu' niente da se', quindi se questa unita' non
+# gira, i membri della lega non vengono avvisati DI NULLA — e sullo schermo
+# sembra tutto a posto. health_report ha un controllo apposta (digest:stuck) che
+# guarda la coda invece del timer, proprio per il caso in cui il timer non sia
+# mai stato installato.
+#
+# Niente Persistent: recuperare uno scatto saltato non serve, l'esecuzione
+# successiva trova la stessa coda e il comando e' idempotente.
+OnBootSec=4min
+OnUnitActiveSec=5min
+AccuracySec=30s
+[Install]
+WantedBy=timers.target

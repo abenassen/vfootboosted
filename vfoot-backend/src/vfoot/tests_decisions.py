@@ -951,9 +951,10 @@ class ConsultationEmailTests(DecisionQueueTests):
     is a survey with no respondents. Two messages, and only two: the question
     addressed to you, and its answer.
 
-    ``captureOnCommitCallbacks`` everywhere on purpose — the sends are queued for
-    after the commit, and a test that did not run them would pass while the real
-    thing never left the building.
+    Neither leaves at the click any more — both go out with the digest — so every
+    test here says WHEN it flushes. ``captureOnCommitCallbacks`` everywhere on
+    purpose: the sends are queued for after the commit, and a test that did not
+    run them would pass while the real thing never left the building.
     """
 
     def setUp(self):
@@ -979,11 +980,19 @@ class ConsultationEmailTests(DecisionQueueTests):
         with self.captureOnCommitCallbacks(execute=True):
             resolve(decision, option, user=user or self.admin)
 
+    def _flush(self, **kwargs):
+        from vfoot.services import decision_digest
+        kwargs.setdefault("force", True)
+        with self.captureOnCommitCallbacks(execute=True):
+            return decision_digest.flush(**kwargs)
+
     def test_opening_a_consultation_asks_the_members_by_email(self):
         d = self._one_decision()
         self._consult(d)
+        self.assertEqual(self.mail.outbox, [])          # il click non spedisce
 
-        self.assertEqual(len(self.mail.outbox), 1)          # not the admin himself
+        self._flush()
+        self.assertEqual(len(self.mail.outbox), 1)      # not the admin himself
         msg = self.mail.outbox[0]
         self.assertEqual(msg.to, [self.member.email])
         self.assertIn("parere", msg.subject)
@@ -993,24 +1002,38 @@ class ConsultationEmailTests(DecisionQueueTests):
     def test_closing_a_consultation_mails_nobody(self):
         d = self._one_decision()
         self._consult(d)
+        self._flush()
         self.mail.outbox = []
         self._consult(d, False)
+        self._flush()
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_a_consultation_withdrawn_inside_the_window_bothers_nobody(self):
+        """Asked and unasked before the digest left: there was never a question."""
+        d = self._one_decision()
+        self._consult(d)
+        self._consult(d, False)
+        self._flush()
         self.assertEqual(self.mail.outbox, [])
 
     def test_reopening_an_already_open_consultation_does_not_ask_twice(self):
         d = self._one_decision()
         self._consult(d)
+        self._flush()
         self.mail.outbox = []
         self._consult(d)
+        self._flush()
         self.assertEqual(self.mail.outbox, [])
 
     def test_the_outcome_goes_back_to_whoever_was_asked(self):
         d = self._one_decision()
         self._consult(d)
+        self._flush()
         cast_vote(d, self.member, "ATT")
         self.mail.outbox = []
 
         self._resolve(d, "CEN")
+        self._flush()
         self.assertEqual(len(self.mail.outbox), 1)
         msg = self.mail.outbox[0]
         self.assertEqual(msg.to, [self.member.email])
@@ -1020,30 +1043,190 @@ class ConsultationEmailTests(DecisionQueueTests):
     def test_a_routine_sign_off_mails_nobody(self):
         """No consultation, no mail: the admin's own backlog is not news."""
         self._resolve(self._one_decision(), "CEN")
+        self._flush()
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_a_question_settled_before_it_was_asked_says_nothing_either(self):
+        """Opened and resolved inside the same window. Announcing the answer to a
+        question nobody received reads like a message about somebody else."""
+        d = self._one_decision()
+        self._consult(d)
+        self._resolve(d, "CEN")
+        self._flush()
         self.assertEqual(self.mail.outbox, [])
 
     def test_a_member_without_an_address_is_simply_skipped(self):
         d = self._one_decision()
         User.objects.filter(id=self.member.id).update(email="")
         self._consult(d)
+        self._flush()
         self.assertEqual(self.mail.outbox, [])
 
     def test_a_broken_relay_does_not_break_the_admin_s_action(self):
         """The mail is a courtesy; the decision is the point."""
         from unittest.mock import patch
         d = self._one_decision()
+        self._consult(d)
         with patch("vfoot.services.league_notifications.get_connection",
                    side_effect=OSError("relay down")):
-            self._consult(d)
+            self._flush()
         d.refresh_from_db()
         self.assertTrue(d.consultation_open)
+        # E il segno resta messo: si perde un digest, non se ne spedisce uno
+        # doppio al primo giro in cui il relay torna (v. decision_digest).
+        self.assertIsNotNone(d.consult_notified_at)
 
     def test_the_switch_silences_everything(self):
         d = self._one_decision()
         with self.settings(VFOOT_NOTIFY_EMAILS=False):
             self._consult(d)
+            self._flush()
             self._resolve(d, "CEN")
+            self._flush()
         self.assertEqual(self.mail.outbox, [])
+
+
+class DecisionDigestTests(ConsultationEmailTests):
+    """Forty questions are one message.
+
+    The reason this exists: a role decision is about ONE player, so an import that
+    lands a queue used to produce one email per player per member — which is how a
+    league of friends learns to filter you into the bin.
+    """
+
+    def _decisions(self, n: int) -> list:
+        for i in range(n):
+            self._player(f"Dubbio {i}", method=CurrentPlayerRole.METHOD_DEFAULT)
+        open_role_decisions(self.league)
+        return list(LeagueDecision.objects.filter(league=self.league).order_by("id"))
+
+    def test_a_queue_of_questions_is_one_email_not_one_each(self):
+        decisions = self._decisions(3)
+        for d in decisions:
+            self._consult(d)
+        self._flush()
+
+        self.assertEqual(len(self.mail.outbox), 1)
+        msg = self.mail.outbox[0]
+        self.assertEqual(msg.to, [self.member.email])
+        self.assertIn("3 pareri", msg.subject)
+        for d in decisions:
+            self.assertIn(d.question, msg.body)
+
+    def test_the_outcomes_are_grouped_the_same_way(self):
+        decisions = self._decisions(3)
+        for d in decisions:
+            self._consult(d)
+        self._flush()
+        self.mail.outbox = []
+
+        for d in decisions:
+            self._resolve(d, "CEN")
+        self._flush()
+
+        self.assertEqual(len(self.mail.outbox), 1)
+        self.assertIn("3 decisioni prese", self.mail.outbox[0].subject)
+
+    def test_nobody_is_asked_his_own_question(self):
+        """Two admins, one digest each way: each is told what the other asked and
+        not what he asked himself."""
+        LeagueMembership.objects.filter(league=self.league, user=self.member).update(
+            role=LeagueMembership.ROLE_ADMIN)
+        first, second = self._decisions(2)
+        self._consult(first, user=self.admin)
+        self._consult(second, user=self.member)
+        self._flush()
+
+        by_to = {m.to[0]: m for m in self.mail.outbox}
+        self.assertEqual(set(by_to), {self.admin.email, self.member.email})
+        self.assertIn(second.question, by_to[self.admin.email].body)
+        self.assertNotIn(first.question, by_to[self.admin.email].body)
+        self.assertIn(first.question, by_to[self.member.email].body)
+        self.assertNotIn(second.question, by_to[self.member.email].body)
+
+    def test_the_window_waits_for_the_clicking_to_stop(self):
+        from vfoot.services import decision_digest
+        decisions = self._decisions(2)
+        self._consult(decisions[0])
+        opened = LeagueDecision.objects.get(id=decisions[0].id).consult_opened_at
+
+        # Un minuto dopo il primo click l'admin sta ancora lavorando la coda.
+        self._flush(force=False, now=opened + timedelta(minutes=1))
+        self.assertEqual(self.mail.outbox, [])
+
+        self._consult(decisions[1])
+        later = LeagueDecision.objects.get(id=decisions[1].id).consult_opened_at
+        self._flush(force=False,
+                    now=later + decision_digest.quiet_window() + timedelta(seconds=1))
+        self.assertEqual(len(self.mail.outbox), 1)
+        self.assertIn("2 pareri", self.mail.outbox[0].subject)
+
+    def test_a_slow_drip_does_not_hold_the_first_question_hostage(self):
+        """Una domanda ogni tanto non fa mai silenzio: senza il tetto, la prima
+        resterebbe in coda finche' l'admin non smette del tutto."""
+        from vfoot.services import decision_digest
+        decisions = self._decisions(2)
+        self._consult(decisions[0])
+        self._consult(decisions[1])
+        now = timezone.now()
+        LeagueDecision.objects.filter(id=decisions[0].id).update(
+            consult_opened_at=now - decision_digest.max_wait() - timedelta(minutes=1))
+
+        # L'ultimo click e' di adesso: la finestra del silenzio NON e' chiusa.
+        self._flush(force=False, now=now)
+        self.assertEqual(len(self.mail.outbox), 1)
+
+    def test_a_second_run_sends_nothing(self):
+        for d in self._decisions(2):
+            self._consult(d)
+        self._flush()
+        self.mail.outbox = []
+        self._flush()
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_two_leagues_get_two_digests_never_each_other_s(self):
+        other = FantasyLeague.objects.create(
+            name="Altra", owner=self.admin, mode="classic",
+            reference_season=self.cs)
+        outsider = User.objects.create_user("estraneo", password="x",
+                                            email="estraneo@example.com")
+        LeagueMembership.objects.create(league=other, user=outsider,
+                                        role=LeagueMembership.ROLE_MANAGER)
+        LeagueMembership.objects.create(league=other, user=self.admin,
+                                        role=LeagueMembership.ROLE_ADMIN)
+        mine = self._decisions(1)[0]
+        open_role_decisions(other)
+        theirs = LeagueDecision.objects.get(league=other)
+        self._consult(mine)
+        self._consult(theirs)
+        self._flush()
+
+        by_to = {m.to[0]: m for m in self.mail.outbox}
+        self.assertEqual(len(self.mail.outbox), 2)      # una a testa, non due a testa
+        self.assertEqual(set(by_to), {self.member.email, outsider.email})
+        self.assertIn('lega "L"', by_to[self.member.email].body)
+        self.assertIn('lega "Altra"', by_to[outsider.email].body)
+
+    def test_the_command_is_what_actually_sends(self):
+        """L'unita' systemd chiama questo, e senza di lei non parte nulla."""
+        from django.core.management import call_command
+        from io import StringIO
+        for d in self._decisions(2):
+            self._consult(d)
+        out = StringIO()
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("send_decision_digests", "--force", stdout=out)
+        self.assertEqual(len(self.mail.outbox), 1)
+        self.assertIn("consultazioni=2", out.getvalue())
+
+    def test_a_dry_run_decides_everything_and_sends_nothing(self):
+        from vfoot.services import decision_digest
+        for d in self._decisions(2):
+            self._consult(d)
+        stats = self._flush(dry_run=True)
+        self.assertEqual(stats["consultations"], 2)
+        self.assertEqual(self.mail.outbox, [])
+        self.assertEqual(decision_digest.pending_consultations().count(), 2)
 
 
 class NewDecisionNotificationTests(LateArrivalTests):

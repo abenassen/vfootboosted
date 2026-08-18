@@ -224,25 +224,48 @@ class DecisionPushTests(TestCase):
             question="Che ruolo assegnare a D. Berardi?",
             options=ROLE_OPTIONS, proposed="CEN", blocks_market=True)
 
+    def _flush(self):
+        """Il click non spedisce piu' niente, ne' mail ne' push: e' il digest che
+        esce, ed e' lui che va eseguito perche' il telefono squilli."""
+        from vfoot.services import decision_digest
+        return decision_digest.flush(force=True)
+
     def test_opening_a_consultation_pushes_to_the_members(self):
         from vfoot.services.league_decisions import set_consultation
         d = self._decision()
         with patch("pywebpush.webpush") as wp, self.captureOnCommitCallbacks(execute=True):
             set_consultation(d, True, user=self.admin)
+            self._flush()
         self.assertEqual(wp.call_count, 1)   # the member, not the admin
         import json
         payload = json.loads(wp.call_args.kwargs["data"])
         self.assertIn("parere", payload["title"])
         self.assertEqual(payload["url"], "/decisioni")
-        # Per-subject tag: repeated news about one decision replaces itself in the
-        # shade instead of stacking up.
-        self.assertEqual(payload["tag"], f"decision-{d.id}")
+        # Per-LEAGUE tag, not per decision: the message is now one digest for the
+        # league, and a second digest replacing the first in the shade loses
+        # nothing — they both point at the page that lists every open question.
+        self.assertEqual(payload["tag"], f"consultations-{self.league.id}")
+
+    def test_a_queue_of_questions_rings_once(self):
+        """Il motivo per cui esiste il digest, dal lato del telefono: quaranta
+        domande erano quaranta squilli."""
+        from vfoot.services.league_decisions import set_consultation
+        decisions = [self._decision() for _ in range(3)]
+        with patch("pywebpush.webpush") as wp, self.captureOnCommitCallbacks(execute=True):
+            for d in decisions:
+                set_consultation(d, True, user=self.admin)
+            self._flush()
+        self.assertEqual(wp.call_count, 1)
+        import json
+        payload = json.loads(wp.call_args.kwargs["data"])
+        self.assertIn("3 pareri", payload["title"])
 
     def test_a_routine_sign_off_pushes_nothing(self):
         from vfoot.services.league_decisions import resolve
         d = self._decision()
         with patch("pywebpush.webpush") as wp, self.captureOnCommitCallbacks(execute=True):
             resolve(d, "CEN", user=self.admin)
+            self._flush()
         wp.assert_not_called()
 
     def test_a_broken_push_does_not_stop_the_email(self):
@@ -254,5 +277,6 @@ class DecisionPushTests(TestCase):
         with patch("pywebpush.webpush", side_effect=RuntimeError("kaboom")), \
                 self.captureOnCommitCallbacks(execute=True):
             set_consultation(d, True, user=self.admin)
+            self._flush()
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, [self.member.email])
