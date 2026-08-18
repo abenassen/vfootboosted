@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 
 from realdata.models import Player
 from vfoot.models import (
-    FantasyLeague, LeagueDecision, LeagueDecisionVote, LeagueMembership,
+    FantasyLeague, LeagueDecision, LeagueMembership,
 )
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
@@ -35,9 +35,43 @@ def _is_admin(league, user_id) -> bool:
     return bool(m and m.role == LeagueMembership.ROLE_ADMIN) or league.owner_id == user_id
 
 
-def _serialize(d: LeagueDecision, user) -> dict:
-    my = LeagueDecisionVote.objects.filter(decision=d, user=user).first()
-    return {
+def _voter_names(league) -> dict[int, str]:
+    """user_id -> how this league knows him.
+
+    The team name, because that is what people call each other inside a league;
+    the username only for whoever has not named a team yet.
+    """
+    out = {}
+    for m in (LeagueMembership.objects.filter(league=league)
+              .select_related("user", "team")):
+        team = getattr(m, "team", None)
+        out[m.user_id] = (team.name if team else "") or m.user.username
+    return out
+
+
+def _voters_for(league, user_id) -> dict[int, str] | None:
+    """The name map for an admin, None for everyone else.
+
+    Which is the whole visibility rule: the tally is public, the names are not.
+    The admin is the one who has to weigh the opinions and then answer for the
+    decision, and an opinion whose author he cannot see is hard to weigh — a
+    league of ten where three say "attaccante" is a different question depending
+    on WHICH three. The members keep seeing the counts only, so nobody's vote is
+    put on display in front of the people he is voting with.
+    """
+    return _voter_names(league) if _is_admin(league, user_id) else None
+
+
+def _serialize(d: LeagueDecision, user, *, voter_names: dict | None = None) -> dict:
+    # One pass over the votes for all three readings — the caller's own answer,
+    # the counts, and the names. `d.votes.all()` rides the list view's prefetch,
+    # where `LeagueDecision.tally()` would go back to the database per decision.
+    votes = list(d.votes.all())
+    my = next((v for v in votes if v.user_id == user.id), None)
+    tally = {o.get("value"): 0 for o in d.options}
+    for v in votes:
+        tally[v.option] = tally.get(v.option, 0) + 1
+    out = {
         "id": d.id, "kind": d.kind, "title": d.title, "question": d.question,
         "options": d.options, "proposed": d.proposed, "rationale": d.rationale,
         "blocks_market": d.blocks_market, "consultation_open": d.consultation_open,
@@ -48,9 +82,18 @@ def _serialize(d: LeagueDecision, user) -> dict:
         "my_vote": my.option if my else None,
         # The tally is shown to everyone: a consultation people cannot see the
         # result of is a survey, not a conversation.
-        "tally": d.tally(),
-        "votes_total": sum(d.tally().values()),
+        "tally": tally,
+        "votes_total": sum(tally.values()),
     }
+    if voter_names is not None:
+        by_option: dict[str, list[str]] = {o.get("value"): [] for o in d.options}
+        for v in votes:
+            name = voter_names.get(v.user_id)
+            if name:
+                by_option.setdefault(v.option, []).append(name)
+        out["voters"] = {k: sorted(names, key=str.lower)
+                         for k, names in by_option.items()}
+    return out
 
 
 class LeagueDecisionListView(APIView):
@@ -65,7 +108,9 @@ class LeagueDecisionListView(APIView):
         if request.query_params.get("status", "open") != "all":
             qs = qs.filter(status=request.query_params.get("status", "open"))
         admin = _is_admin(league, request.user.id)
-        items = [_serialize(d, request.user) for d in qs.order_by("-blocks_market", "id")]
+        names = _voter_names(league) if admin else None
+        items = [_serialize(d, request.user, voter_names=names)
+                 for d in qs.order_by("-blocks_market", "id")]
         if not admin:
             # A member's queue is what he has been ASKED about; the admin's
             # sign-off backlog is not everyone's business.
@@ -96,7 +141,8 @@ class LeagueDecisionVoteView(APIView):
             cast_vote(d, request.user, str(request.data.get("option", "")))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(_serialize(d, request.user))
+        return Response(_serialize(d, request.user,
+                                   voter_names=_voters_for(league, request.user.id)))
 
 
 class LeagueDecisionResolveView(APIView):
@@ -116,7 +162,7 @@ class LeagueDecisionResolveView(APIView):
             resolve(d, str(request.data.get("option", "")), user=request.user)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(_serialize(d, request.user))
+        return Response(_serialize(d, request.user, voter_names=_voter_names(league)))
 
 
 class LeagueDecisionConsultView(APIView):
@@ -136,7 +182,7 @@ class LeagueDecisionConsultView(APIView):
             set_consultation(d, bool(request.data.get("open", True)), user=request.user)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(_serialize(d, request.user))
+        return Response(_serialize(d, request.user, voter_names=_voter_names(league)))
 
 
 class LeagueDecisionOpenView(APIView):
@@ -161,7 +207,9 @@ class LeagueDecisionOpenView(APIView):
                                                      opened_by=request.user)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({**_serialize(decision, request.user), "created": created},
+        return Response({**_serialize(decision, request.user,
+                                      voter_names=_voter_names(league)),
+                         "created": created},
                         status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 

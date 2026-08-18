@@ -21,7 +21,8 @@ from vfoot.services import push_channel
 from vfoot.api.league_views import _real_transfers
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
-    open_role_decisions, resolve, unavailable_players, undecided_player_ids,
+    open_role_decisions, resolve, set_consultation, unavailable_players,
+    undecided_player_ids,
 )
 
 
@@ -249,6 +250,40 @@ class DecisionApiTests(DecisionQueueTests):
                              {"option": "ATT"}, format="json")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["my_vote"], "ATT")
+
+    def test_the_admin_sees_who_voted_what_and_the_members_do_not(self):
+        """Counts for everyone, names for the admin alone.
+
+        He is the one who answers for the decision, and three votes for
+        "attaccante" are a different argument depending on which three said it.
+        The members keep the tally they already had: nobody's opinion goes on
+        display in front of the people he is voting with.
+        """
+        from vfoot.models import FantasyTeam
+        FantasyTeam.objects.create(
+            league=self.league, name="Real Panino",
+            manager=LeagueMembership.objects.get(league=self.league, user=self.member))
+        self._player("Uno", method=CurrentPlayerRole.METHOD_DEFAULT)
+        open_role_decisions(self.league)
+        d = LeagueDecision.objects.get(league=self.league)
+        set_consultation(d, True)
+        cast_vote(d, self.member, "ATT")
+        cast_vote(d, self.admin, "DIF")
+
+        self.client.force_authenticate(user=self.admin)
+        body = self.client.get(f"/api/v1/leagues/{self.league.id}/decisions").json()
+        voters = body["decisions"][0]["voters"]
+        # By team name, because that is what the league calls him; by username
+        # only for whoever has not named a team (the admin, here).
+        self.assertEqual(voters["ATT"], ["Real Panino"])
+        self.assertEqual(voters["DIF"], ["boss"])
+        self.assertEqual(voters["CEN"], [])
+
+        self.client.force_authenticate(user=self.member)
+        body = self.client.get(f"/api/v1/leagues/{self.league.id}/decisions").json()
+        seen = body["decisions"][0]
+        self.assertNotIn("voters", seen)
+        self.assertEqual(seen["tally"]["ATT"], 1)  # il conteggio resta pubblico
 
     def test_list_hides_the_admin_backlog_from_members(self):
         self._player("Uno", method=CurrentPlayerRole.METHOD_DEFAULT)

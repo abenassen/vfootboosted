@@ -30,6 +30,10 @@ export interface LeagueDecision {
   /** option value -> number of votes. Advisory: the admin decides. */
   tally: Record<string, number>;
   votes_total: number;
+  /** option value -> who voted it, by team name. Only in the admin's copy: he
+   *  weighs the opinions, so he sees whose they are; a member gets the counts
+   *  alone, as before. */
+  voters?: Record<string, string[]>;
 }
 
 export interface LeagueDecisionsResponse {

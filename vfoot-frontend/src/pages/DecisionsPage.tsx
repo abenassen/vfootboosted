@@ -199,6 +199,12 @@ function DecisionRow({
   onConsult: (open: boolean) => void;
 }) {
   const [choice, setChoice] = useState(d.proposed || d.my_vote || '');
+  // Chi ha votato che cosa: presente solo nella copia dell'amministratore. Da
+  // mouse basta fermarsi sul ruolo; da telefono il passaggio del dito non
+  // esiste, quindi la stessa lista si apre con un tocco sotto ai bottoni.
+  const [showVoters, setShowVoters] = useState(false);
+  const voters = d.voters ?? null;
+  const votedOptions = voters ? d.options.filter((o) => (voters[o.value]?.length ?? 0) > 0) : [];
   return (
     <div className="py-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -217,28 +223,65 @@ function DecisionRow({
         {d.options.map((o) => {
           const selected = choice === o.value;
           const votes = d.tally[o.value] ?? 0;
+          const who = voters?.[o.value] ?? [];
           return (
-            <button
-              key={o.value}
-              type="button"
-              onClick={() => setChoice(o.value)}
-              className={`rounded-xl border px-3 py-1.5 text-sm font-semibold ${
-                selected
-                  ? 'border-line bg-ink text-paper'
-                  : 'border-line bg-surface text-ink-soft hover:bg-surface-2'
-              }`}
-            >
-              {o.label}
-              {o.value === d.proposed ? <span className="ml-1 text-[10px] opacity-70">proposto</span> : null}
-              {votes > 0 ? (
-                <span className="ml-1 text-[10px] font-bold opacity-90">
-                  · {votes} {votes === 1 ? 'voto' : 'voti'}
+            <span key={o.value} className="group relative inline-flex">
+              <button
+                type="button"
+                onClick={() => setChoice(o.value)}
+                className={`rounded-xl border px-3 py-1.5 text-sm font-semibold ${
+                  selected
+                    ? 'border-line bg-ink text-paper'
+                    : 'border-line bg-surface text-ink-soft hover:bg-surface-2'
+                }`}
+              >
+                {o.label}
+                {o.value === d.proposed ? <span className="ml-1 text-[10px] opacity-70">proposto</span> : null}
+                {votes > 0 ? (
+                  <span className="ml-1 text-[10px] font-bold opacity-90">
+                    · {votes} {votes === 1 ? 'voto' : 'voti'}
+                  </span>
+                ) : null}
+              </button>
+              {/* Il fumetto e' dietro a `(hover: hover)`: su un touch il tocco
+                  serve a scegliere il ruolo, e un :hover che resta appiccicato
+                  dopo il tocco coprirebbe il bottone accanto. Li' la lista si
+                  legge dal pieghevole sotto. */}
+              {who.length > 0 ? (
+                <span
+                  role="tooltip"
+                  className="pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden w-max max-w-[16rem] rounded-lg border border-line bg-surface px-2 py-1 text-xs text-ink-soft shadow-card [@media(hover:hover)]:group-focus-within:block [@media(hover:hover)]:group-hover:block"
+                >
+                  {who.join(', ')}
                 </span>
               ) : null}
-            </button>
+            </span>
           );
         })}
       </div>
+
+      {votedOptions.length > 0 ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setShowVoters((v) => !v)}
+            aria-expanded={showVoters}
+            className="text-xs font-semibold text-ink-soft underline underline-offset-2"
+          >
+            {showVoters ? 'nascondi chi ha votato' : 'chi ha votato'}
+          </button>
+          {showVoters ? (
+            <div className="mt-1 rounded-xl bg-surface-2 px-3 py-2 text-xs">
+              {votedOptions.map((o) => (
+                <div key={o.value} className="flex flex-wrap gap-x-1 py-0.5">
+                  <span className="font-semibold text-ink">{o.label}:</span>
+                  <span className="text-ink-soft">{voters?.[o.value].join(', ')}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {d.consultation_open ? (
