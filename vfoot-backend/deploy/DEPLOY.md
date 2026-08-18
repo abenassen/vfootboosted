@@ -568,3 +568,52 @@ of the data between one deploy and the next, and it depends on nothing.
    HTTPS è un prerequisito assoluto (service worker e push non esistono in
    chiaro), ed è già a posto con Let's Encrypt. `localhost` è l'unica eccezione,
    ed è ciò che rende collaudabile lo sviluppo.
+
+## Stemmi caricati dagli utenti (primo deploy che li porta)
+
+1. **Deps** — nessuna nuova: `pillow` era già in `requirements.txt`. Verifica
+   però che quella build abbia il WebP, altrimenti gli stemmi escono in PNG
+   (funziona, pesa di più):
+
+   ```sh
+   ../.venv/bin/python -c "import PIL.features as f; print(f.check('webp'))"
+   ```
+
+2. **Migrazione** — `manage.py migrate` crea `vfoot_crestimage` e
+   `vfoot_crestreport`. Su PostgreSQL la migrazione fa anche un
+   `ALTER COLUMN data SET STORAGE EXTERNAL`: dentro c'è un WebP, già compresso,
+   e senza quello TOAST proverebbe a comprimerlo di nuovo a ogni scrittura. Su
+   SQLite (sviluppo) quel passo non fa nulla.
+
+3. **nginx** — nessuna regola nuova, ed è il punto: i byte stanno nel database e
+   li serve l'app, sotto `/api/v1/crest-images/<hash>`, che ricade nella
+   `location ~ ^/(api|admin)/` già esistente. **Non** serve una `location
+   /media/` (non c'è, e non deve esserci: `MEDIA_ROOT` resta vuoto).
+
+4. **Backup** — niente da cambiare: le immagini sono righe, quindi vengono già
+   dentro il `pg_dump` notturno. Il tar dei media resta quello che era, cioè
+   quasi sempre vuoto.
+
+5. **Taglie e limiti** — `DJANGO_CREST_UPLOAD_RATE` (default `30/day` per
+   utente) se serve stringere. Il tetto sul file è nel codice
+   (`services/crest_images.py`: 2 MB, 16 megapixel), e il `client_max_body_size
+   32M` di nginx è comodamente sopra.
+
+6. **Verifica** dopo il restart, con un token qualsiasi:
+
+   ```sh
+   curl -s -X POST https://vfoot.it/api/v1/crest-images \
+     -H "Authorization: Token $TOK" -F "file=@prova.jpg"     # {"hash":"...","bytes":...}
+   curl -sD - -o /dev/null https://vfoot.it/api/v1/crest-images/$HASH \
+     | grep -Ei 'HTTP/|content-type|cache-control|x-content-type'
+   ```
+
+   Attese: `200`, `image/webp`, `public, max-age=31536000, immutable`, `nosniff`.
+   L'endpoint che serve i byte **non** chiede il token, ed è voluto: un `<image>`
+   dentro un SVG non può mandare l'intestazione `Authorization`. A proteggerlo è
+   l'indirizzo, che è lo sha256 del contenuto.
+
+7. **Moderazione** — le segnalazioni arrivano per mail a `VFOOT_FEEDBACK_EMAIL`
+   (la stessa delle segnalazioni generali) e si smistano dall'admin di Django,
+   dove `CrestImage` ha le miniature e l'azione «revoca». La prima linea però è
+   l'admin di lega, dalla scheda Roster della gestione lega.

@@ -28,6 +28,7 @@ from vfoot.models.fantasy import (
     MarketOffer,
     MarketEvent,
 )
+from vfoot.models.crest import CrestImage, CrestReport
 from vfoot.models.decisions import LeagueDecision, LeagueDecisionVote
 from vfoot.models.feedback import Feedback
 from vfoot.models.heatmap import HeatmapGrid
@@ -59,6 +60,8 @@ __all__ = [
     "FantasyRosterSlot",
     "FantasyTeam",
     "Feedback",
+    "CrestImage",
+    "CrestReport",
     "HeatmapGrid",
     "LeagueMembership",
     "LeaguePlayerRole",

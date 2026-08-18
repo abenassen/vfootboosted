@@ -5,6 +5,7 @@ import { getTeamLineup } from '../api';
 import { useLeagueContext } from '../league/LeagueContext';
 import RosterView from '../components/RosterView';
 import Crest from '../components/Crest';
+import { CrestReportButton } from '../components/CrestModeration';
 
 /** Another participant's roster, in the same structured view as one's own — the
  *  read-only counterpart of the Squad page, reached from the League page. The
@@ -67,6 +68,16 @@ export default function TeamRosterPage() {
             </Button>
           </Link>
         </div>
+        {/* Fuori dalla riga dell'intestazione, non dentro la colonna del nome:
+            chiuso è un link da nulla, ma aperto è un modulo, e in una colonna
+            larga metà schermo a 390px il campo di testo non ci sta. Compare solo
+            se lo stemma è un'immagine caricata — su uno composto non ci sarebbe
+            niente da segnalare. */}
+        <CrestReportButton
+          leagueId={selectedLeagueId}
+          descriptor={data.team.crest}
+          className="mt-3"
+        />
       </Card>
       {/* Niente albo d'oro qui. Una rosa è la proprietà di UNA squadra in UNA
           lega e finisce con lei; i trofei di un fantallenatore no — si accumulano

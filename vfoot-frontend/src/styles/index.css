@@ -47,6 +47,13 @@
   --vf-ink-faint: 139 151 158;
   --vf-line: 228 234 231;
 
+  /* Il bordo dello stemma. Colore intero e non terna, perché non passa da
+     Tailwind: lo consuma direttamente un attributo `stroke` dentro l'SVG.
+     Vive qui e non nel componente perché è l'unica cosa che separa la sagoma
+     dal fondo, e un valore fisso funziona in un tema solo — su fondo scuro un
+     blu notte al 45% semplicemente sparisce, e con lui la forma. */
+  --vf-crest-edge: rgb(15 23 42 / .45);
+
   /* stato */
   --vf-warn: 180 83 9;      --vf-warn-bg: 254 243 199;
   --vf-live: 109 40 217;    --vf-live-bg: 237 233 254;
@@ -74,6 +81,10 @@
   --vf-ink-soft: 163 177 186;
   --vf-ink-faint: 110 125 135;
   --vf-line: 34 48 58;
+
+  /* Chiaro, non l'inverso esatto: al 55% l'orlo si stacca dal fondo profondo
+     senza diventare un contorno da fumetto sulle miniature da 20 px. */
+  --vf-crest-edge: rgb(226 235 240 / .55);
 
   --vf-warn: 251 191 36;    --vf-warn-bg: 58 44 7;
   --vf-live: 167 139 250;   --vf-live-bg: 42 33 69;

@@ -20,6 +20,7 @@ from django.urls import reverse
 from rest_framework.throttling import ScopedRateThrottle
 
 from vfoot.services.auth_tokens import issue_token
+from vfoot.tests_crest_images import png_bytes, upload_file
 
 REAL_CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache",
                           "LOCATION": "throttle-tests"}}
@@ -143,3 +144,34 @@ class PasswordChangeThrottleTests(TestCase):
         with mock.patch.dict(ScopedRateThrottle.THROTTLE_RATES, {"password_change": "1/hour"}):
             self.assertEqual(self._change(self.andrea, "primaNuova9").status_code, 200)
             self.assertEqual(self._change(self.bruno, "altraNuova9").status_code, 200)
+
+
+@override_settings(CACHES=REAL_CACHE)
+class CrestUploadThrottleTests(TestCase):
+    """Caricare uno stemma costa una decodifica Pillow. Il client manda 256×256
+    gia' pronti, ma il client non e' obbligatorio: chi chiama a mano puo' spedire
+    dodici megapixel, e questo scope e' l'unica cosa che conta quante volte."""
+
+    def setUp(self):
+        ScopedRateThrottle.cache.clear()
+        self.andrea = User.objects.create_user(
+            username="andrea", email="andrea@example.com", password=PASSWORD)
+        self.bruno = User.objects.create_user(
+            username="bruno", email="bruno@example.com", password=PASSWORD)
+
+    def _upload(self, user):
+        # Il client di Django manda multipart da se' quando nel dizionario c'e'
+        # un file: e' la forma in cui questo endpoint riceve davvero.
+        return self.client.post(
+            reverse("crest-image-upload"), {"file": upload_file(png_bytes(64, 64))},
+            HTTP_AUTHORIZATION=f"Token {issue_token(user).key}")
+
+    def test_one_user_hammering_is_stopped(self):
+        with mock.patch.dict(ScopedRateThrottle.THROTTLE_RATES, {"crest_upload": "1/day"}):
+            self.assertEqual(self._upload(self.andrea).status_code, 201)
+            self.assertEqual(self._upload(self.andrea).status_code, 429)
+
+    def test_the_count_is_per_user(self):
+        with mock.patch.dict(ScopedRateThrottle.THROTTLE_RATES, {"crest_upload": "1/day"}):
+            self.assertEqual(self._upload(self.andrea).status_code, 201)
+            self.assertEqual(self._upload(self.bruno).status_code, 201)

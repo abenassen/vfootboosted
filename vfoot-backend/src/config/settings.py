@@ -147,6 +147,12 @@ REST_FRAMEWORK = {
         # costs half a second. This is the only layer that can bound it, and it
         # is counted PER USER, which is something nginx cannot express at all.
         "password_change": os.environ.get("DJANGO_PASSWORD_CHANGE_RATE", "10/hour"),
+        # Caricare uno stemma costa una decodifica Pillow: poca cosa per il file
+        # che manda il nostro client (già 256×256), parecchia per una foto da
+        # dodici megapixel mandata a mano. Contato PER UTENTE — nginx qui non
+        # può aiutare, perché la sua zona /api/ è tarata sul traffico dell'asta.
+        # Trenta al giorno è dieci volte quello che serve a scegliere uno stemma.
+        "crest_upload": os.environ.get("DJANGO_CREST_UPLOAD_RATE", "30/day"),
     },
 }
 

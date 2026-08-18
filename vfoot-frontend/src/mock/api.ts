@@ -307,6 +307,32 @@ export async function updateMyTeam(leagueId: number, patch: { name?: string; cre
   return { team_id: team.team_id, name: team.name, crest: team.crest ?? '' };
 }
 
+// --- stemmi caricati -------------------------------------------------------
+// Nel provider finto non c'è un posto dove mettere dei byte, e inventarne uno
+// (un blob URL) darebbe un'anteprima che sparisce al primo ricaricamento: un
+// finto che mente sul comportamento è peggio di uno che dice di non saper fare.
+
+export async function uploadCrestImage(_file: Blob): Promise<{ hash: string; bytes: number }> {
+  await sleep(200);
+  throw new Error('Per caricare uno stemma serve il backend vero (VITE_API_PROVIDER=backend).');
+}
+
+export function crestImageUrl(hash: string): string {
+  // Un indirizzo che non risponde: <Crest> ricade sullo stemma composto, che è
+  // esattamente ciò che succede in produzione quando l'immagine non c'è.
+  return `/mock-crest/${hash}`;
+}
+
+export async function reportCrestImage(_leagueId: number, _hash: string, _reason?: string) {
+  await sleep(120);
+  return { id: 1, created: true, detail: 'Segnalazione ricevuta (finta).' };
+}
+
+export async function revokeCrestImage(_leagueId: number, hash: string, _reason?: string) {
+  await sleep(120);
+  return { hash, revoked: true };
+}
+
 export async function getLeagueActivity(_leagueId: number, _limit = 12) {
   await sleep(80);
   return [] as Array<{

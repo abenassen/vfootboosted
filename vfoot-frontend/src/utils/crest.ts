@@ -1,11 +1,17 @@
 // Club crest, composed in the browser and stored as an opaque descriptor —
 // exactly like the manager's avatar (see utils/avatar.ts), and for the same
-// reason: the schema can grow without a backend migration, and there are no
-// uploaded files to serve, back up or ship inside the dev-db dump.
+// reason: the schema can grow without a backend migration, and this file owns
+// the schema outright. The server stores the string and echoes it back; it has
+// never parsed it, and adding uploads did not change that.
 //
 // Hand-drawn SVG rather than a DiceBear style: a crest has to stay readable at
 // 20px in a standings table, which means few shapes, hard edges and real
 // contrast — not an illustration shrunk down.
+//
+// Three ways a team can have a crest, and they are a chain rather than a menu:
+// an uploaded image, else the composed layers below, else one seeded from the
+// team name. Each falls through to the next, so there is no state in which a
+// team has no crest and none in which a broken image leaves a grey box.
 
 export type CrestShape = 'shield' | 'circle' | 'pennant';
 export type CrestPattern = 'solid' | 'stripes' | 'halves' | 'sash' | 'hoops';
@@ -20,10 +26,28 @@ export type CrestOptions = {
   ink: string;
   /** An emoji; empty => the team's initials are drawn instead. */
   symbol: string;
+  /** sha256 of an uploaded image; empty => the composed crest above is drawn.
+   *
+   *  A CLAIM, not a fact: the server stores the descriptor without ever opening
+   *  it, so nothing here guarantees the image exists. The endpoint that serves
+   *  the bytes is the authority — an unknown or revoked hash simply 404s, and
+   *  <Crest> falls back to the composed layers, which is why they are kept here
+   *  rather than replaced. That is also what makes an admin's "remove this
+   *  crest" one DELETE with no cleanup pass: everything pointing at it degrades
+   *  on its own. */
+  img: string;
 };
 
 export const CREST_SHAPES: CrestShape[] = ['shield', 'circle', 'pennant'];
 export const CREST_PATTERNS: CrestPattern[] = ['solid', 'stripes', 'halves', 'sash', 'hoops'];
+
+// Qui e non dentro l'editor: la forma si sceglie in DUE posti — comporre e
+// caricare — e due copie delle stesse etichette divergono alla prima aggiunta.
+export const CREST_SHAPE_LABELS: Record<CrestShape, string> = {
+  shield: 'Scudo',
+  circle: 'Tondo',
+  pennant: 'Gagliardetto',
+};
 
 // Kit colours, not a designer palette: these are the ones football clubs
 // actually wear, so any pair of them reads as a strip.
@@ -45,6 +69,7 @@ export const DEFAULT_CREST: CrestOptions = {
   secondary: 'ffffff',
   ink: 'ffffff',
   symbol: '',
+  img: '',
 };
 
 function pick<T>(arr: readonly T[]): T {
@@ -61,6 +86,8 @@ export function randomCrest(): CrestOptions {
     secondary: pick(CREST_COLORS.filter((c) => c !== primary)),
     ink: 'ffffff',
     symbol: Math.random() < 0.6 ? pick(CREST_SYMBOLS.filter((s) => s !== '')) : '',
+    // "Sorprendimi" compone: non tocca l'immagine caricata, la mette da parte.
+    img: '',
   };
 }
 
@@ -111,6 +138,7 @@ export function defaultCrest(teamName: string | null | undefined): CrestOptions 
     secondary: (h >>> 12) % 2 ? 'ffffff' : '0f172a',
     ink: 'ffffff',
     symbol: '',
+    img: '',
   };
 }
 
@@ -161,4 +189,12 @@ export function crestColor(value: string, fallback: string): string {
  *  symbol someone picked from the palette — it is a descriptor built by hand. */
 export function crestSymbol(value: string): string {
   return [...(value ?? '')].slice(0, 2).join('');
+}
+
+/** Sixty-four hex digits, or nothing. Same reasoning as `crestColor`: the
+ *  descriptor is stored verbatim by a server that never reads it, so this value
+ *  is whatever the last person to save it wrote. It ends up in a URL, and the
+ *  shape of a sha256 is the only shape that may get there. */
+export function crestImageHash(value: string | null | undefined): string {
+  return /^[0-9a-f]{64}$/.test(value ?? '') ? (value as string) : '';
 }

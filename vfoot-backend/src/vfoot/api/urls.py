@@ -117,6 +117,13 @@ from vfoot.api.push_views import (
 
 from vfoot.api.feedback_views import FeedbackCreateView
 
+from vfoot.api.crest_views import (
+    CrestImageUploadView,
+    CrestImageView,
+    LeagueCrestReportView,
+    LeagueCrestRevokeView,
+)
+
 urlpatterns = [
     # Web Push. The config is open (the public VAPID key identifies us, it does
     # not authorise anything); subscribing needs the token, since a subscription
@@ -127,6 +134,15 @@ urlpatterns = [
     # Le segnalazioni degli utenti: si scrivono e basta, non si rileggono da qui
     # (si smistano dall'admin di Django).
     path("feedback", FeedbackCreateView.as_view(), name="feedback-create"),
+    # Gli stemmi caricati. Il caricamento non è sotto una lega (un'immagine è
+    # contenuto, e chi la usa lo dice il descrittore della squadra); segnalazione
+    # e revoca sì, perché è la lega a dare il diritto di intervenire.
+    path("crest-images", CrestImageUploadView.as_view(), name="crest-image-upload"),
+    path("crest-images/<str:image_hash>", CrestImageView.as_view(), name="crest-image"),
+    path("leagues/<int:league_id>/crest-reports", LeagueCrestReportView.as_view(),
+         name="league-crest-report"),
+    path("leagues/<int:league_id>/crest-revoke", LeagueCrestRevokeView.as_view(),
+         name="league-crest-revoke"),
     path("leagues/<int:league_id>/decisions", LeagueDecisionListView.as_view(),
          name="league-decisions"),
     path("leagues/<int:league_id>/decisions/accept-all",

@@ -38,6 +38,7 @@ import InviteShare from '../components/InviteShare';
 import MarketAdminPanel from '../components/MarketAdminPanel';
 import LeagueSetupChecklist from '../components/LeagueSetupChecklist';
 import Crest from '../components/Crest';
+import { CrestModerationPanel } from '../components/CrestModeration';
 import { competitionFormatLabel } from '../league/competitionFormat';
 import type {
   ClassicRole,
@@ -1474,6 +1475,11 @@ export default function LeagueAdminPage() {
                       )}
                     </div>
                   </Card>
+                  {/* Nella scheda Roster e non in una sua: riguarda l'identità
+                      delle squadre, che è quello di cui parla questa scheda. Una
+                      sesta linguetta per una cosa che si usa due volte l'anno
+                      farebbe pagare a tutti una tendina più stretta. */}
+                  <CrestModerationPanel leagueId={league.league_id} teams={league.teams} />
                 </div>
               ) : null}
 

@@ -477,6 +477,66 @@ export async function updateMyTeam(
   return parseJsonOrThrow(res);
 }
 
+/** Where the bytes of an uploaded crest live. Built from the hash, so it is
+ *  immutable by construction: that content is at that address and nowhere else,
+ *  which is what lets the server answer with a one-year immutable cache.
+ *
+ *  No token is attached, and none could be: this URL ends up in an <image> tag,
+ *  which cannot send an Authorization header. What protects it is the address
+ *  itself — sixty-four hex digits nobody guesses. */
+export function crestImageUrl(hash: string): string {
+  return `${baseUrl()}/crest-images/${hash}`;
+}
+
+/** Upload an image and get back its hash, to be written into a crest descriptor.
+ *
+ *  Deliberately NOT part of saving the team: the two are separate gestures, so
+ *  an upload the user then abandons leaves nothing half-applied. What comes back
+ *  is a claim the descriptor will carry — the server does not record who uses
+ *  which image, and does not need to. */
+export async function uploadCrestImage(file: Blob): Promise<{ hash: string; bytes: number }> {
+  const form = new FormData();
+  form.append('file', file, 'stemma.webp');
+  const res = await fetch(`${baseUrl()}/crest-images`, {
+    method: 'POST',
+    // No Content-Type here on purpose: the browser has to set it, because only
+    // it knows the multipart boundary it just generated.
+    headers: { Accept: 'application/json', ...authHeaders() },
+    body: form,
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** "Questo stemma non va bene": any member of the league may say it. */
+export async function reportCrestImage(
+  leagueId: number,
+  hash: string,
+  reason?: string,
+): Promise<{ id: number; created: boolean; detail: string }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/crest-reports`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ hash, reason: reason ?? '' }),
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** The league admin takes an image out of circulation. Nothing else has to
+ *  happen: the descriptors that named it keep their composed layers, and those
+ *  are what gets drawn from the next render on. */
+export async function revokeCrestImage(
+  leagueId: number,
+  hash: string,
+  reason?: string,
+): Promise<{ hash: string; revoked: boolean }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/crest-revoke`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ hash, reason: reason ?? '' }),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export interface LeagueActivityItem {
   /** `acquisto` is the FANTASY market (a manager buying); the other two are the
    *  REAL one, and they are separate because they answer different questions:
