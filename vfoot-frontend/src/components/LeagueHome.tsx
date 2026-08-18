@@ -25,6 +25,7 @@ import { useDecisionAlerts } from '../league/useDecisionAlerts';
 import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { Badge, Button, Card, SectionTitle } from './ui';
 import Crest from './Crest';
+import InviteShare from './InviteShare';
 import type {
   ActiveAuctionInfo,
   CompetitionItem,
@@ -34,6 +35,7 @@ import type {
   LeagueFixtureItem,
   LeagueMatchdayItem,
   LeagueStandingRow,
+  LeagueSummary,
   MatchdayImpact,
 } from '../types/league';
 
@@ -45,6 +47,21 @@ import type {
  *  hidden. Beyond it the fixture is not something you can act on, and putting it
  *  beside this weekend's match only made both look equally urgent. */
 const NEXT_MATCH_HORIZON = 4;
+
+/** Quante squadre bastano perché «fai entrare gli altri» smetta di essere la
+ *  prima cosa da fare.
+ *
+ *  Sei, e non è una regola: la lega non impone un numero di partecipanti, a otto
+ *  o a dodici si gioca uguale, e nessuna schermata rifiuta di andare avanti sotto
+ *  questa cifra. È il punto in cui un campionato sta in piedi da solo — sei
+ *  squadre sono dieci giornate di andata e ritorno — e quindi il punto in cui
+ *  invitare diventa una cosa che si PUÒ ancora fare invece della cosa da fare.
+ *
+ *  Sotto, la scheda insiste col link d'invito aperto. Da qui in su si ripiega:
+ *  l'invito resta, chiuso, e il posto in evidenza passa alla competizione. Il
+ *  numero non si può dedurre da nessun dato — quanti saranno alla fine lo sa solo
+ *  l'amministratore — quindi è una scelta, dichiarata qui una volta sola. */
+const TEAMS_ENOUGH_TO_START = 6;
 
 /** One glyph per kind of news. Not 'premio': that line already begins with the
  *  trophy the admin picked for the prize itself. */
@@ -71,7 +88,16 @@ const ACTIVITY_ICON: Record<LeagueActivityItem['kind'], string> = {
  *  Two columns from `lg` up: stacked, the useful part was pushed below the fold
  *  by material nobody opens the app for.
  */
-export default function LeagueHome({ competitions }: { competitions: CompetitionItem[] }) {
+export default function LeagueHome({
+  competitions,
+  competitionsLoading,
+}: {
+  competitions: CompetitionItem[];
+  /** Le competizioni sono ancora in arrivo. Senza, «nessuna competizione» e
+   *  «non le so ancora» si confondono, e una lega che gioca si annuncerebbe in
+   *  costruzione per il tempo di una chiamata. */
+  competitionsLoading?: boolean;
+}) {
   const { selectedLeagueId, selectedLeague } = useLeagueContext();
   const isAdmin = selectedLeague?.role === 'admin';
   const myTeamName = selectedLeague?.team_name?.trim() || null;
@@ -347,7 +373,45 @@ export default function LeagueHome({ competitions }: { competitions: Competition
       });
   };
 
-  if (!competitions.length) return null;
+  // UNA LEGA IN COSTRUZIONE NON È UNA LEGA VUOTA. Qui cadono i blocchi che una
+  // competizione la richiedono per davvero — giornate da chiudere, prossime
+  // partite, risultati, classifiche, albo d'oro: senza calendario non hanno né
+  // dati né senso. Non cade tutto il resto, che esiste dal giorno in cui la lega
+  // è nata: il listone si muove col mercato vero, un'asta si può bandire prima
+  // di avere un calendario, e le squadre entrano una alla volta.
+  //
+  // Si tornava `null` e basta, e allora la home di OGNI lega appena creata era la
+  // scheda «Lega in costruzione» e nient'altro — per l'amministratore un elenco
+  // di cose da fare, senza una riga su cosa stesse intanto succedendo, proprio
+  // nei giorni di agosto in cui il mercato vero ne fa di più.
+  //
+  // L'ORDINE, che è il motivo per cui anche la scheda di costruzione sta qui e
+  // non nella pagina sopra: prima quello che sta succedendo adesso (un'asta è un
+  // evento dal vivo, e si perde), poi quello che c'è da fare, poi quello che è
+  // successo, e infine chi c'è. Finché la scheda la disegnava DashboardPage
+  // finiva per forza sopra tutto, e la sala asta restava sotto un elenco di passi
+  // di configurazione.
+  if (!competitions.length) {
+    if (competitionsLoading) return null;
+    return (
+      <div className="space-y-4">
+        <MarketBanner auction={auction} session={marketSession} />
+        {selectedLeague ? (
+          <LeagueUnderConstruction league={selectedLeague} teamCount={detail?.teams.length ?? 0} />
+        ) : null}
+        <NewsCard
+          activity={activity}
+          // Non la formula generale: qui una giornata da concludere non c'è e non
+          // può esserci, e prometterla sarebbe indicare la porta sbagliata.
+          empty="Ancora niente da raccontare: i movimenti del mercato vero che toccano il listone compaiono qui, anche prima che la lega cominci."
+        />
+        {/* Compatto: in una lega che deve ancora cominciare la domanda è QUANTI
+            sono e se ci sei, non chi allena cosa — e undici schede a colonna
+            singola su un telefono sono mezzo schermo di scorrimento per dirlo. */}
+        {detail ? <Participants detail={detail} myTeamName={myTeamName} compact /> : null}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -463,43 +527,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
         </div>
       ) : null}
 
-      {/* The market, when there IS one. The old Lega page carried this banner and
-          it was worth keeping: an auction is a live event you have to be told
-          about, unlike a permission flag that is on from the day the league is
-          created. */}
-      {auction?.auction_id ? (
-        <Card className="border-2 border-good/40 bg-good-bg p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="flex items-center gap-2">
-                <Badge tone="green">Live</Badge>
-                <span className="font-bold">Asta in corso</span>
-              </div>
-              <div className="mt-1 text-sm text-ink-soft">
-                {auction.is_admin
-                  ? 'Sei il banditore: entra per chiamare i giocatori e aggiudicare.'
-                  : 'Entra per seguire l’asta e rilanciare in tempo reale.'}
-              </div>
-            </div>
-            <Link to="/auction">
-              <Button>Entra nella sala asta →</Button>
-            </Link>
-          </div>
-        </Card>
-      ) : marketSession ? (
-        <Card className="relative overflow-hidden bg-accent/10 p-4 pl-5">
-        <span className="absolute inset-y-0 left-0 w-1.5 bg-accent" aria-hidden />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-sm font-bold text-accent">Mercato aperto</div>
-              <div className="text-xs text-accent">Puoi fare offerte sugli svincolati.</div>
-            </div>
-            <Link to="/market">
-              <Button size="sm">Vai al mercato →</Button>
-            </Link>
-          </div>
-        </Card>
-      ) : null}
+      <MarketBanner auction={auction} session={marketSession} />
 
       {/* 0 — THE ROUND YOU ARE IN. Above everything else: while a round is open it
           is the only thing on this page anyone opens the app for. What it offers is
@@ -713,65 +741,7 @@ export default function LeagueHome({ competitions }: { competitions: Competition
         ) : null}
 
         {/* 3 — what has been happening */}
-        <Card className="p-4">
-          <SectionTitle>News</SectionTitle>
-          {activity.length ? (
-            <ul className="mt-2 space-y-1.5">
-              {activity.slice(0, 5).map((a, i) => {
-                // A trophy is the one thing in this feed worth stopping on: it is
-                // the end of months of play, and a line identical to "acquisto:
-                // Tizio" would let it go by unnoticed.
-                const isPrize = a.kind === 'premio';
-                const isEnd = a.kind === 'competizione';
-                return (
-                  <li
-                    key={`${a.kind}-${i}`}
-                    className={
-                      'flex items-start gap-2 text-sm ' +
-                      (isPrize || isEnd ? 'rounded-lg bg-warn-bg px-2 py-1.5' : '') +
-                      // In evidenza: il server l'ha già messa in cima, qui si dice
-                      // PERCHÉ ci sta. Senza il bordo una notizia fuori ordine
-                      // cronologico sembra un elenco che ha sbagliato a ordinare.
-                      (a.pinned ? ' border-l-2 border-warn pl-2' : '')
-                    }
-                  >
-                    {/* A prize carries its OWN trophy inside the text — the one the
-                        admin chose for it — so the row adds no glyph of its own. */}
-                    {isPrize ? null : (
-                      <span className="mt-0.5 shrink-0" aria-hidden>
-                        {ACTIVITY_ICON[a.kind] ?? '🏁'}
-                      </span>
-                    )}
-                    <span className="min-w-0">
-                      <span
-                        className={
-                          'block truncate ' +
-                          (isPrize ? 'font-semibold text-warn' : isEnd ? 'text-warn' : 'text-ink-soft')
-                        }
-                      >
-                        {a.text}
-                      </span>
-                      {a.pinned ? (
-                        <span className="mt-0.5 inline-block rounded bg-warn/25 px-1.5 text-[10px] font-bold uppercase tracking-wide text-warn">
-                          in evidenza
-                        </span>
-                      ) : null}
-                      {a.detail ? (
-                        <span className={'block text-xs ' + (isPrize || isEnd ? 'text-warn' : 'text-ink-faint')}>
-                          {a.detail}
-                        </span>
-                      ) : null}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <div className="mt-2 text-sm text-ink-faint">
-              Ancora niente da raccontare: acquisti, decisioni e giornate concluse compaiono qui.
-            </div>
-          )}
-        </Card>
+        <NewsCard activity={activity} />
       </div>
       )}
 
@@ -1370,7 +1340,45 @@ function MiniFixture({
  *  rosa e il nome sotto era testo morto, che è esattamente il motivo per cui
  *  l'albo d'oro era finito su una pagina che non è sua.
  */
-function Participants({ detail, myTeamName }: { detail: LeagueDetail; myTeamName: string | null }) {
+function Participants({
+  detail,
+  myTeamName,
+  compact,
+}: {
+  detail: LeagueDetail;
+  myTeamName: string | null;
+  /** Solo stemmi e nomi, col conteggio nel titolo. Per una lega che deve ancora
+   *  cominciare, dove la domanda è «quanti siamo» e non «chi allena cosa»: il
+   *  nome del fantallenatore è la riga che raddoppia l'altezza di ogni scheda,
+   *  e su un telefono dodici schede sono mezzo schermo di scorrimento per dire
+   *  una cifra. Resta il collegamento alla squadra, che è il gesto vero. */
+  compact?: boolean;
+}) {
+  if (compact) {
+    return (
+      <Card className="p-4">
+        <SectionTitle>Partecipanti · {detail.teams.length}</SectionTitle>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {detail.teams.map((t) => {
+            const mine = t.name === myTeamName;
+            return (
+              <Link
+                key={t.team_id}
+                to={mine ? '/squad' : `/teams/${t.team_id}`}
+                className={clsx(
+                  'flex items-center gap-1.5 rounded-full border py-1 pl-1 pr-2.5 text-xs font-semibold transition',
+                  mine ? 'border-good/40 bg-good-bg text-good' : 'border-line text-ink-soft hover:bg-surface-2',
+                )}
+              >
+                <Crest descriptor={t.crest} teamName={t.name} size={22} />
+                <span className="max-w-[10rem] truncate">{t.name}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </Card>
+    );
+  }
   return (
     <Card className="p-4">
       <SectionTitle>Partecipanti</SectionTitle>
@@ -1409,6 +1417,249 @@ function Participants({ detail, myTeamName }: { detail: LeagueDetail; myTeamName
           );
         })}
       </div>
+    </Card>
+  );
+}
+
+
+/** Cosa è successo, di recente, in questa lega.
+ *
+ *  Un componente e non un pezzo di JSX in mezzo alla pagina perché lo stesso
+ *  blocco serve a una lega che gioca e a una che deve ancora cominciare: la
+ *  seconda è quella che ne ha più bisogno — è tutto quello che ha da mostrare —
+ *  e finché il blocco viveva dentro il ramo delle competizioni era esattamente
+ *  quella che restava senza.
+ */
+function NewsCard({
+  activity,
+  empty = 'Ancora niente da raccontare: acquisti, decisioni e giornate concluse compaiono qui.',
+}: {
+  activity: LeagueActivityItem[];
+  empty?: string;
+}) {
+  return (
+    <Card className="p-4">
+      <SectionTitle>News</SectionTitle>
+      {activity.length ? (
+        <ul className="mt-2 space-y-1.5">
+          {activity.slice(0, 5).map((a, i) => {
+            // A trophy is the one thing in this feed worth stopping on: it is
+            // the end of months of play, and a line identical to "acquisto:
+            // Tizio" would let it go by unnoticed.
+            const isPrize = a.kind === 'premio';
+            const isEnd = a.kind === 'competizione';
+            return (
+              <li
+                key={`${a.kind}-${i}`}
+                className={
+                  'flex items-start gap-2 text-sm ' +
+                  (isPrize || isEnd ? 'rounded-lg bg-warn-bg px-2 py-1.5' : '') +
+                  // In evidenza: il server l'ha già messa in cima, qui si dice
+                  // PERCHÉ ci sta. Senza il bordo una notizia fuori ordine
+                  // cronologico sembra un elenco che ha sbagliato a ordinare.
+                  (a.pinned ? ' border-l-2 border-warn pl-2' : '')
+                }
+              >
+                {/* A prize carries its OWN trophy inside the text — the one the
+                    admin chose for it — so the row adds no glyph of its own. */}
+                {isPrize ? null : (
+                  <span className="mt-0.5 shrink-0" aria-hidden>
+                    {ACTIVITY_ICON[a.kind] ?? '🏁'}
+                  </span>
+                )}
+                <span className="min-w-0">
+                  <span
+                    className={
+                      'block truncate ' +
+                      (isPrize ? 'font-semibold text-warn' : isEnd ? 'text-warn' : 'text-ink-soft')
+                    }
+                  >
+                    {a.text}
+                  </span>
+                  {a.pinned ? (
+                    <span className="mt-0.5 inline-block rounded bg-warn/25 px-1.5 text-[10px] font-bold uppercase tracking-wide text-warn">
+                      in evidenza
+                    </span>
+                  ) : null}
+                  {a.detail ? (
+                    <span className={'block text-xs ' + (isPrize || isEnd ? 'text-warn' : 'text-ink-faint')}>
+                      {a.detail}
+                    </span>
+                  ) : null}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className="mt-2 text-sm text-ink-faint">{empty}</div>
+      )}
+    </Card>
+  );
+}
+
+/** The market, when there IS one. The old Lega page carried this banner and it
+ *  was worth keeping: an auction is a live event you have to be told about,
+ *  unlike a permission flag that is on from the day the league is created.
+ *
+ *  Vale anche — e soprattutto — prima che esista una competizione: l'asta è la
+ *  cosa che di solito viene PRIMA del calendario, e la home che si tirava
+ *  indietro per mancanza di competizioni nascondeva la sala asta proprio mentre
+ *  era in corso.
+ */
+function MarketBanner({
+  auction,
+  session,
+}: {
+  auction: ActiveAuctionInfo | null;
+  session: MarketSessionInfo | null;
+}) {
+  if (auction?.auction_id) {
+    return (
+      <Card className="border-2 border-good/40 bg-good-bg p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <Badge tone="green">Live</Badge>
+              <span className="font-bold">Asta in corso</span>
+            </div>
+            <div className="mt-1 text-sm text-ink-soft">
+              {auction.is_admin
+                ? 'Sei il banditore: entra per chiamare i giocatori e aggiudicare.'
+                : 'Entra per seguire l’asta e rilanciare in tempo reale.'}
+            </div>
+          </div>
+          <Link to="/auction">
+            <Button>Entra nella sala asta →</Button>
+          </Link>
+        </div>
+      </Card>
+    );
+  }
+  if (!session) return null;
+  return (
+    <Card className="relative overflow-hidden bg-accent/10 p-4 pl-5">
+      <span className="absolute inset-y-0 left-0 w-1.5 bg-accent" aria-hidden />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-bold text-accent">Mercato aperto</div>
+          <div className="text-xs text-accent">Puoi fare offerte sugli svincolati.</div>
+        </div>
+        <Link to="/market">
+          <Button size="sm">Vai al mercato →</Button>
+        </Link>
+      </div>
+    </Card>
+  );
+}
+
+
+/** LA LEGA NON HA ANCORA UNA COMPETIZIONE: cosa manca, e chi lo deve fare.
+ *
+ *  Non è un caso raro né un errore — è come si presenta OGNI lega appena creata,
+ *  cioè il primo schermo che vede chi ne apre una.
+ *
+ *  Due passi, ma solo finché sono davvero due. L'ordine fra loro è una dipendenza
+ *  vera e non una convenzione: il calendario si genera sulle squadre presenti in
+ *  quel momento, quindi una competizione creata da soli nasce senza partite. Da
+ *  ``TEAMS_ENOUGH_TO_START`` squadre in su però il primo passo è fatto, e
+ *  continuare a proporre il link d'invito come prima cosa è la scheda che non si
+ *  accorge di dove sei arrivato: a undici squadre dentro annunciava ancora
+ *  «1 — Fai entrare gli altri», e la risposta (chi c'è già) stava mille pixel
+ *  più in basso.
+ */
+function LeagueUnderConstruction({
+  league,
+  teamCount,
+}: {
+  league: LeagueSummary;
+  teamCount: number;
+}) {
+  // Chiuso di suo: da qui in poi invitare è una possibilità, non un passo. Chi
+  // lo vuole lo apre — e resta aperto, perché di solito chi lo apre manda più
+  // di un invito.
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const isAdmin = league.role === 'admin';
+  // `teamCount` è 0 anche mentre il dettaglio della lega sta arrivando, e allora
+  // si mostra la versione che insiste: è quella giusta per una lega vuota, ed è
+  // l'errore meno grave da fare per una frazione di secondo.
+  const enough = teamCount >= TEAMS_ENOUGH_TO_START;
+
+  return (
+    <Card className="border-l-4 border-accent bg-accent/10 p-4">
+      <div className="text-sm font-bold text-accent">🚧 Lega in costruzione</div>
+      <p className="mt-1 text-sm text-ink-soft">
+        <b>{league.name}</b> non ha ancora una competizione, e finché non ce n'è una non c'è niente
+        da giocare: calendario, classifica e formazione nascono tutti da lì.
+      </p>
+      {!isAdmin ? (
+        <div className="mt-3 text-sm text-ink-faint">
+          La crea l'amministratore della lega. Appena c'è, questa pagina si riempie da sola — nel
+          frattempo il listone e il campionato di riferimento sono già consultabili dal menu.
+        </div>
+      ) : enough ? (
+        <>
+          <div className="mt-3 rounded-xl border border-line bg-surface p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-bold uppercase tracking-wide text-good">
+                ✓ Siete già in {teamCount}
+              </div>
+              <button
+                type="button"
+                onClick={() => setInviteOpen((v) => !v)}
+                className="text-xs font-semibold text-accent underline-offset-2 hover:underline"
+              >
+                {inviteOpen ? 'Nascondi l’invito' : 'Invita ancora →'}
+              </button>
+            </div>
+            {/* La conseguenza, detta adesso che è il momento di deciderla: da qui
+                in poi il rischio non è più partire senza partite, è partire
+                lasciando fuori chi stava per arrivare. */}
+            <div className="mt-1 text-xs text-ink-faint">
+              Abbastanza per giocare. Il calendario si costruisce sulle squadre presenti quando lo
+              generi: chi entra dopo non ci sarà.
+            </div>
+            {inviteOpen ? (
+              <div className="mt-2">
+                <InviteShare code={league.invite_code} leagueName={league.name} compact />
+              </div>
+            ) : null}
+          </div>
+          {/* Senza numero: di passi ne è rimasto uno. */}
+          <Link
+            to="/league-admin?tab=league"
+            className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-bold text-white shadow-card hover:opacity-90 active:scale-[0.99]"
+          >
+            Crea la competizione →
+          </Link>
+        </>
+      ) : (
+        <>
+          <div className="mt-3 rounded-xl border border-line bg-surface p-3">
+            <div className="text-xs font-bold uppercase tracking-wide text-ink-faint">
+              1 — Fai entrare gli altri
+              {teamCount > 1 ? (
+                <span className="ml-1.5 font-normal normal-case tracking-normal text-ink-faint">
+                  · siete in {teamCount}
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-2">
+              <InviteShare code={league.invite_code} leagueName={league.name} compact />
+            </div>
+            <div className="mt-2 text-xs text-ink-faint">
+              Prima loro, poi la competizione: il calendario si costruisce sulle squadre presenti
+              quando lo generi, quindi creandola adesso resterebbe senza partite.
+            </div>
+          </div>
+          <Link
+            to="/league-admin?tab=league"
+            className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-bold text-white shadow-card hover:opacity-90 active:scale-[0.99]"
+          >
+            2 — Crea la competizione →
+          </Link>
+        </>
+      )}
     </Card>
   );
 }

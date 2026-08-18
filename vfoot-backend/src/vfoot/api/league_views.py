@@ -131,6 +131,7 @@ from vfoot.services.match_resolver import matchday_fixtures_by_team
 from vfoot.services import (
     currency, honours, knockout, lineup_deadline, lineup_repair, matchday_state,
 )
+from vfoot.services.live_realtime import broadcast_live
 
 log = logging.getLogger(__name__)
 
@@ -316,6 +317,21 @@ class LeagueJoinView(APIView):
             role=LeagueMembership.ROLE_MANAGER,
         )
         team = FantasyTeam.objects.create(league=league, manager=membership, name=data["team_name"])
+
+        # Chi ha la home aperta lo viene a sapere adesso. Un ingresso è raro — una
+        # manciata in tutta la vita di una lega, quasi tutti nella settimana prima
+        # dell'asta — quindi il canale non se ne accorge nemmeno; ma è proprio in
+        # quella settimana che la home di una lega in costruzione conta i
+        # partecipanti, e alla sesta squadra smette di chiedere di invitarne altre
+        # (v. TEAMS_ENOUGH_TO_START nel frontend). Senza spinta quel passaggio si
+        # vedeva solo al ricaricamento.
+        #
+        # ON_COMMIT, non subito: siamo dentro `transaction.atomic`, e un nudge
+        # spedito prima della commit fa rileggere lo stato a chi ascolta mentre la
+        # squadra nuova non è ancora visibile alle altre connessioni. Si otterrebbe
+        # un aggiornamento che non aggiorna niente, cioè il bug più difficile da
+        # riconoscere fra quelli che questa riga può causare.
+        transaction.on_commit(lambda: broadcast_live(league.id, kind="membership"))
 
         return Response(
             {

@@ -1,11 +1,10 @@
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useLeagueContext } from '../league/LeagueContext';
-import { Badge, Card, SectionTitle } from '../components/ui';
+import { Card, SectionTitle } from '../components/ui';
 import SetupBanner from '../components/SetupBanner';
 import Crest from '../components/Crest';
 import LeagueHome from '../components/LeagueHome';
 import NewcomerHome from '../components/NewcomerHome';
-import InviteShare from '../components/InviteShare';
 import FeedbackCard from '../components/FeedbackCard';
 import { useCompetitionContext } from '../league/CompetitionContext';
 
@@ -100,66 +99,20 @@ export default function DashboardPage() {
         </div>
       </Card>
 
-      {/* UNA LEGA SENZA COMPETIZIONI HA UNA HOME BIANCA, e lo era per davvero:
-          `LeagueHome` si tira indietro quando non c'è niente da giocare — ha
-          ragione, è la vista delle competizioni — e la scheda con lo stemma qui
-          sopra non si vede più sul telefono. Restava il solo banner delle
-          notifiche, su una pagina che si intitola «Home lega».
-
-          Non è un caso raro né un errore: è come si presenta OGNI lega appena
-          creata, cioè il primo schermo che vede chi ne apre una. Quindi qui si
-          dice cosa manca e chi lo deve fare, che sono due risposte diverse a
-          seconda di chi guarda. */}
-      {!competitionsLoading && !competitions.length ? (
-        <Card className="border-l-4 border-accent bg-accent/10 p-4">
-          <div className="text-sm font-bold text-accent">🚧 Lega in costruzione</div>
-          <p className="mt-1 text-sm text-ink-soft">
-            <b>{selectedLeague?.name}</b> non ha ancora una competizione, e finché non ce n'è una non
-            c'è niente da giocare: calendario, classifica e formazione nascono tutti da lì.
-          </p>
-          {selectedLeague?.role === 'admin' ? (
-            <>
-              {/* L'ordine conta ed è una dipendenza vera, non una convenzione: il
-                  calendario si genera dalle squadre presenti in quel momento, per
-                  cui una competizione creata da soli nasce senza partite. È la
-                  stessa cosa che dice la checklist in Gestione lega, detta qui
-                  perché è qui che si arriva per primi. */}
-              <div className="mt-3 rounded-xl border border-line bg-surface p-3">
-                <div className="text-xs font-bold uppercase tracking-wide text-ink-faint">
-                  1 — Fai entrare gli altri
-                </div>
-                <div className="mt-2">
-                  <InviteShare
-                    code={selectedLeague.invite_code}
-                    leagueName={selectedLeague.name}
-                    compact
-                  />
-                </div>
-                <div className="mt-2 text-xs text-ink-faint">
-                  Prima loro, poi la competizione: il calendario si costruisce sulle squadre presenti
-                  quando lo generi, quindi creandola adesso resterebbe senza partite.
-                </div>
-              </div>
-              <Link
-                to="/league-admin?tab=league"
-                className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-bold text-white shadow-card hover:opacity-90 active:scale-[0.99]"
-              >
-                2 — Crea la competizione →
-              </Link>
-            </>
-          ) : (
-            <div className="mt-3 text-sm text-ink-faint">
-              La crea l'amministratore della lega. Appena c'è, questa pagina si riempie da sola —
-              nel frattempo il listone e il campionato di riferimento sono già consultabili dal menu.
-            </div>
-          )}
-        </Card>
-      ) : null}
-
       {/* Everything the old "Lega" page was for, and the part of it that was not
           a shortcut to somewhere else: what is being played right now in each
-          competition, how each stands, and who is in the league. */}
-      <LeagueHome competitions={competitions} />
+          competition, how each stands, and who is in the league.
+
+          E ANCHE la scheda «Lega in costruzione», che per un po' stava qui sopra.
+          Stava nel posto sbagliato per un motivo strutturale, non estetico: una
+          scheda disegnata da QUESTA pagina finisce per forza sopra tutto quello
+          che disegna LeagueHome, e così un'asta accesa — che è un evento dal vivo
+          — restava mille pixel sotto un elenco di cose da fare. L'ordine di una
+          lega in costruzione lo decide adesso LeagueHome, che è l'unico posto da
+          cui si vedono entrambe le cose. Serve solo sapere se le competizioni
+          sono ancora in arrivo: senza, una lega che gioca si annuncerebbe «in
+          costruzione» per il tempo di una chiamata. */}
+      <LeagueHome competitions={competitions} competitionsLoading={competitionsLoading} />
 
       {/* In fondo, e non più in alto: non è il motivo per cui si apre l'app, ma
           la home è l'unica pagina su cui si torna sempre — quindi è l'unico posto
