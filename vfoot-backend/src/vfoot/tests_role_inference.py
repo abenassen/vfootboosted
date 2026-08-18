@@ -84,6 +84,28 @@ class RoleInferenceTests(TestCase):
         # ...and meanwhile he still gets the positional fallback, not a hole.
         self.assertEqual(r.role_mitigated, TM_DEFAULT["left winger"])
 
+    def test_attacking_midfield_is_ambiguous_and_measured_style_wins(self):
+        """A trequartista is no longer overridden to CEN merely by TM's label."""
+        self._population()
+        trequartista = self._player("Trequartista", "attacking midfield", col=4,
+                                    box=40.0, shots=30.0)
+        rep = infer_roles(self.cur.id, self.prev.id, runs=6, n_categories=3)
+        r = next(x for x in rep.results if x.player_id == trequartista.id)
+        self.assertEqual(r.method, "category")
+        self.assertEqual(r.role_data, Player.ROLE_FWD)
+        self.assertEqual(r.role_mitigated, Player.ROLE_FWD)
+
+    def test_unmeasured_attacking_midfield_is_provisional_and_reviewable(self):
+        self._population()
+        newcomer = self._player("Trequartista nuovo", "attacking midfield", col=3,
+                                seasons=("cur",))
+        rep = infer_roles(self.cur.id, self.prev.id, runs=6, n_categories=3)
+        r = next(x for x in rep.results if x.player_id == newcomer.id)
+        self.assertEqual(r.method, "default")
+        self.assertEqual(r.role_data, Player.ROLE_MID)
+        self.assertEqual(r.role_mitigated, Player.ROLE_MID)
+        self.assertTrue(r.needs_decision)
+
     def test_unambiguous_position_never_needs_a_decision(self):
         self._population()
         newcomer = self._player("Difensore nuovo", "centre-back", col=0,

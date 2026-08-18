@@ -56,8 +56,10 @@ from vfoot.services.classic_rating import _round_sum
 
 PROVIDER_TM = "transfermarkt"
 
-# TM positions whose fantasy role is not in doubt (verified at 100% against a full
-# season of external roles, bar attacking midfield at 96%).
+# TM positions whose fantasy role is not in doubt.  ``attacking midfield`` is
+# deliberately NOT here: the current measured sample splits it across CEN and ATT
+# (and contains several clear attacking profiles), so its provider label is an
+# area of the pitch rather than a sufficient fantasy-role answer.
 TM_DETERMINISTIC = {
     "goalkeeper": Player.ROLE_GK,
     "centre-back": Player.ROLE_DEF,
@@ -67,7 +69,6 @@ TM_DETERMINISTIC = {
     "right-back": Player.ROLE_DEF,
     "defensive midfield": Player.ROLE_MID,
     "central midfield": Player.ROLE_MID,
-    "attacking midfield": Player.ROLE_MID,
     "midfielder": Player.ROLE_MID,
     "centre-forward": Player.ROLE_FWD,
     "striker": Player.ROLE_FWD,
@@ -76,7 +77,7 @@ TM_DETERMINISTIC = {
 }
 # ...and the ones that are a coin flip, which is what the categories are for.
 TM_AMBIGUOUS = {"left winger", "right winger", "left midfield", "right midfield",
-                "second striker"}
+                "second striker", "attacking midfield"}
 
 # Fallback when a player has no usable history (a newcomer), pending a human
 # decision. Deliberately CONSERVATIVE rather than modal: most wingers we measure
@@ -86,7 +87,11 @@ TM_AMBIGUOUS = {"left winger", "right winger", "left midfield", "right midfield"
 # Midfield is the choice that costs least if it is wrong.
 TM_DEFAULT = {"left winger": Player.ROLE_MID, "right winger": Player.ROLE_MID,
               "left midfield": Player.ROLE_DEF, "right midfield": Player.ROLE_DEF,
-              "second striker": Player.ROLE_FWD}
+              "second striker": Player.ROLE_FWD,
+              # A trequartista with no usable play data remains CEN provisionally;
+              # because the label is ambiguous, a relevant player is still sent to
+              # the league decision queue rather than silently frozen as such.
+              "attacking midfield": Player.ROLE_MID}
 
 # Minutes below which a season tells us too little to describe a style.
 MIN_MINUTES = 600
@@ -148,47 +153,25 @@ class PlayerRoleResult:
     def needs_decision(self) -> bool:
         """A human should settle this one — and ONLY these, measured.
 
-        An unambiguous Transfermarkt position ends the question whatever else we
-        know: over a full season it matched the fantacalcio listone 351 times out
-        of 352, and it did so in EVERY band of ``role_margin`` — 100% even where
-        our own measurement was a coin flip. So a tight margin under a certain TM
-        position says our clustering wobbled, not that TM is wrong, and asking a
-        human there is nine questions with nothing to correct. The one case in the
-        season where the measurement beat TM (De Ketelaere) had a margin of 0.76,
-        the most CONFIDENT of the disagreeing group — the exact opposite of what a
-        margin filter would have caught.
-
-        Where the TM position is ambiguous nobody overrules the measurement, so
-        the doubt is real and comes in two shapes:
+        An unambiguous Transfermarkt position ends the question. Where the
+        provider label is ambiguous nobody overrules the measurement, so the doubt
+        is real and comes in two shapes. This includes ``attacking midfield``:
+        current data shows that its trequartista label spans CEN and ATT profiles,
+        unlike the provider labels retained in ``TM_DETERMINISTIC``.
 
         * we could not measure him — the SofaScore lineup position is all we have,
-          and for a winger it is F/M/D, which cannot answer the CEN-or-ATT question
-          fantacalcio itself splits down the middle: it agrees 8 times out of 15;
+          and its coarse F/M/D tag cannot settle the CEN-or-ATT question;
         * we did measure him and the measurement itself sits on the CEN/ATT line.
           That doubt has two shapes too, and one of them is invisible to the other:
 
           - ``role_margin`` below ROLE_MARGIN_REVIEW — the runs themselves could
-            not agree. Berardi is this case: 60 runs put him at CEN 56% / ATT 35%.
+            not agree.
           - ``role_boundary`` above BOUNDARY_REVIEW — the runs agreed, but he sits
-            on the border in the FEATURE space. Esposito is this case, and only
-            this one: margin 0.44 (settled), boundary 0.82 (on the line).
+            on the border in the FEATURE space.
 
-          The second exists because the first is computed on the co-association
-          matrix, and that is precisely where players in doubt stop looking like
-          it: two of them float between the same groups in the same proportions,
-          so their co-association PROFILES converge even when they land apart half
-          the runs. Barella and Esposito are 2.57σ apart on ball recoveries and
-          3.27 apart overall — and only two players out of 370 have a
-          co-association profile closer to Barella's than Esposito does. A margin
-          read there cannot see a border it has already averaged away.
-
-          Measured against the 2026-27 listone on the 44 players this can fire on:
-          the margin alone asks 7 questions and lands on 1 real disagreement; the
-          boundary at 0.80 asks 11 and lands on 6. They are kept in OR — the margin
-          still catches players the boundary does not (Ngonge, Cancellieri,
-          Cambiaghi), and nobody the queue holds today is dropped by adding a
-          criterion. At the 0.70 the boundary now runs at, it asks 15 of the 43
-          measured and ambiguous, 14 of them above the relevance gate.
+          The second exists because a co-association matrix averages a border away:
+          players that drift between the same groups can acquire similar profiles
+          even when their feature-space positions remain near another role.
 
         Note that ``confidence`` answers neither question: it measures how firmly
         he sits in his CATEGORY, and oscillating between two styles that condense

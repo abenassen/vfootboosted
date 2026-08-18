@@ -147,10 +147,10 @@ def players_needing_decision(league, *,
                      .values_list("player_id", flat=True))
     # Measured, but the measurement itself sits on the CEN/ATT line. Only where the
     # TM position is AMBIGUOUS: there nobody overrules the clustering, so a role
-    # decided by 56% against 35% is genuinely open. Under a certain TM position
-    # the same tight margin means nothing — TM matched the listone 351 times out
-    # of 352, in every margin band, so those cases (Nico Paz, McTominay) belong to
-    # TM and asking about them is work with nothing to correct.
+    # decided by 56% against 35% is genuinely open. Positions outside this set are
+    # provider answers we deliberately retain; the ambiguous set includes
+    # ``attacking midfield`` because current data shows that label spans both CEN
+    # and ATT profiles.
     #
     # Two readings in OR, because they see different players: the margin catches
     # the runs disagreeing with each other, the boundary catches a border the runs

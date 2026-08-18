@@ -500,15 +500,14 @@ class QueueCriterionTests(TestCase):
         p = Player.objects.create(full_name=kw.pop("name", "X"))
         return CurrentPlayerRole.objects.create(player=p, **kw), p
 
-    def test_a_certain_tm_position_ends_the_question_however_torn_the_measurement(self):
-        """Nico Paz: TM says attacking midfield, our clustering says ATT at a margin
-        of 0.24. TM matched the listone 351/352 across EVERY margin band, so this is
-        not a doubt — it is our own wobble under an answer that is right."""
+    def test_an_attacking_midfield_with_a_torn_measurement_needs_a_decision(self):
+        """TM's trequartista label spans CEN and ATT, so a close measurement is
+        exactly the case the league must arbitrate."""
         from vfoot.services.role_inference import PlayerRoleResult
         r = PlayerRoleResult(player_id=1, category="ala offensiva", confidence=0.5,
-                             role_data="ATT", role_mitigated="CEN", method="category",
+                             role_data="ATT", role_mitigated="ATT", method="category",
                              tm_position="attacking midfield", role_margin=0.05)
-        self.assertFalse(r.needs_decision)
+        self.assertTrue(r.needs_decision)
 
     def test_an_ambiguous_position_with_a_torn_measurement_does_need_one(self):
         """Berardi: TM says right winger (54% pure in the listone), so nobody
