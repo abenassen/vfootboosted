@@ -74,7 +74,9 @@ from realdata.models import (
 from realdata.services.statsbomb_adapter import (
     BOX_X_MIN, BOX_Y_MIN, BOX_Y_MAX, _zone_key)
 from realdata.services.sofascore_client import SofaScoreBlocked
-from realdata.services.identity import is_placeholder_dob, norm_name
+from realdata.services.identity import (
+    is_placeholder_dob, norm_name, spell_out_particles,
+)
 
 PROVIDER = PROVIDER_SOFASCORE
 # SofaScore card incidentClass -> our card taxonomy
@@ -402,10 +404,16 @@ def _player(player_id: Any, name: str, short_name: str,
                   f"id {ext_id} — no duplicate created")
             player = adopted
         else:
+            full = str(name or f"SS-{ext_id}")
             player = Player.objects.create(
                 external_source=PROVIDER, external_id=ext_id,
-                full_name=str(name or f"SS-{ext_id}"),
-                short_name=str(short_name or ""), date_of_birth=dob)
+                full_name=full,
+                # Il nome breve arriva gia' abbreviato dal fornitore, che pero'
+                # accorcia anche le particelle del cognome ('G. D. Marzi'). E'
+                # quello che si legge in quasi tutta l'app, quindi si ripara qui,
+                # una volta, invece che a ogni punto di visualizzazione.
+                short_name=spell_out_particles(short_name, full),
+                date_of_birth=dob)
     # player may have existed without a DOB (or with a placeholder) -> fill it
     if _should_set_dob(player.date_of_birth, dob):
         player.date_of_birth = dob

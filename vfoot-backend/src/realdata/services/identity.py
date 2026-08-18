@@ -1,4 +1,5 @@
-"""Cross-provider identity helpers: name normalisation + DOB sanity.
+"""Cross-provider identity helpers: name normalisation, DOB sanity, and the
+repair of the short names a provider abbreviates badly.
 
 Shared by the Transfermarkt roster importer and the SofaScore adapter so both use
 ONE definition of "same name" and "obviously-bogus birth date". Matching players
@@ -43,3 +44,55 @@ def name_similarity(a: str | None, b: str | None) -> float:
 def is_placeholder_dob(d: date | None) -> bool:
     """SofaScore uses Jan 1 when the real birth date is unknown — treat as missing."""
     return bool(d) and d.month == 1 and d.day == 1
+
+
+# Parole che appartengono al cognome che precedono: abbreviarle spezza in due un
+# cognome composto. Confrontate normalizzate, quindi minuscole e senza accenti.
+# GEMELLO di ``SURNAME_PARTICLES`` in ``vfoot-frontend/src/utils/text.ts``, che le
+# usa per ordinare per cognome: le due liste vanno tenute allineate.
+SURNAME_PARTICLES = frozenset({
+    "de", "del", "della", "delle", "delli", "dello", "dei", "degli", "di",
+    "da", "dal", "dalla", "dalle", "dallo", "do", "dos", "das", "du",
+    "van", "von", "der", "den", "ten", "ter", "la", "le", "lo",
+    "af", "av", "bin", "ibn", "al", "el", "mac", "mc", "st", "san", "santa", "ait",
+})
+
+
+def _is_initial(token: str) -> bool:
+    """'G.' si', 'De' no, 'G' no (l'abbreviazione del fornitore ha sempre il punto)."""
+    return len(token) == 2 and token[1] == "." and token[0].isalpha()
+
+
+def spell_out_particles(short_name: str | None, full_name: str | None) -> str:
+    """Il nome breve del fornitore con le particelle del cognome scritte per esteso.
+
+    SofaScore abbrevia TUTTE le parole tranne l'ultima, e su un cognome composto
+    produce 'G. D. Marzi': quel 'D.' si legge come un secondo nome, mentre 'De'
+    fa parte del cognome. Sbaglia anche il nostro ordinamento per cognome, che si
+    ferma alle iniziali e finisce per elencarlo sotto 'Marzi G. D.'.
+
+    Le parole si allineano da DESTRA — il lato del cognome e' l'unico che combacia
+    quando il fornitore lascia cadere un secondo nome — e un'iniziale si apre solo
+    se il nome completo ha, in quella posizione, una particella che comincia con
+    la stessa lettera. Cosi' un nome breve che e' in realta' un soprannome
+    ('G. Jesus' per 'Gabriel Silva de Jesus') resta intatto, e nel dubbio non si
+    tocca niente: qui si ripara un'abbreviazione, non si ricostruisce un nome.
+    """
+    short_words = (short_name or "").split()
+    full_words = (full_name or "").split()
+    if not short_words or not full_words:
+        return short_name or ""
+
+    out = list(short_words)
+    changed = False
+    for i in range(1, min(len(short_words), len(full_words)) + 1):
+        token, full_word = short_words[-i], full_words[-i]
+        if not _is_initial(token):
+            continue
+        norm_full = norm_name(full_word)
+        if norm_full in SURNAME_PARTICLES and norm_full[:1] == norm_name(token[0]):
+            out[-i] = full_word
+            changed = True
+    # Invariato se non c'e' niente da aprire: il rientro delle parole toglierebbe
+    # anche spazi anomali del fornitore, che non e' quello che ci hanno chiesto.
+    return " ".join(out) if changed else (short_name or "")

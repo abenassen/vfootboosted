@@ -154,7 +154,19 @@ class Player(models.Model):
     Canonical player identity across seasons.
     """
     full_name = models.CharField(max_length=120)
+    # Il nome che si legge in quasi tutta l'app (elenchi, pagelle, asta, notifiche).
+    # NON lo componiamo noi: arriva gia' abbreviato da SofaScore, riparato all'ingresso
+    # nelle particelle di cognome che il fornitore accorcia (v. spell_out_particles).
     short_name = models.CharField(max_length=120, blank=True, default="")
+    # Chi ha deciso il nome breve: il fornitore (vuoto) o una persona ("admin").
+    # Serve perche' certe abbreviazioni NON sono ricavabili dai dati: "Carlos Augusto"
+    # e' un nome doppio, non nome + cognome, e nessuna regola lo distingue da "Carlos
+    # Augusto Silva". Chi gestisce il sito lo corregge a mano dall'admin di Django, e
+    # questo campo e' quello che impedisce alla prossima riparazione automatica di
+    # rimettere "C. Augusto" senza che nessuno se ne accorga: OGNI passata sui nomi
+    # brevi deve escludere le righe con SHORT_NAME_ADMIN.
+    SHORT_NAME_ADMIN = "admin"
+    short_name_source = models.CharField(max_length=16, blank=True, default="")
     date_of_birth = models.DateField(null=True, blank=True)
 
     # provider identifiers for robust matching across sources
