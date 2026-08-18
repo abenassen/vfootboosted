@@ -65,7 +65,10 @@ if (manifest.length) {
       // visita normale, quindi riguarda chiunque abbia aperto il sito una volta.
       // L'indirizzo vive in due posti che devono restare d'accordo — qui e nella
       // location di vfoot.it.conf: se un giorno cambia, va cambiato in entrambi.
-      denylist: [/^\/api\//, /^\/admin\//, /^\/ws\//, /^\/static\//, /^\/media\//,
+      // /admin e /admin/ entrambi: il worker risponde a una NAVIGAZIONE, cioe' a
+      // un indirizzo digitato a mano, e a mano la barra finale non la scrive
+      // nessuno. Senza il `$` quella navigazione la mangia il guscio dell'app.
+      denylist: [/^\/api\//, /^\/admin(\/|$)/, /^\/ws\//, /^\/static\//, /^\/media\//,
                  /^\/benchmark-voto\//,
                  /^\/mobile-frame\.html/, /^\/pwa-check\.html/],
     }),
