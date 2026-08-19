@@ -150,6 +150,75 @@ curl -s -o /dev/null -w '%{http_code}\n' https://vfoot.it/api/v1/auth/me   # 401
 ssh root@139.162.144.123 'journalctl -u vfoot --since "2 min ago" | grep -i error'  # empty
 ```
 
+## Compressione delle risposte (gzip) — DA INSTALLARE
+
+**Oggi il sito non comprime né il bundle JS né il JSON.** `nginx.conf` ha
+`gzip on` ma `gzip_types` commentato — il default Debian — e senza `gzip_types`
+nginx comprime **solo `text/html`**. Misurato su https://vfoot.it il 19/08/2026:
+
+```sh
+curl -skI -H 'Accept-Encoding: gzip' https://vfoot.it/            # content-encoding: gzip
+curl -skI -H 'Accept-Encoding: gzip' https://vfoot.it/assets/index-IiJ2eRLH.js
+#   content-type: application/javascript
+#   content-length: 830493        ← nessun content-encoding: 830 KB in chiaro
+```
+
+Quanto si guadagna, sui payload veri e a livello 1:
+
+| | oggi | gzip lvl 1 | quando pesa |
+|---|---|---|---|
+| bundle JS | 814 KB | **283 KB** (−65%) | ogni primo accesso e ogni deploy |
+| stato asta | 20,4 KB | **3,0 KB** (−85%) | ogni dispositivo, **ogni rilancio** |
+| rose a rose piene | 16,4 KB | **2,2 KB** (−86%) | a ogni aggiudicazione |
+| pool listone | 61,1 KB | **11,6 KB** (−81%) | il banditore, a ogni evento |
+
+Costo in CPU — la risorsa scarsa qui: **0,10 ms** per comprimere lo stato
+dell'asta, contro i ~15 ms che Django impiega a produrlo. Sotto l'1%.
+
+Il file versionato è `deploy/nginx/vfoot-gzip.conf`, e va in `conf.d/` e non nel
+vhost perché le direttive `gzip_*` vivono nel contesto http — stessa ragione di
+`vfoot-limits.conf`. Le motivazioni di ogni numero sono commentate lì dentro.
+
+```sh
+scp vfoot-backend/deploy/nginx/vfoot-gzip.conf root@139.162.144.123:/etc/nginx/conf.d/
+ssh root@139.162.144.123 'nginx -t && systemctl reload nginx'
+```
+
+**Verifica** (`content-encoding: gzip` su entrambi, e il JS molto più corto):
+
+```sh
+curl -skI -H 'Accept-Encoding: gzip' https://vfoot.it/assets/$(curl -s https://vfoot.it/ \
+  | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 | cut -d/ -f2) \
+  | grep -iE 'content-encoding|content-length'
+curl -sk -H 'Accept-Encoding: gzip' -o /dev/null -w '%{size_download}\n' https://vfoot.it/
+```
+
+**Rollback**: `rm /etc/nginx/conf.d/vfoot-gzip.conf && nginx -t && systemctl reload nginx`.
+
+**Attenzione, verificato con `nginx -t` su un albero di prova il 19/08/2026:** il
+file **non deve** contenere `gzip on`. È già dichiarato in `nginx.conf`, e nello
+stesso contesto http una seconda volta non è un doppione innocuo — nginx rifiuta
+di partire con `[emerg] "gzip" directive is duplicate`.
+
+### `gzip_static` — opzionale, non ancora attivo
+
+`vfoot-gzip.conf` accende già `gzip_static on`, ma è **inerte** finché accanto ai
+file non compaiono i `.gz`. Per accenderlo davvero, una riga fra il passo 1 e il
+passo 5 del deploy, che comprime il bundle **una volta a livello 9** invece che a
+ogni richiesta (i ~12 ms di CPU per download spariscono, e il file scende sotto i
+240 KB):
+
+```sh
+find vfoot-frontend/dist -type f \
+  \( -name '*.js' -o -name '*.css' -o -name '*.svg' -o -name '*.json' \
+     -o -name '*.webmanifest' -o -name '*.html' \) -size +1k \
+  -exec gzip -9 -k -f {} +
+```
+
+L'`rsync --delete` del passo 5 li porta su e ripulisce i vecchi da solo: i nomi
+degli asset sono col digest del contenuto, quindi un `.gz` stantio non può
+sopravvivere accanto a un sorgente cambiato.
+
 ## Live auction WebSocket (first deploy that ships it)
 
 The auction room is real-time over `wss://vfoot.it/ws/auctions/<id>/`. One-time setup:
