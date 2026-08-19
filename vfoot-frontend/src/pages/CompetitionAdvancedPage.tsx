@@ -142,7 +142,7 @@ export default function CompetitionAdvancedPage() {
           <p className="text-sm text-ink-faint">Per formule che i tre formati guidati non coprono.</p>
         </div>
         <Link to="/league-admin?tab=league" className="shrink-0 text-sm text-ink-faint hover:text-ink">
-          ✕ Chiudi
+          ← Competizioni
         </Link>
       </div>
 

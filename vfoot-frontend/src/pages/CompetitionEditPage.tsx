@@ -118,7 +118,7 @@ export default function CompetitionEditPage() {
           </div>
         </div>
         <Link to="/league-admin?tab=league" className="shrink-0 text-sm text-ink-faint hover:text-ink">
-          ✕ Chiudi
+          ← Competizioni
         </Link>
       </div>
 
