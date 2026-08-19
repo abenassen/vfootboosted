@@ -4,6 +4,7 @@ import { Button, Card, SectionTitle } from '../ui';
 import { MatchScoreHeader, type MatchHeaderVM } from './MatchScoreHeader';
 import { MatchManagers } from './MatchManagers';
 import type {
+  ClassicDefenseBonus,
   ClassicFixtureDetail,
   ClassicPlayerEvents,
   ClassicPlayerLine,
@@ -101,6 +102,34 @@ const DEF_MODE_LABEL: Record<string, string> = {
   subtract_opponent: 'sottratto alla squadra avversaria',
 };
 
+const DEF_GATE_LABEL: Record<string, string> = {
+  starters: 'almeno 4 difensori schierati dal 1’',
+  effective: 'almeno 4 difensori con voto a fine giornata',
+};
+
+/** Perché il modificatore non è scattato, con le parole della regola che l’ha
+ *  fermato. Dirlo dal `reason` e non dalla regola più comune non è pignoleria: la
+ *  lega sceglie quale delle due difese deve essere di quattro, e una riga fissa
+ *  finiva per accusare del difensore mancante chi invece aveva perso il portiere. */
+function defenseReason(d: ClassicDefenseBonus): string {
+  switch (d.reason) {
+    case 'meno_di_4_difensori_titolari':
+      return 'servono ≥4 difensori schierati dal 1’';
+    case 'meno_di_4_difensori_con_voto':
+      return 'servono ≥4 difensori con voto';
+    case 'meno_di_3_difensori_con_voto':
+      return 'meno di 3 difensori con voto';
+    case 'portiere_senza_voto':
+      return 'portiere senza voto';
+    case 'disattivato':
+      return 'spento in questa lega';
+    default:
+      // Referto vecchio o motivo che non conosciamo: si dice quel che serve,
+      // secondo il cancello con cui è stato calcolato.
+      return `servono ${DEF_GATE_LABEL[d.gate ?? 'starters']}`;
+  }
+}
+
 /** A number that is still moving. Same mark everywhere it appears — on a single
  *  vote, on a team total, on the fixture — because it is the same statement: the
  *  real match behind it has not settled, so this will change.
@@ -197,10 +226,14 @@ export function ClassicMatchDetail({
                   {' '}
                   Un titolare <b>s.v.</b> è rimpiazzato dal primo panchinaro utile (in ordine di panchina)
                   che mantiene la formazione valida.
+                  {d.sv_office_vote
+                    ? ` Se non ce n’è, il buco vale ${fmt(d.sv_office_vote)} d’ufficio.`
+                    : ' Se non ce n’è, il suo posto non vale niente.'}
                   {d.defense_bonus_mode ? (
                     <>
                       {' '}
-                      Modificatore difesa: <b>{DEF_MODE_LABEL[d.defense_bonus_mode] ?? d.defense_bonus_mode}</b>.
+                      Modificatore difesa: <b>{DEF_MODE_LABEL[d.defense_bonus_mode] ?? d.defense_bonus_mode}</b>,
+                      a chi ha <b>{DEF_GATE_LABEL[d.defense_bonus_gate ?? 'starters']}</b>.
                     </>
                   ) : null}
                 </>
@@ -268,7 +301,7 @@ function TeamColumn({
               <b className="text-good">+{fmt(team.defense.bonus)}</b>
             </span>
           ) : (
-            <span className="text-ink-faint">🛡 Modificatore difesa non attivo (servono ≥4 difensori titolari)</span>
+            <span className="text-ink-faint">🛡 Modificatore difesa non attivo ({defenseReason(team.defense)})</span>
           )}
           {team.defense.applied !== 0 ? (
             <span className="text-ink-faint">
@@ -448,7 +481,11 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
             )}
             {p.office ? (
               <span
-                title="Voto d'ufficio: la lega ha imposto questo voto per una partita non giocata"
+                title={
+                  p.sv_filled
+                    ? "Voto d'ufficio: non ha preso voto e in panchina non c'era un rimpiazzo utile, la lega copre il buco"
+                    : "Voto d'ufficio: la lega ha imposto questo voto per una partita non giocata"
+                }
                 className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-bold text-accent"
               >
                 ufficio

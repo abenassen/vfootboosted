@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from vfoot.services.defense_bonus import compute_defense_bonus
+from vfoot.services.defense_bonus import GATE_STARTERS, compute_defense_bonus
 from vfoot.services.lineup_substitution import apply_classic_substitutions
 from vfoot.services.scoring_engine import fantavote_to_goals
 
@@ -48,6 +48,12 @@ class Ruleset:
     max_substitutions: int | None = 5
     defense_enabled: bool = True
     defense_mode: str = "add_own"  # add_own | subtract_opponent
+    # Which lineup the >=4-defenders gate counts: "starters" (the XI as sent) or
+    # "effective" (the XI as it ended, defenders with a vote). See defense_bonus.
+    defense_gate: str = GATE_STARTERS
+    # Voto d'ufficio per un titolare senza voto che la panchina non ha coperto.
+    # 0 = spento (il buco non vale niente, la regola classica).
+    sv_office_vote: float = 0.0
     keeper_clean_sheet_enabled: bool = False
     keeper_clean_sheet_value: float = 1.0
     # Fattore campo: quanto vale giocare in casa. 0 = spento. SE valga, in una data
@@ -60,6 +66,8 @@ class Ruleset:
             max_substitutions=league.max_substitutions,
             defense_enabled=league.defense_bonus_enabled,
             defense_mode=league.defense_bonus_mode,
+            defense_gate=getattr(league, "defense_bonus_gate", None) or GATE_STARTERS,
+            sv_office_vote=float(getattr(league, "sv_office_vote", 0.0) or 0.0),
             # Field added during wiring; getattr keeps the engine usable before then.
             keeper_clean_sheet_enabled=bool(getattr(league, "keeper_clean_sheet_enabled", False)),
             keeper_clean_sheet_value=float(getattr(league, "keeper_clean_sheet_value", 1.0)),
@@ -74,6 +82,8 @@ class Ruleset:
             "max_substitutions": self.max_substitutions,
             "defense_enabled": self.defense_enabled,
             "defense_mode": self.defense_mode,
+            "defense_gate": self.defense_gate,
+            "sv_office_vote": self.sv_office_vote,
             "keeper_clean_sheet_enabled": self.keeper_clean_sheet_enabled,
             "keeper_clean_sheet_value": self.keeper_clean_sheet_value,
             "home_advantage_bonus": self.home_advantage_bonus,
@@ -85,6 +95,10 @@ class Ruleset:
             max_substitutions=snap.get("max_substitutions", 5),
             defense_enabled=snap.get("defense_enabled", True),
             defense_mode=snap.get("defense_mode", "add_own"),
+            # A matchday concluded before the gate existed was scored on the XI as
+            # sent, so that is what an old snapshot has to keep meaning.
+            defense_gate=snap.get("defense_gate") or GATE_STARTERS,
+            sv_office_vote=snap.get("sv_office_vote", 0.0) or 0.0,
             keeper_clean_sheet_enabled=snap.get("keeper_clean_sheet_enabled", False),
             keeper_clean_sheet_value=snap.get("keeper_clean_sheet_value", 1.0),
             home_advantage_bonus=snap.get("home_advantage_bonus", 0.0),
@@ -112,7 +126,8 @@ class ModifierResult:
 def _mod_defense(ctx: dict, rs: Ruleset) -> ModifierResult | None:
     if not rs.defense_enabled:
         return None
-    d = compute_defense_bonus(ctx["starter_lineup_roles"], ctx["def_votes"], ctx["gk_vote"])
+    d = compute_defense_bonus(ctx["starter_lineup_roles"], ctx["def_votes"], ctx["gk_vote"],
+                              rs.defense_gate)
     scope = OPP_SUBTRACT if rs.defense_mode == "subtract_opponent" else SELF_ADD
     return ModifierResult(
         key="defense", eligible=bool(d["eligible"]), value=float(d["bonus"]),
@@ -127,7 +142,10 @@ def _mod_keeper_clean_sheet(ctx: dict, rs: Ruleset) -> ModifierResult | None:
     # Imbattuto = the effective keeper played (has a vote) and conceded no goals.
     # An OFFICE vote is explicitly not enough: it is a ruling on the vote, not a
     # match that was played, and there is no clean sheet to be had in a game nobody
-    # played — reading its conceded=0 as one would be inventing an event.
+    # played — reading its conceded=0 as one would be inventing an event. The
+    # league's ``sv_office_vote`` rides the same ``office`` flag and is refused by
+    # the same line: it is that same statement made about a keeper who is not there
+    # at all.
     imbattuto = bool(gk and not gk.get("sv") and not gk.get("office")
                      and (gk.get("conceded") or 0) == 0)
     return ModifierResult(
@@ -140,6 +158,46 @@ def _mod_keeper_clean_sheet(ctx: dict, rs: Ruleset) -> ModifierResult | None:
 # Order is irrelevant: each modifier's magnitude is computed independently and
 # summed in resolve_fixture. Append here to add a future modifier.
 MODIFIERS = [_mod_defense, _mod_keeper_clean_sheet]
+
+
+def _fill_unresolved(s_by: dict, unresolved: list[int], vote: float) -> list[int]:
+    """Give the league's voto d'ufficio to the starters left without one, in place.
+
+    A hole is a starter with no vote whom the bench could not cover — for whatever
+    reason: nobody eligible, or the substitution budget spent. It costs the team his
+    whole fantavoto, which on a keeper (the one starter a bench rarely covers,
+    because only another keeper will do) is the difference between a bad weekend and
+    a lost one. A league may decide that a hole is worth 3 or 4 rather than nothing.
+
+    Two slots are deliberately left empty even so:
+
+    * a line whose match is still MOVING (``provisional``). Mid-round every player
+      on the pitch is momentarily voteless, and filling those would show a team
+      "leading" on eleven office votes at the fifth minute, then sliding as the
+      real ones arrive. A hole is only a hole once the match that made it is over.
+    * a VACANT slot — a player the team no longer has, in a lineup the manager never
+      submitted for this round (see ``build_team_lines``). That is not a hole in a
+      team that was fielded; it is the absence of one, and paying for it would pay a
+      manager for not turning up.
+
+    Returns the player_ids actually filled (empty when the league has it off).
+    """
+    if not vote:
+        return []
+    filled: list[int] = []
+    for pid in unresolved:
+        line = s_by.get(pid)
+        if line is None or line.get("provisional") or line.get("vacant"):
+            continue
+        # ``office``: the SAME channel an admin ruling travels on (_office_line),
+        # so everything downstream — no bonus/malus, no clean sheet, the "ufficio"
+        # chip in the tabellino — already knows what this line is. ``sv_filled``
+        # only records WHO imposed it: the league's standing rule, not a ruling on
+        # a particular match.
+        line.update(sv=False, office=True, sv_filled=True, voto_puro=float(vote),
+                    bonus=0.0, malus=0.0, fantavoto=float(vote))
+        filled.append(pid)
+    return filled
 
 
 # --------------------------------------------------------------------------- #
@@ -176,13 +234,18 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
         subs.append({"out": {"player_id": out_pid, "name": name[out_pid]},
                      "in": {"player_id": in_pid, "name": name[in_pid]}})
 
+    filled = _fill_unresolved(s_by, res.unresolved, rs.sv_office_vote)
+
     # Effective XI. An UNRESOLVED s.v. (fantavoto None) contributes nothing — it is
     # excluded from the sum (DEC-1), so the team simply sums fewer than 11 voti.
+    # Unless the league fills the hole with its voto d'ufficio, in which case the
+    # line has a vote by the time we get here and sums like any other.
     eff_lines = [(s_by.get(pid) or b_by.get(pid)) for pid in res.effective]
     base_total = round(sum(l["fantavoto"] for l in eff_lines if l["fantavoto"] is not None), 2)
 
-    # Modifier context (defence gates on the STARTING XI; votes come from the
-    # EFFECTIVE XI so a substitute defender's vote counts).
+    # Modifier context. The defence gate counts EITHER list depending on the league
+    # (see defense_bonus); the votes always come from the EFFECTIVE XI, so a
+    # substitute defender's vote counts towards the average under both readings.
     ctx = {
         "starter_lineup_roles": [l["lineup_role"] for l in starters],
         "def_votes": [l["voto_puro"] for l in eff_lines
@@ -196,13 +259,18 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
 
     # Legacy "defense" key kept for the existing match-detail payload/UI.
     defense = next((m.detail for m in mods if m.key == "defense"),
-                   {"eligible": False, "reason": "disattivato", "avg": None, "bonus": 0.0})
+                   {"eligible": False, "reason": "disattivato", "avg": None, "bonus": 0.0,
+                    "gate": None})
 
     return {
         "starters": [s_by[l["player_id"]] for l in starters],
         "bench": [b_by[l["player_id"]] for l in bench],
         "substitutions": subs,
+        # The holes, and — of those — the ones the league's voto d'ufficio covered.
+        # Both, because they are two different facts: the first says the manager
+        # was left short, the second says what the rules did about it.
         "unresolved_sv": list(res.unresolved),
+        "sv_filled": filled,
         # Fielded players whose real match has not been played: what the league has
         # to decide about (wait for the recovery, or impose an office vote).
         "pending": sorted(frozen),

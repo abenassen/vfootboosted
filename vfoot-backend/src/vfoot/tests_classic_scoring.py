@@ -116,6 +116,119 @@ class ClassicScoringTest(SimpleTestCase):
         self.assertEqual(away["total"], 69.5)
         self.assertEqual(away["applied"], -2.0)
 
+    def test_defense_gate_effective_counts_the_lineup_that_played(self):
+        """End-to-end through score_team: the gate is a Ruleset knob, and what it
+        moves is eligibility only — the average is the effective XI's either way."""
+        starters = legal_xi(6.5, n_def=3, n_mid=5)      # 3-5-2 schierato
+        starters[4] = line(5, "MID", 0, sv=True)        # un centrocampista s.v.
+        bench = [line(20, "DEF", 6.5)]                  # entra un difensore: 4-4-2
+        for gate, eligible in (("starters", False), ("effective", True)):
+            team = score_team([dict(l) for l in starters], [dict(l) for l in bench],
+                              Ruleset(defense_enabled=True, defense_gate=gate))
+            self.assertEqual(team["defense"]["eligible"], eligible, gate)
+            self.assertEqual(len(team["substitutions"]), 1, gate)
+        # E il valore, quando scatta, e' quello dei difensori che hanno giocato.
+        team = score_team([dict(l) for l in starters], [dict(l) for l in bench],
+                          Ruleset(defense_enabled=True, defense_gate="effective"))
+        self.assertAlmostEqual(team["defense"]["avg"], 6.5)
+        self.assertEqual(team["defense"]["bonus"], 2.0)
+
+    def test_defense_gate_is_read_from_the_league(self):
+        from types import SimpleNamespace
+        league = SimpleNamespace(max_substitutions=5, defense_bonus_enabled=True,
+                                 defense_bonus_mode="add_own",
+                                 defense_bonus_gate="effective")
+        self.assertEqual(Ruleset.from_league(league).defense_gate, "effective")
+        # Una lega piu' vecchia del campo (o un doppio di prova che non ce l'ha)
+        # gioca la regola storica, non un cancello vuoto.
+        del league.defense_bonus_gate
+        self.assertEqual(Ruleset.from_league(league).defense_gate, "starters")
+
+    def test_defense_gate_survives_the_ruleset_snapshot(self):
+        """A concluded matchday is re-scored from its snapshot: the gate has to be
+        in there, and a snapshot written before it existed must keep meaning
+        'the XI as sent'."""
+        rs = Ruleset(defense_gate="effective")
+        self.assertEqual(Ruleset.from_snapshot(rs.to_snapshot()).defense_gate, "effective")
+        self.assertEqual(Ruleset.from_snapshot({"defense_mode": "add_own"}).defense_gate,
+                         "starters")
+
+    # -- voto d'ufficio sui buchi ---------------------------------------------
+
+    def test_hole_is_worth_nothing_by_default(self):
+        rs = Ruleset(defense_enabled=False, max_substitutions=5)
+        starters = legal_xi(6.0)
+        starters[5] = line(6, "MID", 0, sv=True)     # s.v., panchina vuota
+        team = score_team(starters, [], rs)
+        self.assertEqual(team["base_total"], 60.0)
+        self.assertEqual(team["unresolved_sv"], [6])
+        self.assertEqual(team["sv_filled"], [])
+
+    def test_the_league_can_fill_a_hole_with_an_office_vote(self):
+        rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(6.0)
+        starters[5] = line(6, "MID", 0, sv=True)
+        team = score_team(starters, [], rs)
+        self.assertEqual(team["base_total"], 64.0)   # 10x6 + 4
+        # Il buco resta un buco nel referto; quel che cambia e' quanto vale.
+        self.assertEqual(team["unresolved_sv"], [6])
+        self.assertEqual(team["sv_filled"], [6])
+        filled = team["starters"][5]
+        self.assertFalse(filled["sv"])
+        self.assertTrue(filled["office"])            # lo stesso canale del voto d'ufficio
+        self.assertEqual((filled["bonus"], filled["malus"]), (0.0, 0.0))
+
+    def test_a_filled_keeper_feeds_the_defence_modifier_but_never_a_clean_sheet(self):
+        """Il caso che ha motivato la regola: nessun portiere schierabile."""
+        rs = Ruleset(defense_enabled=True, keeper_clean_sheet_enabled=True,
+                     max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(7.0)
+        starters[0] = line(1, "GK", 0, sv=True, conceded=0)   # portiere s.v., niente riserva
+        team = score_team(starters, [], rs)
+        self.assertEqual(team["sv_filled"], [1])
+        # Senza il voto d'ufficio il modificatore sarebbe morto (portiere senza
+        # voto); con esso si calcola, e la media lo paga: (7+7+7+4)/4 = 6.25 -> +1.
+        self.assertTrue(team["defense"]["eligible"])
+        self.assertAlmostEqual(team["defense"]["avg"], 6.25)
+        self.assertEqual(team["defense"]["bonus"], 1.0)
+        # Ma imbattuto no: nessuno ha giocato quella partita.
+        cs = next(m for m in team["modifiers"] if m.key == "keeper_clean_sheet")
+        self.assertFalse(cs.eligible)
+
+    def test_a_moving_line_is_not_a_hole_yet(self):
+        """Mid-round ogni giocatore in campo e' momentaneamente senza voto: coprirli
+        mostrerebbe una squadra in vantaggio su undici voti d'ufficio al 5'."""
+        rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(6.0)
+        starters[5] = {**line(6, "MID", 0, sv=True), "provisional": True}
+        team = score_team(starters, [], rs)
+        self.assertEqual(team["sv_filled"], [])
+        self.assertEqual(team["base_total"], 60.0)
+
+    def test_a_vacant_slot_is_not_filled(self):
+        """Non e' un buco in una squadra schierata: e' una squadra non schierata."""
+        rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(6.0)
+        starters[5] = {**line(6, "MID", 0, sv=True), "vacant": True}
+        team = score_team(starters, [], rs)
+        self.assertEqual(team["sv_filled"], [])
+
+    def test_a_pending_starter_is_not_a_hole(self):
+        """Partita non ancora giocata: si aspetta (o la lega decide), non si tappa."""
+        rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(6.0)
+        starters[5] = {**line(6, "MID", 0, sv=True), "pending": True}
+        team = score_team(starters, [], rs)
+        self.assertEqual(team["sv_filled"], [])
+        self.assertEqual(team["unresolved_sv"], [])
+        self.assertEqual(team["pending"], [6])
+
+    def test_the_office_vote_survives_the_ruleset_snapshot(self):
+        rs = Ruleset(sv_office_vote=4.0)
+        self.assertEqual(Ruleset.from_snapshot(rs.to_snapshot()).sv_office_vote, 4.0)
+        # Una giornata conclusa prima che l'opzione esistesse non ne aveva.
+        self.assertEqual(Ruleset.from_snapshot({"defense_mode": "add_own"}).sv_office_vote, 0.0)
+
     def test_keeper_clean_sheet_bonus(self):
         rs = Ruleset(defense_enabled=False, keeper_clean_sheet_enabled=True)
         clean = score_team(legal_xi(6.0, gk_conceded=0), [], rs)

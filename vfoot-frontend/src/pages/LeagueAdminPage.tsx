@@ -148,6 +148,8 @@ export default function LeagueAdminPage() {
       max_substitutions: d.max_substitutions,
       defense_bonus_enabled: d.defense_bonus_enabled,
       defense_bonus_mode: d.defense_bonus_mode,
+      defense_bonus_gate: d.defense_bonus_gate,
+      sv_office_vote: d.sv_office_vote,
       keeper_clean_sheet_enabled: d.keeper_clean_sheet_enabled,
       home_advantage_bonus: d.home_advantage_bonus,
       enforce_lineup_deadline: d.enforce_lineup_deadline,
@@ -886,6 +888,28 @@ export default function LeagueAdminPage() {
 
                       <div className="border-t pt-2">
                         <label className="flex items-center gap-2 text-sm">
+                          <span>Voto d’ufficio sui buchi</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={6}
+                            step={0.5}
+                            value={draft.sv_office_vote ?? 0}
+                            onChange={(e) => set({ sv_office_vote: Number(e.target.value) })}
+                            className="w-20 rounded-lg border px-2 py-1 text-sm"
+                          />
+                        </label>
+                        <div className="mt-1 text-[11px] text-ink-faint">
+                          Quanto vale un titolare senza voto che la panchina non è riuscita a coprire.{' '}
+                          <b>0 = niente</b>, la regola classica: chi resta in dieci somma dieci voti. Serve
+                          soprattutto ai portieri, dove il rimpiazzo può mancare per mezza stagione. È un voto
+                          d’ufficio come quelli imposti dalla lega: niente bonus/malus, niente imbattuto, ma
+                          entra nella media del modificatore difesa.
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-2">
+                        <label className="flex items-center gap-2 text-sm">
                           <input
                             type="checkbox"
                             checked={!!draft.defense_bonus_enabled}
@@ -907,9 +931,26 @@ export default function LeagueAdminPage() {
                             <option value="subtract_opponent">Sottratto alla squadra avversaria</option>
                           </select>
                         </label>
+                        <label className="mt-2 flex items-center gap-2 text-sm">
+                          <span>Si contano i difensori</span>
+                          <select
+                            value={draft.defense_bonus_gate}
+                            disabled={!draft.defense_bonus_enabled}
+                            onChange={(e) =>
+                              set({ defense_bonus_gate: e.target.value as 'starters' | 'effective' })
+                            }
+                            className="rounded-lg border px-2 py-1 text-sm disabled:opacity-50"
+                          >
+                            <option value="starters">Della formazione schierata</option>
+                            <option value="effective">Della formazione acquisita</option>
+                          </select>
+                        </label>
                         <div className="mt-1 text-[11px] text-ink-faint">
-                          Premia chi schiera ≥4 difensori titolari: media dei 3 migliori difensori + portiere (voti
-                          puri) → bonus a fasce.
+                          Media dei 3 migliori difensori + portiere (voti puri) → bonus a fasce, a chi ha una
+                          difesa di almeno 4.{' '}
+                          {draft.defense_bonus_gate === 'effective'
+                            ? 'Contano i 4 difensori con voto a fine giornata: un difensore subentrato vale, un titolare senza voto no.'
+                            : 'Contano i 4 difensori schierati dal 1’: una difesa a quattro raggiunta con le sostituzioni non vale.'}
                         </div>
                       </div>
 

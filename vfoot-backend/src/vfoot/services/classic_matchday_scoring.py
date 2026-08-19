@@ -204,18 +204,23 @@ def read_previous_lineup(league_id: int, real_matchday: int, team_id: int, compe
 # Pure composition (unit-tested without a DB).                                 #
 # --------------------------------------------------------------------------- #
 def _sv_line(pid: int, lineup_role: str, name: str | None = None,
-             pending: bool = False) -> dict:
+             pending: bool = False, vacant: bool = False) -> dict:
     """A senza-voto placeholder for a player with no line in the index (didn't play)
     or no longer owned (sold): no vote, so it triggers a substitution / is excluded.
 
     ``pending`` marks the other reason for having no vote: his club's match has not
     been played yet. It reads as s.v. everywhere the sum is concerned, but the bench
     must NOT cover it — a postponement is not a performance.
+
+    ``vacant`` marks the third: the slot holds somebody this team no longer has, in
+    a lineup it never submitted for this round. It is scored as an empty slot, and
+    the league's voto d'ufficio deliberately does not cover it (classic_scoring.
+    _fill_unresolved): a hole is what happens to a team that fielded one.
     """
     return {
         "player_id": pid, "name": name or str(pid), "lineup_role": lineup_role,
         "role": None, "voto_puro": None, "fantavoto": None, "sv": True,
-        "pending": pending,
+        "pending": pending, "vacant": vacant,
         "conceded": 0, "entered": False, "entered_for": None, "replaced_by": None,
     }
 
@@ -294,7 +299,7 @@ def compose_team_lines(
         role = role_map.get(pid, "MID")
         name = names.get(pid)
         if pid in vacant:
-            return _sv_line(pid, role, name)
+            return _sv_line(pid, role, name, vacant=True)
         if pid in office:
             # The league has ruled on this match: the ruling wins over both the
             # missing data and any partial data the provider may have shipped.
@@ -348,6 +353,8 @@ def build_fixture_payload(fixture_meta: dict, home: dict, away: dict, ruleset: R
         "home_total": home["total"],
         "away_total": away["total"],
         "defense_bonus_mode": ruleset.defense_mode,
+        "defense_bonus_gate": ruleset.defense_gate,
+        "sv_office_vote": ruleset.sv_office_vote,
         "result": "home" if home["goals"] > away["goals"] else "away" if away["goals"] > home["goals"] else "draw",
         "home": _serialize_team(home),
         "away": _serialize_team(away),
@@ -556,7 +563,14 @@ def live_scorer(league, md, ruleset):
             starters, bench, meta = team_lines_for_conclusion(
                 league, team, fx.competition_id, md.real_matchday, index, "previous",
                 not_started, office)
-            lines[side] = (starters or [], bench or [], meta)
+            starters, bench = starters or [], bench or []
+            # BEFORE scoring, not only after: the scorer now reads ``provisional``
+            # to decide what is a hole (classic_scoring._fill_unresolved). Marked
+            # afterwards, every player on the pitch of a match in progress would be
+            # a hole for the length of that match, and a league with the voto
+            # d'ufficio on would open the round showing eleven of them.
+            _mark_unstable({"starters": starters, "bench": bench}, unstable)
+            lines[side] = (starters, bench, meta)
 
         payload = score_composed_fixture(
             (lines["home"][0], lines["home"][1]),

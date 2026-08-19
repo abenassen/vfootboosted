@@ -24,16 +24,47 @@ class FantasyLeague(models.Model):
     # to this many times). League-configurable by the admin; fantacalcio default 5.
     max_substitutions = models.PositiveSmallIntegerField(default=5)
     # Defence modifier (classic): a reward for fielding a strong, deep defence.
-    # Awarded only if AT LEAST 4 defenders START (not if 4 is reached via subs).
+    # Awarded only to a defence at least four strong — WHICH four is the gate below.
     DEF_BONUS_ADD_OWN = "add_own"
     DEF_BONUS_SUB_OPP = "subtract_opponent"
     DEF_BONUS_MODE_CHOICES = [
         (DEF_BONUS_ADD_OWN, "Aggiunto alla propria squadra"),
         (DEF_BONUS_SUB_OPP, "Sottratto alla squadra avversaria"),
     ]
+    # WHICH lineup has to hold four defenders. The two readings are both defensible
+    # and neither is a variant of the other, so the league says which one it plays:
+    #
+    # * "starters" — the lineup AS SENT. Four defenders from the first minute or no
+    #   modifier: what is rewarded is having committed to a back four, and a back
+    #   four arrived at because a midfielder was s.v. was never a commitment.
+    # * "effective" — the lineup AS IT ENDED, substitutions included, counting the
+    #   defenders who actually took a vote. What is rewarded is the defence that
+    #   played, however it was arrived at — and, by the same token, a back four that
+    #   lost a man to an s.v. nobody could cover does not collect it.
+    DEF_GATE_STARTERS = "starters"
+    DEF_GATE_EFFECTIVE = "effective"
+    DEF_BONUS_GATE_CHOICES = [
+        (DEF_GATE_STARTERS, "Formazione schierata (4 difensori dal 1')"),
+        (DEF_GATE_EFFECTIVE, "Formazione acquisita (4 difensori con voto)"),
+    ]
     defense_bonus_enabled = models.BooleanField(default=True)
     defense_bonus_mode = models.CharField(
         max_length=20, choices=DEF_BONUS_MODE_CHOICES, default=DEF_BONUS_ADD_OWN)
+    defense_bonus_gate = models.CharField(
+        max_length=10, choices=DEF_BONUS_GATE_CHOICES, default=DEF_GATE_STARTERS)
+    # Voto d'ufficio sui BUCHI: un titolare senza voto che la panchina non e'
+    # riuscita a coprire vale questo, invece di non valere niente. 0 = spento (il
+    # default, cioe' la regola classica: chi gioca in dieci somma dieci voti).
+    #
+    # E' un voto d'ufficio come quelli dell'OfficeOverride, e si comporta come
+    # loro: entra nel totale E nell'aritmetica del modificatore difesa — che per un
+    # portiere mancante e' l'unico modo di avere un numero da mettere nella media —
+    # ma non regala mai il clean sheet, perche' nessuno ha giocato quella partita.
+    #
+    # Serve soprattutto ai portieri: senza un secondo portiere schierabile il buco
+    # costa il voto pieno E il modificatore, e a meta' stagione capita per motivi
+    # che non dipendono da come si e' schierato.
+    sv_office_vote = models.FloatField(default=0.0)
     # Optional "clean sheet" modifier (classic): +1 to the team total when the
     # effective goalkeeper played (has a vote) and conceded no goals. Off by default;
     # the defence modifier is the only one enabled out of the box.

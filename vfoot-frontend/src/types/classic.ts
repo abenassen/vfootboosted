@@ -42,8 +42,12 @@ export interface ClassicPlayerLine {
    *  sum but is NOT one: the bench does not cover it, and the league settles it
    *  later — by the recovery, or by an office vote. */
   pending?: boolean;
-  /** The vote was IMPOSED by the league for a match that was not played. */
+  /** The vote was IMPOSED by the league: either a ruling on a match that was not
+   *  played, or — with `sv_filled` — the league's standing voto d'ufficio filling
+   *  a hole the bench could not cover. No bonus/malus either way. */
   office?: boolean;
+  /** Era un buco: senza voto e senza rimpiazzo, coperto dal voto d'ufficio di lega. */
+  sv_filled?: boolean;
   /** His club's match is being played, or has ended and the provider has not
    *  settled the data. There IS a vote — it is simply going to move. */
   provisional?: boolean;
@@ -78,13 +82,21 @@ export interface ClassicPlayerLine {
   replaced_by: ClassicPlayerRef | null; // starter who was substituted
 }
 
+export type DefenseBonusGate = 'starters' | 'effective';
+
 export interface ClassicDefenseBonus {
   eligible: boolean;
+  /** Perché non è scattato: `meno_di_4_difensori_titolari` /
+   *  `meno_di_4_difensori_con_voto` (a seconda del cancello della lega),
+   *  `portiere_senza_voto`, `meno_di_3_difensori_con_voto`, `disattivato`. */
   reason: string;
   avg: number | null;
   bonus: number;
   applied: number; // signed adjustment to this team's total
   mode: 'add_own' | 'subtract_opponent' | null;
+  /** Quale formazione ha contato il cancello dei 4 difensori: quella schierata o
+   *  quella acquisita. Assente sui referti congelati prima che fosse un'opzione. */
+  gate?: DefenseBonusGate | null;
 }
 
 export interface ClassicSubstitution {
@@ -129,6 +141,10 @@ export interface ClassicFixtureDetail {
   home_total: number;
   away_total: number;
   defense_bonus_mode: 'add_own' | 'subtract_opponent' | null;
+  defense_bonus_gate?: DefenseBonusGate | null;
+  /** Quanto vale, in questa lega, un buco che la panchina non ha coperto. 0/assente
+   *  = niente, la regola classica. */
+  sv_office_vote?: number | null;
   result: 'home' | 'away' | 'draw';
   home: ClassicTeamDetail;
   away: ClassicTeamDetail;

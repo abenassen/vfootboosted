@@ -256,6 +256,8 @@ export async function createLeague(req: CreateLeagueRequest) {
     max_substitutions: 5,
     defense_bonus_enabled: true,
     defense_bonus_mode: 'add_own',
+    defense_bonus_gate: 'starters',
+    sv_office_vote: 0,
     keeper_clean_sheet_enabled: false,
     home_advantage_bonus: 0,
     enforce_lineup_deadline: true,
@@ -390,7 +392,13 @@ export async function updateMemberRole(leagueId: number, membershipId: number, r
 
 export async function updateLeagueSettings(
   leagueId: number,
-  settings: { max_substitutions?: number; defense_bonus_enabled?: boolean; defense_bonus_mode?: string },
+  settings: {
+    max_substitutions?: number;
+    defense_bonus_enabled?: boolean;
+    defense_bonus_mode?: string;
+    defense_bonus_gate?: string;
+    sv_office_vote?: number;
+  },
 ) {
   await sleep(80);
   return { league_id: leagueId, ...settings };

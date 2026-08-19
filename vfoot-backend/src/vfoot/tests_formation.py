@@ -139,6 +139,55 @@ class DefenseBonusTests(SimpleTestCase):
         self.assertAlmostEqual(r["avg"], 6.5)
         self.assertEqual(r["bonus"], 2.0)
 
+    # -- the league's gate: which lineup has to hold four defenders -----------
+    #
+    # The two readings differ on exactly two lineups, and both are tested here:
+    # the 3-4-3 that became a back four through the bench (the "starters" gate
+    # refuses, the "effective" one pays) and the back four that lost a man to an
+    # s.v. nobody covered (the other way round).
+
+    def test_effective_gate_pays_a_back_four_reached_from_the_bench(self):
+        from vfoot.services.defense_bonus import GATE_EFFECTIVE, compute_defense_bonus
+        # Schierato 3-4-3, un centrocampista s.v., entra un difensore: quattro
+        # difensori a voto, tre titolari.
+        starters = ["GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "MID",
+                    "ATT", "ATT", "ATT"]
+        votes = [7.0, 7.0, 6.0, 6.0]
+        self.assertFalse(compute_defense_bonus(starters, votes, 6.0)["eligible"])
+        r = compute_defense_bonus(starters, votes, 6.0, GATE_EFFECTIVE)
+        self.assertTrue(r["eligible"])
+        self.assertAlmostEqual(r["avg"], 6.5)   # 7+7+6 + gk 6, /4
+
+    def test_effective_gate_refuses_a_back_four_that_lost_a_man(self):
+        from vfoot.services.defense_bonus import GATE_EFFECTIVE, compute_defense_bonus
+        # Quattro difensori schierati, uno senza voto e nessuno in panchina che lo
+        # copra: tre a voto.
+        roles = ["GK"] + ["DEF"] * 4 + ["MID"] * 3 + ["ATT"] * 3
+        self.assertTrue(compute_defense_bonus(roles, [7.0, 7.0, 6.0], 6.0)["eligible"])
+        r = compute_defense_bonus(roles, [7.0, 7.0, 6.0], 6.0, GATE_EFFECTIVE)
+        self.assertFalse(r["eligible"])
+        self.assertEqual(r["reason"], "meno_di_4_difensori_con_voto")
+
+    def test_the_keeper_is_needed_under_either_gate(self):
+        from vfoot.services.defense_bonus import GATE_EFFECTIVE, compute_defense_bonus
+        roles = ["GK"] + ["DEF"] * 4 + ["MID"] * 3 + ["ATT"] * 3
+        for gate in ("starters", GATE_EFFECTIVE):
+            r = compute_defense_bonus(roles, [7.0, 7.0, 6.0, 6.0], None, gate)
+            self.assertFalse(r["eligible"], gate)
+            self.assertEqual(r["reason"], "portiere_senza_voto", gate)
+
+    def test_the_reason_names_the_gate_that_refused(self):
+        """The tabellino words the refusal from this, so the two gates must not
+        answer with each other's rule."""
+        from vfoot.services.defense_bonus import GATE_EFFECTIVE, compute_defense_bonus
+        three = ["GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "MID",
+                 "ATT", "ATT", "ATT"]
+        self.assertEqual(compute_defense_bonus(three, [7.0, 7.0, 7.0], 6.0)["reason"],
+                         "meno_di_4_difensori_titolari")
+        self.assertEqual(
+            compute_defense_bonus(three, [7.0, 7.0, 7.0], 6.0, GATE_EFFECTIVE)["reason"],
+            "meno_di_4_difensori_con_voto")
+
 
 class AuraSubstitutionTests(SimpleTestCase):
     def test_best_score_wins_ignoring_order(self):

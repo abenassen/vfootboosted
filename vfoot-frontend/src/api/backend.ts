@@ -641,6 +641,12 @@ export interface LeagueSettingsPatch {
   max_substitutions?: number;
   defense_bonus_enabled?: boolean;
   defense_bonus_mode?: 'add_own' | 'subtract_opponent';
+  /** Su quale formazione si contano i 4 difensori: `starters` (quella schierata)
+   *  o `effective` (quella acquisita, difensori con voto a fine giornata). */
+  defense_bonus_gate?: 'starters' | 'effective';
+  /** Voto d'ufficio per un buco in formazione (titolare senza voto e senza
+   *  rimpiazzo in panchina). 0 = spento. Massimo 6. */
+  sv_office_vote?: number;
   keeper_clean_sheet_enabled?: boolean;
   /** Punti di fantavoto a chi gioca in casa. 0 = spento. Si applica solo dove la
    *  partita ha un campo (`FantasyFixture.home_advantage`). */

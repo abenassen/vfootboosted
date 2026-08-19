@@ -59,7 +59,7 @@ from vfoot.models import (
 from vfoot.services import honours
 from vfoot.services.classic_rating import build_reference
 from vfoot.services.classic_pagella import get_role_averages, pagella_for_match
-from vfoot.services.defense_bonus import compute_defense_bonus
+from vfoot.services.defense_bonus import GATE_STARTERS, compute_defense_bonus
 from vfoot.services.formation_rules import is_legal_classic
 from vfoot.services.lineup_substitution import apply_classic_substitutions
 
@@ -255,7 +255,7 @@ class Command(BaseCommand):
                 "bonus": float(bonus), "malus": float(malus),
                 "fantavoto": round(vp + bonus - malus, 1), **why}
 
-    def _score_team(self, starters, bench, md, maps, max_subs):
+    def _score_team(self, starters, bench, md, maps, max_subs, gate=GATE_STARTERS):
         roles = {p["player_id"]: ROLE_TO_LINEUP[p["role"]] for p in starters + bench}
         s_lines = {p["player_id"]: self._line(p, md, maps) for p in starters}
         b_lines = {p["player_id"]: self._line(p, md, maps) for p in bench}
@@ -276,13 +276,14 @@ class Command(BaseCommand):
             line = s_lines.get(pid) or b_lines.get(pid)
             eff_lines.append(line)
             total += line["fantavoto"] if line["fantavoto"] is not None else SV_BASELINE
-        # Defence modifier: gate on STARTING defenders; value from the effective XI's
-        # best 3 defender voti puri + GK voto puro (excluding bonus/malus).
+        # Defence modifier: the league's gate (XI as sent / XI as it ended); value
+        # from the effective XI's best 3 defender voti puri + GK voto puro
+        # (excluding bonus/malus).
         starter_lroles = [ROLE_TO_LINEUP[p["role"]] for p in starters]
         def_votes = [l["voto_puro"] for l in eff_lines
                      if l["lineup_role"] == "DEF" and l["voto_puro"] is not None]
         gk_vote = next((l["voto_puro"] for l in eff_lines if l["lineup_role"] == "GK"), None)
-        defense = compute_defense_bonus(starter_lroles, def_votes, gk_vote)
+        defense = compute_defense_bonus(starter_lroles, def_votes, gk_vote, gate)
         starters_out = [s_lines[p["player_id"]] for p in starters]
         bench_out = [b_lines[p["player_id"]] for p in bench]
         subs = [{"out": {"player_id": o, "name": name[o]}, "in": {"player_id": i, "name": name[i]}}
@@ -474,7 +475,8 @@ class Command(BaseCommand):
             score = {}
             for tid in (t.id for t in teams):
                 st, bn = depth[tid]
-                score[tid] = self._score_team(st, bn, rm, maps, league.max_substitutions)
+                score[tid] = self._score_team(st, bn, rm, maps, league.max_substitutions,
+                                              league.defense_bonus_gate)
             for home_id, away_id in pairs:
                 hs, as_ = score[home_id], score[away_id]
                 self._apply_defense_bonus(hs, as_, league)
@@ -525,8 +527,10 @@ class Command(BaseCommand):
         """Score one fixture (classic engine + defence bonus), persist it (+detail +
         lineups), and return the winner id (decisive: goals → total → home)."""
         c = self._ctx
-        hs = self._score_team(*c["depth"][home_id], rm, c["maps"], c["league"].max_substitutions)
-        as_ = self._score_team(*c["depth"][away_id], rm, c["maps"], c["league"].max_substitutions)
+        hs = self._score_team(*c["depth"][home_id], rm, c["maps"], c["league"].max_substitutions,
+                              c["league"].defense_bonus_gate)
+        as_ = self._score_team(*c["depth"][away_id], rm, c["maps"], c["league"].max_substitutions,
+                               c["league"].defense_bonus_gate)
         self._apply_defense_bonus(hs, as_, c["league"])
         tbi = c["tbi"]
         fx = FantasyFixture.objects.create(
@@ -662,8 +666,10 @@ class Command(BaseCommand):
     def _fixture_goals(self, comp, stage_obj, rno, rm, home_id, away_id):
         """Like _play_fixture but returns the (home_goals, away_goals) for group tables."""
         c = self._ctx
-        hs = self._score_team(*c["depth"][home_id], rm, c["maps"], c["league"].max_substitutions)
-        as_ = self._score_team(*c["depth"][away_id], rm, c["maps"], c["league"].max_substitutions)
+        hs = self._score_team(*c["depth"][home_id], rm, c["maps"], c["league"].max_substitutions,
+                              c["league"].defense_bonus_gate)
+        as_ = self._score_team(*c["depth"][away_id], rm, c["maps"], c["league"].max_substitutions,
+                               c["league"].defense_bonus_gate)
         self._apply_defense_bonus(hs, as_, c["league"])
         tbi = c["tbi"]
         fx = FantasyFixture.objects.create(

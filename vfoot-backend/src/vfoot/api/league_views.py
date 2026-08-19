@@ -371,6 +371,8 @@ class LeagueDetailView(APIView):
                 "max_substitutions": league.max_substitutions,
                 "defense_bonus_enabled": league.defense_bonus_enabled,
                 "defense_bonus_mode": league.defense_bonus_mode,
+                "defense_bonus_gate": league.defense_bonus_gate,
+                "sv_office_vote": league.sv_office_vote,
                 "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
                 "home_advantage_bonus": league.home_advantage_bonus,
                 "enforce_lineup_deadline": league.enforce_lineup_deadline,
@@ -1121,6 +1123,30 @@ class LeagueSettingsUpdateView(APIView):
             league.defense_bonus_mode = mode
             fields.append("defense_bonus_mode")
 
+        if "defense_bonus_gate" in request.data:
+            gate = request.data.get("defense_bonus_gate")
+            valid = {c[0] for c in FantasyLeague.DEF_BONUS_GATE_CHOICES}
+            if gate not in valid:
+                return Response({"detail": f"defense_bonus_gate deve essere in {sorted(valid)}."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            league.defense_bonus_gate = gate
+            fields.append("defense_bonus_gate")
+
+        if "sv_office_vote" in request.data:
+            try:
+                voto = float(request.data.get("sv_office_vote") or 0)
+            except (TypeError, ValueError):
+                return Response({"detail": "sv_office_vote non valido."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            # Il tetto e' il 6: un voto d'ufficio sopra la sufficienza pagherebbe
+            # per non aver giocato piu' di quanto renda giocare, e a quel punto la
+            # panchina lunga sarebbe un danno.
+            if not (0 <= voto <= 6):
+                return Response({"detail": "Il voto d'ufficio deve essere tra 0 e 6."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            league.sv_office_vote = voto
+            fields.append("sv_office_vote")
+
         if "keeper_clean_sheet_enabled" in request.data:
             league.keeper_clean_sheet_enabled = bool(request.data.get("keeper_clean_sheet_enabled"))
             fields.append("keeper_clean_sheet_enabled")
@@ -1181,6 +1207,8 @@ class LeagueSettingsUpdateView(APIView):
             "max_substitutions": league.max_substitutions,
             "defense_bonus_enabled": league.defense_bonus_enabled,
             "defense_bonus_mode": league.defense_bonus_mode,
+            "defense_bonus_gate": league.defense_bonus_gate,
+            "sv_office_vote": league.sv_office_vote,
             "keeper_clean_sheet_enabled": league.keeper_clean_sheet_enabled,
             "home_advantage_bonus": league.home_advantage_bonus,
             "enforce_lineup_deadline": league.enforce_lineup_deadline,
@@ -5788,6 +5816,8 @@ def real_match_payload(match, league=None) -> dict | None:
         "home_total": pag["home"]["total"],
         "away_total": pag["away"]["total"],
         "defense_bonus_mode": None,
+        "defense_bonus_gate": None,
+        "sv_office_vote": None,
         "result": result,
         "home": pag["home"],
         "away": pag["away"],

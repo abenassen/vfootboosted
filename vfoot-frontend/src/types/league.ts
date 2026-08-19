@@ -74,6 +74,12 @@ export interface LeagueDetail {
   max_substitutions: number;
   defense_bonus_enabled: boolean;
   defense_bonus_mode: 'add_own' | 'subtract_opponent';
+  /** Quale formazione deve avere i 4 difensori: quella schierata o quella
+   *  acquisita a fine giornata (sostituzioni comprese). */
+  defense_bonus_gate: 'starters' | 'effective';
+  /** Quanto vale un titolare senza voto che la panchina non ha coperto. 0 = niente
+   *  (regola classica): chi gioca in dieci somma dieci voti. */
+  sv_office_vote: number;
   keeper_clean_sheet_enabled: boolean;
   home_advantage_bonus: number;
   enforce_lineup_deadline: boolean;
