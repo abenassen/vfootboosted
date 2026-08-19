@@ -884,6 +884,30 @@ class AuctionNomination(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
+        constraints = [
+            # UNA SOLA CHIAMATA APERTA PER ASTA, garantita dal database.
+            #
+            # La vista che chiama un giocatore il controllo lo faceva gia', ma
+            # leggendo e poi scrivendo dentro la transazione: con UN banditore e'
+            # irraggiungibile, con DUE amministratori che premono «Chiama» nello
+            # stesso istante no. Su Postgres in READ COMMITTED tutte e due le
+            # transazioni leggono «nessuna chiamata aperta» — nessuna delle due
+            # vede l'inserimento dell'altra prima della commit — e inseriscono.
+            #
+            # Il danno non sarebbe stato un errore ma un silenzio: lo stato mostra
+            # `_open_nomination()`, cioe' la PRIMA, e la seconda resterebbe aperta
+            # per sempre, tenendo fuori dal sorteggio un giocatore che nessuno sta
+            # piu' chiamando. Piu' amministratori per lega sono previsti apposta
+            # (MemberRoleUpdateView), quindi non e' un caso di scuola.
+            #
+            # Chiuso, chiamata annullata e invenduto restano liberi di essere
+            # quanti sono: la condizione tiene dentro solo `open`.
+            models.UniqueConstraint(
+                fields=["session"],
+                condition=models.Q(status="open"),
+                name="uniq_open_nomination_per_session",
+            )
+        ]
         indexes = [models.Index(fields=["session", "status"])]
 
 

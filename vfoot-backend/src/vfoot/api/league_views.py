@@ -9,7 +9,7 @@ from datetime import timezone as dt_timezone
 from random import Random
 
 from django.contrib.auth.models import User
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
@@ -4442,8 +4442,19 @@ class AuctionNominateView(APIView):
             player_id = rng.choice(candidates)
 
         player = get_object_or_404(Player, id=player_id)
-        nom = AuctionNomination.objects.create(
-            session=session, player=player, nominator=m, call_mode=call_mode)
+        try:
+            # Punto di salvataggio annidato: senza, l'IntegrityError romperebbe la
+            # transazione della vista e la risposta 400 non si potrebbe nemmeno
+            # costruire. Il vincolo `uniq_open_nomination_per_session` scatta solo
+            # quando due amministratori chiamano nello stesso istante — il
+            # controllo qui sopra prende tutti gli altri casi — e chi arriva
+            # secondo deve leggere la stessa frase che leggerebbe un attimo dopo.
+            with transaction.atomic():
+                nom = AuctionNomination.objects.create(
+                    session=session, player=player, nominator=m, call_mode=call_mode)
+        except IntegrityError:
+            return Response({"detail": "C'e' gia' un giocatore in chiamata: chiudilo o annullalo prima."},
+                            status=status.HTTP_400_BAD_REQUEST)
         _record_auction_event(
             session, AuctionEvent.TYPE_NOMINATED, request.user,
             {"player_name": _player_label(player), "player_id": player.id,

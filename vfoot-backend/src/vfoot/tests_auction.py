@@ -8,6 +8,7 @@ least 1 credit reservable for each of its still-unfilled slots.
 from __future__ import annotations
 
 from django.contrib.auth.models import User
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -310,6 +311,29 @@ class AuctionUndoTests(AuctionBase):
         # top bid gone -> next min is 1 again
         state = self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()
         self.assertEqual(state["open_nomination"]["min_next_bid"], 1)
+
+    def test_only_one_open_nomination_per_session(self):
+        """Il database rifiuta la seconda chiamata aperta, non solo la vista.
+
+        Il controllo nella vista legge e poi scrive dentro la transazione: con un
+        banditore solo basta, con due amministratori che premono «Chiama» nello
+        stesso istante no — su Postgres in READ COMMITTED nessuna delle due
+        transazioni vede l'inserimento dell'altra prima della commit.
+        """
+        a = self._player("Uno", "ATT")
+        b = self._player("Due", "ATT")
+        aid = self._create_auction([a, b])
+        self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": a.id}, format="json")
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                AuctionNomination.objects.create(
+                    session_id=aid, player=b, nominator=self.m_admin,
+                    call_mode=AuctionNomination.CALL_MANUAL)
+        # Chiuse, annullate e invendute possono essere quante sono: vincola `open`.
+        AuctionNomination.objects.create(
+            session_id=aid, player=b, nominator=self.m_admin,
+            call_mode=AuctionNomination.CALL_MANUAL, status=AuctionNomination.STATUS_CANCELLED)
 
     def test_revert_assignment_refunds_and_reopens(self):
         atk = self._player("X", "ATT")
