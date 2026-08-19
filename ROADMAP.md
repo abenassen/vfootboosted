@@ -336,6 +336,16 @@ Prerequisito condiviso con §5: le chiavi VAPID in produzione.
   collocati nella metà campo sbagliata; i vettori di zona su cui poggia la
   modalità Aura giravano su quei dati. Ora sono corretti ma non ho verificato
   cosa cambia per quella modalità.
+- **Uno script `vfoot-deploy`**, sorella di `vfoot-dev` e `vfoot-sim`, che
+  racchiuda i sei passi di `DEPLOY.md` con l'host scritto dentro. Oggi il
+  rilascio è una ricetta da ricopiare a mano, e per farlo fare a Claude servono
+  tre permessi larghi — `Bash(ssh *)`, `Bash(scp *)`, `Bash(rsync *)` — che non
+  sono vincolati a nessuna destinazione: autorizzano quei comandi verso qualunque
+  macchina. Con lo script diventerebbero una regola sola, `Bash(./vfoot-deploy
+  *)`, e il Linode sarebbe l'unico posto raggiungibile. In più i passi
+  diventerebbero ripetibili singolarmente (`backup`, `frontend`, `verify`) e i
+  controlli finali smetterebbero di dipendere dalla memoria. Rimandato il
+  19/08/2026 per non allungare un rilascio già pronto.
 - **Blocco formazione al fischio d'inizio**, mai implementato.
 - **Produzione ferma** al commit `03b099b`. Il deploy richiede migrazioni,
   reimportazione e ricalcolo dei ruoli.

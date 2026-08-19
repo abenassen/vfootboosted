@@ -134,12 +134,36 @@ ssh root@139.162.144.123 'cd /srv/vfoot-app/vfoot-backend/src
   sudo -u vfoot ../.venv/bin/python manage.py collectstatic --noinput'
 ```
 
-### 5. Frontend + restart
+### 5. Restart, POI il frontend — in quest'ordine
 
 ```sh
+ssh root@139.162.144.123 'systemctl restart vfoot'
 rsync -az --delete vfoot-frontend/dist/ root@139.162.144.123:/srv/vfoot-web/
-ssh root@139.162.144.123 'chown -R vfoot:vfoot /srv/vfoot-web; systemctl restart vfoot'
+ssh root@139.162.144.123 'chown -R vfoot:vfoot /srv/vfoot-web'
 ```
+
+**Prima il backend, poi il frontend** (invertito il 19/08/2026). Fra i due passi
+c'è una finestra di qualche secondo in cui le due metà non hanno la stessa
+versione, e delle due combinazioni possibili una sola è innocua:
+
+- **backend nuovo + frontend vecchio** — va bene, purché il rilascio sia
+  additivo: il bundle vecchio ignora i campi che non conosce. Da verificare ogni
+  volta, con `git diff <prod>..HEAD | grep '^-' | grep '"[a-z_]*":'` — se non
+  esce nessuna chiave rimossa o rinominata, questa direzione è sicura.
+- **frontend nuovo + backend vecchio** — no: il bundle nuovo chiama endpoint che
+  ancora non esistono. Al rilascio delle rose in asta, `/auctions/<id>/rosters`
+  avrebbe risposto 404 e il riquadro sarebbe rimasto su «Caricamento…» — un
+  fallimento silenzioso, che è il tipo peggiore.
+
+Se un rilascio TOGLIE o rinomina qualcosa dalle risposte, nessuno dei due ordini
+è sicuro: lì ci vuole una finestra di manutenzione, o due rilasci (prima il campo
+nuovo accanto al vecchio, poi la rimozione).
+
+Chi ha la PWA installata resta comunque sulla versione vecchia finché non accetta
+l'invito di `UpdateBanner`: il service worker nuovo si installa e aspetta, di
+proposito (`pwa/registerSW.ts`), per non ricaricare la pagina a qualcuno che sta
+rilanciando in asta. Motivo in più perché la direzione «backend nuovo + frontend
+vecchio» debba reggere non per secondi, ma per giorni.
 
 ### 6. Verify
 
@@ -150,9 +174,15 @@ curl -s -o /dev/null -w '%{http_code}\n' https://vfoot.it/api/v1/auth/me   # 401
 ssh root@139.162.144.123 'journalctl -u vfoot --since "2 min ago" | grep -i error'  # empty
 ```
 
-## Compressione delle risposte (gzip) — DA INSTALLARE
+## Compressione delle risposte (gzip) — INSTALLATA il 19/08/2026
 
-**Oggi il sito non comprime né il bundle JS né il JSON.** `nginx.conf` ha
+Il file `deploy/nginx/vfoot-gzip.conf` è in `/etc/nginx/conf.d/` e attivo.
+Verificato dopo il reload: bundle 830.493 → 289.182 byte, `/benchmark-voto/`
+72.874 → 18.215, `base.css` 22.120 → 6.057, e la PWA regge il `Vary`
+(34 voci precacheate su 34 rilette, ricarica offline 200). Quel che segue resta
+come storia della decisione e come ricetta per rifarlo su una macchina nuova.
+
+**Prima di questo, il sito non comprimeva né il bundle JS né il JSON.** `nginx.conf` ha
 `gzip on` ma `gzip_types` commentato — il default Debian — e senza `gzip_types`
 nginx comprime **solo `text/html`**. Misurato su https://vfoot.it il 19/08/2026:
 
@@ -200,13 +230,18 @@ file **non deve** contenere `gzip on`. È già dichiarato in `nginx.conf`, e nel
 stesso contesto http una seconda volta non è un doppione innocuo — nginx rifiuta
 di partire con `[emerg] "gzip" directive is duplicate`.
 
-### `gzip_static` — opzionale, non ancora attivo
+### `gzip_static` — parte del deploy dal 19/08/2026
 
-`vfoot-gzip.conf` accende già `gzip_static on`, ma è **inerte** finché accanto ai
-file non compaiono i `.gz`. Per accenderlo davvero, una riga fra il passo 1 e il
-passo 5 del deploy, che comprime il bundle **una volta a livello 9** invece che a
-ogni richiesta (i ~12 ms di CPU per download spariscono, e il file scende sotto i
-240 KB):
+`vfoot-gzip.conf` accende `gzip_static on`, che è inerte finché accanto ai file
+non compaiono i `.gz`. Questa riga va fra il passo 1 e il passo 5, e comprime il
+bundle **una volta a livello 9** invece che a ogni richiesta: il file scende da
+289 a 244 KB, cioè 45 KB in meno per ogni download.
+
+Il risparmio di CPU, invece, è trascurabile e non è il motivo per farlo: gli
+asset hanno il nome col digest del contenuto e 30 giorni di cache, quindi il
+bundle si scarica solo al primo accesso o dopo un rilascio — qualche decina di
+volte, non a ogni visita. Il guadagno vero sono i byte per chi ha la linea
+lenta.
 
 ```sh
 find vfoot-frontend/dist -type f \
