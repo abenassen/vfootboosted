@@ -90,7 +90,13 @@ function eventLine(type: string, payload: Record<string, unknown>): string {
     case 'nomination_unsold':
       return `Nessuna offerta per ${p.player_name}: fuori dal giro`;
     case 'assignment_reverted':
-      return `Acquisto revocato: ${p.player_name} (rimborso ${p.amount ?? '?'})`;
+      // Dove finisce il giocatore dipende dal banco: se c'era già qualcuno in
+      // chiamata torna nel sacchetto, altrimenti risale sul banco lui. Sono due
+      // esiti diversi e la cronologia deve distinguerli, o la stanza non capisce
+      // perché a volte il giocatore ricompare in chiamata e a volte no.
+      return `Acquisto revocato: ${p.player_name} (rimborso ${p.amount ?? '?'})${
+        p.back_to_pool ? ' · torna in lista' : ' · torna in chiamata'
+      }`;
     case 'session_closed':
       return 'Asta chiusa';
     default:

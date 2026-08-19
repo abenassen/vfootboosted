@@ -335,6 +335,38 @@ class AuctionUndoTests(AuctionBase):
             session_id=aid, player=b, nominator=self.m_admin,
             call_mode=AuctionNomination.CALL_MANUAL, status=AuctionNomination.STATUS_CANCELLED)
 
+    def test_revert_with_a_player_on_the_block_sends_him_to_the_pool(self):
+        """Revocare una vendita vecchia non deve cambiare chi c'è sul banco.
+
+        Riaprendo la chiamata si finiva con DUE aperte: la stanza vedeva sul banco
+        un giocatore diverso da quello su cui stava rilanciando, e l'altra restava
+        aperta e invisibile.
+        """
+        venduto = self._player("Venduto", "ATT")
+        sul_banco = self._player("SulBanco", "ATT")
+        aid = self._create_auction([venduto, sul_banco])
+        self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/assign",
+            {"player_id": venduto.id, "team_id": self.t2.id, "price": 40}, format="json")
+        self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate",
+            {"mode": "manual", "player_id": sul_banco.id}, format="json")
+
+        nom = AuctionNomination.objects.get(session_id=aid, player=venduto)
+        res = self._as(self.admin).post(f"/api/v1/nominations/{nom.id}/revert", format="json")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["status"], AuctionNomination.STATUS_CANCELLED)
+
+        # Il venduto torna nel sacchetto, e sul banco resta chi ci stava.
+        self.assertEqual(AuctionNomination.objects.get(id=nom.id).status,
+                         AuctionNomination.STATUS_CANCELLED)
+        state = self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()
+        self.assertEqual(state["open_nomination"]["player_name"], "SulBanco")
+        self.assertEqual(
+            AuctionNomination.objects.filter(session_id=aid, status="open").count(), 1)
+        # E i crediti sono comunque tornati: la revoca ha fatto il suo mestiere.
+        self.assertEqual(team_budgets(self.league)[self.t2.id].remaining, 1000)
+
     def test_revert_assignment_refunds_and_reopens(self):
         atk = self._player("X", "ATT")
         aid = self._create_auction([atk])

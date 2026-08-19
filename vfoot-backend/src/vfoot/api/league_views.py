@@ -4210,25 +4210,55 @@ def _undo_unsold(nom, actor):
 
 
 def _revert_assignment(nom, actor):
+    """Disfa un acquisto: il contratto sparisce, i crediti tornano.
+
+    DOVE FINISCE IL GIOCATORE dipende da cosa sta succedendo nella stanza, e non
+    e' un dettaglio: di chiamate aperte se ne regge UNA SOLA (la stessa ragione
+    scritta in ``_undo_unsold``).
+
+    A banco libero si riapre la chiamata con le sue offerte, che e' il caso per
+    cui questa funzione e' nata: l'aggiudicazione appena sbagliata torna sul
+    banco e la stanza rilancia da dove era.
+
+    Ma la revoca si usa anche per correggere una vendita VECCHIA mentre l'asta
+    va avanti — dai «Acquisti recenti» del banditore — e li' riaprire metteva in
+    piedi una seconda chiamata aperta accanto a quella in corso. Il risultato non
+    era un errore ma un cambio di scena: la stanza vedeva sul banco un giocatore
+    diverso da quello su cui stava rilanciando (lo stato mostra la prima delle
+    due), e l'altra chiamata restava aperta e invisibile. Riprodotto il
+    19/08/2026 con un solo amministratore, senza bisogno di nessuna concorrenza.
+
+    Percio' a banco occupato il giocatore torna nel sacchetto — annullato, offerte
+    azzerate — e resta sorteggiabile: e' quello che si vuole quando si sta
+    correggendo un acquisto di mezz'ora prima.
+    """
     if nom.status != AuctionNomination.STATUS_CLOSED:
         raise ValueError("La chiamata non e' assegnata.")
     team_name = nom.closed_winner_team.name if nom.closed_winner_team_id else None
     amount = nom.winning_amount
     if nom.roster_slot_id:
         FantasyRosterSlot.objects.filter(id=nom.roster_slot_id).delete()
-    # Reopen so the player can be re-auctioned; keep his (now un-void) bids so the
-    # room can simply re-close, or the admin can cancel/re-assign.
-    nom.bids.update(is_void=False)
+
+    busy = AuctionNomination.objects.filter(
+        session_id=nom.session_id, status=AuctionNomination.STATUS_OPEN
+    ).exclude(id=nom.id).exists()
+    if busy:
+        nom.bids.filter(is_void=False).update(is_void=True)
+        nom.status = AuctionNomination.STATUS_CANCELLED
+    else:
+        # Le offerte tornano valide: la stanza puo' semplicemente riaggiudicare.
+        nom.bids.update(is_void=False)
+        nom.status = AuctionNomination.STATUS_OPEN
     nom.roster_slot = None
     nom.closed_winner_team = None
     nom.winning_amount = None
-    nom.status = AuctionNomination.STATUS_OPEN
     nom.save(update_fields=["roster_slot", "closed_winner_team", "winning_amount", "status"])
     _record_auction_event(
         nom.session, AuctionEvent.TYPE_ASSIGNMENT_REVERTED, actor,
-        {"player_name": _player_label(nom.player), "team_name": team_name, "amount": amount},
+        {"player_name": _player_label(nom.player), "team_name": team_name, "amount": amount,
+         "back_to_pool": busy},
         nomination=nom)
-    return {"nomination_id": nom.id}
+    return {"nomination_id": nom.id, "reopened": not busy}
 
 
 class LeagueActiveAuctionView(APIView):
@@ -4683,8 +4713,14 @@ class AuctionMarkUnsoldView(APIView):
 
 
 class AuctionRevertNominationView(APIView):
-    """Undo a completed purchase: refund the credits, free the slot, reopen the
-    player for auction."""
+    """Undo a completed purchase: refund the credits, free the slot, and give the
+    player back to the room.
+
+    ``status`` nella risposta dice DOVE e' finito, e non e' sempre lo stesso:
+    ``open`` se il banco era libero (torna in chiamata con le sue offerte),
+    ``cancelled`` se c'era gia' qualcuno sul banco (torna nel sacchetto). Il
+    perche' sta in ``_revert_assignment``.
+    """
 
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
