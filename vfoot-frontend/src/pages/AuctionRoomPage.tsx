@@ -377,8 +377,15 @@ function CurrentPlayerPanel({
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-lg font-bold">{nom.player_name}</div>
-          <div className="mt-1 flex items-center gap-2 text-xs">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
             {nom.player_role ? <Badge tone="blue">{ROLE_LABEL[nom.player_role]}</Badge> : null}
+            {/* Il club sta qui e non in fondo: insieme al ruolo è quello che dice
+                quanto vale un giocatore — un difensore di una squadra che subisce
+                poco è un altro prezzo — ed è anche l'unica cosa che distingue due
+                omonimi, che in un listone da 660 capitano. */}
+            {nom.player_team ? (
+              <span className="font-semibold text-ink-soft">{nom.player_team}</span>
+            ) : null}
             <span className="text-ink-faint">chiamato da {nom.nominator}</span>
           </div>
         </div>
@@ -684,6 +691,7 @@ function AdminControls({
                 <span className="flex items-center justify-between gap-2">
                   <span className="truncate">{p.full_name}</span>
                   <span className="flex shrink-0 items-center gap-1">
+                    {p.team ? <span className="text-[10px] text-ink-soft">{p.team}</span> : null}
                     {p.role ? <span className="text-[10px] text-ink-faint">{p.role}</span> : null}
                     {/* Callable but not in the drawn order: signed after the
                         auction began, or already gone round once. Worth saying,

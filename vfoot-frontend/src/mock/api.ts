@@ -836,6 +836,7 @@ export async function getAuctionState(auctionId: number): Promise<AuctionState> 
       player_id: 103,
       player_name: 'N. Barella',
       player_role: 'CEN',
+      player_team: 'Inter',
       call_mode: 'random',
       nominator: 'mock-admin',
       top_bid: 18,

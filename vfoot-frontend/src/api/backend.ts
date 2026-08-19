@@ -1008,6 +1008,8 @@ export interface AuctionPoolPlayer {
   name: string;
   full_name: string;
   role: string | null;
+  /** Il club vero: distingue due omonimi, che in un listone da 660 capitano. */
+  team: string | null;
   /** False for someone outside the drawn order — added to the listone after the
    *  auction started, or already gone round once. Still callable by name. */
   in_draw_order: boolean;

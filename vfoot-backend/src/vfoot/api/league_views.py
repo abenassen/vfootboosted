@@ -4036,6 +4036,31 @@ def _league_rosters(league) -> dict:
     }
 
 
+def _club_by_player(competition_season_id, player_ids) -> dict[int, str]:
+    """Il club di ciascun giocatore NELL'EDIZIONE di campionato che si sta guardando.
+
+    UNA REGOLA SOLA, e sono due comportamenti diversi che vengono gratis.
+
+    Una lega in corso gioca la stagione corrente, e l'importazione delle rose
+    tiene fresca quella: chiude i cartellini di chi parte e riapre quelli di chi
+    arriva, quindi il trasferimento di gennaio si vede il giorno dopo. Una lega
+    conclusa resta ferma alla sua stagione, ed e' giusto: una lega finita e' un
+    documento, e deve dire le maglie di allora, non quelle di oggi.
+
+    E' la stessa regola del listone — anzi, e' la stessa funzione, chiamata da
+    ``championship_players_payload`` — e questo e' il punto: in asta si compra dal
+    listone, e i due schermi non possono dire due squadre diverse per lo stesso
+    giocatore. Legarli a due fonti che "di solito coincidono" e' esattamente il
+    modo in cui un giorno non coincidono piu'.
+    """
+    if not competition_season_id:
+        return {}
+    return dict(PlayerTeamStint.objects
+                .filter(team_season__competition_season_id=competition_season_id,
+                        end_date__isnull=True, player_id__in=player_ids)
+                .values_list("player_id", "team_season__team__name"))
+
+
 def _serialize_auction_state(session, viewer_membership_id: int | None = None) -> dict:
     league = session.league
     budgets = team_budgets(league)
@@ -4073,6 +4098,7 @@ def _serialize_auction_state(session, viewer_membership_id: int | None = None) -
             "player_id": open_nom.player_id,
             "player_name": _player_label(open_nom.player),
             "player_role": role,
+            "player_team": _club_by_player(league.reference_season_id, [open_nom.player_id]).get(open_nom.player_id),
             "call_mode": open_nom.call_mode,
             "nominator": open_nom.nominator.user.username,
             "top_bid": top_amount,
@@ -4393,12 +4419,14 @@ class AuctionPoolView(APIView):
         players = Player.objects.filter(id__in=callable_ids).values_list(
             "id", "short_name", "full_name")
         by_id = {pid: (short, full) for pid, short, full in players}
+        clubs = _club_by_player(session.league.reference_season_id, callable_ids)
         return Response([
             {
                 "player_id": pid,
                 "name": by_id[pid][0] or by_id[pid][1] or str(pid),
                 "full_name": by_id[pid][1] or "",
                 "role": roles.get(pid),
+                "team": clubs.get(pid),
                 # False => outside the draw order (added to the listone later, or
                 # already gone round once). Callable, but the UI can say so.
                 "in_draw_order": pid in drawn,
@@ -5383,14 +5411,16 @@ class LeagueTeamLineupView(APIView):
                 Player.objects.filter(id__in=player_ids).exclude(classic_role_seed="").values_list("id", "classic_role_seed")
             )
 
-        # Real club each player belongs to, in the season the stats come from — so a
-        # player row can name his team, not just his fantasy price.
-        real_team = dict(PlayerTeamStint.objects
-                         .filter(player_id__in=player_ids,
-                                 team_season__competition_season=stats_cs,
-                                 end_date__isnull=True)
-                         .values_list("player_id", "team_season__team__name")) \
-            if stats_cs is not None else {}
+        # Il club di ciascun giocatore, cosi' che una riga di rosa dica per chi
+        # gioca e non solo quanto e' costato.
+        #
+        # ADESSO, non nella stagione da cui vengono le statistiche. Erano legati, e
+        # le due cose non c'entrano niente: le statistiche appartengono per forza
+        # alla stagione in cui sono state prodotte, il cartellino no. Peggio, il
+        # ripiego qui sopra sceglie la stagione PRECEDENTE finche' quella nuova non
+        # ha una presenza — cioe' per tutta l'estate, che e' esattamente il periodo
+        # in cui uno si e' appena trasferito e la sua maglia nuova e' la notizia.
+        real_team = _club_by_player(league.reference_season_id, player_ids)
 
         # The deadline, as it applies to THIS matchday. Sent whole rather than left
         # to be re-derived client-side from the kickoffs: the page has to grey out
@@ -5929,14 +5959,9 @@ def championship_players_payload(cs, league=None) -> dict:
     value sorting over this list."""
     pool = eligible_player_ids(cs.id)
 
-    # real club per player (open stint on this season)
-    team_by_player = {}
-    for pid, tname in (PlayerTeamStint.objects
-                       .filter(team_season__competition_season=cs,
-                               end_date__isnull=True, player_id__in=pool)
-                       .select_related("team_season__team")
-                       .values_list("player_id", "team_season__team__name")):
-        team_by_player[pid] = tname
+    # Il club di ciascuno in QUESTA edizione. Stessa funzione che usa la sala
+    # d'asta: si compra da questo elenco, e i due schermi devono dire lo stesso.
+    team_by_player = _club_by_player(cs.id, pool)
 
     # frozen listone role, fallback to the global classic role
     lpr = (dict(LeaguePlayerRole.objects.filter(league=league)

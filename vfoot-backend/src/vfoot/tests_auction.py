@@ -13,7 +13,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from realdata.models import (
-    Competition, CompetitionSeason, Player, Season, Team, TeamSeason,
+    Competition, CompetitionSeason, Player, PlayerTeamStint, Season, Team, TeamSeason,
 )
 from vfoot.models import (
     AuctionBid, AuctionEvent, AuctionNomination, AuctionSession,
@@ -496,6 +496,83 @@ class AuctionRostersTests(AuctionBase):
         payload = self._as(self.u2).get(f"/api/v1/auctions/{aid}/rosters").json()
         self.assertEqual(self._roster(payload, self.t2.id), [])
         self.assertIsNone(payload["last_purchase"])
+
+    def test_the_player_on_the_block_names_his_real_club(self):
+        """Chi è in chiamata, e la ricerca, dicono per che squadra gioca.
+
+        Senza, in asta si compra un nome: il club è metà del prezzo di un
+        difensore, ed è l'unica cosa che separa due omonimi. NON nelle righe
+        della rosa, dove il nome basta e la colonna è stretta.
+        """
+        atk = self._player("Bomber", "ATT")
+        gk = self._player("Portiere", "POR")
+        for p in (atk, gk):
+            PlayerTeamStint.objects.create(player=p, team_season=self.ts)
+        aid = self._create_auction([atk, gk])
+        self._assign(aid, gk, self.t2, 12)
+        self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": atk.id},
+            format="json")
+
+        state = self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()
+        self.assertEqual(state["open_nomination"]["player_team"], "Inter")
+        pool = self._as(self.admin).get(f"/api/v1/auctions/{aid}/pool").json()
+        self.assertTrue(all(p["team"] == "Inter" for p in pool), pool)
+
+    def test_the_club_is_the_one_of_the_league_edition(self):
+        """Il club è quello dell'EDIZIONE che la lega gioca, e nient'altro.
+
+        Sono due comportamenti da una regola sola: una lega in corso gioca la
+        stagione corrente, che l'importazione delle rose tiene fresca — quindi il
+        trasferimento di gennaio si vede. Una lega conclusa resta ferma alla sua, e
+        deve dire le maglie di allora: è un documento, non una fotografia di oggi.
+
+        Qui il giocatore è passato altrove in una stagione SUCCESSIVA a quella
+        della lega: la sala d'asta di questa lega non ne deve sapere niente.
+        """
+        atk = self._player("Trasferito", "ATT")
+        PlayerTeamStint.objects.create(player=atk, team_season=self.ts)  # Inter, 25-26
+        dopo = CompetitionSeason.objects.create(
+            competition=self.cs.competition, season=Season.objects.create(code="2027-2028"),
+            name="Serie A 2027-2028")
+        PlayerTeamStint.objects.create(
+            player=atk,
+            team_season=TeamSeason.objects.create(
+                competition_season=dopo, team=Team.objects.create(name="Juventus")))
+
+        aid = self._create_auction([atk])
+        self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": atk.id},
+            format="json")
+        state = self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()
+        self.assertEqual(state["open_nomination"]["player_team"], "Inter")
+
+    def test_auction_and_listone_never_disagree(self):
+        """La stessa maglia sui due schermi, perché in asta si compra da lì."""
+        atk = self._player("Bomber", "ATT")
+        PlayerTeamStint.objects.create(player=atk, team_season=self.ts)
+        aid = self._create_auction([atk])
+        self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": atk.id},
+            format="json")
+
+        in_asta = self._as(self.u2).get(
+            f"/api/v1/auctions/{aid}").json()["open_nomination"]["player_team"]
+        listone = self._as(self.u2).get(
+            f"/api/v1/leagues/{self.league.id}/championship-players").json()["players"]
+        nel_listone = next(p["team"] for p in listone if p["player_id"] == atk.id)
+        self.assertEqual(in_asta, nel_listone)
+        self.assertEqual(in_asta, "Inter")
+
+    def test_no_club_is_a_blank_not_a_crash(self):
+        """Un giocatore senza cartellino in questa stagione non inventa una squadra."""
+        atk = self._player("Senzaclub", "ATT")
+        aid = self._create_auction([atk])
+        self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": atk.id},
+            format="json")
+        state = self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()
+        self.assertIsNone(state["open_nomination"]["player_team"])
 
     def test_rosters_refused_to_outsiders(self):
         atk = self._player("Bomber", "ATT")

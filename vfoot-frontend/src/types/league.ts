@@ -621,6 +621,8 @@ export interface AuctionOpenNomination {
   player_id: number;
   player_name: string;
   player_role: ClassicRole | null;
+  /** Il club vero di chi è in chiamata: serve a decidere quanto vale. */
+  player_team: string | null;
   call_mode: string;
   nominator: string;
   top_bid: number;
