@@ -24,6 +24,7 @@ import type {
 } from '../types/auth';
 import type {
   ActiveAuctionInfo,
+  AuctionRosters,
   AuctionState,
   ClassicRole,
   CompetitionItem,
@@ -1405,6 +1406,15 @@ export async function searchPlayers(q: string, leagueId?: number, limit = 20): P
 
 export async function getAuctionState(auctionId: number): Promise<AuctionState> {
   const res = await fetch(`${baseUrl()}/auctions/${auctionId}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** Le rose della lega per la sala d'asta. Si rilegge quando `rosters_rev` dello
+ *  stato cambia, non a ogni offerta: e' il motivo per cui sta fuori dallo stato. */
+export async function getAuctionRosters(auctionId: number): Promise<AuctionRosters> {
+  const res = await fetch(`${baseUrl()}/auctions/${auctionId}/rosters`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);

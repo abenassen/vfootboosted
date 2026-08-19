@@ -10,7 +10,7 @@ from random import Random
 
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -3944,7 +3944,71 @@ def _top_bid(nomination):
             .order_by("-amount", "created_at").first())
 
 
-def _serialize_auction_state(session) -> dict:
+def _rosters_rev(league) -> str:
+    """L'impronta delle rose della lega: cambia se e solo se una rosa e' cambiata.
+
+    E' quello che permette alle rose di stare FUORI dallo stato dell'asta senza
+    smettere di essere live. Lo stato viene riletto da ogni dispositivo a ogni
+    rilancio (il socket manda solo un «e' cambiato qualcosa»), ma un rilancio non
+    sposta nessun giocatore: le rose si muovono alle aggiudicazioni e alle revoche,
+    che sono decine, non migliaia. Il client rilegge le rose solo quando questa
+    stringa cambia, e nel frattempo paga una aggregazione su un indice.
+
+    Conta E ultimo id, non la spesa: revocare un acquisto e ricomprarne un altro
+    allo stesso prezzo — cioe' l'admin che corregge il nome sbagliato — lascia
+    identica ogni cifra di budget, ma cancella una riga e ne scrive una nuova.
+    """
+    agg = (FantasyRosterSlot.objects
+           .filter(team__league=league, released_at__isnull=True)
+           .aggregate(n=Count("id"), last=Max("id")))
+    return f"{agg['n'] or 0}:{agg['last'] or 0}"
+
+
+def _league_rosters(league) -> dict:
+    """Chi ha comprato chi: le rose della lega come sono in questo istante.
+
+    Il riepilogo dell'asta dice quanti slot sono pieni per reparto (P 0/3, D 8/8)
+    e non dice un nome; l'unico posto dove leggerli era la pagina Rose, che non e'
+    attaccata al socket e quindi durante un'asta restava ferma.
+
+    Sta su un endpoint suo e non dentro lo stato per il motivo scritto in
+    ``AuctionPoolView``: a rose piene sono 16 KB e 10 ms in piu' per lettura, e le
+    letture sono una per dispositivo per rilancio. L'ordine e' quello con cui si
+    legge una rosa: per reparto, e dentro il reparto dal piu' pagato al meno.
+    """
+    rows = list(
+        FantasyRosterSlot.objects
+        .filter(team__league=league, released_at__isnull=True)
+        .select_related("player")
+    )
+    roles = league_role_map(league, [r.player_id for r in rows])
+    order = {r: i for i, r in enumerate(AUCTION_ROLES)}
+    by_team: dict[int, list[dict]] = {}
+    for r in rows:
+        by_team.setdefault(r.team_id, []).append({
+            "player_id": r.player_id,
+            "name": _player_label(r.player),
+            "role": roles.get(r.player_id),
+            "price": int(r.purchase_price),
+        })
+    for entries in by_team.values():
+        entries.sort(key=lambda e: (order.get(e["role"], len(order)), -e["price"], e["name"]))
+
+    # L'acquisto piu' recente, per far vedere QUALE riga e' appena comparsa: una
+    # rosa che si riempie da sola e' altrimenti un elenco che cambia lunghezza
+    # mentre non la si guarda.
+    last = (FantasyRosterSlot.objects
+            .filter(team__league=league, released_at__isnull=True)
+            .order_by("-acquired_at", "-id")
+            .values_list("team_id", "player_id").first())
+    return {
+        "rev": _rosters_rev(league),
+        "teams": [{"team_id": tid, "roster": entries} for tid, entries in by_team.items()],
+        "last_purchase": ({"team_id": last[0], "player_id": last[1]} if last else None),
+    }
+
+
+def _serialize_auction_state(session, viewer_membership_id: int | None = None) -> dict:
     league = session.league
     budgets = team_budgets(league)
     teams = list(FantasyTeam.objects.filter(league=league).select_related("manager__user"))
@@ -4042,6 +4106,15 @@ def _serialize_auction_state(session) -> dict:
         "recent_nominations": rows,
         "events": feed,
         "team_budgets": team_budgets_out,
+        # Quale delle rose e' la propria. Il client non lo sa da solo: le squadre
+        # sono legate all'iscrizione alla lega, non all'utente, e confrontare i
+        # nomi utente sarebbe indovinarlo.
+        "my_team_id": (team_by_membership.get(viewer_membership_id).id
+                       if viewer_membership_id and team_by_membership.get(viewer_membership_id)
+                       else None),
+        # Le rose stanno su /rosters; qui viaggia solo la loro impronta, che dice
+        # al client quando vale la pena rileggerle.
+        "rosters_rev": _rosters_rev(league),
     }
 
 
@@ -4209,8 +4282,28 @@ class AuctionStateView(APIView):
 
     def get(self, request, auction_id: int):
         session = get_object_or_404(AuctionSession, id=auction_id)
+        m = _membership_or_404(session.league, request.user.id)
+        return Response(_serialize_auction_state(session, viewer_membership_id=m.id))
+
+
+class AuctionRostersView(APIView):
+    """Le rose della lega, per la stanza d'asta: chi ha comprato chi, a quanto.
+
+    Fuori dallo stato di proposito, come il pool qui sotto e per la stessa ragione:
+    lo stato lo rileggono tutti i dispositivi a ogni rilancio, e le rose a fine
+    asta sono 16 KB e 10 ms che si moltiplicano per il numero di partecipanti. Le
+    rose invece cambiano solo quando un giocatore viene aggiudicato o revocato, e
+    ``rosters_rev`` nello stato dice esattamente quando: il client rilegge questo
+    endpoint a quel cambio e non a ogni offerta.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, auction_id: int):
+        session = get_object_or_404(AuctionSession, id=auction_id)
         _membership_or_404(session.league, request.user.id)
-        return Response(_serialize_auction_state(session))
+        return Response(_league_rosters(session.league))
 
 
 class AuctionPoolView(APIView):

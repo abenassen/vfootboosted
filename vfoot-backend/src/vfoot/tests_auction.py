@@ -345,3 +345,104 @@ class AuctionUndoTests(AuctionBase):
         res = self._as(self.admin).patch(
             f"/api/v1/leagues/{self.league.id}/settings", {"initial_budget": 500}, format="json")
         self.assertEqual(res.status_code, 400)
+
+
+class AuctionRostersTests(AuctionBase):
+    """Le rose in sala d'asta: chi ha comprato chi, e quando vale rileggerle.
+
+    Stanno su un endpoint loro perche' lo stato lo rileggono tutti i dispositivi a
+    ogni rilancio; ``rosters_rev`` e' il segnale che dice al client quando le rose
+    sono davvero cambiate.
+    """
+
+    def _create_auction(self, players):
+        return self._as(self.admin).post(
+            f"/api/v1/leagues/{self.league.id}/auctions",
+            {"player_ids": [p.id for p in players]}, format="json").json()["auction_id"]
+
+    def _roster(self, payload, team_id):
+        row = next((t for t in payload["teams"] if t["team_id"] == team_id), None)
+        return row["roster"] if row else []
+
+    def _assign(self, aid, player, team, price):
+        res = self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/assign",
+            {"player_id": player.id, "team_id": team.id, "price": price}, format="json")
+        self.assertEqual(res.status_code, 201, res.content)
+
+    def test_rosters_list_who_bought_whom(self):
+        gk = self._player("Portiere", "POR")
+        atk = self._player("Bomber", "ATT")
+        aid = self._create_auction([gk, atk])
+        self._assign(aid, atk, self.t2, 40)
+        self._assign(aid, gk, self.t2, 12)
+
+        res = self._as(self.u2).get(f"/api/v1/auctions/{aid}/rosters")
+        self.assertEqual(res.status_code, 200, res.content)
+        payload = res.json()
+        # Per reparto nell'ordine del listone, e dentro il reparto dal piu' caro.
+        self.assertEqual(
+            [(e["name"], e["role"], e["price"]) for e in self._roster(payload, self.t2.id)],
+            [("Portiere", "POR", 12), ("Bomber", "ATT", 40)])
+        self.assertEqual(self._roster(payload, self.t3.id), [])
+        self.assertEqual(payload["last_purchase"], {"team_id": self.t2.id, "player_id": gk.id})
+
+    def test_rosters_are_not_in_the_state(self):
+        """Lo stato resta leggero: e' la lettura che si moltiplica per rilancio."""
+        atk = self._player("Bomber", "ATT")
+        aid = self._create_auction([atk])
+        self._assign(aid, atk, self.t2, 40)
+        state = self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()
+        self.assertNotIn("roster", state["team_budgets"][0])
+        self.assertEqual(state["my_team_id"], self.t2.id)
+        self.assertEqual(
+            state["rosters_rev"],
+            self._as(self.u2).get(f"/api/v1/auctions/{aid}/rosters").json()["rev"])
+
+    def test_state_says_which_team_is_the_viewers(self):
+        atk = self._player("Bomber", "ATT")
+        aid = self._create_auction([atk])
+        self.assertEqual(self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()["my_team_id"], self.t2.id)
+        self.assertEqual(self._as(self.u3).get(f"/api/v1/auctions/{aid}").json()["my_team_id"], self.t3.id)
+
+    def test_rev_moves_on_purchases_but_not_on_bids(self):
+        a = self._player("Uno", "ATT")
+        b = self._player("Due", "ATT")
+        aid = self._create_auction([a, b])
+        rev0 = self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()["rosters_rev"]
+
+        nom_id = self._as(self.admin).post(
+            f"/api/v1/auctions/{aid}/nominate", {"mode": "manual", "player_id": a.id},
+            format="json").json()["nomination_id"]
+        self._as(self.u2).post(f"/api/v1/nominations/{nom_id}/bid", {"amount": 10}, format="json")
+        # Un rilancio non sposta nessun giocatore: le rose non si rileggono.
+        self.assertEqual(self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()["rosters_rev"], rev0)
+
+        self._as(self.admin).post(f"/api/v1/nominations/{nom_id}/close", format="json")
+        rev1 = self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()["rosters_rev"]
+        self.assertNotEqual(rev1, rev0)
+
+        # Revoca e riacquisto ALLO STESSO PREZZO su un altro giocatore: ogni cifra
+        # di budget torna identica, ma la rosa e' un'altra e l'impronta deve dirlo.
+        nom = AuctionNomination.objects.get(session_id=aid, player=a)
+        self._as(self.admin).post(f"/api/v1/nominations/{nom.id}/revert", format="json")
+        self._assign(aid, b, self.t2, 10)
+        state = self._as(self.u2).get(f"/api/v1/auctions/{aid}").json()
+        self.assertEqual(team_budgets(self.league)[self.t2.id].remaining, 990)
+        self.assertNotIn(state["rosters_rev"], (rev0, rev1))
+
+    def test_reverted_purchase_leaves_the_roster(self):
+        atk = self._player("Bomber", "ATT")
+        aid = self._create_auction([atk])
+        self._assign(aid, atk, self.t2, 40)
+        nom = AuctionNomination.objects.get(session_id=aid, player=atk)
+        self._as(self.admin).post(f"/api/v1/nominations/{nom.id}/revert", format="json")
+        payload = self._as(self.u2).get(f"/api/v1/auctions/{aid}/rosters").json()
+        self.assertEqual(self._roster(payload, self.t2.id), [])
+        self.assertIsNone(payload["last_purchase"])
+
+    def test_rosters_refused_to_outsiders(self):
+        atk = self._player("Bomber", "ATT")
+        aid = self._create_auction([atk])
+        stranger = User.objects.create_user("estraneo", password="x")
+        self.assertEqual(self._as(stranger).get(f"/api/v1/auctions/{aid}/rosters").status_code, 404)

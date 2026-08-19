@@ -568,6 +568,14 @@ export interface AuctionSlotCount {
   remaining: number;
 }
 
+/** Un giocatore gia' acquistato: quel che serve per leggerne la riga in rosa. */
+export interface AuctionRosterEntry {
+  player_id: number;
+  name: string;
+  role: ClassicRole | null;
+  price: number;
+}
+
 export interface AuctionTeamBudget {
   team_id: number;
   team_name: string;
@@ -578,6 +586,13 @@ export interface AuctionTeamBudget {
   slots: Record<ClassicRole, AuctionSlotCount>;
   slots_remaining_total: number;
   max_bid_any: number;
+}
+
+/** Le rose di tutta la lega, con l'impronta che dice quando sono cambiate. */
+export interface AuctionRosters {
+  rev: string;
+  teams: Array<{ team_id: number; roster: AuctionRosterEntry[] }>;
+  last_purchase: { team_id: number; player_id: number } | null;
 }
 
 export interface AuctionBidState {
@@ -644,6 +659,13 @@ export interface AuctionState {
   recent_nominations: AuctionNominationState[];
   events: AuctionEventItem[];
   team_budgets: AuctionTeamBudget[];
+  /** La squadra di chi sta guardando, se in questa lega ne ha una. */
+  my_team_id: number | null;
+  /** L'impronta delle rose: cambia solo quando una rosa e' cambiata davvero, ed e'
+   *  il segnale con cui il client decide se rileggere /rosters. Le rose stanno
+   *  fuori di qui perche' questo payload lo rilegge ogni dispositivo a ogni
+   *  rilancio, e loro cambiano solo alle aggiudicazioni. */
+  rosters_rev: string;
 }
 
 export interface ActiveAuctionInfo {

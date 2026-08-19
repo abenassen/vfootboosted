@@ -17,11 +17,15 @@ import {
   undoLastAuctionAction,
   voidBid,
 } from '../api';
-import { getAuctionPool, type AuctionPoolPlayer } from '../api/backend';
+import { getAuctionPool, getAuctionRosters, type AuctionPoolPlayer } from '../api/backend';
 import { foldedMatch } from '../utils/text';
+import { CURRENCY_SYMBOL, price } from '../utils/currency';
 import type {
   ActiveAuctionInfo,
+  AuctionRosterEntry,
+  AuctionRosters,
   AuctionState,
+  AuctionTeamBudget,
   ClassicRole,
 } from '../types/league';
 
@@ -33,6 +37,38 @@ const ROLE_LABEL: Record<ClassicRole, string> = {
 };
 const ROLE_SHORT: Record<ClassicRole, string> = { POR: 'P', DIF: 'D', CEN: 'C', ATT: 'A' };
 const ROLES: ClassicRole[] = ['POR', 'DIF', 'CEN', 'ATT'];
+// Le quattro tinte dei reparti, prese dai token del tema e non da colori scritti
+// a mano: in una riga di rosa la lettera del ruolo è l'unica cosa che si legge
+// senza leggere, e con `blue-50` sopra `blue-700` sparirebbe nel tema scuro.
+const ROLE_TINT: Record<ClassicRole, string> = {
+  POR: 'bg-warn-bg text-warn',
+  DIF: 'bg-accent/10 text-accent',
+  CEN: 'bg-good-bg text-good',
+  ATT: 'bg-bad-bg text-bad',
+};
+
+/** Vero quando lo schermo è largo abbastanza per tenere aperte tutte le rose.
+ *
+ *  1024px è la soglia `lg`, la stessa a cui la pagina passa a tre colonne: le
+ *  rose degli altri si aprono da sole esattamente quando compare lo spazio in cui
+ *  metterle, e sotto quella soglia restano chiuse — dodici rose da venticinque
+ *  giocatori su un telefono sono trecento righe tra chi sta chiamando e chi sta
+ *  rilanciando. Resta comunque tutto apribile a mano, sopra e sotto la soglia. */
+function useWideScreen(): boolean {
+  const query = '(min-width: 1024px)';
+  const [wide, setWide] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(query);
+    const onChange = (e: MediaQueryListEvent) => setWide(e.matches);
+    setWide(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return wide;
+}
 
 function eventLine(type: string, payload: Record<string, unknown>): string {
   const p = payload as Record<string, string | number>;
@@ -245,6 +281,13 @@ export default function AuctionRoomPage() {
                 run={run}
               />
             ) : null}
+
+            {/* Le rose stanno PRIMA della cronologia, e nella colonna larga.
+                La cronologia è il racconto di quel che è successo; la rosa è
+                com'è messa adesso una squadra, che è la cosa su cui si decide
+                se rilanciare — e quella andava cercata sulla pagina Rose, che
+                non è attaccata al socket e quindi durante un'asta era ferma. */}
+            <RosterBoard auctionId={auctionId} state={state} />
 
             <FeedPanel state={state} />
           </div>
@@ -747,6 +790,189 @@ function AdminControls({
         </div>
       ) : null}
     </Card>
+  );
+}
+
+/** Chi ha comprato chi, mentre lo sta comprando.
+ *
+ *  Il riepilogo qui accanto conta gli slot pieni per reparto — P 0/3, D 8/8 — e
+ *  non dice un nome: per sapere chi era andato a chi bisognava uscire dall'asta,
+ *  aprire la pagina Rose e ricaricarla a mano. Qui le rose si riempiono da sole,
+ *  sullo stesso nudge del socket che aggiorna l'offerta migliore.
+ *
+ *  La propria sta prima ed è aperta di suo; le altre seguono in ordine alfabetico
+ *  — non per budget residuo come il riepilogo, perché una griglia che si
+ *  riordina a ogni aggiudicazione fa perdere il posto a chi la stava leggendo. */
+function RosterBoard({ auctionId, state }: { auctionId: number; state: AuctionState }) {
+  const wide = useWideScreen();
+  // Solo le aperture DECISE a mano: il resto resta al valore di partenza, così
+  // allargando la finestra le rose si aprono anche se non le si è mai toccate.
+  const [overrides, setOverrides] = useState<Record<number, boolean>>({});
+  const [rosters, setRosters] = useState<AuctionRosters | null>(null);
+  const myTeamId = state.my_team_id;
+
+  // LE ROSE SI RILEGGONO SULL'IMPRONTA, NON SULLO STATO. Il socket manda un nudge
+  // a ogni cosa che succede e la pagina rilegge lo stato: se le rose viaggiassero
+  // lì dentro, ogni rilancio ne farebbe riscaricare 16 KB a ciascun dispositivo
+  // della stanza, per un elenco che un rilancio non tocca. `rosters_rev` cambia
+  // solo quando un giocatore cambia proprietario, e allora sì che si rilegge.
+  useEffect(() => {
+    let alive = true;
+    void getAuctionRosters(auctionId)
+      .then((r) => alive && setRosters(r))
+      .catch(() => {
+        /* le rose sono un di più: se non arrivano, l'asta va avanti lo stesso */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [auctionId, state.rosters_rev]);
+
+  const rosterOf = useMemo(() => {
+    const map = new Map<number, AuctionRosterEntry[]>();
+    for (const t of rosters?.teams ?? []) map.set(t.team_id, t.roster);
+    return map;
+  }, [rosters]);
+  const last = rosters?.last_purchase ?? null;
+
+  const teams = useMemo(() => {
+    const rows = [...state.team_budgets].sort((a, b) => a.team_name.localeCompare(b.team_name, 'it'));
+    return [
+      ...rows.filter((t) => t.team_id === myTeamId),
+      ...rows.filter((t) => t.team_id !== myTeamId),
+    ];
+  }, [state.team_budgets, myTeamId]);
+
+  const isOpen = (teamId: number) => overrides[teamId] ?? (teamId === myTeamId || wide);
+  const allOpen = teams.every((t) => isOpen(t.team_id));
+
+  if (!teams.length) return null;
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <SectionTitle className="!mb-0">Rose</SectionTitle>
+        {teams.length > 1 ? (
+          <button
+            type="button"
+            className="text-[11px] font-semibold text-ink-soft underline hover:text-ink"
+            onClick={() =>
+              setOverrides(Object.fromEntries(teams.map((t) => [t.team_id, !allOpen])))
+            }
+          >
+            {allOpen ? 'Chiudi tutte' : 'Apri tutte'}
+          </button>
+        ) : null}
+      </div>
+      {/* `items-start`: senza, ogni scheda si stira fino all'altezza della più
+          alta della sua riga, e accanto a una rosa da ventuno giocatori le altre
+          diventavano riquadri quasi vuoti. Griglia e non colonne CSS proprio
+          perché è viva: in un impaginato a colonne una rosa che cresce di una
+          riga rimescola la posizione di tutte le altre mentre le si legge. */}
+      <div className="mt-2 grid items-start gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {teams.map((t) => (
+          <TeamRosterCard
+            key={t.team_id}
+            team={t}
+            roster={rosterOf.get(t.team_id) ?? []}
+            mine={t.team_id === myTeamId}
+            open={isOpen(t.team_id)}
+            justBought={last && last.team_id === t.team_id ? last.player_id : null}
+            onToggle={() =>
+              setOverrides((o) => ({ ...o, [t.team_id]: !isOpen(t.team_id) }))
+            }
+          />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function TeamRosterCard({
+  team,
+  roster,
+  mine,
+  open,
+  justBought,
+  onToggle,
+}: {
+  team: AuctionTeamBudget;
+  roster: AuctionRosterEntry[];
+  mine: boolean;
+  open: boolean;
+  justBought: number | null;
+  onToggle: () => void;
+}) {
+  // Il conteggio viene dagli slot e non dalla lunghezza dell'elenco: gli slot
+  // arrivano con lo stato, quindi il numero è giusto anche nell'istante fra
+  // un'aggiudicazione e la rilettura delle rose.
+  const quota = ROLES.reduce((s, r) => s + team.slots[r].quota, 0);
+  const filled = ROLES.reduce((s, r) => s + team.slots[r].filled, 0);
+  return (
+    <div className={`rounded-xl border ${mine ? 'border-brand/50 bg-brand/5' : 'border-line'}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-2.5 py-2 text-left"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-semibold">{team.team_name}</span>
+            {mine ? (
+              <span className="shrink-0 rounded bg-brand/15 px-1 text-[10px] font-bold uppercase text-brand">
+                tu
+              </span>
+            ) : null}
+          </span>
+          <span className="mt-0.5 block text-[11px] text-ink-faint">
+            {filled}/{quota} · resta <b className="text-ink-soft">{price(team.available_budget)}</b>
+          </span>
+        </span>
+        <span
+          aria-hidden
+          className={`shrink-0 text-ink-faint transition-transform ${open ? 'rotate-90' : ''}`}
+        >
+          ›
+        </span>
+      </button>
+
+      {open ? (
+        roster.length ? (
+          <div className="border-t border-line px-2.5 pb-1.5">
+            {/* La moneta detta una volta in cima alla colonna, come nella pagina
+                Rose, invece che ripetuta accanto a venticinque numeri. */}
+            <div className="flex items-center justify-between gap-2 border-b border-line py-1 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+              <span>Giocatore</span>
+              <span className="normal-case tracking-normal">{CURRENCY_SYMBOL}</span>
+            </div>
+            {roster.map((p) => (
+              <div
+                key={p.player_id}
+                title={p.player_id === justBought ? 'Ultimo acquisto' : undefined}
+                className={`-mx-1 flex items-center gap-1.5 rounded px-1 py-[3px] text-xs ${
+                  p.player_id === justBought ? 'bg-good-bg' : ''
+                }`}
+              >
+                <span
+                  className={`w-4 shrink-0 rounded text-center text-[10px] font-bold leading-4 ${
+                    p.role ? ROLE_TINT[p.role] : 'bg-surface-2 text-ink-faint'
+                  }`}
+                >
+                  {p.role ? ROLE_SHORT[p.role] : '?'}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                <span className="shrink-0 font-semibold tabular-nums">{p.price}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="border-t border-line px-2.5 py-2 text-[11px] text-ink-faint">
+            {filled ? 'Caricamento…' : 'Nessun acquisto ancora.'}
+          </div>
+        )
+      ) : null}
+    </div>
   );
 }
 

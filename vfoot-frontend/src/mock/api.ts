@@ -852,6 +852,8 @@ export async function getAuctionState(auctionId: number): Promise<AuctionState> 
       { team_id: 11, team_name: 'Mock Team', manager_username: 'mock-admin', initial_budget: 1000, spent_budget: 42, available_budget: 958, slots: slots({ ATT: 1 }), slots_remaining_total: 24, max_bid_any: 935 },
       { team_id: 12, team_name: 'Mock Team 2', manager_username: 'mock-user', initial_budget: 1000, spent_budget: 0, available_budget: 1000, slots: slots({}), slots_remaining_total: 25, max_bid_any: 976 },
     ],
+    my_team_id: 12,
+    rosters_rev: '1:1',
   };
 }
 
