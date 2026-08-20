@@ -23,6 +23,68 @@ import { expect, test } from '@playwright/test';
 
 const ORIGIN = process.env.VFOOT_E2E_BASE_URL || 'http://127.0.0.1:5173';
 
+type Page = import('@playwright/test').Page;
+type Context = import('@playwright/test').BrowserContext;
+
+declare global {
+  interface Window {
+    /** Quello che il worker ha detto alle finestre aperte, v. `sw.ts`. */
+    __pushRicevute?: Array<{ type?: string; tag?: string }>;
+  }
+}
+
+/** Apre un canale DevTools sul worker e restituisce come consegnargli una push.
+ *
+ *  `ServiceWorker.deliverPushMessage` produce lo stesso evento di una consegna
+ *  vera da FCM, meno la rete: e' il modo di provare la logica del worker senza
+ *  una subscription viva. Una sessione sola per prova, riusata da tutte le
+ *  consegne, perche' e' l'ordine fra due push a essere interessante.
+ */
+async function consegnatorePush(page: Page, context: Context): Promise<(data: string) => Promise<void>> {
+  const cdp = await context.newCDPSession(page);
+  const registrations: Array<{ registrationId: string; scopeURL: string }> = [];
+  cdp.on('ServiceWorker.workerRegistrationUpdated', (e) =>
+    registrations.push(...(e.registrations as typeof registrations)),
+  );
+  await cdp.send('ServiceWorker.enable');
+  await expect
+    .poll(() => registrations.find((r) => r.scopeURL.startsWith(ORIGIN)) !== undefined, {
+      timeout: 5000,
+    })
+    .toBeTruthy();
+  const { registrationId } = registrations.find((r) => r.scopeURL.startsWith(ORIGIN))!;
+  return async (data: string) => {
+    await cdp.send('ServiceWorker.deliverPushMessage', { origin: ORIGIN, registrationId, data });
+  };
+}
+
+/** Mette in ascolto la finestra su cio' che il worker le manda dopo OGNI push,
+ *  mostrata o no. E' il traguardo che rende dimostrabile un'assenza: quando il
+ *  messaggio su quel tag e' arrivato, il worker ha finito di occuparsi di quella
+ *  push, e la tendina e' come dovra' restare. */
+async function ascoltaIlWorker(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.__pushRicevute = [];
+    navigator.serviceWorker.addEventListener('message', (e) =>
+      window.__pushRicevute?.push(e.data as { type?: string; tag?: string }),
+    );
+  });
+}
+
+async function attendiPushGestita(page: Page, tag: string): Promise<void> {
+  await page.waitForFunction(
+    (t) => (window.__pushRicevute ?? []).some((d) => d?.tag === t),
+    tag,
+  );
+}
+
+async function tendina(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const r = await navigator.serviceWorker.ready;
+    return (await r.getNotifications()).map((n) => n.tag);
+  });
+}
+
 /** Chiude le notifiche che il test ha appena verificato.
  *
  *  Queste prove girano in Chrome VERO (il guscio headless non ha il dominio DevTools
@@ -67,6 +129,10 @@ test.describe('@pwa PWA', () => {
       '/icons/maskable-192.png',
       '/icons/maskable-512.png',
       '/icons/apple-touch-icon.png',
+      // Non è nel manifest: la dichiara il service worker come `badge`, ed è
+      // l'icona piccola in cima allo schermo. Se manca, Android non ripiega
+      // sulle altre — disegna un quadrato bianco vuoto.
+      '/icons/badge-96.png',
     ]) {
       const res = await request.get(path);
       expect(res.ok(), `${path} manca`).toBeTruthy();
@@ -108,30 +174,16 @@ test.describe('@pwa PWA', () => {
     await context.grantPermissions(['notifications'], { origin: ORIGIN });
     await page.goto('/');
     await page.evaluate(() => navigator.serviceWorker.ready);
+    const consegna = await consegnatorePush(page, context);
 
-    const cdp = await context.newCDPSession(page);
-    const registrations: Array<{ registrationId: string; scopeURL: string }> = [];
-    cdp.on('ServiceWorker.workerRegistrationUpdated', (e) =>
-      registrations.push(...(e.registrations as typeof registrations)),
-    );
-    await cdp.send('ServiceWorker.enable');
-    await expect
-      .poll(() => registrations.find((r) => r.scopeURL.startsWith(ORIGIN)) !== undefined, {
-        timeout: 5000,
-      })
-      .toBeTruthy();
-    const reg = registrations.find((r) => r.scopeURL.startsWith(ORIGIN))!;
-
-    await cdp.send('ServiceWorker.deliverPushMessage', {
-      origin: ORIGIN,
-      registrationId: reg.registrationId,
-      data: JSON.stringify({
+    await consegna(
+      JSON.stringify({
         title: 'Ti hanno chiesto un parere',
         body: 'Ruolo di D. Berardi',
         url: '/decisioni',
         tag: 'decision-1',
       }),
-    });
+    );
 
     const shown = await page.waitForFunction(async () => {
       const r = await navigator.serviceWorker.ready;
@@ -163,28 +215,13 @@ test.describe('@pwa PWA', () => {
     await page.goto('/');
     await page.evaluate(() => navigator.serviceWorker.ready);
 
-    const cdp = await context.newCDPSession(page);
-    const registrations: Array<{ registrationId: string; scopeURL: string }> = [];
-    cdp.on('ServiceWorker.workerRegistrationUpdated', (e) =>
-      registrations.push(...(e.registrations as typeof registrations)),
-    );
-    await cdp.send('ServiceWorker.enable');
-    await expect
-      .poll(() => registrations.find((r) => r.scopeURL.startsWith(ORIGIN)) !== undefined, {
-        timeout: 5000,
-      })
-      .toBeTruthy();
-
-    await cdp.send('ServiceWorker.deliverPushMessage', {
-      origin: ORIGIN,
-      registrationId: registrations.find((r) => r.scopeURL.startsWith(ORIGIN))!.registrationId,
-      // Si dichiara una prova: il fallback mostra il testo GREZZO nel corpo, e
-      // questa notifica finisce davvero nel centro notifiche di chi lancia i test
-      // (serve Chrome vero, v. playwright.config). Un payload che diceva solo
-      // "questo non è json" è stato segnalato come un difetto dell'app, il
-      // 12/08/2026, da chi l'aveva vista comparire.
-      data: 'prova end-to-end: payload non JSON, atteso',
-    });
+    const consegna = await consegnatorePush(page, context);
+    // Si dichiara una prova: il fallback mostra il testo GREZZO nel corpo, e
+    // questa notifica finisce davvero nel centro notifiche di chi lancia i test
+    // (serve Chrome vero, v. playwright.config). Un payload che diceva solo
+    // "questo non è json" è stato segnalato come un difetto dell'app, il
+    // 12/08/2026, da chi l'aveva vista comparire.
+    await consegna('prova end-to-end: payload non JSON, atteso');
 
     const shown = await page.waitForFunction(async () => {
       const r = await navigator.serviceWorker.ready;
@@ -192,6 +229,73 @@ test.describe('@pwa PWA', () => {
       return ns.length ? ns.map((n) => n.title) : null;
     });
     expect((await shown.jsonValue()) as string[]).toEqual(['Vfoot Boosted']);
+    await chiudiNotifiche(page);
+  });
+});
+
+/** Il caso segnalato il 20/08/2026: si decide un ruolo dal telefono, si accende
+ *  il computer due ore dopo e la stessa richiesta arriva anche lì — perché il
+ *  servizio di push tiene in coda quello che non ha potuto consegnare. Cliccarla
+ *  porta su una pagina dove non c'è più niente da risolvere.
+ *
+ *  Il worker lo chiede al server un istante prima di aprire la tendina (v.
+ *  `sw.ts` e `push_relevance.py`). Qui la risposta è finta — quello che si prova
+ *  è che il worker la ascolti, e soprattutto che nel dubbio mostri: una notifica
+ *  di troppo è una seccatura, una in meno è un mercato fermo di cui nessuno
+ *  viene avvisato.
+ */
+test.describe('@pwa notifiche già evase altrove', () => {
+  const RICHIESTA = JSON.stringify({
+    title: '3 nuovi ruoli da decidere',
+    body: 'L: il mercato reale ha portato giocatori da classificare.',
+    url: '/decisioni',
+    tag: 'decisions-1',
+    check: 'gettone-finto',
+  });
+
+  async function prepara(page: Page, context: Context): Promise<(data: string) => Promise<void>> {
+    await context.grantPermissions(['notifications'], { origin: ORIGIN });
+    await page.goto('/');
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await ascoltaIlWorker(page);
+    return consegnatorePush(page, context);
+  }
+
+  test('una richiesta già risolta non diventa una notifica', async ({ page, context }) => {
+    await context.route('**/push/relevance*', (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ stale: true }) }),
+    );
+    const consegna = await prepara(page, context);
+
+    await consegna(RICHIESTA);
+    // Un'assenza si dimostra solo aspettando qualcosa: il worker avvisa le
+    // finestre aperte dopo OGNI push, mostrata o no, e quel messaggio è la prova
+    // che se ne è occupato fino in fondo.
+    await attendiPushGestita(page, 'decisions-1');
+    expect(await tendina(page)).toEqual([]);
+  });
+
+  test('una richiesta ancora aperta si vede', async ({ page, context }) => {
+    await context.route('**/push/relevance*', (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ stale: false }) }),
+    );
+    const consegna = await prepara(page, context);
+
+    await consegna(RICHIESTA);
+    await attendiPushGestita(page, 'decisions-1');
+    expect(await tendina(page)).toEqual(['decisions-1']);
+    await chiudiNotifiche(page);
+  });
+
+  test('col server irraggiungibile si mostra lo stesso', async ({ page, context }) => {
+    // Chi è appena atterrato in aeroporto non deve perdere la notifica che il
+    // mercato della sua lega è fermo per colpa sua.
+    await context.route('**/push/relevance*', (route) => route.abort());
+    const consegna = await prepara(page, context);
+
+    await consegna(RICHIESTA);
+    await attendiPushGestita(page, 'decisions-1');
+    expect(await tendina(page)).toEqual(['decisions-1']);
     await chiudiNotifiche(page);
   });
 });

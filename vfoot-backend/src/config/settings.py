@@ -153,6 +153,14 @@ REST_FRAMEWORK = {
         # può aiutare, perché la sua zona /api/ è tarata sul traffico dell'asta.
         # Trenta al giorno è dieci volte quello che serve a scegliere uno stemma.
         "crest_upload": os.environ.get("DJANGO_CREST_UPLOAD_RATE", "30/day"),
+        # Il service worker chiede, prima di mostrare una notifica, se la
+        # richiesta che porta è ancora aperta: una chiamata per push consegnata,
+        # cioè qualcosa come una manciata al giorno per dispositivo. È un
+        # endpoint senza login (la credenziale è il gettone firmato dentro la
+        # push), e dietro la firma c'è un giro di database: il limite è quello
+        # che tiene un gettone rubato lontano dall'unica vCPU. Contato per IP —
+        # più installazioni dietro la stessa uscita di rete ci stanno comunque.
+        "push_relevance": os.environ.get("DJANGO_PUSH_RELEVANCE_RATE", "60/min"),
     },
 }
 

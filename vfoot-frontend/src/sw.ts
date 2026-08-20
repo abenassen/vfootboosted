@@ -82,7 +82,60 @@ self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
 });
 
-type PushPayload = { title?: string; body?: string; url?: string; tag?: string };
+type PushPayload = {
+  title?: string;
+  body?: string;
+  url?: string;
+  tag?: string;
+  /** Gettone firmato per chiedere al server se questa notifica ha ancora senso.
+   *  Ce l'hanno solo quelle che CHIEDONO qualcosa — v. `ancoraDaFare`. */
+  check?: string;
+};
+
+/** La stessa base che usa l'app (src/api/backend.ts): relativa in produzione,
+ *  dove nginx fa da proxy, e su un'altra porta in sviluppo. Ripetuta qui invece
+ *  che importata perché il worker è autonomo per costruzione — v. l'intestazione:
+ *  quello che tira dentro se lo porta appresso in ogni risveglio a freddo. */
+const API_BASE = (
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ||
+  'http://localhost:8000/api/v1'
+).replace(/\/+$/, '');
+
+/** Quanto si aspetta la risposta prima di mostrare comunque la notifica. Il
+ *  browser tiene in vita il worker solo finché la promessa di `waitUntil` non si
+ *  chiude, e una rete lenta non deve trasformare una notifica in un silenzio. */
+const CHECK_TIMEOUT_MS = 3000;
+
+/** C'è ancora qualcosa da fare, o qualcuno l'ha già fatto?
+ *
+ *  Una push non è un messaggio istantaneo: il servizio del dispositivo la tiene
+ *  in coda e la consegna quando quel browser si ricollega. Chi decide un ruolo
+ *  dal telefono e più tardi accende il computer se la ritrova lì identica, e
+ *  cliccandola arriva su una pagina dove non c'è più niente da risolvere. Le due
+ *  notifiche sono la stessa cosa mandata a due installazioni, e al momento della
+ *  partenza erano entrambe giuste: l'unico posto in cui la domanda ha una
+ *  risposta è qui, un istante prima di aprire la tendina.
+ *
+ *  In dubbio si mostra — timeout, rete assente, server che risponde storto, non
+ *  autenticato in questo browser. Una notifica di troppo è una seccatura, una
+ *  notifica in meno è un mercato fermo di cui nessuno viene avvisato.
+ */
+async function ancoraDaFare(check: string): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CHECK_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/push/relevance?t=${encodeURIComponent(check)}`, {
+      signal: ctrl.signal,
+      cache: 'no-store',
+    });
+    if (!res.ok) return true;
+    return ((await res.json()) as { stale?: boolean }).stale !== true;
+  } catch {
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 self.addEventListener('push', (event) => {
   let data: PushPayload = {};
@@ -95,16 +148,38 @@ self.addEventListener('push', (event) => {
   }
   event.waitUntil(
     (async () => {
-      await self.registration.showNotification(data.title || 'Vfoot Boosted', {
-        body: data.body || '',
-        icon: '/icons/icon-192.png',
-        badge: '/icons/maskable-192.png',
-        // Same tag => the new notification REPLACES the old one instead of
-        // stacking. Keyed per subject by the server (decision-<id>), so three
-        // updates about one decision stay one line in the shade.
-        tag: data.tag || 'vfoot',
-        data: { url: data.url || '/home' },
-      });
+      // Same tag => the new notification REPLACES the old one instead of
+      // stacking. Keyed per subject by the server (decision-<id>), so three
+      // updates about one decision stay one line in the shade.
+      const tag = data.tag || 'vfoot';
+      if (!data.check || (await ancoraDaFare(data.check))) {
+        await self.registration.showNotification(data.title || 'Vfoot Boosted', {
+          body: data.body || '',
+          icon: '/icons/icon-192.png',
+          // NON un'icona qualsiasi, e nemmeno una delle altre: quella piccola in
+          // cima allo schermo Android la disegna da sé, prendendo del file solo
+          // il CANALE ALFA e riempiendo di bianco tutto ciò che è opaco. Qui
+          // c'era la maskable, che per definizione è piena fino ai bordi — e
+          // infatti nella barra di stato compariva un quadrato bianco anonimo
+          // accanto alle altre app (segnalato il 20/08/2026). badge-96 è lo
+          // scudo del logo ritagliato in silhouette, sfondo trasparente, senza
+          // la scritta: a 24dp una parola non si legge comunque.
+          badge: '/icons/badge-96.png',
+          tag,
+          data: { url: data.url || '/home' },
+        });
+      } else {
+        // Già risolto altrove. Niente da mostrare — e se questo dispositivo ne
+        // aveva ancora una vecchia in tendina, se ne va con l'occasione.
+        //
+        // Il patto di `userVisibleOnly` dice che ogni push produce qualcosa di
+        // visibile, e non mostrare niente attinge al credito che il browser
+        // concede ai siti frequentati; esaurito quello, mostra lui un generico
+        // «il sito è stato aggiornato in background». È il prezzo accettato
+        // consapevolmente: si arriva qui solo quando la richiesta è già evasa,
+        // cioè di rado, e l'alternativa è mandare la persona su una pagina vuota.
+        for (const n of await self.registration.getNotifications({ tag })) n.close();
+      }
       // ...and tell any window that is already open, so the app and the shade do
       // not disagree. Web Push and the running SPA are two separate channels: a
       // notification saying "3 roles to decide" beside a badge still reading zero
@@ -113,9 +188,11 @@ self.addEventListener('push', (event) => {
       // this covers the case where the reader simply switches to a tab that was
       // open all along. The message carries no state — only "something about
       // <tag> moved" — so whoever listens re-reads over REST, same as everywhere.
+      // Anche quando non si è mostrato niente: che la coda si sia svuotata è una
+      // notizia esattamente come che si sia riempita.
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const client of clients) {
-        client.postMessage({ type: 'push', tag: data.tag || 'vfoot' });
+        client.postMessage({ type: 'push', tag });
       }
     })(),
   );

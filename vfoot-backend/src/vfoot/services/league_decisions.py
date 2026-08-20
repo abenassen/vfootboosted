@@ -359,7 +359,7 @@ def _push_new_decisions(league, n: int) -> int:
     which is precisely when nobody is watching and the market stays blocked for
     those players until someone answers.
     """
-    from vfoot.services import push_channel
+    from vfoot.services import push_channel, push_relevance
 
     admins = [m.user for m in LeagueMembership.objects
               .filter(league=league, role=LeagueMembership.ROLE_ADMIN)
@@ -377,7 +377,10 @@ def _push_new_decisions(league, n: int) -> int:
             url="/decisioni",
             # One tag per league: a second import before the admin has answered
             # replaces the notification instead of stacking another copy.
-            tag=f"decisions-{league.id}")
+            tag=f"decisions-{league.id}",
+            # E se nel frattempo ha risposto da un altro dispositivo, questa non
+            # si mostra affatto: v. push_relevance.
+            check=(push_relevance.KIND_DECISIONS, league.id))
     return sent
 
 

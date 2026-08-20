@@ -42,6 +42,7 @@ from django.core.mail import get_connection, EmailMessage
 from django.db import transaction
 
 from vfoot.models import LeagueMembership
+from vfoot.services import push_relevance
 
 log = logging.getLogger(__name__)
 
@@ -157,7 +158,8 @@ def notify_consultations_opened(league, decisions: list) -> None:
         # si perde niente, perche' entrambi puntano alla pagina che le elenca
         # tutte.
         _push([user], title=subject, body=_summary(mine),
-              tag=f"consultations-{league.id}")
+              tag=f"consultations-{league.id}",
+              check=(push_relevance.KIND_CONSULTATIONS, league.id))
         body = (
             "{greeting}\n\n"
             f"Nella lega \"{league.name}\" l'amministratore "
@@ -233,7 +235,8 @@ def notify_conclusions_pending(league, matchdays, admins) -> None:
                else f"{n} giornate da chiudere · {league.name}")
     _push(users, title=subject,
           body=f"Giornat{'a' if n == 1 else 'e'} {rounds}: i risultati aspettano te.",
-          tag=f"conclusions-{league.id}", url="/league-admin?tab=matchdays")
+          tag=f"conclusions-{league.id}", url="/league-admin?tab=matchdays",
+          check=(push_relevance.KIND_CONCLUSIONS, league.id))
     base = str(getattr(settings, "VFOOT_FRONTEND_BASE_URL", "")).rstrip("/")
     body = (
         "{greeting}\n\n"
@@ -286,16 +289,24 @@ def notify_lineup_repaired(league, manager, out_player_id, in_player_id, matchda
     _send([_message(manager, subject, body)])
 
 
-def _push(users: list, *, title: str, body: str, tag: str = "", url: str = "/decisioni") -> None:
+def _push(users: list, *, title: str, body: str, tag: str = "", url: str = "/decisioni",
+          check: tuple[str, int] | None = None) -> None:
     """The second channel. Silent when push is not configured, and never able to
-    stop the email: whoever installed the app hears sooner, nobody hears less."""
+    stop the email: whoever installed the app hears sooner, nobody hears less.
+
+    ``check`` lo passano solo i messaggi che chiedono qualcosa, e vale per la sola
+    push: la mail resta com'e'. Una mail la si legge quando la si legge e nessuno
+    si aspetta che sparisca dalla casella; una notifica invece pretende di parlare
+    di adesso, e consegnata su un secondo dispositivo ore dopo non parla piu' di
+    niente. V. ``push_relevance``.
+    """
     from vfoot.services import push_channel
     if not push_channel.configured():
         return
     for user in users:
         try:
             push_channel.send_to_user(user, title=title, body=body,
-                                      url=url, tag=tag)
+                                      url=url, tag=tag, check=check)
         except Exception:                                 # noqa: BLE001
             log.exception("Notifica push fallita per l'utente %s", user.id)
 

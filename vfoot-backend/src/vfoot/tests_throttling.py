@@ -175,3 +175,32 @@ class CrestUploadThrottleTests(TestCase):
         with mock.patch.dict(ScopedRateThrottle.THROTTLE_RATES, {"crest_upload": "1/day"}):
             self.assertEqual(self._upload(self.andrea).status_code, 201)
             self.assertEqual(self._upload(self.bruno).status_code, 201)
+
+
+@override_settings(CACHES=REAL_CACHE)
+class PushRelevanceThrottleTests(TestCase):
+    """Il controllo di pertinenza e' senza login: la credenziale e' il gettone
+    che la push si porta dietro, perche' il service worker il token dell'utente
+    non ce l'ha. Dietro la firma c'e' un giro di database, e un gettone valido
+    resta valido per un giorno — questo scope e' quel che tiene un gettone rubato
+    lontano dall'unica vCPU. Per indirizzo, che di un worker e' tutto quel che si
+    conosce."""
+
+    def setUp(self):
+        ScopedRateThrottle.cache.clear()
+
+    def _check(self, addr="1.2.3.4"):
+        return self.client.get(reverse("push-relevance"), {"t": "gettone"},
+                               REMOTE_ADDR=addr)
+
+    def test_one_address_hammering_is_stopped(self):
+        with mock.patch.dict(ScopedRateThrottle.THROTTLE_RATES,
+                             {"push_relevance": "1/min"}):
+            self.assertEqual(self._check().status_code, 200)
+            self.assertEqual(self._check().status_code, 429)
+
+    def test_the_count_is_per_address(self):
+        with mock.patch.dict(ScopedRateThrottle.THROTTLE_RATES,
+                             {"push_relevance": "1/min"}):
+            self.assertEqual(self._check("1.2.3.4").status_code, 200)
+            self.assertEqual(self._check("5.6.7.8").status_code, 200)

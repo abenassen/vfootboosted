@@ -69,8 +69,16 @@ def _claims() -> dict:
 
 
 def send_to_user(user, *, title: str, body: str, url: str = "/",
-                 tag: str = "") -> int:
+                 tag: str = "", check: tuple[str, int] | None = None) -> int:
     """Push to every live installation of one user. Returns how many got through.
+
+    ``check`` distingue le notifiche che CHIEDONO QUALCOSA da quelle che
+    raccontano: e' la coppia (tipo, id lega) di ``push_relevance``, e il gettone
+    firmato che ne esce viaggia nel corpo perche' il service worker possa
+    chiedere, prima di aprire la tendina, se quella richiesta e' ancora aperta.
+    Serve a un caso solo ma frequente: due dispositivi, uno spento, la stessa
+    notifica consegnata ore dopo su quello che si riaccende. Alle notizie non si
+    passa, che restano vere comunque.
 
     Never raises: see the module docstring.
     """
@@ -79,13 +87,15 @@ def send_to_user(user, *, title: str, body: str, url: str = "/",
     subs = list(PushSubscription.objects.filter(user=user))
     if not subs:
         return 0
-    payload = json.dumps({"title": title, "body": body, "url": url,
-                          "tag": tag or "vfoot"})
+    data = {"title": title, "body": body, "url": url, "tag": tag or "vfoot"}
+    if check:
+        from vfoot.services import push_relevance
+        data["check"] = push_relevance.mint(user, check[0], check[1])
+    payload = json.dumps(data)
     if len(payload.encode()) > MAX_PAYLOAD_BYTES:
         # Truncating the body beats being dropped by the push service.
-        body = body[:200]
-        payload = json.dumps({"title": title, "body": body, "url": url,
-                              "tag": tag or "vfoot"})
+        data["body"] = body[:200]
+        payload = json.dumps(data)
     sent = 0
     for sub in subs:
         if _send_one(sub, payload):

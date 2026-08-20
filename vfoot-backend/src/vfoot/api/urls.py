@@ -113,7 +113,7 @@ from vfoot.api.decision_views import (
 )
 
 from vfoot.api.push_views import (
-    PushConfigView, PushSubscribeView, PushUnsubscribeView,
+    PushConfigView, PushRelevanceView, PushSubscribeView, PushUnsubscribeView,
 )
 
 from vfoot.api.feedback_views import FeedbackCreateView
@@ -132,6 +132,10 @@ urlpatterns = [
     path("push/config", PushConfigView.as_view(), name="push-config"),
     path("push/subscribe", PushSubscribeView.as_view(), name="push-subscribe"),
     path("push/unsubscribe", PushUnsubscribeView.as_view(), name="push-unsubscribe"),
+    # Aperto come la config, e per lo stesso motivo: lo chiama il service worker,
+    # che il token dell'utente non ce l'ha. La credenziale è il gettone firmato
+    # che si porta dietro la push stessa.
+    path("push/relevance", PushRelevanceView.as_view(), name="push-relevance"),
     # Le segnalazioni degli utenti: si scrivono e basta, non si rileggono da qui
     # (si smistano dall'admin di Django).
     path("feedback", FeedbackCreateView.as_view(), name="feedback-create"),

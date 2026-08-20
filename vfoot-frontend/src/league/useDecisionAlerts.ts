@@ -30,6 +30,32 @@ const POLL_MS = 5 * 60 * 1000;
 
 /** Server-side tag prefix for the "new roles to decide" push (league_decisions). */
 const DECISION_TAG = 'decisions-';
+/** E quello della consultazione aperta ai partecipanti (league_notifications). */
+const CONSULTATION_TAG = 'consultations-';
+
+/** Toglie dalla tendina le notifiche di questa lega quando non resta niente da fare.
+ *
+ *  È l'altra metà di quello che fa il service worker prima di mostrarne una: là si
+ *  tratta di non APRIRE una richiesta già evasa altrove, qui di chiudere quella che
+ *  era già a schermo nel momento in cui l'hanno evasa. Sono due casi diversi e
+ *  succedono entrambi — chi risponde dal telefono non fa arrivare nessuna push al
+ *  computer acceso di là, e la notifica di stamattina resta lì, buona, finché non
+ *  la si scaccia a mano.
+ *
+ *  Silenziosa in ogni suo fallimento: è pulizia, e nessuno deve accorgersi se non
+ *  riesce.
+ */
+async function pulisciTendina(leagueId: number): Promise<void> {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (!reg) return;
+    for (const tag of [`${DECISION_TAG}${leagueId}`, `${CONSULTATION_TAG}${leagueId}`]) {
+      for (const n of await reg.getNotifications({ tag })) n.close();
+    }
+  } catch {
+    /* worker assente, permesso mai dato: non c'è niente da pulire */
+  }
+}
 
 /** Evento di finestra emesso dalla pagina Decisioni quando la coda cambia per
  * mano dell'utente. I tre canali qui sopra guardano tutti FUORI dall'app — una
@@ -52,8 +78,9 @@ export function useDecisionAlerts(leagueId: number | null) {
     const read = async () => {
       try {
         const r = await getLeagueDecisions(leagueId);
-        if (!cancelled)
-          setAlerts({ attention: r.attention, blocking: r.blocking_open, isAdmin: r.is_admin });
+        if (cancelled) return;
+        setAlerts({ attention: r.attention, blocking: r.blocking_open, isAdmin: r.is_admin });
+        if (r.attention === 0 && r.blocking_open === 0) void pulisciTendina(leagueId);
       } catch {
         // A badge is not worth an error message: if we cannot count, show nothing.
         if (!cancelled) setAlerts(EMPTY);
@@ -65,8 +92,14 @@ export function useDecisionAlerts(leagueId: number | null) {
     const onMessage = (e: MessageEvent) => {
       const tag = (e.data as { type?: string; tag?: string } | null)?.tag;
       // This league's decisions only: another league's push, or a goal, has
-      // nothing to say about this number.
-      if (typeof tag === 'string' && tag === `${DECISION_TAG}${leagueId}`) void read();
+      // nothing to say about this number. Le due che ce l'hanno sono la coda
+      // dell'amministratore e la consultazione aperta a tutti: il badge le conta
+      // entrambe, quindi entrambe lo rimettono in pari.
+      if (
+        tag === `${DECISION_TAG}${leagueId}` ||
+        tag === `${CONSULTATION_TAG}${leagueId}`
+      )
+        void read();
     };
     navigator.serviceWorker?.addEventListener('message', onMessage);
 

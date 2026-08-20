@@ -314,7 +314,9 @@ codice, ricostruisci e ricarica. Deve comparire la fascia in basso.
 | Il permesso non si può più chiedere | Si chiede una volta sola: dopo un rifiuto serve passare dalle impostazioni del sito. |
 | 401/403 dal servizio push | Chiavi VAPID cambiate dopo l'iscrizione: ogni browser ha legato la subscription alla chiave ricevuta. Non rigenerarle. |
 | 404/410 dal servizio push | Installazione sparita. `push_channel` cancella la riga da sé. |
-| Consegna riuscita, notifica assente | Dispositivo offline (il messaggio resta in coda) o permesso revocato a livello di sistema operativo. |
+| Consegna riuscita, notifica assente | Dispositivo offline (il messaggio resta in coda) o permesso revocato a livello di sistema operativo. Terza possibilità dal 20/08/2026: la richiesta era già stata evasa e il worker ha chiesto al server se mostrarla — `push_relevance.py`. |
+| Quadrato bianco anonimo nella barra di stato Android | L'icona piccola la disegna Android prendendo del file **solo il canale alfa**: un'icona opaca fino ai bordi (la maskable) diventa un quadrato pieno. Va usata `badge-96.png`, silhouette su sfondo trasparente. |
+| La stessa notifica arriva ore dopo sul secondo dispositivo | È la coda del servizio di push, non un doppio invio: consegna quando quel browser si ricollega. Chi *chiede qualcosa* porta un gettone firmato e il worker verifica prima di mostrare; le notizie no, restano vere comunque. |
 | Il service worker non si registra in `npm run dev` | Percorso sbagliato: in sviluppo è `/dev-sw.js?dev-sw`, non `/sw.js`. |
 | Overlay rosso `Failed to resolve import "…"` dal telefono | Un `git pull` che aggiunge una libreria non la installa: manca `npm install`. `--lan` lo dice all'avvio confrontando `package-lock.json` con `node_modules/.package-lock.json`, così te ne accorgi dal portatile e non dall'altra parte della stanza. |
 | L'app installata su Android si apre con la barra dell'indirizzo | Origine `http://`: Chrome non può generare il WebAPK e l'installazione degrada a scorciatoia. Non è il manifest. Serve HTTPS pubblico o `adb reverse` — vedi il riquadro nel livello 3. |
