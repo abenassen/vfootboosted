@@ -271,6 +271,10 @@ export default function FormationPage() {
   // buio e si scopre dove è finito solo lasciando la presa.
   const [dragPreview, setDragPreview] = useState<number[] | null>(null);
   const benchRowEls = useRef(new Map<number, HTMLElement>());
+  const pressTimer = useRef<number | null>(null);
+  const pressFrom = useRef<{ x: number; y: number; id: number } | null>(null);
+  const blockScroll = useRef((e: TouchEvent) => e.preventDefault()).current;
+
   // Places left open by a demoted starter, in the order they were vacated. They
   // are what keeps the pitch at eleven while the module is still being decided.
   const [vacancies, setVacancies] = useState<PlayerRole[]>([]);
@@ -615,7 +619,86 @@ export default function FormationPage() {
     if (next !== current) setDragPreview(next);
   };
 
+  /** LA PRESSIONE LUNGA AL POSTO DELLE FRECCETTE.
+   *
+   *  Le due freccette erano bersagli da 21×11 pixel: sotto qualunque soglia
+   *  ragionevole, ed e' il motivo per cui gli utenti scrivono che l'ordine della
+   *  panchina «non si puo' cambiare». La maniglia da 20×16 accanto non stava
+   *  meglio. Ora la presa e' la RIGA INTERA, dopo un quarto di secondo di dito
+   *  fermo — il gesto che qualunque telefono usa per riordinare una lista.
+   *
+   *  Il tempo distingue le due cose che un dito puo' voler fare partendo dalla
+   *  stessa riga: se si muove prima della soglia sta scorrendo la pagina e il
+   *  gesto si annulla; se resta fermo vuole quella riga. Otto pixel di tolleranza
+   *  perche' un dito fermo non e' mai fermo davvero.
+   *
+   *  Lo scorrimento durante il trascinamento lo blocca un listener su `touchmove`
+   *  non passivo, e non `touch-action`: quest'ultimo va deciso PRIMA che il gesto
+   *  cominci, e qui al momento del `pointerdown` non sappiamo ancora se sara' un
+   *  trascinamento o una scorsa. */
+  const cancelPress = () => {
+    if (pressTimer.current != null) {
+      clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+    pressFrom.current = null;
+  };
+
+  const rowPointerDown = (id: number) => (e: React.PointerEvent) => {
+    // I comandi dentro la riga restano comandi: un tocco sul segmentato non deve
+    // diventare ne' una selezione ne' l'inizio di un trascinamento.
+    if ((e.target as HTMLElement).closest('button')) return;
+    if (immutableReason(id)) return; // il suo posto e' fissato: niente presa
+    // Senza questo il dito (o il mouse) tenuto fermo su una riga avvia la
+    // SELEZIONE DEL TESTO: il nome si evidenzia, il browser prende in mano il
+    // gesto per conto suo e i pointermove che dovrebbero riordinare la lista
+    // vanno a muovere un'ancora di selezione.
+    e.preventDefault();
+    const el = e.currentTarget as HTMLElement;
+    const pointerId = e.pointerId;
+    pressFrom.current = { x: e.clientX, y: e.clientY, id };
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null;
+      try {
+        el.setPointerCapture(pointerId);
+      } catch {
+        /* il puntatore puo' essere gia' sparito: il trascinamento parte lo stesso */
+      }
+      document.addEventListener('touchmove', blockScroll, { passive: false });
+      setDragId(id);
+      setDragPreview(benchIds);
+    }, 250);
+  };
+
+  const rowPointerMove = (e: React.PointerEvent) => {
+    if (dragId != null) {
+      dragMoveTo(e.clientY);
+      return;
+    }
+    const from = pressFrom.current;
+    if (!from) return;
+    if (Math.abs(e.clientY - from.y) > 8 || Math.abs(e.clientX - from.x) > 8) cancelPress();
+  };
+
+  const rowPointerUp = (id: number) => (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    // Dito alzato prima della soglia e senza esserci mosso: era un tocco, e un
+    // tocco su un panchinaro apre la sua scheda.
+    const wasPress = pressTimer.current != null && pressFrom.current?.id === id;
+    cancelPress();
+    if (dragId != null) {
+      dragEnd();
+      return;
+    }
+    if (wasPress) {
+      setPicking(null);
+      setSelected((sel) => (sel === id ? null : id));
+    }
+  };
+
   const dragEnd = () => {
+    document.removeEventListener('touchmove', blockScroll);
+    cancelPress();
     if (dragPreview) setBenchOrder(dragPreview);
     setDragId(null);
     setDragPreview(null);
@@ -634,33 +717,6 @@ export default function FormationPage() {
     }
     setRefused(null);
     setBenchOrder((b) => reorderBench(pinFrozen(orderBench(ctx.roster, starterIds, b), frozenSlots), id, 0));
-  };
-
-  const moveBench = (id: number, dir: -1 | 1) => {
-    setBenchOrder((b) => {
-      const i = b.indexOf(id);
-      if (i < 0) return b;
-      if (closed || lockedIds.has(id)) {
-        setRefused({
-          player_id: id,
-          reason: closed
-            ? 'Giornata chiusa: la formazione non è più modificabile.'
-            : "Il suo posto in panchina è fissato: la sua partita è iniziata.",
-        });
-        return b;
-      }
-      // NOT a jump over the frozen row — nobody passes him, and his number never
-      // changes. What happens is that the two FREE players either side of him
-      // exchange places: with the 3rd frozen, the 2nd and the 4th swap and the 3rd
-      // is still the 3rd. So the search skips the frozen rows to find the free
-      // neighbour, which is the only reordering a half-played bench still allows.
-      let j = i + dir;
-      while (j >= 0 && j < b.length && lockedIds.has(b[j])) j += dir;
-      if (j < 0 || j >= b.length) return b;
-      const next = [...b];
-      [next[i], next[j]] = [next[j], next[i]];
-      return next;
-    });
   };
 
   const starterRoles = starterIds.map((id) => byId.get(id)?.role).filter((r): r is PlayerRole => !!r);
@@ -943,13 +999,15 @@ export default function FormationPage() {
               ? 'Entra il primo panchinaro in lista che ha un voto e mantiene la formazione valida.'
               : 'In Aura il sostituto è il migliore disponibile; l’ordine conta solo a parità.'}
           </div>
+          <div className="mt-1 text-[11px] text-ink-faint">
+            Tieni premuto e trascina per cambiare l'ordine.
+          </div>
           <div
             className="divide-y"
             // Il gesto si segue sul CONTENITORE, non sulla riga: mentre la lista si
             // riordina sotto il dito la riga di partenza cambia posto, e gli eventi
             // agganciati a lei arriverebbero a singhiozzo.
-            onPointerMove={(e) => dragMoveTo(e.clientY)}
-            onPointerUp={dragEnd}
+            onPointerMove={rowPointerMove}
             onPointerCancel={dragEnd}
           >
             {shownBench.map((p, i) => (
@@ -966,34 +1024,15 @@ export default function FormationPage() {
                 immutable={!!immutableReason(p.player_id)}
                 immutableReason={immutableReason(p.player_id)}
                 order={i + 1}
-                canUp={i > 0}
-                canDown={i < shownBench.length - 1}
-                onMoveUp={() => moveBench(p.player_id, -1)}
-                onMoveDown={() => moveBench(p.player_id, 1)}
                 rowRef={(el) => {
                   if (el) benchRowEls.current.set(p.player_id, el);
                   else benchRowEls.current.delete(p.player_id);
                 }}
-                dragHandle={{
+                drag={{
                   dragging: dragId === p.player_id,
                   disabled: !!immutableReason(p.player_id),
-                  reason: immutableReason(p.player_id),
-                  onPointerDown: (e) => {
-                    if (immutableReason(p.player_id)) {
-                      setRefused({
-                        player_id: p.player_id,
-                        reason: closed
-                          ? closedReason
-                          : 'Il suo posto in panchina è fissato: la sua partita è iniziata.',
-                      });
-                      return;
-                    }
-                    // La presa resta a questo elemento anche se il dito esce dai
-                    // suoi confini, che durante un trascinamento è la norma.
-                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                    setDragId(p.player_id);
-                    setDragPreview(benchIds);
-                  },
+                  onPointerDown: rowPointerDown(p.player_id),
+                  onPointerUp: rowPointerUp(p.player_id),
                 }}
               />
             ))}
@@ -1357,6 +1396,14 @@ function PitchIcon() {
   );
 }
 
+/** UNA RIGA DELLA ROSA. Sul telefono e' la panchina e basta (i titolari li mostra
+ *  il campo), quindi la riga porta solo quello che serve per decidere l'ORDINE:
+ *  numero, ruolo, nome, e se e' congelato. Media voto, partita e minuti stavano
+ *  qui e mandavano nove righe su quattordici a capo su tre righe: adesso sono a
+ *  un tocco di distanza, nella scheda, dove ci si va apposta.
+ *
+ *  Su desktop la riga resta com'era — c'e' spazio, e li' non c'e' nessuna scheda
+ *  a raccogliere quello che si toglie. */
 function RosterRow({
   p,
   isStarter,
@@ -1369,11 +1416,7 @@ function RosterRow({
   immutable,
   immutableReason,
   order,
-  canUp,
-  canDown,
-  onMoveUp,
-  onMoveDown,
-  dragHandle,
+  drag,
   rowRef,
 }: {
   p: TeamLineupPlayer;
@@ -1393,50 +1436,61 @@ function RosterRow({
   /** The refusal, shown after an attempt: the tooltip alone is invisible on touch. */
   note?: string | null;
   order?: number;
-  canUp?: boolean;
-  canDown?: boolean;
-  onMoveUp?: () => void;
-  onMoveDown?: () => void;
-  /** La presa per trascinare la riga. Assente = riga non trascinabile (un
-   *  titolare, o un panchinaro il cui posto è fissato). */
-  dragHandle?: {
+  /** La riga si trascina: tutta lei, dopo un quarto di secondo di dito fermo.
+   *  Assente = riga non trascinabile (un titolare). */
+  drag?: {
     onPointerDown: (e: React.PointerEvent) => void;
+    onPointerUp: (e: React.PointerEvent) => void;
     dragging: boolean;
     disabled: boolean;
-    reason?: string | null;
   };
   rowRef?: (el: HTMLElement | null) => void;
 }) {
   return (
     <div
       ref={rowRef}
+      onPointerDown={drag?.onPointerDown}
+      onPointerUp={drag?.onPointerUp}
+      role={drag ? 'button' : undefined}
+      tabIndex={drag ? 0 : undefined}
+      onKeyDown={
+        drag
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect();
+              }
+            }
+          : undefined
+      }
       className={clsx(
-        'flex items-center justify-between gap-2 py-2',
+        'flex min-h-[48px] items-center justify-between gap-2 py-2',
+        // Sempre, non solo mentre si trascina: la selezione parte al primo
+        // millisecondo di pressione, cioè molto prima che si sappia se è un
+        // trascinamento.
+        drag && 'select-none',
         selected && 'bg-surface-2',
         // La riga che sta sotto il dito: alzata dal foglio, così si vede che è in
         // mano e non semplicemente selezionata.
-        dragHandle?.dragging && 'rounded-lg bg-surface shadow-md ring-1 ring-line',
+        drag?.dragging && 'rounded-lg bg-surface shadow-md ring-1 ring-line',
+        // Deciso solo QUANDO la presa è partita: al `pointerdown` non si sa ancora
+        // se sarà un trascinamento o una scorsa, e toglierlo in anticipo
+        // bloccherebbe lo scorrimento della pagina su tutta la panchina.
+        drag?.dragging && 'touch-none select-none',
       )}
     >
-      {dragHandle ? (
-        <button
-          type="button"
-          aria-label={dragHandle.disabled ? 'Posto fissato' : 'Trascina per cambiare ordine'}
-          title={dragHandle.disabled ? dragHandle.reason ?? 'Posto fissato' : 'Trascina per cambiare ordine'}
-          disabled={dragHandle.disabled}
-          onPointerDown={dragHandle.onPointerDown}
-          // `touch-none`: senza, il dito che scende trascina la PAGINA e la riga
-          // resta ferma — il gesto viene mangiato dallo scroll prima di arrivare
-          // qui.
+      {drag ? (
+        <span
+          aria-hidden
           className={clsx(
-            'shrink-0 touch-none select-none px-1 text-base leading-none',
-            dragHandle.disabled ? 'cursor-not-allowed text-ink-faint' : 'cursor-grab text-ink-faint active:cursor-grabbing',
+            'shrink-0 select-none px-1 text-base leading-none',
+            drag.disabled ? 'text-ink-faint/40' : 'text-ink-faint',
           )}
         >
           ⠿
-        </button>
+        </span>
       ) : null}
-      <button onClick={onSelect} className="flex min-w-0 items-center gap-2 text-left">
+      <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
         {order != null ? (
           <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-ink-faint">{order}</span>
         ) : null}
@@ -1460,7 +1514,9 @@ function RosterRow({
               </span>
             ) : null}
           </span>
-          <span className="block text-[11px] text-ink-faint">
+          {/* SOLO SU DESKTOP: sul telefono questa riga mandava a capo nove righe su
+              quattordici, e le stesse tre cose sono nella scheda a un tocco. */}
+          <span className="hidden text-[11px] text-ink-faint lg:block">
             {typeof p.value === 'number' ? (
               <>
                 media voto <b className="text-ink-soft">{p.value.toFixed(2)}</b>
@@ -1476,43 +1532,22 @@ function RosterRow({
               scheda in fondo, dove si vedono senza scorrere. */}
           {selected ? <span className="hidden lg:block"><PlayerDetails p={p} /></span> : null}
         </span>
-      </button>
-      <div className="flex shrink-0 items-center gap-1">
-        {order != null ? (
-          <div className="flex flex-col overflow-hidden rounded border border-line text-ink-faint">
-            <button
-              onClick={onMoveUp}
-              disabled={!immutable && !canUp}
-              aria-disabled={immutable ? true : undefined}
-              className={`px-1.5 text-[9px] leading-tight disabled:opacity-30 ${
-                immutable ? 'cursor-not-allowed opacity-30' : 'hover:bg-surface-2'}`}
-              title={immutableReason ?? 'Alza priorità'}
-            >
-              ▲
-            </button>
-            <button
-              onClick={onMoveDown}
-              disabled={!immutable && !canDown}
-              aria-disabled={immutable ? true : undefined}
-              className={`px-1.5 text-[9px] leading-tight disabled:opacity-30 ${
-                immutable ? 'cursor-not-allowed opacity-30' : 'hover:bg-surface-2'}`}
-              title={immutableReason ?? 'Abbassa priorità'}
-            >
-              ▼
-            </button>
-          </div>
-        ) : null}
+      </div>
+      {/* Il segmentato resta su desktop, dove è l'unico comando della riga. Sul
+          telefono l'azione sta nella scheda, con l'icona della panchina e il
+          motivo scritto quando non si può. */}
+      <div className="hidden shrink-0 items-center gap-1 lg:flex">
         <div className="flex overflow-hidden rounded-lg border border-line text-[11px] font-semibold">
-          {/* Deliberately not `disabled`: a disabled button swallows the click AND
-              its own tooltip, so it would refuse without ever saying why. It looks
-              unavailable and, if pressed, explains itself on the row.
-              When the row is immutable BOTH sides go grey — the side he is on stays
-              filled, so you can still read where he is, but muted rather than black:
-              a live-looking switch you are not allowed to flip is worse than one
-              that says so before you touch it. */}
+          {/* Deliberatamente non `disabled`: un pulsante disabilitato mangia il
+              click E il proprio tooltip, quindi rifiuterebbe senza mai dire perché.
+              Sembra non disponibile e, se premuto, si spiega sulla riga.
+              E ognuno dei due fa la SUA direzione: premere «Titolare» su un
+              titolare non deve panchinarlo — era un segmentato in cui il lato già
+              acceso era l'azione distruttiva. */}
           <button
-            onClick={onToggle}
+            onClick={() => (isStarter ? undefined : onToggle())}
             title={immutableReason ?? blocked ?? undefined}
+            aria-pressed={isStarter}
             aria-disabled={immutable || blocked ? true : undefined}
             className={
               immutable
@@ -1529,8 +1564,9 @@ function RosterRow({
             Titolare
           </button>
           <button
-            onClick={onToggle}
+            onClick={() => (isStarter ? onToggle() : undefined)}
             title={immutableReason ?? undefined}
+            aria-pressed={!isStarter}
             aria-disabled={immutable ? true : undefined}
             className={
               immutable
@@ -1571,13 +1607,6 @@ function expectedPos(footprint: Record<string, number>): { col: number; row: num
   }
   return tot > 0 ? { col: scol / tot, row: srow / tot } : { col: 2, row: 1.5 };
 }
-
-const DOT_COLOR: Record<PlayerRole, string> = {
-  GK: 'bg-warn',
-  DEF: 'bg-blue-500',
-  MID: 'bg-good',
-  ATT: 'bg-orange-500',
-};
 
 // The XI placed on a pitch at each player's expected position. Defence on the
 // left, attack on the right; goalkeeper ringed in amber.
