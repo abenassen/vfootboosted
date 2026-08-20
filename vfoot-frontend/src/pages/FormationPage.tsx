@@ -618,6 +618,21 @@ export default function FormationPage() {
     setDragPreview(null);
   };
 
+  /** «Fai entrare per primo»: il gesto che copre il caso vero. L'ordine fine si
+   *  trascina, ma nove volte su dieci quello che si vuole è che UNO entri prima
+   *  degli altri, e per quello un tocco basta. Passa da `reorderBench`, quindi i
+   *  posti fissati restano fissati: chi ha la partita in corso non si sposta e
+   *  non viene scavalcato. */
+  const benchToTop = (id: number) => {
+    const why = immutableReason(id);
+    if (why) {
+      setRefused({ player_id: id, reason: closed ? closedReason : "Il suo posto in panchina è fissato: la sua partita è iniziata." });
+      return;
+    }
+    setRefused(null);
+    setBenchOrder((b) => reorderBench(pinFrozen(orderBench(ctx.roster, starterIds, b), frozenSlots), id, 0));
+  };
+
   const moveBench = (id: number, dir: -1 | 1) => {
     setBenchOrder((b) => {
       const i = b.indexOf(id);
@@ -710,6 +725,7 @@ export default function FormationPage() {
     .map((id) => byId.get(id))
     .filter((p): p is TeamLineupPlayer => !!p);
   const compName = ctx.competitions.find((c) => c.competition_id === competition)?.name;
+  const selectedPlayer = selected != null ? byId.get(selected) ?? null : null;
 
   return (
     <div className="space-y-4">
@@ -986,9 +1002,44 @@ export default function FormationPage() {
         style={{ height: 'calc(var(--vf-bar-block, 60px) + 4.5rem)' }}
       />
       <div
-        className="fixed inset-x-0 z-40 border-t border-line bg-surface/95 px-3 py-2 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur lg:hidden"
+        className="fixed inset-x-0 z-40 lg:hidden"
         style={{ bottom: 'calc(var(--vf-safe-bottom) + var(--vf-bar-block, 60px))' }}
       >
+        {/* LA SCHEDA STA NELLO STESSO BLOCCO FISSO DELLA BARRA, impilata sopra.
+         *
+         *  Non è un vezzo di struttura: se fossero due elementi fissi separati,
+         *  ognuno col suo `bottom` calcolato a mano, si sovrapporrebbero il giorno
+         *  in cui uno dei due cambia altezza — e la barra cambia altezza da sola,
+         *  ogni volta che ha un motivo di blocco da scrivere. Impilati, la somma
+         *  la fa il flusso e non c'è niente da tenere allineato.
+         *
+         *  Toccando un giocatore sul campo, prima, i dati si aprivano dentro la
+         *  riga della lista: a 390px erano 289 pixel sotto la piega. Si accendeva
+         *  il giallo sul campo e nient'altro, e il dato che avevi chiesto stava in
+         *  un punto dello schermo che non stavi guardando. */}
+        {selectedPlayer ? (
+          <PlayerSheet
+            p={selectedPlayer}
+            isStarter={starterIds.includes(selectedPlayer.player_id)}
+            benchOrder={
+              starterIds.includes(selectedPlayer.player_id)
+                ? null
+                : shownBench.findIndex((b) => b.player_id === selectedPlayer.player_id) + 1
+            }
+            locked={lockedIds.has(selectedPlayer.player_id)}
+            immutableReason={immutableReason(selectedPlayer.player_id)}
+            blocked={
+              starterIds.includes(selectedPlayer.player_id) ? null : blockReasonFor(selectedPlayer)
+            }
+            refusedNote={
+              refused?.player_id === selectedPlayer.player_id ? refused.reason : null
+            }
+            onToggle={() => toggleStarter(selectedPlayer.player_id)}
+            onTop={() => benchToTop(selectedPlayer.player_id)}
+            onClose={() => setSelected(null)}
+          />
+        ) : null}
+        <div className="border-t border-line bg-surface px-3 py-2 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline gap-1.5">
@@ -1015,8 +1066,172 @@ export default function FormationPage() {
             {saving ? 'Salvo…' : 'Salva'}
           </Button>
         </div>
+        </div>
       </div>
     </div>
+  );
+}
+
+/** LA SCHEDA DI UN GIOCATORE, aperta toccandolo — sul campo o in panchina.
+ *
+ *  Contiene le tre cose per cui lo si tocca (che partita gioca e quando, quanto
+ *  viene impiegato, quanto vale) e le due che si vogliono fare dopo averle lette
+ *  (mandarlo dall'altra parte, o farlo entrare per primo). Prima erano separate:
+ *  i dati in fondo alla pagina dentro la riga, le azioni in un segmentato largo
+ *  sessanta pixel accanto al nome.
+ *
+ *  Un rifiuto qui si LEGGE, e si legge prima: il pulsante che non si può premere
+ *  porta scritto sotto il motivo, invece di aspettare il tocco per dirlo. */
+function PlayerSheet({
+  p,
+  isStarter,
+  benchOrder,
+  locked,
+  immutableReason,
+  blocked,
+  refusedNote,
+  onToggle,
+  onTop,
+  onClose,
+}: {
+  p: TeamLineupPlayer;
+  isStarter: boolean;
+  /** Il suo numero in panchina, o null se è un titolare. */
+  benchOrder: number | null;
+  locked?: boolean;
+  immutableReason: string | null;
+  blocked: string | null;
+  refusedNote: string | null;
+  onToggle: () => void;
+  onTop: () => void;
+  onClose: () => void;
+}) {
+  const nm = p.next_match;
+  const why = immutableReason ?? blocked ?? refusedNote;
+  return (
+    <div className="border-t border-line bg-surface px-3 pb-3 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.10)]">
+      <div className="mx-auto max-w-3xl">
+        <div className="flex items-start gap-2">
+          <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[p.role]}`}>
+            {ROLE_LABEL[p.role]}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5">
+              <span className="truncate text-sm font-bold">{p.name}</span>
+              {benchOrder ? (
+                <span className="shrink-0 text-[11px] tabular-nums text-ink-faint">
+                  {benchOrder}° in panchina
+                </span>
+              ) : null}
+              {locked ? (
+                <span className="shrink-0 rounded bg-surface-2 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-ink-soft">
+                  {frozenLabel(nm)}
+                </span>
+              ) : null}
+            </div>
+            {nm ? (
+              <div className="text-[11px] text-ink-soft">
+                {fixtureLabel(nm)} <span className="text-ink-faint">· {fmtKickoff(nm)}</span>
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Chiudi"
+            className="-mr-1 -mt-1 shrink-0 rounded-lg px-2.5 py-1.5 text-lg leading-none text-ink-faint hover:bg-surface-2"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-soft">
+          {typeof p.value === 'number' ? (
+            <span>
+              media voto <b className="text-ink">{p.value.toFixed(2)}</b>
+              {p.value_basis === 'stimato' ? <span className="text-ink-faint"> (stimata)</span> : null}
+            </span>
+          ) : (
+            <span className="text-ink-faint">nessuno storico</span>
+          )}
+          {p.minutes_label === 'unknown' ? (
+            <span className="text-ink-faint">impiego sconosciuto</span>
+          ) : (
+            <span>
+              {p.appearances} pres · {p.avg_minutes}′ medi
+              {p.minutes_label === 'low' ? <Badge tone="amber"> poco impiegato</Badge> : null}
+              {p.minutes_label === 'high' ? <Badge tone="green"> titolare abituale</Badge> : null}
+            </span>
+          )}
+        </div>
+
+        {why ? <div className="mt-2 text-[11px] font-semibold text-bad">{why}</div> : null}
+
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-disabled={immutableReason || blocked ? true : undefined}
+            className={clsx(
+              'flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold',
+              immutableReason || blocked
+                ? 'cursor-not-allowed bg-surface-2 text-ink-faint'
+                : isStarter
+                  ? 'bg-ink text-paper'
+                  : 'bg-good text-white',
+            )}
+          >
+            {isStarter ? (
+              <>
+                <BenchIcon /> In panchina
+              </>
+            ) : (
+              <>
+                <PitchIcon /> In campo
+              </>
+            )}
+          </button>
+          {!isStarter ? (
+            <button
+              type="button"
+              onClick={onTop}
+              aria-disabled={immutableReason ? true : undefined}
+              className={clsx(
+                'min-h-[44px] shrink-0 rounded-xl border border-line px-3 text-sm font-semibold',
+                immutableReason ? 'cursor-not-allowed text-ink-faint' : 'text-ink-soft hover:bg-surface-2',
+              )}
+            >
+              Entra per primo
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** La panchina, disegnata: è l'icona che l'utente si aspetta di trovare addosso
+ *  al giocatore selezionato per spedircelo. */
+function BenchIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M2 8h16" />
+      <path d="M2 11.5h16" />
+      <path d="M4 11.5v5" />
+      <path d="M16 11.5v5" />
+      <path d="M4 8V5" />
+      <path d="M16 8V5" />
+    </svg>
+  );
+}
+
+function PitchIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="2" y="4" width="16" height="12" rx="1.5" />
+      <path d="M10 4v12" />
+      <circle cx="10" cy="10" r="2.2" />
+    </svg>
   );
 }
 
@@ -1135,7 +1350,9 @@ function RosterRow({
             {p.next_match ? <span className="text-ink-faint"> · {fixtureLabel(p.next_match)}</span> : null}
           </span>
           {note ? <span className="mt-1 block text-[11px] font-semibold text-bad">{note}</span> : null}
-          {selected ? <PlayerDetails p={p} /> : null}
+          {/* In linea SOLO su desktop: sul telefono gli stessi dati stanno nella
+              scheda in fondo, dove si vedono senza scorrere. */}
+          {selected ? <span className="hidden lg:block"><PlayerDetails p={p} /></span> : null}
         </span>
       </button>
       <div className="flex shrink-0 items-center gap-1">
