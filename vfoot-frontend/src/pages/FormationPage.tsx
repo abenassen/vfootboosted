@@ -836,7 +836,41 @@ export default function FormationPage() {
    *  Tutto o niente: se i congelati di un reparto sono più di quanti il modulo ne
    *  preveda, il cambio non si fa a metà, si rifiuta e dice perché. Restare fra
    *  due moduli sarebbe peggio di non essersi mossi. */
+  /** PERCHÉ QUESTO MODULO NON SI PUÒ — null se si può.
+   *
+   *  Una funzione sola, chiamata da DUE posti: da chi disegna la pastiglia, per
+   *  spegnerla, e da chi la applica, per rifiutare. Erano due regole diverse, ed è
+   *  il modo in cui una pastiglia poteva essere accesa e poi rifiutata al tocco:
+   *  quella che spegneva guardava solo il numero di difensori, quella che
+   *  applicava guardava anche i congelati di ogni reparto. Con due attaccanti che
+   *  avevano già giocato, il 4-5-1 sembrava disponibile e non lo era. */
+  const moduleBlock = (m: [number, number, number]): string | null => {
+    if (closed) return 'La giornata è chiusa.';
+    if (defenceLocked && m[0] !== lock!.defence_count) {
+      return `La giornata è cominciata: i difensori restano ${lock!.defence_count}. `
+        + 'Puoi ancora cambiare centrocampo e attacco.';
+    }
+    const target: Record<PlayerRole, number> = { GK: 1, DEF: m[0], MID: m[1], ATT: m[2] };
+    for (const role of ROLES) {
+      // Un reparto non si può stringere sotto il numero dei suoi congelati: quelli
+      // restano dove sono, e il modulo li vorrebbe fuori.
+      const frozen = starterIds.filter(
+        (id) => lockedIds.has(id) && byId.get(id)?.role === role,
+      ).length;
+      if (frozen > target[role]) {
+        return `Non puoi passare a ${moduleName(m)}: hai ${frozen} ${ROLE_WORD_PLURAL[role]} `
+          + 'con la partita già iniziata, e restano dove sono.';
+      }
+    }
+    return null;
+  };
+
   const applyModule = (m: [number, number, number]) => {
+    const why = moduleBlock(m);
+    if (why) {
+      setModuleNote(why);
+      return;
+    }
     const target: Record<PlayerRole, number> = { GK: 1, DEF: m[0], MID: m[1], ATT: m[2] };
     const keep: number[] = [];
     const dropped: number[] = [];
@@ -849,13 +883,6 @@ export default function FormationPage() {
       const frozen = line.filter((p) => lockedIds.has(p.player_id));
       const free = line.filter((p) => !lockedIds.has(p.player_id));
       const want = target[role];
-      if (frozen.length > want) {
-        setModuleNote(
-          `Non puoi passare a ${moduleName(m)}: hai ${frozen.length} ${ROLE_WORD_PLURAL[role]} `
-          + 'con la partita già iniziata, e restano dove sono.',
-        );
-        return;
-      }
       const room = Math.max(0, want - frozen.length);
       keep.push(...frozen.map((p) => p.player_id), ...free.slice(0, room).map((p) => p.player_id));
       dropped.push(...free.slice(room).map((p) => p.player_id));
@@ -1084,19 +1111,14 @@ export default function FormationPage() {
             <div className="-mx-1 mt-1 flex gap-1.5 overflow-x-auto px-1 pb-1" style={{ scrollbarWidth: 'none' }}>
               {MODULES.map((m) => {
                 const active = moduleName(m) === moduleName(currentModule);
+                const why = moduleBlock(m);
                 return (
                   <button
                     key={moduleName(m)}
                     type="button"
-                    onClick={() =>
-                      defenceLocked && m[0] !== lock!.defence_count
-                        ? setModuleNote(
-                            `La giornata è cominciata: i difensori restano ${lock!.defence_count}. `
-                            + 'Puoi ancora cambiare centrocampo e attacco.',
-                          )
-                        : applyModule(m)}
+                    onClick={() => (why ? setModuleNote(why) : applyModule(m))}
                     aria-pressed={active}
-                    aria-disabled={defenceLocked && m[0] !== lock!.defence_count ? true : undefined}
+                    aria-disabled={why ? true : undefined}
                     disabled={closed}
                     className={clsx(
                       'shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold tabular-nums transition',
@@ -1105,7 +1127,7 @@ export default function FormationPage() {
                         : 'border-line bg-surface text-ink-soft hover:bg-surface-2',
                       // Spento, non nascosto: sparire non spiega niente, e il tocco
                       // sul bottone spento porta il motivo qui sotto.
-                      !active && defenceLocked && m[0] !== lock!.defence_count && 'opacity-40',
+                      !active && why && 'opacity-40',
                       closed && 'cursor-not-allowed opacity-50',
                     )}
                   >
@@ -1158,7 +1180,8 @@ export default function FormationPage() {
             Tocca un giocatore per i suoi dati, un posto vuoto per riempirlo.
             <span className="hidden lg:inline">
               {' '}{isClassic ? 'Schieramento per ruolo.' : 'Posizione attesa di ogni titolare (dai dati storici).'}
-              {' '}Il portiere veste la muta invertita, e le zone d'influenza si accendono sul campo.
+              {' '}Il portiere veste la muta invertita.
+              {isClassic ? null : " Toccando un giocatore si accendono le sue zone d'influenza."}
             </span>
           </div>
           <PitchLineup
@@ -1192,7 +1215,9 @@ export default function FormationPage() {
            *  Qui sotto resta la panchina, che invece il campo non mostra. */}
           <div className="hidden lg:block">
             <SectionTitle>Rosa · titolari e panchina (un solo portiere fra i titolari)</SectionTitle>
-            <div className="mt-1 text-[11px] text-ink-faint">Clicca il nome per vederne le zone sulla mappa.</div>
+            {isClassic ? null : (
+              <div className="mt-1 text-[11px] text-ink-faint">Clicca il nome per vederne le zone sulla mappa.</div>
+            )}
 
             <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
               Titolari {starterIds.length}/{XI}
@@ -1947,7 +1972,13 @@ function PitchLineup({
         kits={kits}
         lockedIds={lockedIds}
         showRole={false}
-        footprint={selRegular?.footprint ?? null}
+        /* NIENTE ZONE IN CLASSIC. In questa modalità il punteggio non guarda dove
+           un giocatore si muove: guarda il suo voto e il suo ruolo. Le zone gialle
+           erano quindi un'informazione vera ma senza conseguenze — bella da
+           vedere, e proprio per questo fuorviante: chi la vede accendersi mentre
+           schiera pensa che stia decidendo qualcosa. L'idea di aura, se va
+           introdotta, va introdotta dove conta, non come decorazione altrove. */
+        footprint={null}
       />
     );
   }
