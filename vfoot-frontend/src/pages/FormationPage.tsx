@@ -309,6 +309,10 @@ export default function FormationPage() {
   // Perché un cambio di modulo è stato rifiutato. Non passa da `refused`, che è
   // ancorato a una riga: questo riguarda la squadra intera.
   const [moduleNote, setModuleNote] = useState<string | null>(null);
+  /** Un avviso momentaneo nella barra: il perché di un comando che non si può
+   *  premere. Un pulsante `disabled` non ha modo di dirlo — mangia il tocco e il
+   *  proprio tooltip — quindi qui si preme, non succede, e si legge perché. */
+  const [notice, setNotice] = useState<string | null>(null);
   // Why the last attempted promotion was refused, pinned to the row that was
   // clicked — the explanation belongs where the finger is, not in the header.
   const [refused, setRefused] = useState<{ player_id: number; reason: string } | null>(null);
@@ -866,9 +870,34 @@ export default function FormationPage() {
     setVacancies(holes);
   };
 
+  /** SUGGERISCI SI SPEGNE QUANDO LA GIORNATA È COMINCIATA.
+   *
+   *  Rifà l'undici da capo per forma, e a giornata cominciata è la cosa più
+   *  sbagliata che possa fare: butta via scelte deliberate su giocatori che non
+   *  si possono più rimettere a posto, e può cambiare il numero di difensori —
+   *  che dal primo calcio d'inizio è fissato. Sarebbe un pulsante offerto
+   *  dall'app che produce uno stato che l'app stessa rifiuta di salvare.
+   *
+   *  Provato: nello scenario di prova proponeva un portiere diverso da quello
+   *  schierato, a otto titolari su undici ormai immobili. */
+  const suggestBlock = closed
+    ? 'La giornata è chiusa.'
+    : defenceLocked || lockedIds.size > 0
+      ? 'La giornata è cominciata: rifare la formazione da capo sposterebbe giocatori che non puoi più muovere.'
+      : null;
+
+  const noticeLater = (msg: string) => {
+    setNotice(msg);
+    setTimeout(() => setNotice(null), 4200);
+  };
+
   // Estratto perché lo chiamano due bottoni: quello in cima su desktop e quello
   // nella barra in fondo sul telefono.
   const onSuggest = () => {
+    if (suggestBlock) {
+      noticeLater(suggestBlock);
+      return;
+    }
     setStarterIds(
       suggest(ctx.roster, isClassic ? constraints : null, {
         pinned: starterIds.filter((id) => lockedIds.has(id)),
@@ -1019,6 +1048,7 @@ export default function FormationPage() {
               <Button
                 variant="secondary"
                 onClick={onSuggest}
+                title={suggestBlock ?? undefined}
               >
                 Suggerisci XI
               </Button>
@@ -1349,6 +1379,8 @@ export default function FormationPage() {
             </div>
             {toast ? (
               <div className="mt-0.5 text-[11px] font-semibold leading-snug text-good">{toast}</div>
+            ) : notice ? (
+              <div className="mt-0.5 text-[11px] font-semibold leading-snug text-ink-soft">{notice}</div>
             ) : saveBlock ? (
               <div className="mt-0.5 text-[11px] font-semibold leading-snug text-bad">{saveBlock}</div>
             ) : upToDate ? (
@@ -1364,7 +1396,12 @@ export default function FormationPage() {
               </div>
             ) : null}
           </div>
-          <Button variant="secondary" size="sm" onClick={onSuggest} className="shrink-0">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onSuggest}
+            className={clsx('shrink-0', suggestBlock && 'opacity-45')}
+          >
             Suggerisci
           </Button>
           <Button onClick={onSave} disabled={!canSave || saving} className="shrink-0">
