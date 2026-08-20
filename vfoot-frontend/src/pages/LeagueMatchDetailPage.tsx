@@ -4,6 +4,7 @@ import { getFixtureDetail } from '../api';
 import { Card } from '../components/ui';
 import { MatchDetail } from '../components/match/MatchDetail';
 import { ClassicMatchDetail } from '../components/match/ClassicMatchDetail';
+import { useAuth } from '../auth/AuthContext';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import { useLiveSocket } from '../hooks/useNudgeSocket';
@@ -14,6 +15,7 @@ import type { SimFixtureDetail } from '../types/simulation';
 export default function LeagueMatchDetailPage() {
   const { matchId } = useParams();
   const { selectedLeagueId } = useLeagueContext();
+  const { user } = useAuth();
   // Bumped by the socket; the only reason this page ever re-fetches on its own.
   const [tick, setTick] = useState(0);
   const { data, loading, error } = useAsync(
@@ -72,7 +74,13 @@ export default function LeagueMatchDetailPage() {
   // Classic leagues carry mode:'classic' in the payload -> fantavoto detail (no zone
   // duel). Aura leagues fall through to the zone-duel MatchDetail.
   if ('mode' in data && data.mode === 'classic') {
-    return <ClassicMatchDetail fixture={data as ClassicFixtureDetail} backTo="/matches" />;
+    return (
+      <ClassicMatchDetail
+        fixture={data as ClassicFixtureDetail}
+        backTo="/matches"
+        myUserId={user?.id ?? null}
+      />
+    );
   }
   return <MatchDetail fixture={data as SimFixtureDetail} backTo="/matches" />;
 }

@@ -174,10 +174,17 @@ export function ClassicMatchDetail({
   backTo,
   backLabel = '← Partite',
   variant = 'fantasy',
+  myUserId = null,
 }: {
   fixture: ClassicFixtureDetail;
   backTo: string;
   backLabel?: string;
+  /** Chi sta guardando, se è uno dei due fantallenatori.
+   *
+   *  Serve a una cosa sola, e prima del blocco: mettere sulla PROPRIA colonna il
+   *  collegamento alla pagina Formazione. Arrivando dalla home la sfida si apre e
+   *  basta — nessuno dice che quello che manca lo devi fare tu, e dove. */
+  myUserId?: number | null;
   // 'real' renders the pagelle of an actual Serie A match: the per-player voto puro
   // + bonus/malus is meaningful, but fantasy-scoring constructs (team fantavoto
   // total, defence modifier, bench priority / s.v. replacement) are not — they
@@ -195,6 +202,20 @@ export function ClassicMatchDetail({
   // `?? true` non è prudenza: i referti congelati nascono alla conclusione della
   // giornata e la chiave non ce l'hanno, quindi la loro assenza vale «bloccato».
   const preview = !realMatch && (d.lineups_locked ?? true) === false;
+  const mineSide =
+    myUserId == null
+      ? null
+      : d.home_manager?.user_id === myUserId
+        ? 'home'
+        : d.away_manager?.user_id === myUserId
+          ? 'away'
+          : null;
+  // Solo prima del blocco: dopo, quella pagina non accetta più niente e il
+  // collegamento sarebbe un invito a sbattere contro un 409.
+  const lineupHref =
+    preview && d.competition_id
+      ? `/squad/formation?competition=${d.competition_id}&matchday=${d.real_matchday}`
+      : null;
   const header: MatchHeaderVM = {
     homeName: d.home_team,
     awayName: d.away_team,
@@ -288,6 +309,7 @@ export function ClassicMatchDetail({
           realMatch={realMatch}
           preview={preview}
           submitted={d.lineup_source?.home === 'lineup'}
+          lineupHref={mineSide === 'home' ? lineupHref : null}
         />
         <TeamColumn
           name={d.away_team}
@@ -295,6 +317,7 @@ export function ClassicMatchDetail({
           realMatch={realMatch}
           preview={preview}
           submitted={d.lineup_source?.away === 'lineup'}
+          lineupHref={mineSide === 'away' ? lineupHref : null}
         />
       </div>
 
@@ -320,10 +343,13 @@ function TeamColumn({
   realMatch,
   preview = false,
   submitted = false,
+  lineupHref = null,
 }: {
   name: string;
   team: ClassicTeamDetail;
   realMatch: boolean;
+  /** Dove si va a schierare, e solo sulla colonna di chi sta guardando. */
+  lineupHref?: string | null;
   /** La giornata non è cominciata: niente punteggi, sono zeri per costruzione. */
   preview?: boolean;
   /** Questa formazione è stata inviata PER QUESTA giornata.
@@ -395,9 +421,20 @@ function TeamColumn({
         </div>
       ) : null}
 
+      {preview && lineupHref ? (
+        <Link
+          to={lineupHref}
+          className="mt-2 inline-flex rounded-lg bg-ink px-2.5 py-1 text-[11px] font-semibold text-paper hover:opacity-90"
+        >
+          {submitted ? 'Cambia la formazione' : 'Imposta la formazione'}
+        </Link>
+      ) : null}
+
       {preview && !submitted ? (
         <div className="mt-3 rounded-xl border border-dashed border-line px-3 py-8 text-center text-sm text-ink-faint">
-          Non ha ancora inviato la formazione per questa giornata.
+          {lineupHref
+            ? 'Non hai ancora inviato la formazione per questa giornata.'
+            : 'Non ha ancora inviato la formazione per questa giornata.'}
         </div>
       ) : (
         <>

@@ -179,7 +179,10 @@ class LiveDetailTests(TestCase):
         row = next(r for r in res.data if r["fixture_id"] == self.fixture.id)
         self.assertIsNone(row["score"])
         self.assertFalse(row["score_provisional"])
-        self.assertFalse(row["has_detail"])
+        # Aprirla si', pero': in classic le formazioni sono pubbliche anche prima
+        # del via. Non c'e' un punteggio da mostrare, ci sono le formazioni — sono
+        # due cose diverse e solo una delle due manca.
+        self.assertTrue(row["has_detail"])
 
     def test_the_frozen_payload_wins_when_there_is_one(self):
         FantasyFixtureDetail.objects.create(
@@ -214,8 +217,8 @@ class LiveDetailTests(TestCase):
         res = self.client.get(f"/api/v1/leagues/{self.league.id}/fixtures")
         return next(r for r in res.data if r["fixture_id"] == self.fixture.id)
 
-    def test_in_classic_the_tabellino_opens_as_soon_as_somebody_has_fielded(self):
-        """E la formazione che si vede e' quella DELL'ALTRO: e' tutto il punto."""
+    def test_in_classic_the_other_managers_lineup_is_visible_before_kickoff(self):
+        """E' tutto il punto: la formazione che si vede e' quella DELL'ALTRO."""
         self._kickoffs_in_three_days()
         self._field(self.theirs)
         self.assertTrue(self._calendar_row()["has_detail"])
@@ -229,12 +232,23 @@ class LiveDetailTests(TestCase):
         self.assertEqual(res.data["lineup_source"]["away"], "lineup")
         self.assertTrue(res.data["away"]["starters"])
 
-    def test_before_the_deadline_with_nobody_fielded_there_is_nothing_to_open(self):
-        """Un collegamento a un tabellino vuoto e' peggio di nessun collegamento."""
+    def test_and_it_opens_even_with_nobody_fielded_yet(self):
+        """Perche' la regola e' della LEGA, non della singola partita.
+
+        Aprire solo dove qualcuno avesse gia' schierato sembrava un riguardo — un
+        collegamento a un tabellino vuoto non serve a nessuno — ed e' finito col
+        rendere cliccabili certe righe si' e certe no senza niente che lo
+        spiegasse. Per giunta la riga morta era spesso proprio la propria, cioe'
+        l'unica in cui non aver ancora schierato e' una cosa su cui si puo' agire.
+        """
         self._kickoffs_in_three_days()
-        self.assertFalse(self._calendar_row()["has_detail"])
-        self.assertEqual(
-            self.client.get(f"/api/v1/fixtures/{self.fixture.id}").status_code, 404)
+        self.assertTrue(self._calendar_row()["has_detail"])
+        res = self.client.get(f"/api/v1/fixtures/{self.fixture.id}")
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.data["lineups_locked"])
+        # E la pagina lo dice, invece di far finta che una formazione ci sia.
+        self.assertEqual(res.data["lineup_source"]["home"], "forfait")
+        self.assertEqual(res.data["home"]["starters"], [])
 
     def test_an_aura_league_keeps_the_lineups_covered_until_the_deadline(self):
         """E non basta che il calendario non ci porti: l'indirizzo si digita.
