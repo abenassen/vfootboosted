@@ -15,6 +15,21 @@ import type {
 
 const XI = 11; // starters incl. exactly one goalkeeper
 
+/** Cosa rende una formazione DIVERSA da un'altra, ai fini del salvataggio.
+ *
+ *  Gli undici come insieme e non in ordine: quello lo deriva il server (P-D-C-A),
+ *  quindi non è una scelta di nessuno e non è una modifica. La panchina invece in
+ *  ordine, perché lì l'ordine È la scelta — è la priorità delle sostituzioni.
+ *  E la casella «manda a tutte le competizioni», che cambia dove va a finire. */
+function lineupPrint(
+  gk: number | null,
+  starters: number[],
+  bench: number[],
+  sendAll: boolean,
+): string {
+  return JSON.stringify([gk, [...starters].sort((a, b) => a - b), bench, sendAll]);
+}
+
 const ROLE_LABEL: Record<PlayerRole, string> = { GK: 'POR', DEF: 'DIF', MID: 'CEN', ATT: 'ATT' };
 // Spelled out for the empty places: "Manca un DIF" reads like a code, "manca un
 // difensore" reads like a sentence.
@@ -343,6 +358,11 @@ export default function FormationPage() {
   }, [selectedLeagueId]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  /** L'impronta della formazione COM'E' SUL SERVER per questa giornata, o null se
+   *  il server non ne ha nessuna. Serve a sapere se c'è ancora qualcosa da
+   *  salvare: un pulsante che dopo il salvataggio torna verde e pronto invita a
+   *  premerlo di nuovo, e chi lo fa non sa se la prima volta sia andata. */
+  const [savedPrint, setSavedPrint] = useState<string | null>(null);
 
   const setParams = (next: { competition?: number; matchday?: number }) => {
     const p = new URLSearchParams(searchParams);
@@ -471,6 +491,15 @@ export default function FormationPage() {
         // ruolo va mostrato: e' l'unica cosa che dice all'allenatore che c'e'
         // qualcosa da sistemare, e dove.
         setVacancies(d.lineup_source?.vacant_roles ?? []);
+        // Pulita SOLO se questa formazione è davvero quella salvata per questa
+        // giornata. Una ereditata dalla giornata prima, o proposta dal
+        // suggeritore, il server non ce l'ha: c'è ancora qualcosa da mandare.
+        const bench0 = pinFrozen(orderBench(d.roster, starters, saved?.bench_player_ids ?? []), slots);
+        setSavedPrint(
+          d.lineup_source?.kind === 'saved'
+            ? lineupPrint(saved?.gk_player_id ?? null, starters, bench0, false)
+            : null,
+        );
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -749,12 +778,29 @@ export default function FormationPage() {
         + 'Puoi ancora cambiare un difensore con un altro difensore.'
       : null;
 
+  const byRole = (a: TeamLineupPlayer, b: TeamLineupPlayer) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form;
+  const starters = ctx.roster.filter((p) => starterIds.includes(p.player_id)).sort(byRole);
+  const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
+  const bench = benchIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
+  // Mentre il dito è giù si mostra l'anteprima, non l'ordine salvato: è il senso
+  // stesso del trascinare, vedere dove sta andando prima di lasciare.
+  const shownBench = (dragPreview ?? benchIds)
+    .map((id) => byId.get(id))
+    .filter((p): p is TeamLineupPlayer => !!p);
   const starterRoles = starterIds.map((id) => byId.get(id)?.role).filter((r): r is PlayerRole => !!r);
   const classicErrors = isClassic && constraints ? validateClassic(starterRoles, constraints) : [];
   const gkOk = gkStarters.length === 1;
-  const canSave =
+  const valid =
     starterIds.length === XI && gkOk && classicErrors.length === 0 && !closed && !defenceBlock;
-  const saveBlock = canSave
+  /** C'è qualcosa da mandare? Dopo un salvataggio riuscito no, finché non si
+   *  tocca di nuovo qualcosa — e «qualcosa» comprende l'ordine della panchina,
+   *  che è una scelta come le altre. */
+  const dirty = savedPrint !== lineupPrint(gkId, starterIds, benchIds, sendAll);
+  const canSave = valid && dirty;
+  /** Salvata e senza niente da fare: NON è un errore, ed è il motivo per cui non
+   *  passa da `saveBlock` — che è rosso, e il rosso qui direbbe una bugia. */
+  const upToDate = valid && !dirty;
+  const saveBlock = valid
     ? null
     : closed
       ? 'La giornata è chiusa: la formazione non è più modificabile.'
@@ -852,6 +898,10 @@ export default function FormationPage() {
         bench_player_ids: benchIds,
       });
       setToast(sendAll ? `Formazione salvata su ${res.saved_competitions} competizioni ✓` : 'Formazione salvata ✓');
+      // Da qui in poi non c'è più niente da mandare, finché non si tocca qualcosa.
+      // Solo dopo l'`await`, e solo se non ha sollevato: segnare «salvata» una
+      // formazione che il server ha rifiutato sarebbe la bugia peggiore di tutte.
+      setSavedPrint(lineupPrint(gkId, starterIds, benchIds, sendAll));
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Errore nel salvataggio');
     } finally {
@@ -860,15 +910,6 @@ export default function FormationPage() {
     }
   };
 
-  const byRole = (a: TeamLineupPlayer, b: TeamLineupPlayer) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form;
-  const starters = ctx.roster.filter((p) => starterIds.includes(p.player_id)).sort(byRole);
-  const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
-  const bench = benchIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
-  // Mentre il dito è giù si mostra l'anteprima, non l'ordine salvato: è il senso
-  // stesso del trascinare, vedere dove sta andando prima di lasciare.
-  const shownBench = (dragPreview ?? benchIds)
-    .map((id) => byId.get(id))
-    .filter((p): p is TeamLineupPlayer => !!p);
   const compName = ctx.competitions.find((c) => c.competition_id === competition)?.name;
   const selectedPlayer = selected != null ? byId.get(selected) ?? null : null;
   const kits = kitFromCrest(ctx.team.crest, ctx.team.name);
@@ -983,8 +1024,12 @@ export default function FormationPage() {
               </Button>
               {/* A grey Salva that does not say why is a dead end: the tooltip carries
                   the first thing standing in the way. */}
-              <Button onClick={onSave} disabled={!canSave || saving} title={canSave ? undefined : saveBlock ?? undefined}>
-                {saving ? 'Salvataggio…' : 'Salva'}
+              <Button
+                onClick={onSave}
+                disabled={!canSave || saving}
+                title={saveBlock ?? (upToDate ? 'Già salvata: non c\'è niente di nuovo da mandare.' : undefined)}
+              >
+                {saving ? 'Salvataggio…' : upToDate ? 'Salvata ✓' : 'Salva'}
               </Button>
             </div>
           </div>
@@ -1291,7 +1336,11 @@ export default function FormationPage() {
               <span
                 className={clsx(
                   'text-base font-bold tabular-nums',
-                  canSave ? 'text-good' : 'text-bad',
+                  // `valid` e non `canSave`: da quando il pulsante si spegne a
+                  // formazione salvata, `canSave` è falso anche quando va tutto
+                  // bene — e il contatore diventava rosso su un undici perfetto.
+                  // Il colore qui parla della FORMAZIONE, non del pulsante.
+                  valid ? 'text-good' : 'text-bad',
                 )}
               >
                 {starterIds.length}/{XI}
@@ -1302,6 +1351,10 @@ export default function FormationPage() {
               <div className="mt-0.5 text-[11px] font-semibold leading-snug text-good">{toast}</div>
             ) : saveBlock ? (
               <div className="mt-0.5 text-[11px] font-semibold leading-snug text-bad">{saveBlock}</div>
+            ) : upToDate ? (
+              <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">
+                Salvata. Niente di nuovo da mandare.
+              </div>
             ) : defenceLocked ? (
               /* Il prezzo della modifica, detto QUANDO si modifica e non a
                  punteggi fatti: un difensore senza voto che nessun difensore in
@@ -1315,7 +1368,7 @@ export default function FormationPage() {
             Suggerisci
           </Button>
           <Button onClick={onSave} disabled={!canSave || saving} className="shrink-0">
-            {saving ? 'Salvo…' : 'Salva'}
+            {saving ? 'Salvo…' : upToDate ? 'Salvata ✓' : 'Salva'}
           </Button>
         </div>
         </div>
@@ -1986,6 +2039,40 @@ function PitchCanvas({
   const place = (left: number, top: number) =>
     vertical ? { left: `${top}%`, top: `${100 - left}%` } : { left: `${left}%`, top: `${top}%` };
 
+  /** QUANTO PUÒ ESSERE LARGA L'ETICHETTA COL NOME, senza poter toccare quella del
+   *  vicino.
+   *
+   *  Non un numero fisso: era `max-w-[70px]`, e settanta pixel su una linea da
+   *  cinque — dove fra un compagno e l'altro ce ne sono cinquantatré — è già una
+   *  sovrapposizione, solo che con caratteri da otto pixel non la si vedeva.
+   *  Ingrandire il testo l'avrebbe resa visibile.
+   *
+   *  Qui la larghezza È la distanza dal vicino più vicino, misurata sull'asse
+   *  orizzontale COME SI VEDE (che gira col campo), meno un filo. Così due
+   *  etichette non possono toccarsi qualunque cosa succeda sopra: linee da tre o
+   *  da cinque, disposizione a reparti o sparsa per heatmap, campo in piedi o
+   *  coricato. Chi è solo sulla sua riga si prende il tetto e non di più: un nome
+   *  lungo come mezzo campo sarebbe brutto quanto una sovrapposizione.
+   *
+   *  Il vicino conta solo se è ANCHE vicino in verticale: due giocatori su linee
+   *  diverse hanno le etichette a settanta pixel di distanza fra loro e non si
+   *  incontrano mai, per quanto lunghi siano i nomi. */
+  const seenX = (d: { left: number; top: number }) => (vertical ? d.top : d.left);
+  const seenY = (d: { left: number; top: number }) => (vertical ? 100 - d.left : d.top);
+  const labelRoom = (d: { left: number; top: number }, selfId: number) => {
+    let nearest = Infinity;
+    for (const o of dots) {
+      // Per IDENTITÀ e non per riferimento: chi chiama passa le coordinate, non
+      // l'oggetto, quindi un confronto `===` non riconoscerebbe mai il pallino
+      // stesso — che dista zero da sé, e azzererebbe la larghezza di ogni
+      // etichetta.
+      if ('p' in o && o.p.player_id === selfId) continue;
+      if (Math.abs(seenY(o) - seenY(d)) > 12) continue;
+      nearest = Math.min(nearest, Math.abs(seenX(o) - seenX(d)));
+    }
+    return Math.min(32, nearest);
+  };
+
   return (
     <div
       className={clsx(
@@ -2096,7 +2183,7 @@ function PitchCanvas({
             style={place(d.left, d.top)}
           >
             <Jersey dashed size={30} />
-            <span className="mt-0.5 rounded bg-black/45 px-1 text-[8px] font-semibold leading-tight text-white/90">
+            <span className="mt-0.5 rounded bg-black/45 px-1 text-[10px] font-bold leading-tight text-white/90">
               {ROLE_LABEL_SHORT[d.role]}
             </span>
           </button>
@@ -2118,7 +2205,12 @@ function PitchCanvas({
           key={p.player_id}
           onClick={() => onSelect(p.player_id)}
           className="absolute flex min-h-[44px] min-w-[44px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center"
-          style={place(left, top)}
+          /* Il tetto sta QUI e non sull'etichetta: una percentuale si risolve
+             sull'elemento che contiene, e l'etichetta è contenuta dal bottone —
+             largo quanto il suo contenuto, cioè una quarantina di pixel. Il
+             bottone invece è posizionato dentro il campo, quindi la sua
+             percentuale è una percentuale DI CAMPO, che è la misura giusta. */
+          style={{ ...place(left, top), maxWidth: `${labelRoom({ left, top }, p.player_id)}%` }}
           title={p.name}
           aria-pressed={sel}
         >
@@ -2147,8 +2239,8 @@ function PitchCanvas({
               </span>
             ) : null}
           </span>
-          <span className="mt-0.5 flex max-w-[70px] items-center gap-0.5 rounded bg-black/45 px-1 text-[8px] font-semibold leading-tight text-white">
-            {showRole ? <span className="opacity-80">{ROLE_LABEL_SHORT[p.role]}</span> : null}
+          <span className="mt-0.5 flex max-w-full items-center gap-0.5 rounded bg-black/55 px-1 text-[10px] font-bold leading-tight text-white">
+            {showRole ? <span className="shrink-0 opacity-80">{ROLE_LABEL_SHORT[p.role]}</span> : null}
             <span className="truncate">{p.name.split(/\s+/).pop()}</span>
           </span>
         </button>
