@@ -402,7 +402,9 @@ function FixtureRow({ f, myTeam }: { f: LeagueFixtureItem; myTeam: string | null
   const homeWin = !!finished && hs > as;
   const awayWin = !!finished && as > hs;
   // Both decided by the server: opening a fixture with no detail lands on a 404,
-  // and a lineup needs a roster the calendar never loads.
+  // and a lineup needs a roster the calendar never loads. In classic `has_detail`
+  // si accende anche PRIMA del calcio d'inizio, appena una delle due ha schierato:
+  // le formazioni sono pubbliche (v. `_open_before_kickoff` lato server).
   const openable = f.has_detail ?? f.status === 'finished';
   const canSetLineup = f.can_set_lineup ?? false;
 
@@ -456,7 +458,7 @@ function FixtureRow({ f, myTeam }: { f: LeagueFixtureItem; myTeam: string | null
           {body}
         </Link>
       ) : (
-        <div title="Il tabellino sarà disponibile a partita giocata">{body}</div>
+        <div title="Niente da aprire: nessuno ha ancora schierato per questa giornata">{body}</div>
       )}
       {canSetLineup ? (
         <div className="mt-2 flex justify-center">

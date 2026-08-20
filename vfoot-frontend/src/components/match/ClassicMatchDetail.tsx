@@ -28,6 +28,22 @@ function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
+/** Quando si bloccano le formazioni, per esteso.
+ *
+ *  Senza data non si inventa un'ora: il blocco è il primo calcio d'inizio
+ *  CONFERMATO del turno, e finché la Lega non lo conferma quella giornata non
+ *  blocca niente — dire «domani alle 15» sarebbe una promessa che non è nostra. */
+function fmtLock(iso?: string | null): string {
+  if (!iso) return 'al primo calcio d’inizio';
+  return new Date(iso).toLocaleString('it-IT', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 // Goal / assist / card / own-goal markers shown next to a player's name.
 //
 // `ev` is OPTIONAL, and the guard is the whole point. A placeholder line — senza
@@ -170,14 +186,24 @@ export function ClassicMatchDetail({
 }) {
   const d = fixture;
   const realMatch = variant === 'real';
+  // Il turno non è ancora cominciato: quella che si sta guardando è l'ANTEPRIMA
+  // delle formazioni, non un tabellino. Tutto ciò che qui sotto è condizionato da
+  // `preview` sono numeri che esistono solo perché la somma di zero giocate fa
+  // zero — un fantavoto di 0,0 e un modificatore difesa «non attivo» non dicono
+  // niente di vero su una partita che nessuno ha giocato.
+  //
+  // `?? true` non è prudenza: i referti congelati nascono alla conclusione della
+  // giornata e la chiave non ce l'hanno, quindi la loro assenza vale «bloccato».
+  const preview = !realMatch && (d.lineups_locked ?? true) === false;
   const header: MatchHeaderVM = {
     homeName: d.home_team,
     awayName: d.away_team,
     homeGoals: d.home_goals,
     awayGoals: d.away_goals,
     result: d.result,
-    homeSubtitle: realMatch ? undefined : `Fantavoto ${fmt(d.home_total)}`,
-    awaySubtitle: realMatch ? undefined : `Fantavoto ${fmt(d.away_total)}`,
+    scoreless: preview,
+    homeSubtitle: realMatch || preview ? undefined : `Fantavoto ${fmt(d.home_total)}`,
+    awaySubtitle: realMatch || preview ? undefined : `Fantavoto ${fmt(d.away_total)}`,
   };
 
   return (
@@ -199,7 +225,11 @@ export function ClassicMatchDetail({
                   confirms an hour later), and labelling that "in corso" says the
                   ball is still rolling. The clock rides with the live label —
                   from the appearances, so it costs nothing. */}
-              {d.live ? (
+              {/* `live` sul referto vuol dire «calcolato adesso invece che
+                  congelato», non «la palla sta rotolando»: prima del calcio
+                  d'inizio è vero e direbbe una bugia grossa, cioè che la partita
+                  è in corso mentre le formazioni si possono ancora cambiare. */}
+              {preview ? null : d.live ? (
                 <LiveBadge label={d.minute != null ? `in corso · ${d.minute}'` : 'in corso'} />
               ) : d.provisional ? (
                 <LiveBadge
@@ -217,6 +247,13 @@ export function ClassicMatchDetail({
             </Link>
           }
           footer={
+            preview ? (
+              <div className="text-center text-[11px] text-ink-faint">
+                Si bloccano <b>{fmtLock(d.lock_at)}</b>, al primo calcio d’inizio della
+                giornata. Fino ad allora ognuno può cambiarla, e chi ha già schierato la
+                mostra a tutti: in classic vedere quella degli altri non dà vantaggio.
+              </div>
+            ) : (
             <div className="text-[11px] text-ink-faint">
               Fantavoto = <b>voto puro</b> + <span className="text-good">bonus</span> −{' '}
               <span className="text-bad">malus</span> (gol +3, assist +1, autogol −2, rig. sbagliato
@@ -239,13 +276,26 @@ export function ClassicMatchDetail({
                 </>
               ) : null}
             </div>
+            )
           }
         />
       </Card>
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
-        <TeamColumn name={d.home_team} team={d.home} realMatch={realMatch} />
-        <TeamColumn name={d.away_team} team={d.away} realMatch={realMatch} />
+        <TeamColumn
+          name={d.home_team}
+          team={d.home}
+          realMatch={realMatch}
+          preview={preview}
+          submitted={d.lineup_source?.home === 'lineup'}
+        />
+        <TeamColumn
+          name={d.away_team}
+          team={d.away}
+          realMatch={realMatch}
+          preview={preview}
+          submitted={d.lineup_source?.away === 'lineup'}
+        />
       </div>
 
       {/* In fondo, chi ha schierato tutto questo. Su una partita vera di Serie A
@@ -268,10 +318,23 @@ function TeamColumn({
   name,
   team,
   realMatch,
+  preview = false,
+  submitted = false,
 }: {
   name: string;
   team: ClassicTeamDetail;
   realMatch: boolean;
+  /** La giornata non è cominciata: niente punteggi, sono zeri per costruzione. */
+  preview?: boolean;
+  /** Questa formazione è stata inviata PER QUESTA giornata.
+   *
+   *  Il server, a giornata aperta, ripiega sulla formazione del turno precedente
+   *  per poter mostrare un'anteprima (v. `team_lines_for_conclusion`, risoluzione
+   *  "previous"): a giornata cominciata è la previsione migliore che si abbia, ma
+   *  PRIMA del blocco spacciarla per la sua sarebbe dire una cosa falsa su una
+   *  persona — che ha schierato quando non l'ha fatto, e undici nomi che non ha
+   *  scelto. Lì non si mostra niente. */
+  submitted?: boolean;
 }) {
   // Il bonus casa viaggia come un modificatore qualunque nel payload: lo si
   // legge da lì invece di ricalcolarlo, così il tabellino non può dissentire
@@ -283,17 +346,29 @@ function TeamColumn({
       <div className="flex items-baseline justify-between gap-2">
         <SectionTitle>{name}</SectionTitle>
         <div className="flex items-center gap-1.5 text-sm text-ink-soft">
-          {/* A total made in part of provisional votes is itself provisional —
-              there is no honest way to show a settled number on unsettled ones. */}
-          {team.provisional ? <LiveBadge label="provvisorio" /> : null}
-          <span>
-            {team.goals} gol{!realMatch ? <> · <b>{fmt(team.total)}</b> fanta</> : null}
-          </span>
+          {preview ? (
+            submitted ? (
+              <span className="text-xs font-semibold text-good">✓ formazione inviata</span>
+            ) : (
+              <span className="text-xs text-ink-faint">non ha ancora schierato</span>
+            )
+          ) : (
+            <>
+              {/* A total made in part of provisional votes is itself provisional —
+                  there is no honest way to show a settled number on unsettled ones. */}
+              {team.provisional ? <LiveBadge label="provvisorio" /> : null}
+              <span>
+                {team.goals} gol{!realMatch ? <> · <b>{fmt(team.total)}</b> fanta</> : null}
+              </span>
+            </>
+          )}
         </div>
       </div>
       {/* Defence modifier is a fantasy-scoring construct: it means nothing for a
-          real Serie A match, so it is only shown on vfoot fixtures. */}
-      {!realMatch ? (
+          real Serie A match, so it is only shown on vfoot fixtures — né su una
+          giornata che non è cominciata, dove «non attivo, media 0,0» è solo il
+          modo lungo di dire che nessuno ha ancora giocato. */}
+      {!realMatch && !preview ? (
         <div className="mt-0.5 text-[11px]">
           {team.defense.eligible ? (
             <span className="text-ink-soft">
@@ -320,21 +395,29 @@ function TeamColumn({
         </div>
       ) : null}
 
-      <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Titolari</div>
-      <div className="divide-y">
-        {team.starters.map((p) => (
-          <PlayerRow key={p.player_id} p={p} />
-        ))}
-      </div>
+      {preview && !submitted ? (
+        <div className="mt-3 rounded-xl border border-dashed border-line px-3 py-8 text-center text-sm text-ink-faint">
+          Non ha ancora inviato la formazione per questa giornata.
+        </div>
+      ) : (
+        <>
+          <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Titolari</div>
+          <div className="divide-y">
+            {team.starters.map((p) => (
+              <PlayerRow key={p.player_id} p={p} />
+            ))}
+          </div>
 
-      <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-        {realMatch ? 'Panchina' : 'Panchina · ordine = priorità'}
-      </div>
-      <div className="divide-y">
-        {team.bench.map((p, i) => (
-          <PlayerRow key={p.player_id} p={p} order={i + 1} bench />
-        ))}
-      </div>
+          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+            {realMatch ? 'Panchina' : 'Panchina · ordine = priorità'}
+          </div>
+          <div className="divide-y">
+            {team.bench.map((p, i) => (
+              <PlayerRow key={p.player_id} p={p} order={i + 1} bench />
+            ))}
+          </div>
+        </>
+      )}
     </Card>
   );
 }

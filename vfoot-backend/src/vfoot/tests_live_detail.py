@@ -189,6 +189,77 @@ class LiveDetailTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.data["frozen"])
 
+    # -- prima del calcio d'inizio ------------------------------------------- #
+    #
+    # Il blocco delle formazioni E' il primo calcio d'inizio del turno, quindi
+    # «prima che la giornata cominci» e «prima della scadenza» sono lo stesso
+    # momento. Fin qui li' non c'era niente da aprire, in nessuna delle due
+    # modalita'. Dal 20/08/2026 in CLASSIC si', perche' la formazione altrui non e'
+    # un vantaggio: la migliore e' la tua migliore qualunque cosa faccia l'altro.
+    # In AURA no — il punteggio nasce da un duello per zone e sapere dove si mette
+    # l'avversario e' esattamente cio' che permette di contro-schierarsi.
+    def _kickoffs_in_three_days(self):
+        Match.objects.filter(competition_season=self.cs).update(
+            kickoff=timezone.now() + timedelta(days=3))
+
+    def _field(self, team):
+        SavedLineupSnapshot.objects.create(
+            league_id=str(self.league.id), matchday_id="22",
+            lineup_id=f"team{team.id}",
+            gk_player_id=str(self._player("Portiere", self.playing[0]).id),
+            starter_player_ids=[self._player("Attaccante", self.playing[1]).id],
+            bench_player_ids=[])
+
+    def _calendar_row(self):
+        res = self.client.get(f"/api/v1/leagues/{self.league.id}/fixtures")
+        return next(r for r in res.data if r["fixture_id"] == self.fixture.id)
+
+    def test_in_classic_the_tabellino_opens_as_soon_as_somebody_has_fielded(self):
+        """E la formazione che si vede e' quella DELL'ALTRO: e' tutto il punto."""
+        self._kickoffs_in_three_days()
+        self._field(self.theirs)
+        self.assertTrue(self._calendar_row()["has_detail"])
+
+        res = self.client.get(f"/api/v1/fixtures/{self.fixture.id}")
+        self.assertEqual(res.status_code, 200)
+        # Non e' un tabellino, e' un'anteprima: il client ci disegna una pagina
+        # diversa invece di presentare uno 0-0 come un risultato.
+        self.assertFalse(res.data["lineups_locked"])
+        self.assertIsNotNone(res.data["lock_at"])
+        self.assertEqual(res.data["lineup_source"]["away"], "lineup")
+        self.assertTrue(res.data["away"]["starters"])
+
+    def test_before_the_deadline_with_nobody_fielded_there_is_nothing_to_open(self):
+        """Un collegamento a un tabellino vuoto e' peggio di nessun collegamento."""
+        self._kickoffs_in_three_days()
+        self.assertFalse(self._calendar_row()["has_detail"])
+        self.assertEqual(
+            self.client.get(f"/api/v1/fixtures/{self.fixture.id}").status_code, 404)
+
+    def test_an_aura_league_keeps_the_lineups_covered_until_the_deadline(self):
+        """E non basta che il calendario non ci porti: l'indirizzo si digita.
+
+        Finche' l'unico cancello e' stato il collegamento mancante, chiunque
+        conoscesse l'id della partita si leggeva la formazione dell'avversario di
+        una giornata ancora aperta."""
+        FantasyLeague.objects.filter(id=self.league.id).update(
+            mode=FantasyLeague.MODE_AURA)
+        self._kickoffs_in_three_days()
+        self._field(self.theirs)
+        self.assertFalse(self._calendar_row()["has_detail"])
+        self.assertEqual(
+            self.client.get(f"/api/v1/fixtures/{self.fixture.id}").status_code, 404)
+
+    def test_once_the_round_has_kicked_off_aura_opens_like_everyone_else(self):
+        """La copertura e' fino alla scadenza, non per sempre."""
+        FantasyLeague.objects.filter(id=self.league.id).update(
+            mode=FantasyLeague.MODE_AURA)
+        self._field(self.theirs)
+        self.assertTrue(self._calendar_row()["has_detail"])
+        res = self.client.get(f"/api/v1/fixtures/{self.fixture.id}")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data["lineups_locked"])
+
     # -- i due fantallenatori ------------------------------------------------ #
     def test_the_tabellino_names_both_managers_live(self):
         SavedLineupSnapshot.objects.create(

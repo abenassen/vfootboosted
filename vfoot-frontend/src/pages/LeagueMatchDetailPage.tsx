@@ -53,8 +53,9 @@ export default function LeagueMatchDetailPage() {
           <div className="text-3xl">📋</div>
           <div className="mt-2 font-bold">Partita non ancora giocata</div>
           <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">
-            Il tabellino compare quando la giornata comincia: prima non ci sono
-            né voti né formazioni da mostrare.
+            Qui non c’è ancora niente da vedere. Il tabellino si riempie quando la
+            giornata comincia; in una lega classic le formazioni già inviate
+            compaiono anche prima, appena qualcuno schiera.
           </p>
           <Link
             to="/matches"

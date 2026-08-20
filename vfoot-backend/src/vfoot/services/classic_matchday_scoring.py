@@ -184,6 +184,25 @@ def read_saved_lineup(league_id: int, real_matchday: int, team_id: int, competit
     return snap
 
 
+def saved_lineup_index(league_id: int) -> set[tuple[str, str]]:
+    """{(giornata, chiave di formazione)} salvate in questa lega, in una query.
+
+    Serve a chiedersi «qualcuno ha gia' schierato?» per un calendario intero senza
+    fare la domanda partita per partita: duecento righe erano duecento query.
+    """
+    return set(SavedLineupSnapshot.objects.filter(league_id=str(league_id))
+               .values_list("matchday_id", "lineup_id"))
+
+
+def has_saved_lineup(index: set[tuple[str, str]], real_matchday: int, team_id: int,
+                     competition_id: int | None) -> bool:
+    """La stessa domanda di ``read_saved_lineup``, ripiego compreso, ma sull'indice
+    e senza leggere la formazione: qui interessa che ci SIA, non cosa dice."""
+    md = str(real_matchday)
+    return ((md, _lineup_key(team_id, competition_id)) in index
+            or (md, f"team{team_id}") in index)
+
+
 def read_previous_lineup(league_id: int, real_matchday: int, team_id: int, competition_id: int | None):
     """The most recent saved lineup from a matchday BEFORE this one (the 'previous'
     fallback for a team that didn't set one). Returns None if there is no earlier lineup."""

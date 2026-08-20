@@ -148,6 +148,19 @@ export interface ClassicFixtureDetail {
   result: 'home' | 'away' | 'draw';
   home: ClassicTeamDetail;
   away: ClassicTeamDetail;
+  /** Le formazioni di questo turno sono bloccate? Falso = la giornata non è
+   *  ancora cominciata e questo è un'ANTEPRIMA: nessuno ha giocato, i totali sono
+   *  zero per costruzione e chi non ha ancora schierato può farlo. Assente sui
+   *  referti congelati, che esistono solo a giornata conclusa — quindi il valore
+   *  di riserva è `true`. */
+  lineups_locked?: boolean;
+  /** Quando si bloccano: il primo calcio d'inizio confermato della giornata. */
+  lock_at?: string | null;
+  /** Da dove viene la formazione mostrata, per lato: `lineup` = inviata per questa
+   *  giornata; `previous` = ripescata dal turno precedente perché non ne ha
+   *  inviata una; `forfait` = non ce n'è nessuna. Prima del blocco solo la prima
+   *  si può mostrare come sua — le altre due sarebbero un'attribuzione falsa. */
+  lineup_source?: { home?: string | null; away?: string | null };
   /** Computed on the fly because the matchday is not concluded (nothing frozen). */
   live?: boolean;
   /** Some real match behind these votes has not settled: the score can still change. */

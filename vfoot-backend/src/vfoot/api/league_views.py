@@ -2810,11 +2810,50 @@ def _live_totals(league: FantasyLeague, fixtures, locked_mds: set[int]) -> dict:
     return out
 
 
+def _open_before_kickoff(league: FantasyLeague, fixtures) -> set[int]:
+    """Le partite il cui tabellino si puo' gia' leggere pur non essendo cominciato
+    il turno. Restituisce gli id, perche' la domanda vera e' per partita.
+
+    Il blocco delle formazioni E' il primo calcio d'inizio del turno (v.
+    ``matchday_state.lineup_lock_at``): «prima che la giornata cominci» e «prima
+    della scadenza» sono lo stesso momento, e fin qui le formazioni altrui erano
+    coperte fino a li'.
+
+    In CLASSIC non devono esserlo, deciso il 20/08/2026: vedere la formazione
+    dell'avversario non da' nessun vantaggio, perche' la formazione migliore e' la
+    tua migliore possibile qualunque cosa faccia lui. Coprirla non proteggeva
+    niente e toglieva l'unica cosa che c'e' da guardare nei giorni che precedono
+    il turno. In AURA il discorso cambia davvero — il punteggio nasce da un duello
+    per zone, e sapere dove si mette l'altro e' esattamente cio' che permette di
+    contro-schierarsi — quindi li' resta coperto fino al blocco.
+
+    E anche in classic serve che QUALCUNO abbia schierato: un collegamento a un
+    tabellino che non ha niente dentro e' peggio che nessun collegamento.
+    """
+    if league.mode != FantasyLeague.MODE_CLASSIC:
+        return set()
+    from vfoot.services.classic_matchday_scoring import has_saved_lineup, saved_lineup_index
+
+    index = saved_lineup_index(league.id)
+    if not index:
+        return set()
+    out = set()
+    for fx in fixtures:
+        real_md = fx.fantasy_matchday.real_matchday if fx.fantasy_matchday_id else None
+        if real_md is None:
+            continue
+        if any(has_saved_lineup(index, real_md, team_id, fx.competition_id)
+               for team_id in (fx.home_team_id, fx.away_team_id)):
+            out.add(fx.id)
+    return out
+
+
 def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_real_md: int | None = None,
                            my_roster_ready: bool = False, awaiting_mds: set[int] | None = None,
                            locked_mds: set[int] | None = None,
                            live_totals: dict | None = None,
                            closed_mds: set[int] | None = None,
+                           early_detail: set[int] | None = None,
                            *, stage_count: int) -> dict:
     # `stage_count` è obbligatorio e senza valore predefinito apposta: serve solo a
     # `round_label`, e qualunque predefinito sarebbe una scommessa sulla forma della
@@ -2894,9 +2933,10 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         ),
         # Whether /fixtures/<id> has anything to show. A concluded fixture has its
         # frozen tabellino; a LOCKED one has the live computation, which is the whole
-        # point of following your own matchday while it is played. Only a round that
-        # has not kicked off has nothing, and there the link would end on a 404.
-        "has_detail": played or locked,
+        # point of following your own matchday while it is played. Prima del calcio
+        # d'inizio ci sono le formazioni gia' inviate, che in classic sono pubbliche
+        # e in aura no: la regola sta tutta in ``_open_before_kickoff``.
+        "has_detail": played or locked or (early_detail is not None and fx.id in early_detail),
     }
 
 
@@ -2943,8 +2983,10 @@ class LeagueFixturesView(APIView):
             .values_list("competition_id", "n"))
         rows = list(qs[:200])
         live_totals = _live_totals(league, rows, locked_mds)
+        early_detail = _open_before_kickoff(league, rows)
         items = [_serialize_fixture_row(fx, my_team_id, current_real_md, my_roster_ready,
                                         awaiting_mds, locked_mds, live_totals, closed_mds,
+                                        early_detail,
                                         stage_count=stage_counts.get(fx.competition_id, 0))
                  for fx in rows]
         return Response(items)
@@ -4993,7 +5035,7 @@ def _highlighted_ranks(stage) -> tuple[list[int], list[int]]:
 
 def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, pl,
              stage=None, awaiting_mds=None, locked_mds=None, live_totals=None,
-             stage_count: int = 0) -> dict:
+             early_detail=None, stage_count: int = 0) -> dict:
     """One results section: a standings table (round-robin) or a bracket (knockout)."""
     fixtures = list(fixtures)
     prize_ranks, qualify_ranks = _highlighted_ranks(stage)
@@ -5016,6 +5058,7 @@ def _section(name, stage_type, order, fixtures, my_team_id, current_md, pw, pd, 
             for f in fs:
                 row = _serialize_fixture_row(f, my_team_id, current_md, False,
                                              awaiting_mds, locked_mds, live_totals,
+                                             None, early_detail,
                                              stage_count=stage_count)
                 winner = next((tid for tid in (f.home_team_id, f.away_team_id)
                                if tid in passed), None)
@@ -5099,8 +5142,9 @@ class CompetitionStructureView(APIView):
         # I punteggi provvisori della competizione, in un colpo solo: `_live_totals`
         # tiene un solo scorer per giornata, e chiederli fase per fase avrebbe
         # rifatto quel lavoro per ogni girone.
-        live_totals = _live_totals(
-            league, list(comp.fixtures.select_related("fantasy_matchday")), locked_mds)
+        comp_fixtures = list(comp.fixtures.select_related("fantasy_matchday"))
+        live_totals = _live_totals(league, comp_fixtures, locked_mds)
+        early_detail = _open_before_kickoff(league, comp_fixtures)
 
         stages = list(comp.stages.order_by("order_index", "id"))
         if stages:
@@ -5108,7 +5152,7 @@ class CompetitionStructureView(APIView):
                 _section(s.name, s.stage_type, s.order_index,
                          s.fixtures.select_related(*rel).defer(*defer), my_team_id, current_md, pw, pd, pl,
                          stage=s, awaiting_mds=awaiting_mds, locked_mds=locked_mds,
-                         live_totals=live_totals,
+                         live_totals=live_totals, early_detail=early_detail,
                          # Gia' in mano: nessuna query in piu' per contarle.
                          stage_count=len(stages))
                 for s in stages
@@ -5118,7 +5162,8 @@ class CompetitionStructureView(APIView):
                 _section(comp.name, comp.competition_type, 1,
                          comp.fixtures.select_related(*rel).defer(*defer), my_team_id, current_md, pw, pd, pl,
                          awaiting_mds=awaiting_mds, locked_mds=locked_mds,
-                         live_totals=live_totals, stage_count=0)
+                         live_totals=live_totals, early_detail=early_detail,
+                         stage_count=0)
             ]
         return Response({
             "competition_id": comp.id, "name": comp.name,
@@ -5226,6 +5271,18 @@ class FixtureDetailView(APIView):
             return Response({"detail": "No rich detail for this fixture."},
                             status=status.HTTP_404_NOT_FOUND)
 
+        # Il turno non e' ancora cominciato. Cosa si puo' leggere lo dice
+        # ``_open_before_kickoff``, e va chiesto QUI e non solo nel calendario:
+        # finche' l'unico cancello e' stato il collegamento mancante, chi digitava
+        # l'indirizzo a mano si leggeva la formazione dell'avversario di una
+        # giornata ancora aperta — in aura, dove quella e' informazione che si puo'
+        # sfruttare, era una falla e basta.
+        locked = matchday_state.is_locked(md.real_competition_season_id,
+                                          md.real_matchday)
+        if not locked and fx.id not in _open_before_kickoff(league, [fx]):
+            return Response({"detail": "No rich detail for this fixture."},
+                            status=status.HTTP_404_NOT_FOUND)
+
         from vfoot.services.classic_matchday_scoring import score_fixture_live
         from vfoot.services.classic_scoring import Ruleset
 
@@ -5233,7 +5290,19 @@ class FixtureDetailView(APIView):
         # use), otherwise the league's current rules.
         ruleset = (Ruleset.from_snapshot(md.ruleset_snapshot) if md.ruleset_snapshot
                    else Ruleset.from_league(league))
-        return Response({**score_fixture_live(fx, league, md, ruleset), **managers})
+        lock_at = matchday_state.lineup_lock_at(md.real_competition_season_id,
+                                                md.real_matchday)
+        return Response({
+            **score_fixture_live(fx, league, md, ruleset), **managers,
+            # Prima del blocco quello che si sta guardando e' un'ANTEPRIMA: nessuno
+            # ha ancora giocato, i totali sono zero per costruzione e le formazioni
+            # si possono ancora cambiare. Il client ne fa una pagina diversa — dirlo
+            # e' l'unico modo che ha di non presentare uno 0-0 come un risultato.
+            # Sui referti congelati la chiave non c'e': si congelano solo a giornata
+            # conclusa, quindi «assente» vale «bloccato».
+            "lineups_locked": locked,
+            "lock_at": lock_at.isoformat() if lock_at else None,
+        })
 
 
 def _zone_grid_keys(cols: int = 5, rows: int = 4) -> list[str]:
@@ -5257,7 +5326,12 @@ class LeagueTeamLineupView(APIView):
     With ``?team_id=`` any league member can read ANOTHER participant's structured
     roster (the same view the Squad page renders), so squads are no longer only
     visible in the flat name+price list. The saved lineup is withheld for other
-    people's teams: the roster is public within the league, the chosen XI is not."""
+    people's teams — ma non perche' sia un segreto: in classic la formazione
+    altrui e' pubblica e si legge dal tabellino della sfida (v.
+    ``_open_before_kickoff``, dove sta la regola). Qui non passa perche' nessuna
+    schermata la chiede da questo endpoint, e un dato che non serve e' meglio non
+    spedirlo; il giorno che servisse, la condizione da scrivere e' quella, non
+    ``is_own``."""
 
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
