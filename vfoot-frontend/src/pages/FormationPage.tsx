@@ -660,6 +660,19 @@ export default function FormationPage() {
           ? 'Manca il portiere.'
           : 'Un solo portiere fra i titolari.');
 
+  // Estratto perché lo chiamano due bottoni: quello in cima su desktop e quello
+  // nella barra in fondo sul telefono.
+  const onSuggest = () => {
+    setStarterIds(
+      suggest(ctx.roster, isClassic ? constraints : null, {
+        pinned: starterIds.filter((id) => lockedIds.has(id)),
+        locked: lockedIds,
+      }),
+    );
+    setVacancies([]);
+    setRefused(null);
+  };
+
   const onSave = async () => {
     if (!canSave || !selectedLeagueId || matchday == null) return;
     setSaving(true);
@@ -777,26 +790,23 @@ export default function FormationPage() {
                 </option>
               ))}
             </select>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setStarterIds(
-                  suggest(ctx.roster, isClassic ? constraints : null, {
-                    pinned: starterIds.filter((id) => lockedIds.has(id)),
-                    locked: lockedIds,
-                  }),
-                );
-                setVacancies([]);
-                setRefused(null);
-              }}
-            >
-              Suggerisci XI
-            </Button>
-            {/* A grey Salva that does not say why is a dead end: the tooltip carries
-                the first thing standing in the way. */}
-            <Button onClick={onSave} disabled={!canSave || saving} title={canSave ? undefined : saveBlock ?? undefined}>
-              {saving ? 'Salvataggio…' : 'Salva'}
-            </Button>
+            {/* Su desktop i due comandi stanno qui, in cima, accanto ai selettori:
+                la pagina è a due colonne e il pollice non c'entra. Sul telefono
+                stanno nella barra in fondo (v. in coda al file) — qui erano fino a
+                2500px sopra il punto in cui si lavora. */}
+            <div className="hidden items-center gap-2 lg:flex">
+              <Button
+                variant="secondary"
+                onClick={onSuggest}
+              >
+                Suggerisci XI
+              </Button>
+              {/* A grey Salva that does not say why is a dead end: the tooltip carries
+                  the first thing standing in the way. */}
+              <Button onClick={onSave} disabled={!canSave || saving} title={canSave ? undefined : saveBlock ?? undefined}>
+                {saving ? 'Salvataggio…' : 'Salva'}
+              </Button>
+            </div>
           </div>
         </div>
         {manyCompetitions ? (
@@ -822,7 +832,10 @@ export default function FormationPage() {
         ) : null}
           </>
         ) : null}
-        {toast ? <div className="mt-2 text-sm font-semibold text-good">{toast}</div> : null}
+        {/* Sul telefono l'esito compare nella barra in fondo, accanto al pulsante
+            che l'ha prodotto: qui sarebbe fuori schermo nel momento esatto in cui
+            serve leggerlo. */}
+        {toast ? <div className="mt-2 hidden text-sm font-semibold text-good lg:block">{toast}</div> : null}
       </Card>
 
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
@@ -947,6 +960,61 @@ export default function FormationPage() {
             {bench.length === 0 ? <div className="py-2 text-sm text-ink-faint">Panchina vuota.</div> : null}
           </div>
         </Card>
+      </div>
+
+      {/* LA BARRA DEL SALVA, dove sta il pollice.
+       *
+       *  Il Salva stava in cima, ed è il posto in cui non si lavora mai: chi
+       *  sistema la panchina ce l'ha a millecinquecento pixel di distanza, e per
+       *  premerlo deve risalire tutta la pagina. Peggio, il motivo per cui è
+       *  grigio viveva SOLO in un `title` su un pulsante `disabled` — un tooltip
+       *  che il dito non fa comparire, su un elemento che il click non raggiunge:
+       *  a schermo restava un bottone spento e nessuna spiegazione.
+       *
+       *  La riga sotto il contatore dice una cosa sola, la più urgente delle tre:
+       *  l'esito appena arrivato, altrimenti l'ostacolo, altrimenti niente. Niente
+       *  e non «tutto a posto», perché una barra che si congratula a ogni tocco
+       *  smette di essere letta, e quando poi ha qualcosa da dire non la guarda
+       *  più nessuno.
+       *
+       *  Sta sopra la tab bar leggendo `--vf-bar-block`, che AppShell pubblica: è
+       *  lo stesso numero con cui la barra è disegnata, striscia delle competizioni
+       *  compresa, e non una copia destinata a divergere. */}
+      <div
+        className="lg:hidden"
+        aria-hidden
+        style={{ height: 'calc(var(--vf-bar-block, 60px) + 4.5rem)' }}
+      />
+      <div
+        className="fixed inset-x-0 z-40 border-t border-line bg-surface/95 px-3 py-2 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur lg:hidden"
+        style={{ bottom: 'calc(var(--vf-safe-bottom) + var(--vf-bar-block, 60px))' }}
+      >
+        <div className="mx-auto flex max-w-3xl items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5">
+              <span
+                className={clsx(
+                  'text-base font-bold tabular-nums',
+                  canSave ? 'text-good' : 'text-bad',
+                )}
+              >
+                {starterIds.length}/{XI}
+              </span>
+              <span className="text-[11px] uppercase tracking-wide text-ink-faint">titolari</span>
+            </div>
+            {toast ? (
+              <div className="mt-0.5 text-[11px] font-semibold leading-snug text-good">{toast}</div>
+            ) : saveBlock ? (
+              <div className="mt-0.5 text-[11px] font-semibold leading-snug text-bad">{saveBlock}</div>
+            ) : null}
+          </div>
+          <Button variant="secondary" size="sm" onClick={onSuggest} className="shrink-0">
+            Suggerisci
+          </Button>
+          <Button onClick={onSave} disabled={!canSave || saving} className="shrink-0">
+            {saving ? 'Salvo…' : 'Salva'}
+          </Button>
+        </div>
       </div>
     </div>
   );

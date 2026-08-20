@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 // Un'icona per voce, e ognuna dice la SUA voce: la maglia per le rose, il podio
 // per la classifica, l'urna per le decisioni. Le emoji le disegnano tre sistemi
 // operativi diversi, quindi la stessa barra aveva tre stili e tre spessori.
@@ -458,7 +459,17 @@ export default function AppShell() {
   };
 
   return (
-    <div className="min-h-screen bg-paper text-ink">
+    /* `--vf-bar-block`: quanto è alto il blocco fisso in basso, ADESSO — sessanta
+       pixel di slot più, quando c'è, la striscia delle competizioni. Era un conto
+       che sapeva solo questo file, e una pagina che volesse appoggiarcisi sopra
+       poteva solo rifarlo a mano e sbagliarlo il giorno in cui la striscia
+       compare. Messo qui viaggia con la variabile della safe area, e chi ha una
+       barra sua la piazza con `calc(var(--vf-safe-bottom) + var(--vf-bar-block))`
+       senza sapere niente di come è fatta questa. */
+    <div
+      className="min-h-screen bg-paper text-ink"
+      style={{ '--vf-bar-block': `${mobileBarBlock}px` } as CSSProperties}
+    >
       <UpdateBanner />
       {/* Desktop top bar — cross-league: switcher + user admin + account */}
       <div className="vf-hero hidden border-b border-black/10 md:block">
