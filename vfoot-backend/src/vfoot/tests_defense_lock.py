@@ -380,3 +380,99 @@ class ConclusionInheritsInsteadOfAskingTests(_ClassicRound):
         SavedLineupSnapshot.objects.filter(matchday_id="21").update(edited_after_kickoff=True)
         _, _, meta = self._lines()
         self.assertFalse(meta["def_locked"])
+
+
+# --------------------------------------------------------------------------- #
+# Il filo: dallo snapshot fino al motore delle sostituzioni.                   #
+# --------------------------------------------------------------------------- #
+class TheLockReachesTheSubstitutionsTests(SimpleTestCase):
+    """R2 provata dove conta: sul PUNTEGGIO, non solo sulla funzione isolata.
+
+    Il caso e' l'exploit per intero. Ho schierato quattro difensori per il
+    modificatore, due hanno preso 5, e un mio centrocampista e' senza voto: se la
+    panchina puo' mandare dentro un difensore al posto suo, i difensori con voto
+    diventano cinque, i «tre migliori» scelgono su cinque invece che su quattro, i
+    due voti brutti escono dalla media e il modificatore sale. A voti visti, e a
+    senso unico.
+    """
+
+    def _lines(self):
+        from vfoot.tests_classic_scoring import line
+
+        starters = [
+            line(1, "GK", 6.0),
+            line(2, "DEF", 5.0), line(3, "DEF", 5.0), line(4, "DEF", 6.0), line(5, "DEF", 6.0),
+            line(6, "MID", 6.0, sv=True),   # il buco da coprire
+            line(7, "MID", 6.0), line(8, "MID", 6.0), line(9, "MID", 6.0),
+            line(10, "ATT", 6.0), line(11, "ATT", 6.0),
+        ]
+        # In panchina, in ordine di priorita': prima un ottimo difensore.
+        bench = [line(20, "DEF", 7.5), line(21, "MID", 6.0)]
+        return starters, bench
+
+    def _score(self, def_locked):
+        from vfoot.services.classic_scoring import Ruleset, score_team
+
+        starters, bench = self._lines()
+        return score_team(starters, bench, Ruleset(), def_locked=def_locked)
+
+    def test_without_the_lock_the_ratchet_works(self):
+        """Il comportamento di sempre, che e' anche la falla: entra il difensore."""
+        r = self._score(False)
+        self.assertEqual(r["substitutions"][0]["in"]["player_id"], 20)
+        self.assertEqual(r["defense"]["avg"], 6.375)
+        self.assertEqual(r["defense"]["bonus"], 2.0)
+
+    def test_with_the_lock_the_defence_keeps_its_number(self):
+        """Chi ha toccato la formazione a voti visti non puo' piu' aggiungerne uno:
+        entra il centrocampista, la media resta quella dei quattro schierati."""
+        r = self._score(True)
+        self.assertEqual(r["substitutions"][0]["in"]["player_id"], 21)
+        self.assertEqual(r["defense"]["avg"], 5.75)
+        self.assertEqual(r["defense"]["bonus"], 0.0)
+
+    def test_the_flag_travels_per_side_through_the_fixture(self):
+        """IL FILO. Le stesse identiche righe per le due squadre, un solo bit di
+        differenza: se il collegamento fra lo snapshot e il motore fosse rotto — un
+        parametro che non viene passato, un meta che si perde per strada — le due
+        squadre farebbero la stessa sostituzione e nessuno se ne accorgerebbe."""
+        from vfoot.services.classic_matchday_scoring import score_composed_fixture
+        from vfoot.services.classic_scoring import Ruleset
+
+        payload = score_composed_fixture(
+            self._lines(), self._lines(), Ruleset(),
+            {"fixture_id": 1, "fantasy_round": 1, "real_matchday": 22, "stage": None,
+             "competition_id": None, "home_advantage": False,
+             "home_team": "Bloccata", "away_team": "Libera"},
+            def_locked=(True, False),
+        )
+        self.assertEqual(payload["home"]["substitutions"][0]["in"]["player_id"], 21)
+        self.assertEqual(payload["away"]["substitutions"][0]["in"]["player_id"], 20)
+        self.assertEqual(payload["home"]["defense"]["bonus"], 0.0)
+        self.assertEqual(payload["away"]["defense"]["bonus"], 2.0)
+
+
+class TheFlagBecomesTheLockTests(_ClassicRound):
+    """E l'altro capo del filo: il booleano scritto al salvataggio diventa davvero
+    il `def_locked` che il punteggio consuma."""
+
+    def _meta(self):
+        from vfoot.services.classic_matchday_scoring import team_lines_for_conclusion
+
+        return team_lines_for_conclusion(self.league, self.team, None, 22, {}, None)[2]
+
+    def test_an_untouched_lineup_does_not_lock(self):
+        self._save_snapshot()
+        self.assertFalse(self._meta()["def_locked"])
+
+    def test_a_lineup_edited_after_kickoff_locks(self):
+        self._save_snapshot()
+        self._snap().__class__.objects.filter(matchday_id="22").update(edited_after_kickoff=True)
+        self.assertTrue(self._meta()["def_locked"])
+
+    def test_without_the_modifier_nothing_locks(self):
+        self._save_snapshot()
+        self._snap().__class__.objects.filter(matchday_id="22").update(edited_after_kickoff=True)
+        self.league.defense_bonus_enabled = False
+        self.league.save(update_fields=["defense_bonus_enabled"])
+        self.assertFalse(self._meta()["def_locked"])
