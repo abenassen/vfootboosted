@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import { getLeagueMatchdays, getTeamLineup, saveTeamLineup } from '../api';
+import Jersey, { kitFromCrest, type Kit } from '../components/Jersey';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
 import type {
@@ -274,6 +275,8 @@ export default function FormationPage() {
   // are what keeps the pitch at eleven while the module is still being decided.
   const [vacancies, setVacancies] = useState<PlayerRole[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
+  // Il posto vuoto che è stato toccato: apre l'elenco di chi può occuparlo.
+  const [picking, setPicking] = useState<PlayerRole | null>(null);
   // Why the last attempted promotion was refused, pinned to the row that was
   // clicked — the explanation belongs where the finger is, not in the header.
   const [refused, setRefused] = useState<{ player_id: number; reason: string } | null>(null);
@@ -726,6 +729,7 @@ export default function FormationPage() {
     .filter((p): p is TeamLineupPlayer => !!p);
   const compName = ctx.competitions.find((c) => c.competition_id === competition)?.name;
   const selectedPlayer = selected != null ? byId.get(selected) ?? null : null;
+  const kits = kitFromCrest(ctx.team.crest, ctx.team.name);
 
   return (
     <div className="space-y-4">
@@ -858,8 +862,9 @@ export default function FormationPage() {
         <Card className="self-start p-4 lg:sticky lg:top-4">
           <SectionTitle>La squadra in campo</SectionTitle>
           <div className="mt-1 text-[11px] text-ink-faint">
-            {isClassic ? 'Schieramento per ruolo.' : 'Posizione attesa di ogni titolare (dai dati storici).'} Il portiere ha il bordo ambra. Clicca un giocatore per
-            vederne le zone d'influenza (in giallo).
+            {isClassic ? 'Schieramento per ruolo.' : 'Posizione attesa di ogni titolare (dai dati storici).'} Il
+            portiere veste la muta invertita. Tocca un giocatore per vederne le zone d'influenza e i dati;
+            tocca un posto vuoto per scegliere chi lo occupa.
           </div>
           <PitchLineup
             starterIds={starterIds}
@@ -867,19 +872,37 @@ export default function FormationPage() {
             byId={byId}
             gkId={gkId}
             selectedId={selected}
-            onSelect={(id) => setSelected((s) => (s === id ? null : id))}
+            onSelect={(id) => {
+              setPicking(null);
+              setSelected((s) => (s === id ? null : id));
+            }}
+            onPickRole={(role) => {
+              setSelected(null);
+              setPicking(role);
+            }}
+            kits={kits}
+            lockedIds={lockedIds}
             regular={isClassic}
           />
         </Card>
 
         <Card className="p-4">
-          <SectionTitle>Rosa · titolari e panchina (un solo portiere fra i titolari)</SectionTitle>
-          <div className="mt-1 text-[11px] text-ink-faint">Clicca il nome per vederne le zone sulla mappa.</div>
+          {/* SUL TELEFONO LA LISTA DEI TITOLARI NON SI DISEGNA.
+           *
+           *  Su desktop le due colonne stanno affiancate e la ripetizione è un
+           *  pannello di comando: si guarda il campo a sinistra e si tocca a
+           *  destra. Impilate su un telefono diventa la stessa cosa detta due
+           *  volte, 653 pixel di pagina che non aggiungono niente a quello che il
+           *  campo mostra già — e che l'utente scorre credendo di doverli usare.
+           *  Qui sotto resta la panchina, che invece il campo non mostra. */}
+          <div className="hidden lg:block">
+            <SectionTitle>Rosa · titolari e panchina (un solo portiere fra i titolari)</SectionTitle>
+            <div className="mt-1 text-[11px] text-ink-faint">Clicca il nome per vederne le zone sulla mappa.</div>
 
-          <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-            Titolari {starterIds.length}/{XI}
-          </div>
-          <div className="divide-y">
+            <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              Titolari {starterIds.length}/{XI}
+            </div>
+            <div className="divide-y">
             {starters.map((p) => (
               <RosterRow
                 key={p.player_id}
@@ -909,9 +932,10 @@ export default function FormationPage() {
             {starters.length === 0 && !vacancies.length ? (
               <div className="py-2 text-sm text-ink-faint">Nessun titolare selezionato.</div>
             ) : null}
+            </div>
           </div>
 
-          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink-faint lg:mt-4">
             Panchina · ordine = priorità sostituzioni
           </div>
           <div className="mt-0.5 text-[11px] text-ink-faint">
@@ -1017,7 +1041,25 @@ export default function FormationPage() {
          *  riga della lista: a 390px erano 289 pixel sotto la piega. Si accendeva
          *  il giallo sul campo e nient'altro, e il dato che avevi chiesto stava in
          *  un punto dello schermo che non stavi guardando. */}
-        {selectedPlayer ? (
+        {picking ? (
+          <RolePicker
+            role={picking}
+            candidates={notChosen
+              .filter((p) => p.role === picking)
+              .map((p) => ({ p, blocked: blockReasonFor(p) }))
+              .sort((a, b) => {
+                // Chi può entrare prima di chi non può, poi per media voto: è
+                // l'ordine in cui si guarda un elenco di sostituti.
+                if (!!a.blocked !== !!b.blocked) return a.blocked ? 1 : -1;
+                return (b.p.value ?? 0) - (a.p.value ?? 0);
+              })}
+            onPick={(id) => {
+              toggleStarter(id);
+              setPicking(null);
+            }}
+            onClose={() => setPicking(null)}
+          />
+        ) : selectedPlayer ? (
           <PlayerSheet
             p={selectedPlayer}
             isStarter={starterIds.includes(selectedPlayer.player_id)}
@@ -1204,6 +1246,86 @@ function PlayerSheet({
               Entra per primo
             </button>
           ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** CHI PUÒ OCCUPARE QUESTO POSTO — l'elenco che si apre toccando un buco sul
+ *  campo.
+ *
+ *  Solo il suo ruolo, e già ordinato per come si guarda: prima chi può entrare
+ *  davvero, poi gli altri col motivo scritto accanto. Il motivo c'è anche per chi
+ *  non può, invece di lasciarlo fuori dall'elenco: «non c'è» e «c'è ma non adesso,
+ *  perché...» sono due risposte diverse, e la seconda è quella vera. */
+function RolePicker({
+  role,
+  candidates,
+  onPick,
+  onClose,
+}: {
+  role: PlayerRole;
+  candidates: Array<{ p: TeamLineupPlayer; blocked: string | null }>;
+  onPick: (id: number) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="border-t border-line bg-surface px-3 pb-3 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.10)]">
+      <div className="mx-auto max-w-3xl">
+        <div className="flex items-center gap-2">
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[role]}`}>
+            {ROLE_LABEL[role]}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-sm font-bold">
+            Chi entra al posto del {ROLE_WORD[role]}?
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Chiudi"
+            className="-mr-1 shrink-0 rounded-lg px-2.5 py-1.5 text-lg leading-none text-ink-faint hover:bg-surface-2"
+          >
+            ×
+          </button>
+        </div>
+        <div className="mt-1 max-h-[38vh] overflow-y-auto">
+          {candidates.length === 0 ? (
+            <div className="py-3 text-sm text-ink-faint">
+              Nessun {ROLE_WORD[role]} in panchina.
+            </div>
+          ) : (
+            <div className="divide-y divide-line">
+              {candidates.map(({ p, blocked }) => (
+                <button
+                  key={p.player_id}
+                  type="button"
+                  onClick={() => (blocked ? undefined : onPick(p.player_id))}
+                  aria-disabled={blocked ? true : undefined}
+                  className={clsx(
+                    'flex min-h-[48px] w-full items-center gap-2 px-1 text-left',
+                    blocked ? 'cursor-not-allowed opacity-60' : 'hover:bg-surface-2',
+                  )}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold">{p.name}</span>
+                    {blocked ? (
+                      <span className="block text-[11px] leading-snug text-bad">{blocked}</span>
+                    ) : p.next_match ? (
+                      <span className="block truncate text-[11px] text-ink-faint">
+                        {fixtureLabel(p.next_match)} · {fmtKickoff(p.next_match)}
+                      </span>
+                    ) : null}
+                  </span>
+                  {typeof p.value === 'number' ? (
+                    <span className="shrink-0 text-sm font-bold tabular-nums text-ink-soft">
+                      {p.value.toFixed(2)}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1466,6 +1588,9 @@ function PitchLineup({
   gkId,
   selectedId,
   onSelect,
+  onPickRole,
+  kits,
+  lockedIds,
   regular = false,
 }: {
   starterIds: number[];
@@ -1474,6 +1599,10 @@ function PitchLineup({
   gkId: number | null;
   selectedId: number | null;
   onSelect: (id: number) => void;
+  /** Un posto vuoto toccato: apre chi può occuparlo. */
+  onPickRole: (role: PlayerRole) => void;
+  kits: { outfield: Kit; keeper: Kit };
+  lockedIds: Set<number>;
   regular?: boolean;
 }) {
   // Lay the XI out as formation lines: depth (x) from each player's expected
@@ -1524,6 +1653,10 @@ function PitchLineup({
         dots={regularDots}
         selectedId={selectedId}
         onSelect={onSelect}
+        onPickRole={onPickRole}
+        kits={kits}
+        lockedIds={lockedIds}
+        showRole={false}
         footprint={selRegular?.footprint ?? null}
       />
     );
@@ -1575,6 +1708,13 @@ function PitchLineup({
       dots={dots}
       selectedId={selectedId}
       onSelect={onSelect}
+      onPickRole={onPickRole}
+      kits={kits}
+      lockedIds={lockedIds}
+      // In Aura i giocatori stanno dove li mette la heatmap, non in linee di
+      // reparto: il ruolo lo diceva solo il colore del pallino, che ora è quello
+      // della squadra. Quindi lo si scrive sulla pastiglia del nome.
+      showRole
       footprint={sel?.footprint ?? null}
     />
   );
@@ -1613,6 +1753,10 @@ function PitchCanvas({
   dots,
   selectedId,
   onSelect,
+  onPickRole,
+  kits,
+  lockedIds,
+  showRole,
   footprint,
 }: {
   dots: Array<
@@ -1621,6 +1765,10 @@ function PitchCanvas({
   >;
   selectedId: number | null;
   onSelect: (id: number) => void;
+  onPickRole: (role: PlayerRole) => void;
+  kits: { outfield: Kit; keeper: Kit };
+  lockedIds: Set<number>;
+  showRole: boolean;
   footprint: Record<string, number> | null;
 }) {
   const selMax = footprint ? Math.max(0.0001, ...Object.values(footprint)) : 1;
@@ -1701,22 +1849,30 @@ function PitchCanvas({
         : null}
       {dots.map((d) =>
         'empty' in d ? (
-          // A place waiting to be filled. Dashed and unlabelled, in the line of the
-          // role it was vacated from, so the eleven stay eleven and it is obvious
-          // where the missing man belongs.
-          <div
+          /* IL POSTO VUOTO, E ADESSO SI TOCCA.
+           *
+           *  Era un `div` con un `title`: il punto che più di ogni altro sulla
+           *  pagina dice «qui va messo qualcuno» era l'unico elemento inerte, e il
+           *  suo testo di aiuto sul telefono non esisteva nemmeno. Adesso è un
+           *  pulsante che apre chi PUÒ occuparlo — solo il suo ruolo, e solo quelli
+           *  che le regole lascerebbero entrare.
+           *
+           *  E la sagoma è una maglia vuota, non un cerchio col più: una maglia
+           *  tratteggiata si legge come un posto in squadra senza bisogno che
+           *  nessuno lo scriva. */
+          <button
             key={`hole-${d.role}-${d.top}`}
-            className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+            type="button"
+            onClick={() => onPickRole(d.role)}
+            aria-label={`Manca un ${ROLE_WORD[d.role]}: scegli chi entra`}
+            className="absolute flex min-h-[44px] min-w-[44px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center"
             style={place(d.left, d.top)}
-            title={`Manca un ${ROLE_WORD[d.role]}`}
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-dashed border-white/80 bg-surface/15 text-[9px] font-bold text-white">
-              +
-            </span>
-            <span className="mt-0.5 rounded bg-black/40 px-1 text-[8px] font-semibold leading-tight text-white/90">
+            <Jersey dashed size={30} />
+            <span className="mt-0.5 rounded bg-black/45 px-1 text-[8px] font-semibold leading-tight text-white/90">
               {ROLE_LABEL_SHORT[d.role]}
             </span>
-          </div>
+          </button>
         ) : (
           renderDot(d)
         ),
@@ -1725,23 +1881,48 @@ function PitchCanvas({
   );
 
   function renderDot({ p, left, top, isGk }: { p: TeamLineupPlayer; left: number; top: number; isGk: boolean }) {
+    const nm = p.next_match;
+    const locked = lockedIds.has(p.player_id);
+    const done = locked && nm?.status === 'finished';
+    const live = locked && nm?.status === 'live';
+    const sel = selectedId === p.player_id;
     return (
         <button
           key={p.player_id}
           onClick={() => onSelect(p.player_id)}
-          className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+          className="absolute flex min-h-[44px] min-w-[44px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center"
           style={place(left, top)}
           title={p.name}
+          aria-pressed={sel}
         >
           <span
-            className={`flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold text-white shadow-md ${DOT_COLOR[p.role]} ${
-              isGk ? 'ring-2 ring-warn/40' : ''
-            } ${selectedId === p.player_id ? 'ring-2 ring-line ring-offset-1' : ''}`}
+            className={clsx(
+              'relative flex items-center justify-center rounded-full',
+              // La selezione è un alone attorno alla maglia: un anello quadrato
+              // attorno a una sagoma non rettangolare si legge male.
+              sel && 'shadow-[0_0_0_3px_rgba(255,255,255,0.9)] rounded-lg',
+              // Chi ha finito è spento. Non nascosto: c'è ancora, e conta.
+              done && 'opacity-55 saturate-50',
+            )}
           >
-            {initials(p.name)}
+            <Jersey kit={isGk ? kits.keeper : kits.outfield} label={initials(p.name)} size={30} />
+            {live ? (
+              <span
+                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-live ring-2 ring-white"
+                aria-hidden
+              />
+            ) : locked && !done ? (
+              <span
+                className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/70 text-[7px] leading-none text-white"
+                aria-hidden
+              >
+                ⏱
+              </span>
+            ) : null}
           </span>
-          <span className="mt-0.5 max-w-[64px] truncate rounded bg-black/40 px-1 text-[8px] font-semibold leading-tight text-white">
-            {p.name.split(/\s+/).pop()}
+          <span className="mt-0.5 flex max-w-[70px] items-center gap-0.5 rounded bg-black/45 px-1 text-[8px] font-semibold leading-tight text-white">
+            {showRole ? <span className="opacity-80">{ROLE_LABEL_SHORT[p.role]}</span> : null}
+            <span className="truncate">{p.name.split(/\s+/).pop()}</span>
           </span>
         </button>
     );
