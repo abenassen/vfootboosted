@@ -203,6 +203,31 @@ def has_saved_lineup(index: set[tuple[str, str]], real_matchday: int, team_id: i
             or (md, f"team{team_id}") in index)
 
 
+def lineup_still_owned(snap, owned: set[int]):
+    """La formazione di uno snapshot, ripulita di chi non e' piu' in rosa.
+
+    Ritorna ``(gk, titolari, panchina, usciti)``. Serve alla formazione EREDITATA
+    — quella della giornata prima, riproposta a chi non ha ancora schierato — e
+    applica la stessa regola che il punteggio applica gia' al suo ripiego: chi e'
+    stato venduto sparisce e lascia un posto vuoto, non viene rimpiazzato d'ufficio.
+
+    Il posto vuoto non e' una mancanza di questa funzione, e' la risposta giusta:
+    scegliere un sostituto al posto dell'allenatore significherebbe schierare per
+    lui un giocatore che non ha scelto, e per di piu' in silenzio. La pagina il
+    buco lo mostra e lo fa toccare.
+    """
+    gk = int(snap.gk_player_id) if snap.gk_player_id else None
+    outfield = [int(x) for x in (snap.starter_player_ids or [])]
+    bench = [int(x) for x in (snap.bench_player_ids or [])]
+    gone = [p for p in ([gk] if gk else []) + outfield + bench if p not in owned]
+    return (
+        gk if (gk is not None and gk in owned) else None,
+        [p for p in outfield if p in owned],
+        [p for p in bench if p in owned],
+        gone,
+    )
+
+
 def read_previous_lineup(league_id: int, real_matchday: int, team_id: int, competition_id: int | None):
     """The most recent saved lineup from a matchday BEFORE this one (the 'previous'
     fallback for a team that didn't set one). Returns None if there is no earlier lineup."""
@@ -443,13 +468,32 @@ def team_lines_for_conclusion(league, team, competition_id, real_matchday, index
                 return [], [], {"source": "forfait", "stale": 0}  # nothing earlier -> forfait
             source = "previous"
         else:
+            # NESSUNA DECISIONE DA PRENDERE, quasi mai piu'.
+            #
+            # Chi non ha schierato viene trattato come chi ha mandato la formazione
+            # della giornata precedente — che e' anche quella che la sua pagina gli
+            # mostrava, con scritto «se non la tocchi, gioca questa». Prima qui si
+            # tornava «missing», la conclusione della giornata si fermava e l'admin
+            # doveva scegliere a mano, squadra per squadra, fra forfait e formazione
+            # precedente: una decisione presa a voti gia' noti, da una persona, su
+            # ogni singolo caso. Ora e' una regola annunciata prima.
+            #
+            # Il forfait resta, ma come scavalco esplicito (`resolution ==
+            # "forfait"`), per la squadra che ha davvero abbandonato. Cambia chi
+            # porta l'onere: prima l'admin decideva sempre, ora solo nel caso
+            # eccezionale.
+            #
+            # «missing» sopravvive per l'unico caso in cui non c'e' proprio niente
+            # da ereditare: la prima giornata di chi non ha mai schierato.
             prev = read_previous_lineup(league.id, real_matchday, team.id, competition_id)
-            prev_ids = _snap_all_ids(prev)
-            return None, None, {
-                "source": "missing",
-                "has_previous_lineup": prev is not None,
-                "previous_lineup_stale": sum(1 for p in prev_ids if p not in owned),
-            }
+            if prev is None:
+                return None, None, {
+                    "source": "missing",
+                    "has_previous_lineup": False,
+                    "previous_lineup_stale": 0,
+                }
+            snap = prev
+            source = "previous"
 
     gk = int(snap.gk_player_id) if snap.gk_player_id else None
     outfield = [int(x) for x in (snap.starter_player_ids or [])]
@@ -461,7 +505,16 @@ def team_lines_for_conclusion(league, team, competition_id, real_matchday, index
     starters, bench_lines = compose_team_lines(gk, outfield, bench, index, role_map,
                                                pending, office, vacant,
                                                names_for(all_ids))
-    return starters, bench_lines, {"source": source, "stale": len(vacant)}
+    # Il vincolo sui difensori vale per chi ha TOCCATO la formazione a giornata
+    # cominciata, e solo dove il modificatore c'e'. Non per la formazione ereditata
+    # («previous»): quel flag riguarda la giornata da cui viene, e per QUESTA il suo
+    # allenatore non ha mosso niente, quindi non ha usato nessuna informazione.
+    def_locked = bool(
+        source == "lineup"
+        and getattr(snap, "edited_after_kickoff", False)
+        and league.defense_bonus_enabled
+    )
+    return starters, bench_lines, {"source": source, "stale": len(vacant), "def_locked": def_locked}
 
 
 def score_composed_fixture(
@@ -469,6 +522,7 @@ def score_composed_fixture(
     away_lines: tuple[list[dict], list[dict]],
     ruleset: Ruleset,
     fixture_meta: dict,
+    def_locked: tuple[bool, bool] = (False, False),
 ) -> dict:
     """Score both composed teams and return the payload. Pure given the line lists.
 
@@ -476,8 +530,8 @@ def score_composed_fixture(
     conta: viaggia nel meta e non come argomento a parte perché è un dato della
     partita, come il turno e la fase, e ogni chiamante ce l'ha già in mano.
     """
-    home = score_team(home_lines[0], home_lines[1], ruleset)
-    away = score_team(away_lines[0], away_lines[1], ruleset)
+    home = score_team(home_lines[0], home_lines[1], ruleset, def_locked=def_locked[0])
+    away = score_team(away_lines[0], away_lines[1], ruleset, def_locked=def_locked[1])
     resolve_fixture(home, away, ruleset, bool(fixture_meta.get("home_advantage")))
     return build_fixture_payload(fixture_meta, home, away, ruleset)
 
@@ -600,6 +654,8 @@ def live_scorer(league, md, ruleset):
              "competition_id": fx.competition_id,
              "home_advantage": fx.home_advantage,
              "home_team": fx.home_team.name, "away_team": fx.away_team.name},
+            def_locked=(bool(lines["home"][2].get("def_locked")),
+                        bool(lines["away"][2].get("def_locked"))),
         )
         home_unstable = _mark_unstable(payload["home"], unstable)
         away_unstable = _mark_unstable(payload["away"], unstable)
@@ -694,7 +750,9 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
             if meta["source"] == "missing":
                 missing_teams[team.id] = {"team_id": team.id, "name": team.name, **meta}
             else:
-                team_lines[(fx.id, side)] = (starters, bench)
+                # Il meta viaggia con le righe: `def_locked` si decide leggendo lo
+                # snapshot, e la seconda passata lo snapshot non ce l'ha piu'.
+                team_lines[(fx.id, side)] = (starters, bench, meta)
 
     if missing_teams and not force:
         return {"updated": 0, "stage_ids": set(), "missing_teams": list(missing_teams.values()),
@@ -727,14 +785,14 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
     updated = 0
     stage_ids: set[int] = set()
     for fx in fixtures:
-        home_ln = team_lines.get((fx.id, "home")) or ([], [])
-        away_ln = team_lines.get((fx.id, "away")) or ([], [])
-        payload = score_composed_fixture(home_ln, away_ln, ruleset, {
+        home_ln = team_lines.get((fx.id, "home")) or ([], [], {})
+        away_ln = team_lines.get((fx.id, "away")) or ([], [], {})
+        payload = score_composed_fixture((home_ln[0], home_ln[1]), (away_ln[0], away_ln[1]), ruleset, {
             "fixture_id": fx.id, "fantasy_round": fx.round_no, "real_matchday": md.real_matchday,
             "stage": fx.stage_id, "competition_id": fx.competition_id,
             "home_advantage": fx.home_advantage,
             "home_team": fx.home_team.name, "away_team": fx.away_team.name,
-        })
+        }, def_locked=(bool(home_ln[2].get("def_locked")), bool(away_ln[2].get("def_locked"))))
         fx.home_total = float(payload["home_goals"])
         fx.away_total = float(payload["away_goals"])
         fx.status = FantasyFixture.STATUS_FINISHED

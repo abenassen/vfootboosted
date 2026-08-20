@@ -5476,6 +5476,7 @@ class LeagueTeamLineupView(APIView):
         # the spatial guess, so a roster is never roleless.
         is_classic = league.mode == FantasyLeague.MODE_CLASSIC
         frozen_roles: dict[int, str] = {}
+        seed_roles: dict[int, str] = {}
         if is_classic:
             frozen_roles = {
                 lpr.player_id: _CLASSIC_ROLE_TO_LINEUP.get(lpr.role, "MID")
@@ -5508,12 +5509,29 @@ class LeagueTeamLineupView(APIView):
                 if league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER
                 else matchday_state.lineup_lock_at(league.reference_season_id, matchday)
             )
+        # IL NUMERO DI DIFENSORI E' CONGELATO, e da quando. Lo specchio della
+        # regola che il salvataggio applica: la pagina deve poter spegnere le
+        # pastiglie del modulo e dirlo PRIMA del tocco, invece di lasciar premere e
+        # rispondere 409 dopo.
+        defence_locked = bool(
+            is_classic
+            and league.defense_bonus_enabled
+            and league.enforce_lineup_deadline
+            and league.reference_season_id is not None
+            and (lambda k: k is not None and k <= timezone.now())(
+                matchday_state.lineup_lock_at(league.reference_season_id, matchday))
+        )
         lineup_lock = {
             "mode": league.lineup_lock_mode,
             "enforced": bool(league.enforce_lineup_deadline),
             "closes_at": lock_closes_at.isoformat() if lock_closes_at else None,
             "closed": bool(lock_closes_at is not None and lock_closes_at <= timezone.now()),
             "locked_player_ids": sorted(locked_pids),
+            "defence_locked": defence_locked,
+            # Quanti difensori sono fissati. Si legge dalla formazione che fa da
+            # base — la propria salvata, o quella ereditata — perche' e' con quella
+            # che il salvataggio confronta. Null quando non c'e' niente di fissato.
+            "defence_count": None,
         }
 
         roster = []
@@ -5559,6 +5577,55 @@ class LeagueTeamLineupView(APIView):
         snap = SavedLineupSnapshot.objects.filter(
             league_id=str(league_id), matchday_id=str(matchday), lineup_id=lineup_key
         ).first()
+
+        # LA FORMAZIONE EREDITATA.
+        #
+        # Chi non ha ancora schierato per questa giornata non riparte da zero: si
+        # ritrova quella della giornata precedente, e da li' cambia quel che vuole.
+        # Non e' una comodita', e' la regola — al punteggio «vale l'ultima» esiste
+        # gia' (v. `read_previous_lineup`, il ripiego che l'admin sceglie a mano
+        # quando qualcuno non ha schierato): era la pagina di inserimento a fingere
+        # di no, proponendo ogni settimana un 4-4-2 fresco per forma e buttando via
+        # il lavoro fatto la settimana prima. Da qui viene il «ogni volta a far
+        # sali e scendi con i giocatori» degli utenti.
+        #
+        # Chi non e' piu' in rosa non viene rimpiazzato: lascia un posto vuoto, che
+        # e' la stessa cosa che fa il punteggio col suo ripiego, e la pagina lo
+        # mostra da toccare invece di scegliere un sostituto al posto del suo
+        # allenatore.
+        inherited_from = None
+        dropped_roles: list[str] = []
+        if snap is None and is_own:
+            from vfoot.services.classic_matchday_scoring import (
+                lineup_still_owned,
+                owned_player_ids,
+                read_previous_lineup,
+                role_map_for,
+            )
+
+            prev = read_previous_lineup(league_id, matchday, team.id, competition_id)
+            if prev is not None:
+                owned = owned_player_ids(team)
+                gk_i, xi_i, bench_i, gone = lineup_still_owned(prev, owned)
+                if gk_i or xi_i:
+                    try:
+                        inherited_from = int(prev.matchday_id)
+                    except (TypeError, ValueError):
+                        inherited_from = None
+                    # Solo i buchi degli UNDICI: chi e' uscito dalla panchina non
+                    # lascia un posto da riempire, la panchina e' tutti gli altri.
+                    gone_xi = [p for p in gone
+                               if p in ([int(prev.gk_player_id)] if prev.gk_player_id else [])
+                               + [int(x) for x in (prev.starter_player_ids or [])]]
+                    roles = role_map_for(league, gone_xi)
+                    dropped_roles = [roles.get(p, "MID") for p in gone_xi]
+                    snap = SavedLineupSnapshot(
+                        gk_player_id=str(gk_i) if gk_i else None,
+                        starter_player_ids=xi_i,
+                        bench_player_ids=bench_i,
+                        starter_backups=[],
+                    )
+
         saved_lineup = (
             {
                 "gk_player_id": int(snap.gk_player_id) if snap.gk_player_id else None,
@@ -5569,6 +5636,16 @@ class LeagueTeamLineupView(APIView):
             if snap
             else None
         )
+        if defence_locked and saved_lineup:
+            base_xi = ([saved_lineup["gk_player_id"]] if saved_lineup["gk_player_id"] else []) + [
+                int(x) for x in (saved_lineup["starter_player_ids"] or [])
+            ]
+            base_roles = {
+                pid: (frozen_roles.get(pid)
+                      or _CLASSIC_ROLE_TO_LINEUP.get(seed_roles.get(pid, ""), "MID"))
+                for pid in base_xi
+            }
+            lineup_lock["defence_count"] = sum(1 for r in base_roles.values() if r == "DEF")
 
         return Response(
             {
@@ -5609,6 +5686,16 @@ class LeagueTeamLineupView(APIView):
                                            and ref_cs is not None
                                            and stats_cs.id == ref_cs.id),
                 "saved_lineup": saved_lineup if is_own else None,
+                # DA DOVE VIENE quello che si sta guardando: la propria formazione
+                # salvata, quella ereditata dalla giornata prima, o niente. La
+                # pagina lo deve dire — «se non la tocchi, gioca questa» e' una
+                # frase che si puo' scrivere solo sapendo qual e' il caso.
+                "lineup_source": {
+                    "kind": ("previous" if inherited_from is not None
+                             else "saved" if saved_lineup else "none"),
+                    "from_matchday": inherited_from,
+                    "vacant_roles": dropped_roles,
+                },
                 "lineup_lock": lineup_lock,
             }
         )
@@ -5737,6 +5824,37 @@ class LeagueTeamLineupSaveView(APIView):
             for s in SavedLineupSnapshot.objects.filter(
                 league_id=str(league_id), matchday_id=str(matchday), lineup_id__in=keys)
         }
+        # E il «prima» di chi non ha mai salvato e' la giornata precedente, come
+        # nella pagina che gliel'ha mostrata. Senza questo il controllo dei
+        # congelati confronta con un dizionario vuoto: ogni giocatore gia' sceso in
+        # campo risulta provenire da FUORI, quindi «non puo' entrare in
+        # formazione» — e siccome la pagina manda tutti e venticinque i giocatori,
+        # l'invio veniva rifiutato in blocco. Chi non aveva schierato era l'unico a
+        # non poter piu' schierare, che e' il contrario del senso della scadenza
+        # per giocatore.
+        if per_player:
+            from vfoot.services.classic_matchday_scoring import (
+                lineup_still_owned,
+                owned_player_ids,
+                read_previous_lineup,
+            )
+
+            owned_now = None
+            for cid, key in zip(target_comp_ids, keys):
+                if key in previous:
+                    continue
+                prev_snap = read_previous_lineup(league_id, md_int, team.id, cid)
+                if prev_snap is None:
+                    continue
+                if owned_now is None:
+                    owned_now = owned_player_ids(team)
+                gk_p, xi_p, bench_p, _ = lineup_still_owned(prev_snap, owned_now)
+                previous[key] = {
+                    "gk_player_id": str(gk_p) if gk_p else None,
+                    "starter_player_ids": xi_p,
+                    "bench_player_ids": bench_p,
+                }
+
         locked_ids: set[int] = set()
 
         if per_player:
@@ -5766,8 +5884,84 @@ class LeagueTeamLineupSaveView(APIView):
                         status=status.HTTP_409_CONFLICT,
                     )
 
+        # --- IL NUMERO DI DIFENSORI, DAL PRIMO CALCIO D'INIZIO IN POI ----------
+        #
+        # La falla: schiero una difesa a quattro per il modificatore, due difensori
+        # prendono un voto basso, e a quel punto SO che il modificatore non arrivera'
+        # — quindi mi conviene togliere un difensore che non ha ancora giocato e
+        # mettere un attaccante. E' una scommessa disdetta a risultato parziale
+        # noto, e funziona anche al contrario: aggiungere il quarto difensore dopo
+        # aver visto due bei voti.
+        #
+        # Il vincolo e' sul NUMERO DI DIFENSORI e non sul modulo, perche' il
+        # modificatore guarda solo quelli (i tre voti piu' alti dei difensori piu'
+        # il portiere): da 4-3-3 a 4-4-2 si resta liberi, che e' un cambio che non
+        # sposta niente di cio' che il modificatore misura. E vale solo dove il
+        # modificatore c'e': una regola senza il suo motivo e' peggio di una regola
+        # che varia con l'impostazione.
+        first_kick = (
+            matchday_state.lineup_lock_at(league.reference_season_id, md_int)
+            if league.reference_season_id is not None else None
+        )
+        round_started = bool(
+            league.enforce_lineup_deadline
+            and first_kick is not None
+            and first_kick <= timezone.now()
+        )
+        if round_started and league.mode == FantasyLeague.MODE_CLASSIC and league.defense_bonus_enabled:
+            from vfoot.services.classic_matchday_scoring import role_map_for
+
+            new_xi = ([int(gk)] if gk else []) + outfield_ids
+            for key in keys:
+                prev = previous.get(key)
+                if not prev:
+                    continue  # nessuna base da conservare: il primo invio la fissa
+                prev_xi = ([int(prev["gk_player_id"])] if prev.get("gk_player_id") else []) + [
+                    int(x) for x in (prev.get("starter_player_ids") or [])
+                ]
+                rmap = role_map_for(league, sorted({*new_xi, *prev_xi}))
+                before = sum(1 for p in prev_xi if rmap.get(p) == "DEF")
+                after = sum(1 for p in new_xi if rmap.get(p) == "DEF")
+                if before != after:
+                    return Response(
+                        {"detail": "Il numero di difensori non può più cambiare.",
+                         "errors": [
+                             f"La giornata è cominciata: avevi schierato {before} "
+                             f"difensori e non se ne può più cambiare il numero "
+                             f"(ne stai schierando {after}). Puoi ancora cambiare "
+                             f"un difensore con un altro difensore."]},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+        def _changed(prev: dict | None, now: dict) -> bool:
+            """Questo invio cambia qualcosa rispetto a quello di prima?
+
+            L'ORDINE DELLA PANCHINA CONTA. Mettere il proprio miglior difensore in
+            cima a voti visti non tocca ne' gli undici ne' chi siede in panchina, ed
+            e' esattamente la leva del secondo verso del vincolo: un difensore che
+            entra al posto di un centrocampista s.v. porta a cinque i difensori con
+            voto, e i tre migliori buttano fuori i due voti brutti.
+
+            Gli undici invece si confrontano come INSIEME: il loro ordine lo deriva
+            il server (P-D-C-A), quindi non e' una scelta di nessuno.
+            """
+            if prev is None:
+                return True
+            if str(prev.get("gk_player_id") or "") != str(now.get("gk_player_id") or ""):
+                return True
+            if ({int(x) for x in (prev.get("starter_player_ids") or [])}
+                    != {int(x) for x in (now.get("starter_player_ids") or [])}):
+                return True
+            return ([int(x) for x in (prev.get("bench_player_ids") or [])]
+                    != [int(x) for x in (now.get("bench_player_ids") or [])])
+
         for cid, key in zip(target_comp_ids, keys):
             payload = dict(defaults)
+            # Il fatto si registra sempre; e' il punteggio che decide se conta (lo
+            # fa solo dove il modificatore e' acceso). Un Salva che non cambia
+            # niente non lo accende: chi apre la pagina a giornata cominciata e non
+            # tocca nulla non ha usato nessuna informazione.
+            payload["edited_after_kickoff"] = round_started and _changed(previous.get(key), defaults)
             if role_of:
                 # The XI order is not the manager's — the page groups the eleven by
                 # role and never offers a way to reorder them — so it is DERIVED

@@ -89,6 +89,15 @@ export interface TeamLineupContext {
     bench_player_ids: number[];
     starter_backups: unknown[];
   } | null;
+  /** Da dove viene quello che `saved_lineup` contiene: la formazione salvata per
+   *  questa giornata, quella EREDITATA dalla precedente (chi non ha ancora
+   *  schierato riparte da li', non da zero), o niente. `vacant_roles` sono i posti
+   *  rimasti scoperti perché quei giocatori non sono più in rosa. */
+  lineup_source?: {
+    kind: 'saved' | 'previous' | 'none';
+    from_matchday: number | null;
+    vacant_roles: PlayerRole[];
+  };
   // The deadline as it applies to THIS matchday. `closes_at` is the moment there is
   // nothing left to decide: the first kickoff under the matchday-wide lock, the last
   // one under the per-player lock.
@@ -98,6 +107,11 @@ export interface TeamLineupContext {
     closes_at: string | null;
     closed: boolean;
     locked_player_ids: number[];
+    /** Dal primo calcio d'inizio, in una lega col modificatore difesa, il NUMERO
+     *  di difensori schierati non cambia piu': ne' inviando, ne' per sostituzione.
+     *  `defence_count` è quello fissato, dalla formazione che fa da base. */
+    defence_locked?: boolean;
+    defence_count?: number | null;
   };
 }
 

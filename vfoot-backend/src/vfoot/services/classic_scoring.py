@@ -203,7 +203,8 @@ def _fill_unresolved(s_by: dict, unresolved: list[int], vote: float) -> list[int
 # --------------------------------------------------------------------------- #
 # Per-team scoring.                                                            #
 # --------------------------------------------------------------------------- #
-def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
+def score_team(starters: list[dict], bench: list[dict], rs: Ruleset,
+               def_locked: bool = False) -> dict:
     """Score one fantasy team for one matchday.
 
     ``starters``/``bench`` are ordered lists of line dicts (bench in the manager's
@@ -222,8 +223,12 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
     # he is simply never eligible, which he already is by not being in ``voted``.
     frozen = {pid for pid in s_ids if s_by[pid].get("pending")}
 
+    # ``def_locked``: la formazione e' stata cambiata a giornata cominciata, in una
+    # lega col modificatore difesa. Da li' in poi la panchina non puo' piu' spostare
+    # il numero di difensori in campo — v. apply_classic_substitutions.
     res = apply_classic_substitutions(s_ids, b_ids, roles, voted,
-                                      max_subs=rs.max_substitutions, frozen=frozen)
+                                      max_subs=rs.max_substitutions, frozen=frozen,
+                                      def_locked=def_locked)
 
     name = {l["player_id"]: l.get("name", str(l["player_id"])) for l in starters + bench}
     subs = []

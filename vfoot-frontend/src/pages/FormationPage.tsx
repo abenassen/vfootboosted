@@ -465,9 +465,12 @@ export default function FormationPage() {
         setFrozenSlots(slots);
         setStarterIds(starters);
         setBenchOrder(pinFrozen(orderBench(d.roster, starters, saved?.bench_player_ids ?? []), slots));
-        // A freshly loaded lineup has no vacated places: whatever it is short of
-        // was never chosen, so there is no role to attribute the gap to.
-        setVacancies([]);
+        // Una formazione appena caricata non ha posti lasciati liberi da nessuno —
+        // tranne uno: quella EREDITATA dalla giornata prima, a cui puo' mancare
+        // qualcuno che nel frattempo e' stato venduto. Quel buco ha un ruolo, e il
+        // ruolo va mostrato: e' l'unica cosa che dice all'allenatore che c'e'
+        // qualcosa da sistemare, e dove.
+        setVacancies(d.lineup_source?.vacant_roles ?? []);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -732,15 +735,31 @@ export default function FormationPage() {
     setBenchOrder((b) => reorderBench(pinFrozen(orderBench(ctx.roster, starterIds, b), frozenSlots), id, 0));
   };
 
+  /** IL NUMERO DI DIFENSORI, CONGELATO DAL PRIMO CALCIO D'INIZIO.
+   *
+   *  Specchio della regola che il salvataggio applica (v. league_views): qui non
+   *  decide niente, serve a dirlo PRIMA — spegnere le pastiglie del modulo e
+   *  scriverlo nella barra, invece di lasciar premere Salva e rispondere 409. */
+  const defenceLocked = !!lock?.defence_locked && lock.defence_count != null;
+  const defenceNow = starterIds.filter((id) => byId.get(id)?.role === 'DEF').length;
+  const defenceBlock =
+    defenceLocked && defenceNow !== lock!.defence_count
+      ? `La giornata è cominciata: i difensori schierati erano ${lock!.defence_count} e `
+        + `non se ne può più cambiare il numero (adesso ne hai ${defenceNow}). `
+        + 'Puoi ancora cambiare un difensore con un altro difensore.'
+      : null;
+
   const starterRoles = starterIds.map((id) => byId.get(id)?.role).filter((r): r is PlayerRole => !!r);
   const classicErrors = isClassic && constraints ? validateClassic(starterRoles, constraints) : [];
   const gkOk = gkStarters.length === 1;
-  const canSave = starterIds.length === XI && gkOk && classicErrors.length === 0 && !closed;
+  const canSave =
+    starterIds.length === XI && gkOk && classicErrors.length === 0 && !closed && !defenceBlock;
   const saveBlock = canSave
     ? null
     : closed
       ? 'La giornata è chiusa: la formazione non è più modificabile.'
-      : classicErrors[0] ??
+      : defenceBlock ??
+      classicErrors[0] ??
       (starterIds.length !== XI
         ? `Servono ${XI} titolari (ne hai ${starterIds.length}).`
         : gkStarters.length === 0
@@ -899,6 +918,22 @@ export default function FormationPage() {
                     : `La formazione si blocca al primo calcio d'inizio della giornata: ${fmtDeadline(lock.closes_at)}.`}
               </div>
             ) : null}
+            {/* «SE NON LA TOCCHI, GIOCA QUESTA». Detto qui perche' e' vero:
+                la formazione della giornata prima e' anche quella che il punteggio
+                usa per chi non schiera, e senza scriverlo la pagina sembrerebbe
+                proporre una bozza qualunque. */}
+            {ctx.lineup_source?.kind === 'previous' ? (
+              <div className="mt-1 text-[11px] font-semibold text-ink-soft">
+                Ripresa dalla giornata {ctx.lineup_source.from_matchday}: se non la tocchi, gioca questa.
+                {ctx.lineup_source.vacant_roles.length ? (
+                  <span className="text-bad">
+                    {' '}Mancano {ctx.lineup_source.vacant_roles.length}{' '}
+                    {ctx.lineup_source.vacant_roles.length === 1 ? 'giocatore' : 'giocatori'} che non
+                    {ctx.lineup_source.vacant_roles.length === 1 ? ' è' : ' sono'} più in rosa.
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             {/* Which round the numbers on this page describe. It used to add "nessuna
                 informazione futura" in warning amber — a note to ourselves from when
                 the season was a replay and the worry was leakage. To a manager it
@@ -978,14 +1013,24 @@ export default function FormationPage() {
                   <button
                     key={moduleName(m)}
                     type="button"
-                    onClick={() => applyModule(m)}
+                    onClick={() =>
+                      defenceLocked && m[0] !== lock!.defence_count
+                        ? setModuleNote(
+                            `La giornata è cominciata: i difensori restano ${lock!.defence_count}. `
+                            + 'Puoi ancora cambiare centrocampo e attacco.',
+                          )
+                        : applyModule(m)}
                     aria-pressed={active}
+                    aria-disabled={defenceLocked && m[0] !== lock!.defence_count ? true : undefined}
                     disabled={closed}
                     className={clsx(
                       'shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold tabular-nums transition',
                       active
                         ? 'border-brand bg-brand text-on-brand'
                         : 'border-line bg-surface text-ink-soft hover:bg-surface-2',
+                      // Spento, non nascosto: sparire non spiega niente, e il tocco
+                      // sul bottone spento porta il motivo qui sotto.
+                      !active && defenceLocked && m[0] !== lock!.defence_count && 'opacity-40',
                       closed && 'cursor-not-allowed opacity-50',
                     )}
                   >
@@ -1252,6 +1297,13 @@ export default function FormationPage() {
               <div className="mt-0.5 text-[11px] font-semibold leading-snug text-good">{toast}</div>
             ) : saveBlock ? (
               <div className="mt-0.5 text-[11px] font-semibold leading-snug text-bad">{saveBlock}</div>
+            ) : defenceLocked ? (
+              /* Il prezzo della modifica, detto QUANDO si modifica e non a
+                 punteggi fatti: un difensore senza voto che nessun difensore in
+                 panchina puo' coprire diventa un buco. */
+              <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">
+                Giornata cominciata: in difesa entrano solo difensori.
+              </div>
             ) : null}
           </div>
           <Button variant="secondary" size="sm" onClick={onSuggest} className="shrink-0">
