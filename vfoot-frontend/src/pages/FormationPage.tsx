@@ -1139,6 +1139,21 @@ export default function FormationPage() {
             {moduleNote ? (
               <div className="mt-1 text-[11px] font-semibold text-bad">{moduleNote}</div>
             ) : null}
+            {/* LA REGOLA PER INTERO, dove c'e' spazio per dirla. La barra in fondo
+                ha una riga sola e la usa per il momento che conta — l'atto di
+                salvare; qui si spiega anche COME funziona e cosa costa, che e' la
+                parte che nessuno indovina: un difensore senza voto che nessun
+                difensore in panchina puo' coprire non viene tappato da un
+                centrocampista, resta un buco. */}
+            {defenceLocked ? (
+              <div className="mt-1.5 rounded-lg bg-warn-bg px-2.5 py-1.5 text-[11px] leading-snug text-warn">
+                <b>La giornata è cominciata: i difensori restano {lock!.defence_count}.</b>{' '}
+                Se modifichi e salvi, il vincolo vale anche sui cambi: un difensore senza voto
+                potrà essere rimpiazzato solo da un difensore, e nessun difensore potrà entrare
+                al posto di un altro ruolo. Se in panchina non c'è un difensore con voto, quel
+                posto resta vuoto.
+              </div>
+            ) : null}
           </div>
         ) : null}
         {manyCompetitions ? (
@@ -1413,11 +1428,15 @@ export default function FormationPage() {
                 Salvata. Niente di nuovo da mandare.
               </div>
             ) : defenceLocked ? (
-              /* Il prezzo della modifica, detto QUANDO si modifica e non a
-                 punteggi fatti: un difensore senza voto che nessun difensore in
-                 panchina puo' coprire diventa un buco. */
-              <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">
-                Giornata cominciata: in difesa entrano solo difensori.
+              /* IL PREZZO DELLA MODIFICA, detto quando si modifica e non a
+                 punteggi fatti. E detto per intero: «in difesa entrano solo
+                 difensori» si poteva leggere come una regola sull'undici che si
+                 sta componendo — dove sarebbe ovvia e inutile — mentre riguarda i
+                 CAMBI, cioe' una cosa che succedera' dopo, quando questa pagina
+                 sara' chiusa da un pezzo. */
+              <div className="mt-0.5 text-[11px] leading-snug text-warn">
+                Salvando, i cambi dalla panchina non potranno più cambiare quanti
+                difensori vanno a voto.
               </div>
             ) : null}
           </div>
