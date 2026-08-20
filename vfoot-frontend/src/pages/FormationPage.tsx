@@ -40,6 +40,16 @@ const ROLE_CHIP: Record<PlayerRole, string> = {
 const ROLE_ORDER: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 }; // P, D, C, A
 const ROLES: PlayerRole[] = ['GK', 'DEF', 'MID', 'ATT'];
 
+/** TUTTI I MODULI LEGALI, che sono otto e non un numero a caso: sono esattamente
+ *  le terne che rispettano i vincoli classic (difesa 3–5, centrocampo 0–5,
+ *  attacco 1–3, dieci di movimento). Con la rosa 3-8-8-6 sono sempre tutti
+ *  raggiungibili, quindi nessuno di questi bottoni è mai una porta chiusa per
+ *  colpa della rosa — solo, eventualmente, per colpa dei congelati. */
+const MODULES: Array<[number, number, number]> = [
+  [3, 4, 3], [3, 5, 2], [4, 3, 3], [4, 4, 2], [4, 5, 1], [5, 2, 3], [5, 3, 2], [5, 4, 1],
+];
+const moduleName = (m: [number, number, number]) => m.join('-');
+
 // Mirror of vfoot/services/formation_rules.validate_classic_lineup — the server
 // validates identically; this is the live UI guide. Returns Italian violations.
 function validateClassic(roles: PlayerRole[], c: ClassicConstraints): string[] {
@@ -281,6 +291,9 @@ export default function FormationPage() {
   const [selected, setSelected] = useState<number | null>(null);
   // Il posto vuoto che è stato toccato: apre l'elenco di chi può occuparlo.
   const [picking, setPicking] = useState<PlayerRole | null>(null);
+  // Perché un cambio di modulo è stato rifiutato. Non passa da `refused`, che è
+  // ancorato a una riga: questo riguarda la squadra intera.
+  const [moduleNote, setModuleNote] = useState<string | null>(null);
   // Why the last attempted promotion was refused, pinned to the row that was
   // clicked — the explanation belongs where the finger is, not in the header.
   const [refused, setRefused] = useState<{ player_id: number; reason: string } | null>(null);
@@ -734,6 +747,60 @@ export default function FormationPage() {
           ? 'Manca il portiere.'
           : 'Un solo portiere fra i titolari.');
 
+  /** IL MODULO COME SI LEGGE ADESSO — dagli undici in campo, buchi compresi.
+   *
+   *  Non c'è nessun modulo memorizzato da nessuna parte, ed è deliberato: se
+   *  esistesse un'intenzione salvata potrebbe divergere dai fatti, e allora
+   *  l'etichetta mentirebbe. Le pastiglie qui sotto non sono una modalità, sono
+   *  un'AZIONE — «portami a 4-4-2» — e un attimo dopo il modulo torna a essere
+   *  soltanto quello che si vede in campo. */
+  const lineCount = (role: PlayerRole) =>
+    starterIds.filter((id) => byId.get(id)?.role === role).length
+    + vacancies.filter((v) => v === role).length;
+  const currentModule: [number, number, number] = [lineCount('DEF'), lineCount('MID'), lineCount('ATT')];
+
+  /** Portare la squadra a un modulo, in modo conservativo: si TOGLIE l'eccedenza
+   *  e si aprono i posti mancanti, non si aggiunge nessuno da sé. Chi esce è
+   *  l'ultimo della linea — che essendo ordinata per forma è il peggiore — e chi
+   *  ha la partita in corso non esce affatto.
+   *
+   *  Tutto o niente: se i congelati di un reparto sono più di quanti il modulo ne
+   *  preveda, il cambio non si fa a metà, si rifiuta e dice perché. Restare fra
+   *  due moduli sarebbe peggio di non essersi mossi. */
+  const applyModule = (m: [number, number, number]) => {
+    const target: Record<PlayerRole, number> = { GK: 1, DEF: m[0], MID: m[1], ATT: m[2] };
+    const keep: number[] = [];
+    const dropped: number[] = [];
+    const holes: PlayerRole[] = [];
+    for (const role of ROLES) {
+      const line = starterIds
+        .map((id) => byId.get(id))
+        .filter((p): p is TeamLineupPlayer => !!p && p.role === role)
+        .sort((a, b) => b.form - a.form); // il migliore per primo, l'ultimo è quello che esce
+      const frozen = line.filter((p) => lockedIds.has(p.player_id));
+      const free = line.filter((p) => !lockedIds.has(p.player_id));
+      const want = target[role];
+      if (frozen.length > want) {
+        setModuleNote(
+          `Non puoi passare a ${moduleName(m)}: hai ${frozen.length} ${ROLE_WORD_PLURAL[role]} `
+          + 'con la partita già iniziata, e restano dove sono.',
+        );
+        return;
+      }
+      const room = Math.max(0, want - frozen.length);
+      keep.push(...frozen.map((p) => p.player_id), ...free.slice(0, room).map((p) => p.player_id));
+      dropped.push(...free.slice(room).map((p) => p.player_id));
+      for (let k = frozen.length + Math.min(room, free.length); k < want; k++) holes.push(role);
+    }
+    setModuleNote(null);
+    setRefused(null);
+    setStarterIds(keep);
+    // I retrocessi in coda alla panchina, non sparsi per ruolo: chi esce dal
+    // campo è l'ultimo che si vuol far rientrare.
+    setBenchOrder((b) => pinFrozen(orderBench(ctx.roster, keep, [...b, ...dropped]), frozenSlots));
+    setVacancies(holes);
+  };
+
   // Estratto perché lo chiamano due bottoni: quello in cima su desktop e quello
   // nella barra in fondo sul telefono.
   const onSuggest = () => {
@@ -797,8 +864,10 @@ export default function FormationPage() {
               <Badge tone={isClassic ? 'blue' : 'green'}>{isClassic ? 'Classic' : 'Aura'}</Badge>
             </div>
             <div className="mt-1 text-sm text-ink-soft">
-              {compName ? <>Competizione <b>{compName}</b> · </> : null}
-              titolari {starterIds.length}/{XI}
+              {compName ? <>Competizione <b>{compName}</b></> : null}
+              {/* Il contatore sul telefono sta nella barra in fondo, accanto al
+                  Salva che dipende da lui: qui sarebbe la stessa cifra due volte. */}
+              <span className="hidden lg:inline">{compName ? ' · ' : null}titolari {starterIds.length}/{XI}</span>
               {!isClassic && gkStarters.length !== 1 ? (
                 <span className="ml-2 font-semibold text-bad">
                   {gkStarters.length === 0 ? '· manca il portiere' : '· un solo portiere consentito'}
@@ -806,7 +875,7 @@ export default function FormationPage() {
               ) : null}
             </div>
             {isClassic ? (
-              <div className="mt-1 text-[11px] text-ink-faint">
+              <div className="mt-1 hidden text-[11px] text-ink-faint lg:block">
                 Vincoli: 1 portiere · almeno 3 difensori · 1–3 attaccanti · meno di 6 per reparto · 11 totali.
               </div>
             ) : null}
@@ -885,6 +954,51 @@ export default function FormationPage() {
             </div>
           </div>
         </div>
+        {/* LE PASTIGLIE DEL MODULO.
+         *
+         *  Molti impostano il modulo PRIMA, e non hanno il riflesso che panchinare
+         *  un attaccante liberi il posto per un centrocampista: il modulo qui si è
+         *  sempre letto dalle scelte, mai scelto, e chi arriva dal fantacalcio
+         *  classico cercava «4-4-2» senza trovarlo nemmeno scritto.
+         *
+         *  Restano tutte e due le strade: questa non toglie niente a chi ragiona
+         *  per giocatori, perché non memorizza nessuna intenzione — tocchi, la
+         *  squadra si dispone, e da lì in poi il modulo torna a essere solo quello
+         *  che si vede in campo. */}
+        {isClassic ? (
+          <div className="mt-3 border-t border-line pt-2">
+            <div className="flex items-baseline gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Modulo</span>
+              <span className="text-sm font-bold tabular-nums">{moduleName(currentModule)}</span>
+            </div>
+            <div className="-mx-1 mt-1 flex gap-1.5 overflow-x-auto px-1 pb-1" style={{ scrollbarWidth: 'none' }}>
+              {MODULES.map((m) => {
+                const active = moduleName(m) === moduleName(currentModule);
+                return (
+                  <button
+                    key={moduleName(m)}
+                    type="button"
+                    onClick={() => applyModule(m)}
+                    aria-pressed={active}
+                    disabled={closed}
+                    className={clsx(
+                      'shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold tabular-nums transition',
+                      active
+                        ? 'border-brand bg-brand text-on-brand'
+                        : 'border-line bg-surface text-ink-soft hover:bg-surface-2',
+                      closed && 'cursor-not-allowed opacity-50',
+                    )}
+                  >
+                    {moduleName(m)}
+                  </button>
+                );
+              })}
+            </div>
+            {moduleNote ? (
+              <div className="mt-1 text-[11px] font-semibold text-bad">{moduleNote}</div>
+            ) : null}
+          </div>
+        ) : null}
         {manyCompetitions ? (
           <>
         <label
