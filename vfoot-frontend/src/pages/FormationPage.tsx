@@ -1076,10 +1076,15 @@ export default function FormationPage() {
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
         <Card className="self-start p-4 lg:sticky lg:top-4">
           <SectionTitle>La squadra in campo</SectionTitle>
+          {/* Corta sul telefono, dove il campo e' l'unica superficie e ogni riga di
+              spiegazione e' spazio tolto a quello che spiega. Le due mosse sono
+              anche le uniche possibili: si scoprono al primo tocco. */}
           <div className="mt-1 text-[11px] text-ink-faint">
-            {isClassic ? 'Schieramento per ruolo.' : 'Posizione attesa di ogni titolare (dai dati storici).'} Il
-            portiere veste la muta invertita. Tocca un giocatore per vederne le zone d'influenza e i dati;
-            tocca un posto vuoto per scegliere chi lo occupa.
+            Tocca un giocatore per i suoi dati, un posto vuoto per riempirlo.
+            <span className="hidden lg:inline">
+              {' '}{isClassic ? 'Schieramento per ruolo.' : 'Posizione attesa di ogni titolare (dai dati storici).'}
+              {' '}Il portiere veste la muta invertita, e le zone d'influenza si accendono sul campo.
+            </span>
           </div>
           <PitchLineup
             starterIds={starterIds}
@@ -1153,7 +1158,7 @@ export default function FormationPage() {
           <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink-faint lg:mt-4">
             Panchina · ordine = priorità sostituzioni
           </div>
-          <div className="mt-0.5 text-[11px] text-ink-faint">
+          <div className="mt-0.5 hidden text-[11px] text-ink-faint lg:block">
             {isClassic
               ? 'Entra il primo panchinaro in lista che ha un voto e mantiene la formazione valida.'
               : 'In Aura il sostituto è il migliore disponibile; l’ordine conta solo a parità.'}
