@@ -1990,10 +1990,37 @@ function PitchCanvas({
     <div
       className={clsx(
         'relative mt-3 w-full overflow-hidden rounded-xl border border-good/40 shadow-inner',
-        vertical
-          ? 'aspect-[5/7] bg-gradient-to-t from-green-600 to-green-500'
-          : 'aspect-[7/5] bg-gradient-to-r from-green-600 to-green-500',
+        vertical ? 'aspect-[5/7]' : 'aspect-[7/5]',
       )}
+      /* IL TAGLIO DELL'ERBA.
+       *
+       *  Le strisce alternate sono la citazione di `.vf-hero`, l'intestazione
+       *  dell'app, che fa la stessa cosa con lo stesso mezzo — bianco a bassissima
+       *  opacità in bande ripetute su un fondo verde. Il campo entra così nella
+       *  stessa famiglia invece di essere un rettangolo verde qualunque.
+       *
+       *  Chiaro E scuro, non chiaro e basta: una sola banda schiarita si legge
+       *  come una macchia di luce, due bande opposte si leggono come due passate
+       *  del rullo in versi contrari, che è quello che sono.
+       *
+       *  Dieci bande, che sono DUE PER ZONA: la griglia del motore è 5×4, e la
+       *  profondità sta sui cinque. Le mezzerie cadono così sui confini delle
+       *  zone, e quando si accende la heatmap gialla il taglio dell'erba non la
+       *  contraddice — le passa sotto in righe che finiscono dove finisce lei.
+       *
+       *  Il verso gira col campo, come tutto il resto qui dentro: le bande sono
+       *  perpendicolari alla lunghezza, cioè orizzontali quando la porta sta in
+       *  basso e verticali quando sta a sinistra. */
+      style={{
+        backgroundImage: [
+          `repeating-linear-gradient(${vertical ? '180deg' : '90deg'},`
+          // Provate tre intensità affiancate: sotto queste il taglio non si legge,
+          // sopra le bande cominciano a spezzare la heatmap gialla — che è
+          // l'unica cosa sul campo a portare informazione, e vince lei.
+          + ' rgb(255 255 255 / .11) 0 10%, rgb(0 0 0 / .07) 10% 20%)',
+          `linear-gradient(${vertical ? 'to top' : 'to right'}, #16a34a, #22c55e)`,
+        ].join(', '),
+      }}
     >
       {/* pitch markings */}
       <div className="pointer-events-none absolute inset-2 rounded border border-white/40" />
