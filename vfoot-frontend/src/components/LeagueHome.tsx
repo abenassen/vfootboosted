@@ -582,7 +582,13 @@ export default function LeagueHome({
               <Link
                 key={f.fixture_id}
                 to={`/matches/${f.fixture_id}`}
-                className="block rounded-xl border border-line bg-surface p-3 transition hover:border-line hover:shadow-sm"
+                // `min-w-0` per la stessa ragione della card «Da fare» qui sotto:
+                // un elemento di griglia non scende sotto la larghezza minima del
+                // suo contenuto, e due nomi lunghi allargavano la pagina. Qui il
+                // difetto era LATENTE — questo riquadro c'è solo a giornata
+                // aperta, cioè mai in sviluppo — ed è il momento in cui la home
+                // la guardano tutti.
+                className="block min-w-0 rounded-xl border border-line bg-surface p-3 transition hover:border-line hover:shadow-sm"
               >
                 <div
                   className={clsx(
@@ -593,14 +599,14 @@ export default function LeagueHome({
                   {compName.get(f.competition_id) ?? 'Competizione'}
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
-                  <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
+                  <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={28} />
                   <span className="truncate">{f.home_team.name}</span>
                   {/* The running score, which is the whole reason to look. */}
                   <span className="shrink-0 font-mono tabular-nums text-ink-soft">
                     {f.score ? `${Math.round(f.score.home_total)}–${Math.round(f.score.away_total)}` : 'vs'}
                   </span>
                   <span className="truncate">{f.away_team.name}</span>
-                  <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
+                  <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={28} />
                 </div>
                 <div className="mt-1.5 text-[11px] font-semibold text-ink-faint">
                   {openPhase === 'playing' ? 'Segui i voti in diretta →' : 'Apri il tabellino →'}
@@ -667,13 +673,11 @@ export default function LeagueHome({
                     {/* Gli stemmi non si stringono (`shrink-0`): sono immagini, e
                         schiacciate diventano un'altra forma. A cedere sono i nomi. */}
                     <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
-                      <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22}
-                             className="shrink-0" />
+                      <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={28} />
                       <span className="truncate">{f.home_team.name}</span>
                       <span className="shrink-0 text-ink-faint">vs</span>
                       <span className="truncate">{f.away_team.name}</span>
-                      <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22}
-                             className="shrink-0" />
+                      <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={28} />
                     </div>
                     {/* Same wording as the results below, from the same function: the
                         two blocks sit one above the other and had no business naming a
@@ -839,7 +843,7 @@ function LeagueTrophyCase({
                       <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
                         {a.winners.map((w) => (
                           <span key={w.team_id} className="flex items-center gap-1">
-                            <Crest descriptor={w.crest} teamName={w.name ?? ''} size={18} />
+                            <Crest descriptor={w.crest} teamName={w.name ?? ''} size={22} />
                             <span
                               className={clsx(
                                 'truncate text-xs',
@@ -1076,7 +1080,7 @@ function CompetitionBlock({
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="w-4 text-right text-xs text-ink-faint">{row.rank}</span>
-                      <Crest descriptor={row.crest} teamName={row.team} size={20} />
+                      <Crest descriptor={row.crest} teamName={row.team} size={24} />
                       <span className="truncate">{row.team}</span>
                       {/* Una partita ancora da finire dentro questi punti. Il
                           pallino è sulla RIGA e non sulla tabella perché è vero
@@ -1263,8 +1267,14 @@ function MiniFixture({
   const pending = !finished && f.score;
   const moving = pending && f.score_provisional;
   const row = (
+    // `min-w-0` qui E sul collegamento qui sotto, perché a turno sono l'uno o
+    // l'altro a essere l'ELEMENTO DI GRIGLIA — e un elemento di griglia non
+    // scende mai sotto la larghezza minima del proprio contenuto. Senza, due
+    // nomi lunghi allargavano la riga a 488 pixel dentro una colonna da 322, e
+    // con lei tutta la pagina: i nomi non si troncavano perché non erano loro a
+    // dover cedere, era la colonna a non stringersi. Misurato il 20/08/2026.
     <div
-      className={`rounded-lg px-2 py-1 ${f.is_user_involved ? 'bg-surface-2 font-semibold' : ''}`}
+      className={`min-w-0 rounded-lg px-2 py-1 ${f.is_user_involved ? 'bg-surface-2 font-semibold' : ''}`}
     >
       {competition || when ? (
         <div className="flex items-baseline justify-between gap-2">
@@ -1288,7 +1298,7 @@ function MiniFixture({
       <div className="flex items-center gap-2 text-sm">
         <span className="flex flex-1 items-center justify-end gap-1.5 truncate">
           <span className="truncate">{f.home_team.name}</span>
-          <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={18} />
+          <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
         </span>
         <span
           className={clsx(
@@ -1308,7 +1318,7 @@ function MiniFixture({
             : 'vs'}
         </span>
         <span className="flex flex-1 items-center gap-1.5 truncate">
-          <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={18} />
+          <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
           <span className="truncate">{f.away_team.name}</span>
         </span>
       </div>
@@ -1334,7 +1344,7 @@ function MiniFixture({
     </div>
   );
   return f.has_detail ? (
-    <Link to={`/matches/${f.fixture_id}`} className="block hover:opacity-80">
+    <Link to={`/matches/${f.fixture_id}`} className="block min-w-0 hover:opacity-80">
       {row}
     </Link>
   ) : (
@@ -1381,7 +1391,10 @@ function Participants({
                   mine ? 'border-good/40 bg-good-bg text-good' : 'border-line text-ink-soft hover:bg-surface-2',
                 )}
               >
-                <Crest descriptor={t.crest} teamName={t.name} size={22} />
+                {/* Il posto dove gli stemmi si GUARDANO, non dove si consultano:
+                    è l'elenco di chi c'è, e la gente ci mette dentro immagini
+                    scelte per far ridere gli altri. Dategli spazio. */}
+                <Crest descriptor={t.crest} teamName={t.name} size={30} />
                 <span className="max-w-[10rem] truncate">{t.name}</span>
               </Link>
             );
@@ -1403,9 +1416,14 @@ function Participants({
                 mine ? 'border-line bg-surface-2' : 'border-line'
               }`}
             >
-              {/* Lo stemma appartiene alla squadra, quindi segue il suo link. */}
+              {/* Lo stemma appartiene alla squadra, quindi segue il suo link.
+                  Quaranta e non trenta: è l'elenco dove gli stemmi si GUARDANO —
+                  la gente ci carica dentro immagini scelte per far ridere gli
+                  altri, e a trenta pixel la battuta non si legge. Quaranta è
+                  esattamente l'altezza delle due righe che gli stanno accanto,
+                  quindi cresce lo stemma e non la scheda. */}
               <Link to={mine ? '/squad' : `/teams/${t.team_id}`} className="shrink-0">
-                <Crest descriptor={t.crest} teamName={t.name} size={30} />
+                <Crest descriptor={t.crest} teamName={t.name} size={40} />
               </Link>
               <span className="min-w-0 flex-1">
                 <Link

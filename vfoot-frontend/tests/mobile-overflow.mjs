@@ -90,6 +90,21 @@ let sforanti = 0;
 for (const path of PAGINE) {
   await page.goto(`${ORIGIN}${path}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1200);
+  // UN TOKEN SCADUTO NON DEVE DARE VERDE. L'app rimanda alla pagina pubblica chi
+  // non è autenticato, e quella pagina — un modulo di login — sta larga in
+  // qualunque schermo: misurandola vien fuori un ✓ per dieci pagine che nessuno
+  // ha guardato. È successo il 20/08/2026, ed è il tipo di verde che insegna a
+  // fidarsi di un controllo che non controlla niente.
+  const dove = new URL(page.url()).pathname;
+  if (dove !== path) {
+    console.error(
+      `\n✗ ${path} ha rimandato a ${dove}: sessione non valida. Conia un token ` +
+        `nuovo (vedi l'intestazione) e riprova — quello vecchio muore quando ne ` +
+        `viene emesso un altro per lo stesso utente.\n`,
+    );
+    await browser.close();
+    process.exit(2);
+  }
   const r = await page.evaluate(() => {
     const de = document.scrollingElement;
     const w = de.clientWidth;
