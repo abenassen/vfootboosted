@@ -650,19 +650,30 @@ export default function LeagueHome({
               {nextByCompetition.map((f) => {
                 const cc = compColorById.get(f.competition_id);
                 return (
-                  <div key={f.fixture_id} className="rounded-xl border border-line p-3">
+                  // `min-w-0`: senza, la colonna della griglia non scende sotto la
+                  // larghezza MINIMA DEL CONTENUTO (è il minimo automatico degli
+                  // elementi di griglia), e due nomi di squadra lunghi allargavano
+                  // la pagina oltre lo schermo — con tutto quello che ne segue su un
+                  // telefono, barra in basso compresa. Il `truncate` sui nomi non
+                  // bastava: non era il testo a non accorciarsi, era la colonna a
+                  // non stringersi. Segnalato il 20/08/2026.
+                  <div key={f.fixture_id} className="min-w-0 rounded-xl border border-line p-3">
                     {/* Which competition, on the shortcut itself: with a championship
                         and a cup running together, "Imposta formazione" alone does
                         not say which team sheet you are about to fill. */}
                     <div className={clsx('text-[11px] font-bold uppercase tracking-wide', cc?.text700 ?? 'text-ink-faint')}>
                       {compName.get(f.competition_id) ?? 'Competizione'}
                     </div>
+                    {/* Gli stemmi non si stringono (`shrink-0`): sono immagini, e
+                        schiacciate diventano un'altra forma. A cedere sono i nomi. */}
                     <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
-                      <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22} />
+                      <Crest descriptor={f.home_team.crest} teamName={f.home_team.name} size={22}
+                             className="shrink-0" />
                       <span className="truncate">{f.home_team.name}</span>
-                      <span className="text-ink-faint">vs</span>
+                      <span className="shrink-0 text-ink-faint">vs</span>
                       <span className="truncate">{f.away_team.name}</span>
-                      <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22} />
+                      <Crest descriptor={f.away_team.crest} teamName={f.away_team.name} size={22}
+                             className="shrink-0" />
                     </div>
                     {/* Same wording as the results below, from the same function: the
                         two blocks sit one above the other and had no business naming a
