@@ -1,4 +1,5 @@
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import clsx from 'clsx';
 import { useLeagueContext } from '../league/LeagueContext';
 import { Card, SectionTitle } from '../components/ui';
 import SetupBanner from '../components/SetupBanner';
@@ -48,28 +49,46 @@ export default function DashboardPage() {
           non fara' mai — ne' a installare, ne' ad accendere le notifiche — e sparisce
           per sempre una volta chiuso. */}
       <SetupBanner />
-      {/* SOLO DA TABLET IN SU. Su un telefono questa scheda dice, in ottantotto
-          pixel più il margine, le tre cose che l'intestazione della app scrive già
-          due centimetri più in alto: stemma, nome della lega, nome della squadra.
-          Là non costa niente perché la barra c'è comunque; qui stava davanti alla
-          cosa per cui si apre l'app. In largo invece la barra laterale non ripete
-          la squadra, e la scheda resta l'unica a dire chi sei in questa lega. */}
+      {/* SOLO DA TABLET IN SU, e resta così. Su un telefono questa scheda dice le
+          tre cose che l'intestazione della app scrive già due centimetri più in
+          alto: stemma, nome della lega, nome della squadra. Là non costano niente
+          perché la barra c'è comunque; qui stavano davanti alla cosa per cui si
+          apre l'app. Adesso che lo stemma è grande la scheda è più alta, non meno,
+          quindi il motivo per tenerla via dal telefono è più forte di prima — su
+          un telefono lo stemma proprio si guarda nell'elenco dei partecipanti,
+          dove sta accanto a quello di tutti gli altri. In largo invece la barra
+          laterale non ripete la squadra, e la scheda resta l'unica a dire chi sei
+          in questa lega. */}
       <Card className="vf-hero hidden border-transparent p-4 md:block">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          {/* Lo stemma, che qui mancava. È l'unica pagina della lega che diceva
-              il nome della squadra senza mostrarla: la rosa ce l'ha, il
-              calendario ce l'ha su ogni riga, i partecipanti pure — e proprio
-              l'intestazione, dove si legge chi sei in questa lega, no. */}
-          <div className="flex items-center gap-3">
-            <Crest
-              descriptor={selectedLeague?.team_crest}
-              teamName={myName}
-              size={52}
-              className={myName ? undefined : 'opacity-40'}
-            />
+          <div className="flex items-center gap-4">
+            {/* GRANDE, e non a fianco del nome come una figurina. Lo stemma è la
+                cosa che l'utente ha COMPOSTO — colori, fasce, o un'immagine
+                caricata a mano — e in tutta la app compariva fra i ventidue e i
+                cinquantadue pixel: alla dimensione di un segnaposto, cioè alla
+                dimensione in cui la scelta di chi l'ha fatto non si vede. Qui c'è
+                lo spazio per mostrarlo davvero, ed è l'unico punto in cui uno
+                guarda il PROPRIO. Novantasei pixel (centododici in largo) sono
+                sopra le tre righe di testo che gli stanno accanto, quindi cresce
+                lo stemma e non la scheda.
+
+                E porta alla rosa, che è la pagina da cui lo si cambia: prima era
+                un disegno morto, e chi voleva ritoccarlo doveva sapere già dove
+                andare. */}
+            <Link to="/squad" title="La tua squadra — da qui si cambia lo stemma" className="shrink-0">
+              <Crest
+                descriptor={selectedLeague?.team_crest}
+                teamName={myName}
+                size={96}
+                className={clsx(
+                  'transition hover:scale-105 lg:h-28 lg:w-28',
+                  myName ? undefined : 'opacity-40',
+                )}
+              />
+            </Link>
             <div className="min-w-0">
               <SectionTitle className="text-white/75">{selectedLeague?.name}</SectionTitle>
-              <div className="mt-1 font-cond text-3xl font-bold uppercase leading-none tracking-wide">{myName ?? 'Spettatore'}</div>
+              <div className="mt-1 font-cond text-4xl font-bold uppercase leading-none tracking-wide">{myName ?? 'Spettatore'}</div>
               {/* WHO you are, and nothing else.
 
                   Rank, points, wins and average are COMPETITION-scoped. They were
