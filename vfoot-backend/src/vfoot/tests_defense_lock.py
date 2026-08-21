@@ -546,15 +546,6 @@ class DefenderCountOnSaveTests(_ClassicRound):
         r = self._post(("d1", "d2", "d3", "m1", "m2", "m3", "m4", "abench", "a1", "a2"))
         self.assertEqual(r.status_code, 200, r.data)
 
-    def test_the_old_flag_is_no_longer_written(self):
-        """``edited_after_kickoff`` era l'interruttore. Resta la colonna, non il
-        dato: un campo che nessuno legge e qualcuno scrive e' una bugia."""
-        self._save_snapshot()
-        self._play_the_saturday()
-        r = self._post(self.OUTFIELD, bench=("abench", "dbench"))
-        self.assertEqual(r.status_code, 200, r.data)
-        self.assertFalse(self._snap().edited_after_kickoff)
-
 
 class ConclusionInheritsInsteadOfAskingTests(_ClassicRound):
     """Chi non schiera non blocca piu' la conclusione della giornata: vale

@@ -15,13 +15,6 @@ class SavedLineupSnapshot(models.Model):
     starter_backups = models.JSONField(default=list)
 
     saved_at = models.DateTimeField(default=timezone.now)
-    # SENZA PIU' CONSUMATORI, da rimuovere. Diceva «toccata a giornata gia'
-    # cominciata» e accendeva il vincolo sui difensori: un interruttore in mano
-    # all'allenatore, che lo azionava a voti visti. La regola e' diventata di lega
-    # (``Ruleset.defence_first``) e il salvataggio non scrive piu' questo campo.
-    # La colonna resta finche' la nuova regola non e' in produzione da qualche
-    # giornata; poi migrazione di rimozione.
-    edited_after_kickoff = models.BooleanField(default=False)
     # CHI L'HA SCRITTA. ``manager``: l'allenatore, dalla pagina. ``baseline``: il
     # server, quando la rosa si e' completata — l'undici suggerito per la prima
     # giornata da giocare, cosi' che «non ha mandato la formazione» non esista

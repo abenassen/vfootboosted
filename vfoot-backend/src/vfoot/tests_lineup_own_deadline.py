@@ -166,7 +166,6 @@ class TheDeadlineIsTheTeamsOwnTests(_OwnRound):
         r = self._post(("d1", "d2", "d3", "m1", "m2", "m3", "m4", "abench", "a1", "a2"),
                        bench=("dbench", "d4"))
         self.assertEqual(r.status_code, 200, r.data)
-        self.assertFalse(SavedLineupSnapshot.objects.get(matchday_id="5").edited_after_kickoff)
 
     def test_without_a_team_the_round_closes_at_its_latest(self):
         """Calendario, viste di lega, admin: senza squadra la risposta e' la
