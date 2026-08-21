@@ -269,10 +269,18 @@ export function ClassicMatchDetail({
           }
           footer={
             preview ? (
+              /* QUANDO si bloccano e COSA vede l'altro. Nient'altro: qui finiva
+                 anche il perché — «in classic vedere quella degli altri non dà
+                 vantaggio» — che è la motivazione della REGOLA, non
+                 un'informazione per chi la subisce. Chi legge questa riga vuole
+                 sapere entro quando cambiare la formazione e se gli altri la
+                 vedono; perché sia stato deciso così è una discussione fra chi
+                 ha scritto il gioco, e messa qui suonava come una scusa. Il
+                 motivo resta dov'è utile: nel codice che decide se scoprirle. */
               <div className="text-center text-[11px] text-ink-faint">
                 Si bloccano <b>{fmtLock(d.lock_at)}</b>, al primo calcio d’inizio della
                 giornata. Fino ad allora ognuno può cambiarla, e chi ha già schierato la
-                mostra a tutti: in classic vedere quella degli altri non dà vantaggio.
+                mostra a tutti.
               </div>
             ) : (
             <div className="text-[11px] text-ink-faint">
