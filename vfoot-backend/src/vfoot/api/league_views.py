@@ -340,6 +340,23 @@ class LeagueJoinView(APIView):
         )
 
 
+def _avatar_of(user) -> str:
+    """Il descrittore della faccia di un utente, o la stringa vuota.
+
+    `getattr` e non `user.profile` perché il profilo è una OneToOne INVERSA e
+    può non esserci: chi si è iscritto prima che esistesse, o chi non ha mai
+    aperto la pagina del profilo, non ne ha uno. Django fa in modo che
+    l'eccezione di una inversa mancante erediti da AttributeError proprio
+    perché `getattr(..., None)` funzioni; senza, un utente senza profilo farebbe
+    fallire l'intera pagina della lega.
+
+    Vuoto non vuol dire «niente faccia»: il client ne disegna comunque una,
+    seminata sul nome utente (v. components/Avatar).
+    """
+    profile = getattr(user, "profile", None)
+    return profile.avatar if profile else ""
+
+
 class LeagueDetailView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -353,7 +370,12 @@ class LeagueDetailView(APIView):
         # il ciclo: le squadre di una lega sono dieci o venti, e sarebbero
         # altrettanti giri al database su una pagina che si apre in continuazione.
         teams = (FantasyTeam.objects.filter(league=league)
-                 .select_related("manager__user")
+                 # `manager__user__profile` per l'avatar dell'elenco partecipanti:
+                 # è una OneToOne, quindi senza il select_related sarebbe una
+                 # interrogazione per squadra su una pagina che si apre in
+                 # continuazione — lo stesso motivo per cui roster_count è
+                 # annotato invece che contato nel ciclo.
+                 .select_related("manager__user", "manager__user__profile")
                  .annotate(roster_count=Count(
                      "roster_slots", filter=Q(roster_slots__released_at__isnull=True))))
         records = _league_wide_records(league)
@@ -409,6 +431,11 @@ class LeagueDetailView(APIView):
                         "crest": t.crest,
                         "manager_user_id": t.manager.user_id,
                         "manager_username": t.manager.user.username,
+                        # La faccia dell'allenatore, letta ADESSO e non congelata:
+                        # stessa scelta dei tabellini (v. _fixture_managers), per
+                        # lo stesso motivo — l'avatar è dell'account, non della
+                        # lega, e chi lo cambia se lo deve ritrovare ovunque.
+                        "manager_avatar": _avatar_of(t.manager.user),
                         # Record aggregated across ALL competitions, not one chosen
                         # implicitly: a league has no single table, so points and
                         # rank would be a lie. Wins/draws/losses and goals for/against

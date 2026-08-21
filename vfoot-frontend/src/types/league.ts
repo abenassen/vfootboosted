@@ -34,6 +34,10 @@ export interface LeagueTeam {
   crest?: string | null;
   manager_user_id: number;
   manager_username: string;
+  /** Descrittore opaco della faccia dell'allenatore (v. utils/avatar). Stringa
+   *  vuota o assente = nessuna scelta: Avatar ne disegna una dal nome utente.
+   *  È dell'ACCOUNT, non della squadra — a differenza di `crest`, che è per lega. */
+  manager_avatar?: string | null;
   // W/D/L and goals aggregated across ALL competitions (no single table exists).
   record?: TeamRecord;
   /** Giocatori sotto contratto adesso. Zero = rosa ancora da fare. */

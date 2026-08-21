@@ -25,6 +25,7 @@ import { useDecisionAlerts } from '../league/useDecisionAlerts';
 import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { Badge, Button, Card, SectionTitle } from './ui';
 import Crest from './Crest';
+import Avatar from './Avatar';
 import InviteShare from './InviteShare';
 import type {
   ActiveAuctionInfo,
@@ -1360,6 +1361,16 @@ function MiniFixture({
  *  campionati — quindi porta alla sua scheda. Prima l'intera riga andava alla
  *  rosa e il nome sotto era testo morto, che è esattamente il motivo per cui
  *  l'albo d'oro era finito su una pagina che non è sua.
+ *
+ *  E DA QUI SI VEDE che sono due. Le due destinazioni c'erano già, ma erano due
+ *  righe di testo impilate a destra dello stesso stemma: niente diceva che la
+ *  seconda portava altrove, e infatti la scheda del fantallenatore restava una
+ *  pagina che si raggiungeva per caso. Adesso la riga è uno SLOT con due metà
+ *  affiancate e un filo in mezzo — a sinistra lo stemma con la squadra, a destra
+ *  la faccia con l'allenatore — e ogni metà si illumina per conto suo. Le due
+ *  immagini sono anche di forma diversa (scudo contro cerchio), che è la stessa
+ *  distinzione che la app fa già in alto nella barra: lo stemma è la squadra in
+ *  QUESTA lega, l'avatar è la persona ovunque giochi.
  */
 function Participants({
   detail,
@@ -1406,42 +1417,112 @@ function Participants({
   return (
     <Card className="p-4">
       <SectionTitle>Partecipanti</SectionTitle>
-      <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+      {/* DUE colonne, e solo da `lg`. Con lo stemma di qua e la faccia di là
+          ogni scheda porta due immagini e due nomi, e vuole trecentocinquanta
+          pixel per dirli interi. Tre colonne non ne lasciano mai tanti — nemmeno
+          su uno schermo largo, perché la colonna del contenuto è una frazione
+          della finestra — e due colonne a `sm` non li lasciano su un tablet, dove
+          la barra laterale c'è già e prende la sua parte: a 834 pixel ogni
+          scheda restava larga duecento e si leggeva «Anomalia s… · a… · S…»,
+          cioè tre iniziali. La soglia va messa dove sta la barra, non dove sta
+          la finestra. Una fila in più vale un nome intero. */}
+      <div className="mt-2 grid gap-1.5 lg:grid-cols-2">
         {detail.teams.map((t) => {
           const mine = t.name === myTeamName;
+          const squadHref = mine ? '/squad' : `/teams/${t.team_id}`;
           return (
             <div
               key={t.team_id}
-              className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${
-                mine ? 'border-line bg-surface-2' : 'border-line'
-              }`}
+              className={clsx(
+                // `overflow-hidden` perché le due metà arrivano fino al bordo:
+                // senza, l'illuminazione di quella che si tocca esce dagli
+                // angoli arrotondati e la scheda sembra rotta.
+                'flex items-stretch overflow-hidden rounded-xl border',
+                // La tua squadra si riconosce dal bordo, non da un fondo pieno:
+                // il fondo è la superficie su cui si accende la metà che si
+                // tocca, e un verde acceso sotto se la mangiava.
+                mine ? 'border-good/50 bg-surface-2' : 'border-line',
+              )}
             >
-              {/* Lo stemma appartiene alla squadra, quindi segue il suo link.
-                  Quaranta e non trenta: è l'elenco dove gli stemmi si GUARDANO —
-                  la gente ci carica dentro immagini scelte per far ridere gli
-                  altri, e a trenta pixel la battuta non si legge. Quaranta è
-                  esattamente l'altezza delle due righe che gli stanno accanto,
-                  quindi cresce lo stemma e non la scheda. */}
-              <Link to={mine ? '/squad' : `/teams/${t.team_id}`} className="shrink-0">
-                <Crest descriptor={t.crest} teamName={t.name} size={40} />
+              {/* METÀ SINISTRA: la squadra, e quindi la rosa. Lo stemma sta
+                  DENTRO il collegamento, non accanto: è l'oggetto su cui si
+                  clicca, e la mano che cerca la rosa punta lo stemma prima del
+                  nome. Quarantotto e non quaranta — è l'elenco dove gli stemmi
+                  si GUARDANO, la gente ci carica dentro immagini scelte per far
+                  ridere gli altri, e più piccoli la battuta non si legge. */}
+              <Link
+                to={squadHref}
+                title={mine ? 'La tua rosa' : `Rosa di ${t.name}`}
+                className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 transition hover:bg-ink/5"
+              >
+                <Crest descriptor={t.crest} teamName={t.name} size={48} />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-ink">{t.name}</span>
+                  {/* La riga sotto il nome diceva l'allenatore, che adesso ha
+                      una metà tutta sua: qui resta a dire DOVE porta questa
+                      metà. Su un telefono non c'è passaggio del mouse e non
+                      c'è suggerimento: senza una parola, due immagini
+                      affiancate sono due immagini, non due porte. */}
+                  <span
+                    className={clsx(
+                      'block truncate text-[10px] font-bold uppercase tracking-wide',
+                      mine ? 'text-good' : 'text-ink-faint',
+                    )}
+                  >
+                    {mine ? 'la tua rosa' : 'rosa'}
+                  </span>
+                </span>
               </Link>
-              <span className="min-w-0 flex-1">
-                <Link
-                  to={mine ? '/squad' : `/teams/${t.team_id}`}
-                  className="block truncate text-sm font-semibold text-ink hover:underline"
-                >
-                  {t.name}
-                  {mine ? (
-                    <span className="ml-1.5 text-[10px] font-bold uppercase text-good">la tua</span>
-                  ) : null}
-                </Link>
-                <Link
-                  to={`/fantallenatori/${t.manager_user_id}`}
-                  className="block truncate text-xs text-ink-faint hover:text-ink hover:underline"
-                >
-                  {t.manager_username}
-                </Link>
-              </span>
+
+              {/* Il filo. È l'unica cosa che dice, ferma e senza testo, che la
+                  scheda è divisa in due — il passaggio del mouse lo conferma,
+                  ma solo dopo che uno ci ha già provato. */}
+              <span className="my-2 w-px shrink-0 bg-line" aria-hidden />
+
+              {/* METÀ DESTRA: la persona, e quindi la sua scheda.
+                  DA TABLET IN SU è lo specchio della sinistra — testo verso il
+                  centro, immagine verso il bordo — e occupa una FRAZIONE FISSA
+                  della scheda invece della larghezza del nome utente: le schede
+                  sono tutte larghe uguale, quindi il filo cade sempre allo
+                  stesso punto e le due zone si leggono come le stesse due zone
+                  su tutte e dodici. A larghezza variabile «фёдор» e
+                  «unnomeutentelunghissimo» spostavano il taglio di sessanta
+                  pixel l'uno dall'altro, e la colonna sembrava storta invece che
+                  divisa.
+
+                  SUL TELEFONO no: in fila, dentro trecentocinquanta pixel, i due
+                  nomi si mangiavano a vicenda e restavano «Anomalia stati…» e
+                  «giova…» — due mezze parole al posto di una intera. Lì la
+                  faccia si mette in colonna con la sola etichetta sotto, il nome
+                  utente sparisce e il nome della SQUADRA si prende lo spazio che
+                  lascia: la faccia dice già di chi è, il nome della squadra no.
+                  `flex-col-reverse` e non `flex-col` perché l'ordine nel codice
+                  è quello della fila — etichetta, poi faccia — ed è quello che
+                  deve leggere chi usa uno screen reader. */}
+              <Link
+                to={`/fantallenatori/${t.manager_user_id}`}
+                title={`Scheda di ${t.manager_username}`}
+                className={clsx(
+                  'flex min-w-0 shrink-0 items-center px-2.5 py-2 transition hover:bg-ink/5',
+                  'flex-col-reverse justify-center gap-0.5 text-center',
+                  'sm:basis-[34%] sm:flex-row sm:justify-end sm:gap-2 sm:text-right',
+                )}
+              >
+                <span className="min-w-0">
+                  <span className="hidden truncate text-xs font-semibold text-ink-soft sm:block">
+                    {t.manager_username}
+                  </span>
+                  <span className="block truncate text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+                    scheda
+                  </span>
+                </span>
+                <Avatar
+                  descriptor={t.manager_avatar}
+                  username={t.manager_username}
+                  size={38}
+                  className="ring-1 ring-line"
+                />
+              </Link>
             </div>
           );
         })}
