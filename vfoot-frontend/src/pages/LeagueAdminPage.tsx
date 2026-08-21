@@ -1047,38 +1047,23 @@ export default function LeagueAdminPage() {
                                 </span>
                               </span>
                             </label>
-                            <label
-                              className={`flex items-start gap-2 text-sm ${
-                                draft.lineup_lock_mode === 'player' ? '' : 'cursor-not-allowed opacity-60'}`}
-                              title={
-                                draft.lineup_lock_mode === 'player'
-                                  ? undefined
-                                  : 'Non ancora attivabile: resta aperta una falla (un giocatore inserito tardi che sicuramente non gioca fa entrare il primo della fila a voto noto).'
-                              }
-                            >
+                            <label className="flex items-start gap-2 text-sm">
                               <input
                                 type="radio"
                                 className="mt-1"
                                 name="lineup_lock_mode"
                                 checked={draft.lineup_lock_mode === 'player'}
-                                // Offerta solo alle leghe che già la usano: finché la quinta
-                                // porta non è chiusa, offrirla vorrebbe dire offrire la falla.
-                                disabled={draft.lineup_lock_mode !== 'player'}
                                 onChange={() => set({ lineup_lock_mode: 'player' })}
                               />
                               <span>
                                 <b>Sempre aperta</b>
                                 <span className="mt-0.5 block text-[11px] text-ink-faint">
                                   Si schiera sempre, anche a giornata in corso, ma chi è sceso in campo
-                                  diventa un chiodo: non si sposta e nessuno lo scavalca. Col modificatore
+                                  diventa un chiodo: non si sposta e nessuno lo scavalca — nemmeno chi
+                                  esce dagli undici, che resta davanti a lui in panchina. Col modificatore
                                   difesa, altre due regole: il numero di difensori non cambia più dal tuo
                                   primo giocatore, e in difesa entra prima un difensore (se nessuno ha voto,
                                   il primo degli altri).
-                                  {draft.lineup_lock_mode === 'player' ? null : (
-                                    <span className="block text-warn">
-                                      Non ancora selezionabile per le nuove leghe.
-                                    </span>
-                                  )}
                                 </span>
                               </span>
                             </label>

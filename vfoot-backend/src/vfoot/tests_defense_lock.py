@@ -334,6 +334,63 @@ class EveryAdmittedBranchGivesTheSameModifierTests(SimpleTestCase):
         self.assertEqual({nine_enters(xi, b) for xi, b in free_for_all}, {True, False})
 
 
+    def test_door_five_the_phantom_inserted_late(self):
+        """Il «grimaldello»: a giornata cominciata inserisco negli undici uno che
+        sicuramente non giochera', per far scattare la sostituzione e far
+        entrare l'8.0 che sta in panchina. Era dato per aperto, ma lo scavalco
+        lo chiude: il titolare che esce deve restare DAVANTI all'8.0, quindi e'
+        lui il primo della fila con voto — se gioca rientra lui, se non gioca
+        l'8.0 entrava comunque. In ogni ramo ammesso, chi entra e' lo stesso,
+        sia che il titolare poi giochi sia che no; con o senza le due passate.
+        """
+        roles = {1: "GK", 2: "DEF", 3: "DEF", 4: "DEF", 5: "DEF",
+                 6: "MID", 7: "MID", 8: "MID", 9: "MID", 10: "ATT", 11: "ATT",
+                 20: "ATT", 21: "ATT", 22: "MID", 23: "DEF"}
+        # 20 = il fittizio (non giochera'); 21 = l'8.0 gia' a voto, congelato;
+        # 22, 23 = panchinari dietro il muro. 9 e 11 = titolari liberi.
+        base = (1, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [20, 21, 22, 23])
+        locked = {1, 2, 3, 4, 5, 6, 7, 8, 10, 21}
+
+        def who_scores(xi, bench, starters_play, defence_first):
+            """L'undici effettivo: chi ha messo un voto nel totale."""
+            votes = {p: 6.0 for p in roles}
+            votes[20] = None
+            votes[21] = 8.0
+            if not starters_play:
+                votes[9] = votes[11] = None
+            def L(p):
+                v = votes.get(p)
+                return line(p, roles[p], v if v is not None else 0.0, sv=v is None)
+            r = score_team([L(1)] + [L(p) for p in xi], [L(p) for p in bench],
+                           Ruleset(defence_first=defence_first))
+            outs = {sub["out"]["player_id"] for sub in r["substitutions"]}
+            ins = {sub["in"]["player_id"] for sub in r["substitutions"]}
+            return frozenset(({1} | set(xi)) - outs | ins), r["base_total"]
+
+        admitted = self._branches(base, roles, locked)
+        self.assertTrue(any(20 in xi for xi, _ in admitted), "il fittizio si puo' inserire")
+        untouched = (base[1], base[2])
+        for defence_first in (False, True):
+            # Se i titolari giocano, in ogni ramo va a voto ESATTAMENTE l'undici di
+            # partenza: il fittizio inserito viene coperto dal titolare che ha fatto
+            # uscire, e l'8.0 non entra.
+            expected = who_scores(*untouched, True, defence_first)
+            self.assertNotIn(21, expected[0])
+            for xi, b in admitted:
+                self.assertEqual(who_scores(xi, b, True, defence_first), expected,
+                                 (defence_first, xi, b))
+            # Se non giocano, l'8.0 entra in ogni ramo — come sarebbe entrato senza
+            # la mossa. Chi entra DOPO di lui puo' cambiare (22 o 23, dietro il
+            # muro): sono due voti ignoti, e sceglierne l'ordine e' schierare.
+            for xi, b in admitted:
+                self.assertIn(21, who_scores(xi, b, False, defence_first)[0], (defence_first, xi, b))
+            # ...e senza lo scavalco la porta c'era: un ramo in cui l'8.0 entra
+            # mentre il titolare tolto gioca.
+            free_for_all = self._branches(base, roles, locked, overtaking_rule=False)
+            self.assertTrue(any(21 in who_scores(xi, b, True, defence_first)[0]
+                                for xi, b in free_for_all))
+
+
 # --------------------------------------------------------------------------- #
 # R1 — l'invio non cambia il numero di difensori.                              #
 # --------------------------------------------------------------------------- #
