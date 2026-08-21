@@ -122,7 +122,7 @@ def matchday_last_kickoffs(competition_season_id: int) -> dict[int, object]:
     return {int(md): last for md, last in rows}
 
 
-def closed_matchdays(league, now=None) -> set[int]:
+def closed_matchdays(league, now=None, team=None) -> set[int]:
     """Real matchdays this league's managers can no longer touch AT ALL.
 
     The one function every "can he still field a team" question should ask, because
@@ -130,6 +130,11 @@ def closed_matchdays(league, now=None) -> set[int]:
 
     * no deadline (a league replayed over a finished season) — nothing is ever closed;
     * ``matchday`` — closed at the first kickoff, the whole XI at once;
+    * ``own`` — closed at the first kickoff of one of the TEAM's players, so the
+      answer is per team. Without a team — the calendar, the league views, the
+      admin — it answers with the LATEST deadline any team could have, i.e. the
+      round's last kickoff: a round must never read as closed while somebody can
+      still field. With a team it is that team's own deadline (``team_deadline``).
     * ``player`` — closed only at the LAST kickoff. In between the round is *partly*
       locked, which is not the same thing and is exactly what used to have no way of
       being said: ``locked_matchdays`` would have shut the page on a manager who
@@ -143,8 +148,114 @@ def closed_matchdays(league, now=None) -> set[int]:
     now = now or timezone.now()
     if league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER:
         return {md for md, last in matchday_last_kickoffs(csid).items() if last <= now}
+    if league.lineup_lock_mode == FantasyLeague.LOCK_OWN:
+        if team is None:
+            return {md for md, last in matchday_last_kickoffs(csid).items() if last <= now}
+        # A team's deadline is never earlier than the round's first kickoff, so
+        # rounds that have not begun are skipped without a query each.
+        return {md for md, first in matchday_locks(csid).items()
+                if first <= now and is_closed_for(league, md, team, now)}
     return locked_matchdays(csid, now)
 
+
+def is_closed_for(league, real_matchday: int, team, now=None) -> bool:
+    """``closed_matchdays`` for ONE matchday and ONE team, without computing the
+    whole season: what the save endpoint and the lineup repair actually ask."""
+    from vfoot.models import FantasyLeague
+
+    csid = league.reference_season_id
+    if csid is None or not league.enforce_lineup_deadline:
+        return False
+    now = now or timezone.now()
+    if league.lineup_lock_mode == FantasyLeague.LOCK_OWN:
+        deadline, _ = team_deadline(league, team, real_matchday)
+        return deadline is not None and deadline <= now
+    return real_matchday in closed_matchdays(league, now)
+
+
+def team_deadline(league, team, real_matchday: int):
+    """Under the ``own`` deadline: when THIS team's lineup for this round closes.
+
+    Returns ``(kickoff, match)`` — the earliest confirmed kickoff among the clubs of
+    the team's players, and the match that sets it — or ``(None, None)`` when the
+    league has no reference season, no deadline, or the round has no confirmed
+    kickoff yet. Postponements are handled by ``player_lock_times``: a club whose
+    match moved binds at the recovery, not at the original slot.
+
+    WHICH players. Everyone owned now, PLUS everyone who was owned at the moment
+    his club kicked off. The second half is not a nicety — it is what makes the
+    deadline a deadline:
+
+    * the market settles between one match of the round and the next (its freeze
+      is the three hours of a match, not the whole weekend). Counting only the
+      current roster, selling a man who took a 4.5 on Friday would move the
+      deadline to Saturday, reopen the lineup, and let the repair swap him for
+      somebody who plays on Sunday: a known vote erased. He was yours when his
+      match began, so he still binds you.
+    * conversely, buying on Saturday a man who played on Friday closes the lineup
+      at his Friday kickoff rather than letting his known vote into it. Harsh, and
+      self-inflicted — and the alternative is a market in known votes.
+
+    So once a team's round is closed it stays closed, whatever the roster does.
+    A player sold BEFORE his kickoff was not yours when it mattered and does not
+    bind. ``acquired_at`` / ``released_at`` on the roster contract are the record.
+    """
+    from vfoot.models import FantasyLeague
+
+    if (league.reference_season_id is None
+            or not league.enforce_lineup_deadline
+            or league.lineup_lock_mode != FantasyLeague.LOCK_OWN):
+        return None, None
+    return team_first_kickoff(league, team, real_matchday)
+
+
+def team_first_kickoff(league, team, real_matchday: int):
+    """``(kickoff, match)`` of the first match of the round involving one of the
+    team's players — the computation behind ``team_deadline``, without the mode
+    check. Under the per-player deadline it is the instant from which the manager
+    knows something about his own team, i.e. the clock of the defender-count rule.
+    ``(None, None)`` without a reference season or a confirmed kickoff."""
+    from vfoot.models import FantasyRosterSlot
+    from vfoot.services.match_resolver import matchday_fixtures_by_team
+    from realdata.models import PlayerTeamStint
+
+    csid = league.reference_season_id
+    if csid is None:
+        return None, None
+    slots = list(
+        FantasyRosterSlot.objects.filter(team_id=getattr(team, "id", team))
+        .values_list("player_id", "acquired_at", "released_at")
+    )
+    if not slots:
+        # No contract, ever: there is nothing to compute a deadline from, and the
+        # conservative answer is the league-wide one — the round's first kickoff.
+        m = (Match.objects.filter(competition_season_id=csid, matchday=real_matchday,
+                                  kickoff_provisional=False, kickoff__isnull=False)
+             .select_related("home_team__team", "away_team__team")
+             .order_by("kickoff").first())
+        return (m.kickoff, m) if m is not None else (None, None)
+    stint = dict(
+        PlayerTeamStint.objects.filter(
+            player_id__in={pid for pid, _, _ in slots},
+            team_season__competition_season_id=csid,
+            end_date__isnull=True,
+        ).values_list("player_id", "team_season_id")
+    )
+    fixtures = matchday_fixtures_by_team(csid, real_matchday)
+    best, best_match = None, None
+    for pid, acquired_at, released_at in slots:
+        m = fixtures.get(stint.get(pid))
+        if m is None or m.kickoff is None or m.kickoff_provisional:
+            continue
+        if m.status in (Match.STATUS_POSTPONED, Match.STATUS_CANCELLED):
+            continue
+        k = m.kickoff
+        if released_at is not None and not (
+                (acquired_at is None or acquired_at <= k) and k < released_at):
+            continue        # gone before his match began: not yours when it mattered
+        if best is None or k < best:
+            best, best_match = k, m
+    return best, best_match
 
 def player_lock_times(competition_season_id: int, real_matchday: int) -> dict[int, object]:
     """{team_season_id: confirmed kickoff of that club's match in this round}.
@@ -207,7 +318,7 @@ def league_matchdays(league):
     )
 
 
-def next_fieldable_matchday(league, now=None) -> int | None:
+def next_fieldable_matchday(league, now=None, team=None) -> int | None:
     """The earliest real matchday whose lineups can still be set.
 
     This — not the ledger pointer — is what the "Formazione" shortcut must follow.
@@ -217,13 +328,20 @@ def next_fieldable_matchday(league, now=None) -> int | None:
     "Still" is the league's own deadline, not a universal one: under the per-player
     lock a round that kicked off on Saturday is the round to field until the last
     club takes the pitch on Monday, and sending the manager forward to the next one
-    would hide the eight players he could still move.
+    would hide the eight players he could still move. Under the ``own`` deadline it
+    is the TEAM's: pass one to get his answer, none to get the latest any team
+    could have (``closed_matchdays``).
     """
     from vfoot.models import FantasyLeague
 
     now = now or timezone.now()
-    per_player = (league.enforce_lineup_deadline
-                  and league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER)
+    mode = league.lineup_lock_mode if league.enforce_lineup_deadline else None
+    if mode == FantasyLeague.LOCK_OWN and team is not None:
+        for md in league_matchdays(league):
+            if not is_closed_for(league, md.real_matchday, team, now):
+                return md.real_matchday
+        return None
+    per_player = mode in (FantasyLeague.LOCK_PLAYER, FantasyLeague.LOCK_OWN)
     locks: dict[int, dict[int, object]] = {}
     for md in league_matchdays(league):
         csid = md.real_competition_season_id
@@ -236,39 +354,65 @@ def next_fieldable_matchday(league, now=None) -> int | None:
     return None
 
 
+# How far apart two matches of the SAME round can be and still be "the same
+# weekend". A round runs Friday to Monday, a midweek one Tuesday to Thursday; a
+# recovery played weeks later is a match of that round but not of that weekend,
+# and must not keep the round on the pitch in between.
+ROUND_SPAN = timedelta(days=5)
+
+
 def playing_matchday(league, now=None) -> int | None:
-    """The real matchday with a match ON THE PITCH right now, or None between rounds.
+    """The real matchday being PLAYED right now, or None between rounds.
 
-    A postponed shell is skipped: it has been moved out of its window and its
-    replay is a separate row with its own kickoff — which correctly makes the
-    matchday 'playing' again on the day of the recovery.
+    A round is on the pitch from its first kickoff until its last match of the
+    weekend has settled — the gaps between one match and the next INCLUDED. It used
+    to be "a match is on the pitch", three hours from a kickoff, and that made the
+    market settle on Saturday morning between Friday's match and Saturday's: a round
+    is one thing, not a string of three-hour windows.
 
-    A match already promoted to ``data_ready`` is skipped too, and that one is not
-    an optimisation: the time window is 3 hours from kick-off, while the data
-    settles at +1h from full time, i.e. around +2h45. So for the quarter of an hour
-    between the two the round was BOTH 'being played' and 'complete', and the home
-    said "la giornata 22 e' finita, puoi calcolare i punteggi" directly above "si
-    gioca la giornata 22" — every single round, not only in the simulator. The
-    window bounds when we start looking; what ends a round is its data settling.
+    Per match, "over" is ``data_ready`` OR the three-hour window elapsed, whichever
+    comes first — the window so that a poller that is down cannot freeze the market
+    for good, the flag so that the quarter of an hour between full time and the
+    data settling does not read as both 'being played' and 'complete'.
+
+    A postponed shell is skipped: it has been moved out of its window and its replay
+    is a separate row with its own kickoff — which correctly makes the matchday
+    'playing' again on the day of the recovery, and only then (``ROUND_SPAN``).
     """
     now = now or timezone.now()
     cs = league.reference_season
     if cs is None:
         return None
-    row = (
+    rows = list(
         Match.objects.filter(
             competition_season_id=cs.id,
-            kickoff__lte=now,
-            kickoff__gt=now - MATCH_WINDOW,
             matchday__isnull=False,
-            data_ready=False,
+            kickoff__isnull=False,
+            kickoff_provisional=False,
+            kickoff__gt=now - ROUND_SPAN - MATCH_WINDOW,
+            kickoff__lte=now + ROUND_SPAN,
         )
         .exclude(status__in=[Match.STATUS_POSTPONED, Match.STATUS_CANCELLED])
-        .order_by("kickoff")
-        .values_list("matchday", flat=True)
-        .first()
+        .values_list("matchday", "kickoff", "data_ready")
     )
-    return int(row) if row is not None else None
+    by_md: dict[int, list] = {}
+    for md, k, ready in rows:
+        by_md.setdefault(int(md), []).append((k, ready))
+    playing = []
+    for md, ms in by_md.items():
+        started = [(k, ready) for k, ready in ms if k <= now]
+        if not started:
+            continue
+        # A match still on the pitch, by either reading.
+        if any(not ready and now < k + MATCH_WINDOW for k, ready in started):
+            playing.append(md)
+            continue
+        # Between two matches of the same weekend: the last one that has begun
+        # and a later one that is due within the span of a round.
+        last_started = max(k for k, _ in started)
+        if any(now < k <= last_started + ROUND_SPAN for k, _ in ms):
+            playing.append(md)
+    return min(playing) if playing else None
 
 
 def is_matchday_in_progress(league, now=None) -> bool:

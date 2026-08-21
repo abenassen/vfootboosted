@@ -4,7 +4,10 @@ export type MinutesLabel = 'high' | 'medium' | 'low' | 'unknown';
 export type LeagueMode = 'aura' | 'classic';
 /** Which deadline the league plays under: the whole XI at the round's first kickoff,
  *  or each player at his own club's. */
-export type LineupLockMode = 'matchday' | 'player';
+/** Fin quando si schiera: alla prima partita della giornata (`matchday`), alla
+ *  prima partita di uno dei PROPRI venticinque (`own`, il default), o sempre, coi
+ *  giocatori gia' scesi in campo congelati uno a uno (`player`). */
+export type LineupLockMode = 'matchday' | 'own' | 'player';
 
 export interface ClassicConstraints {
   starters: number;
@@ -99,12 +102,16 @@ export interface TeamLineupContext {
     vacant_roles: PlayerRole[];
   };
   // The deadline as it applies to THIS matchday. `closes_at` is the moment there is
-  // nothing left to decide: the first kickoff under the matchday-wide lock, the last
-  // one under the per-player lock.
+  // nothing left to decide: the first kickoff under the matchday-wide lock, the
+  // first kickoff of one of THIS team's players under `own`, the last one under
+  // the per-player lock.
   lineup_lock?: {
     mode: LineupLockMode;
     enforced: boolean;
     closes_at: string | null;
+    /** Under `own`: the match that sets the deadline, so the page can say
+     *  «fino alle 15:00 di sabato, con Milan-Como» instead of a bare date. */
+    closes_with?: { home: string; away: string } | null;
     closed: boolean;
     locked_player_ids: number[];
     /** Dal primo calcio d'inizio, in una lega col modificatore difesa, il NUMERO

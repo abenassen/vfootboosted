@@ -654,7 +654,7 @@ export interface LeagueSettingsPatch {
   enforce_lineup_deadline?: boolean;
   /** Che cosa si blocca, quando la scadenza e' attiva: tutta la formazione al primo
    *  calcio d'inizio, o ogni giocatore all'inizio della sua partita. */
-  lineup_lock_mode?: 'matchday' | 'player';
+  lineup_lock_mode?: 'matchday' | 'own' | 'player';
 }
 
 export async function updateLeagueSettings(leagueId: number, settings: LeagueSettingsPatch) {

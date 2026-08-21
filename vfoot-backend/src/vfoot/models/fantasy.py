@@ -79,20 +79,32 @@ class FantasyLeague(models.Model):
     # * "matchday" — the whole lineup freezes at the round's FIRST confirmed
     #   kickoff. One deadline for everybody, the fantacalcio tradition: you commit
     #   to eleven names before a single ball is kicked.
+    # * "own" — the whole lineup freezes at the first kickoff of a match involving
+    #   one of the manager's OWN players, all twenty-five of them and not only the
+    #   eleven. The tradition without its one arbitrary edge: a Friday match in
+    #   which you have nobody is not your business. When you save, none of your
+    #   players has a vote yet — a benched player who had already played would have
+    #   his vote on the board while you could still field, and that vote would
+    #   become a choice, which is why the count is over the roster and not the XI.
+    #   The default.
     # * "player" — each player freezes when HIS OWN club kicks off, and the rest of
     #   the lineup stays editable until the round's LAST kickoff. A manager whose
     #   striker plays on Monday can still decide about him on Sunday night. What it
     #   must never allow is un-deciding someone whose match is under way, which is
     #   why the check is "did this player's placement change", not "is the round
-    #   open".
+    #   open". It is the only mode in which a manager can choose KNOWING part of
+    #   the votes, and the only one that needs the extra rules (no overtaking a
+    #   frozen player, defenders first on the bench).
     LOCK_MATCHDAY = "matchday"
+    LOCK_OWN = "own"
     LOCK_PLAYER = "player"
     LOCK_MODE_CHOICES = [
         (LOCK_MATCHDAY, "Al primo calcio d'inizio della giornata"),
+        (LOCK_OWN, "Alla prima partita di un tuo giocatore"),
         (LOCK_PLAYER, "Ogni giocatore all'inizio della sua partita"),
     ]
     lineup_lock_mode = models.CharField(
-        max_length=10, choices=LOCK_MODE_CHOICES, default=LOCK_MATCHDAY)
+        max_length=10, choices=LOCK_MODE_CHOICES, default=LOCK_OWN)
     # Fattore campo: quanto vale giocare in casa, in punti di fantavoto aggiunti
     # alla squadra di casa. 0 = spento (il default: e' un modificatore in piu', non
     # una regola del fantacalcio).

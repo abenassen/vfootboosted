@@ -3134,7 +3134,7 @@ class LeagueMatchdayListView(APIView):
 
     def get(self, request, league_id: int):
         league = get_object_or_404(FantasyLeague, id=league_id)
-        _membership_or_404(league, request.user.id)
+        membership = _membership_or_404(league, request.user.id)
         _sync_matchdays_for_league(league)
 
         rows = (
@@ -3147,7 +3147,10 @@ class LeagueMatchdayListView(APIView):
         # The other clock, read from the real calendar: what can still be fielded and
         # what is on the pitch right now. Deliberately independent of the conclusions
         # above, so an admin who is three matchdays behind does not move it.
-        fieldable = matchday_state.next_fieldable_matchday(league)
+        # Under the ``own`` deadline "fieldable" is the caller's own answer: his
+        # team may be closed on a round another team can still field.
+        fieldable = matchday_state.next_fieldable_matchday(
+            league, team=getattr(membership, "team", None))
         playing = matchday_state.playing_matchday(league)
         locks = (matchday_state.matchday_locks(league.reference_season_id)
                  if league.reference_season_id else {})
@@ -5495,28 +5498,40 @@ class LeagueTeamLineupView(APIView):
         # the league's own lock mode can answer.
         locked_pids = matchday_state.locked_players(league, matchday, player_ids)
         lock_closes_at = None
+        closes_with = None
+        per_player_mode = league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER
         if league.enforce_lineup_deadline and league.reference_season_id is not None:
-            lock_closes_at = (
-                matchday_state.matchday_last_kickoffs(league.reference_season_id).get(matchday)
-                if league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER
-                else matchday_state.lineup_lock_at(league.reference_season_id, matchday)
-            )
+            if per_player_mode:
+                lock_closes_at = matchday_state.matchday_last_kickoffs(
+                    league.reference_season_id).get(matchday)
+            elif league.lineup_lock_mode == FantasyLeague.LOCK_OWN:
+                # Per squadra: la prima partita di uno dei suoi venticinque. E
+                # QUALE partita, perche' la pagina lo dica com'e' — «fino alle
+                # 15:00 di sabato, con Milan-Como» — invece di una data secca.
+                lock_closes_at, closing = matchday_state.team_deadline(league, team, matchday)
+                if closing is not None:
+                    closes_with = {
+                        "home": closing.home_team.team.short_name or closing.home_team.team.name,
+                        "away": closing.away_team.team.short_name or closing.away_team.team.name,
+                    }
+            else:
+                lock_closes_at = matchday_state.lineup_lock_at(league.reference_season_id, matchday)
         # IL NUMERO DI DIFENSORI E' CONGELATO, e da quando. Lo specchio della
         # regola che il salvataggio applica: la pagina deve poter spegnere le
         # pastiglie del modulo e dirlo PRIMA del tocco, invece di lasciar premere e
-        # rispondere 409 dopo.
-        defence_locked = bool(
-            is_classic
-            and league.defense_bonus_enabled
-            and league.enforce_lineup_deadline
-            and league.reference_season_id is not None
-            and (lambda k: k is not None and k <= timezone.now())(
-                matchday_state.lineup_lock_at(league.reference_season_id, matchday))
-        )
+        # rispondere 409 dopo. Solo nella modalita' «sempre aperta», dal primo
+        # giocatore della squadra: nelle altre due, dopo la scadenza non si salva
+        # affatto, e prima nessun voto proprio e' noto.
+        defence_locked = False
+        if (is_classic and league.defense_bonus_enabled and league.enforce_lineup_deadline
+                and per_player_mode and league.reference_season_id is not None):
+            own_first, _ = matchday_state.team_first_kickoff(league, team, matchday)
+            defence_locked = own_first is not None and own_first <= timezone.now()
         lineup_lock = {
             "mode": league.lineup_lock_mode,
             "enforced": bool(league.enforce_lineup_deadline),
             "closes_at": lock_closes_at.isoformat() if lock_closes_at else None,
+            "closes_with": closes_with,
             "closed": bool(lock_closes_at is not None and lock_closes_at <= timezone.now()),
             "locked_player_ids": sorted(locked_pids),
             "defence_locked": defence_locked,
@@ -5721,6 +5736,19 @@ def _roster_budget(roster: list, initial: int, team_id: int) -> dict:
             "remaining": max(0, initial - spent - sunk), "by_role": by_role}
 
 
+def _deadline_sentence(deadline, match) -> str:
+    """«sabato 22/02 alle 15:00, con Milan-Como»: the deadline as a manager reads
+    it, for the refusal and for the page."""
+    local = timezone.localtime(deadline)
+    days = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
+    when = f"{days[local.weekday()]} {local.strftime('%d/%m')} alle {local.strftime('%H:%M')}"
+    if match is None:
+        return when
+    home = match.home_team.team.short_name or match.home_team.team.name
+    away = match.away_team.team.short_name or match.away_team.team.name
+    return f"{when}, con {home}-{away}"
+
+
 class LeagueTeamLineupSaveView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -5749,20 +5777,35 @@ class LeagueTeamLineupSaveView(APIView):
         per_player = (league.enforce_lineup_deadline
                       and league.lineup_lock_mode == FantasyLeague.LOCK_PLAYER)
         if league.enforce_lineup_deadline and league.reference_season_id is not None:
+            now = timezone.now()
             if per_player:
                 # The round only closes when the LAST club has kicked off; until then
                 # it is partly open and the per-player check below does the work.
                 last_kick = matchday_state.matchday_last_kickoffs(
                     league.reference_season_id).get(md_int)
-                closed = last_kick is not None and last_kick <= timezone.now()
+                if last_kick is not None and last_kick <= now:
+                    return Response(
+                        {"detail": f"Formazione bloccata: la giornata {md_int} è già iniziata."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+            elif league.lineup_lock_mode == FantasyLeague.LOCK_OWN:
+                # The team's own deadline: the first kickoff involving one of its
+                # twenty-five. Refused as a block, with the hour and the match that
+                # closed it — the manager has to be able to read WHY.
+                deadline, closing = matchday_state.team_deadline(league, team, md_int)
+                if deadline is not None and deadline <= now:
+                    return Response(
+                        {"detail": "Formazione chiusa: "
+                                   + _deadline_sentence(deadline, closing) + "."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
             else:
                 first_kick = matchday_state.lineup_lock_at(league.reference_season_id, md_int)
-                closed = first_kick is not None and first_kick <= timezone.now()
-            if closed:
-                return Response(
-                    {"detail": f"Formazione bloccata: la giornata {md_int} è già iniziata."},
-                    status=status.HTTP_409_CONFLICT,
-                )
+                if first_kick is not None and first_kick <= now:
+                    return Response(
+                        {"detail": f"Formazione bloccata: la giornata {md_int} è già iniziata."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
 
         # Classic mode: enforce the role constraints server-side using the FROZEN
         # listone roles, so a hand-crafted request can't bypass the client validator.
@@ -5891,15 +5934,16 @@ class LeagueTeamLineupSaveView(APIView):
         # sposta niente di cio' che il modificatore misura. E vale solo dove il
         # modificatore c'e': una regola senza il suo motivo e' peggio di una regola
         # che varia con l'impostazione.
-        first_kick = (
-            matchday_state.lineup_lock_at(league.reference_season_id, md_int)
-            if league.reference_season_id is not None else None
-        )
-        round_started = bool(
-            league.enforce_lineup_deadline
-            and first_kick is not None
-            and first_kick <= timezone.now()
-        )
+        #
+        # SOLO nella modalita' «sempre aperta» (``player``). Nelle altre due, quando
+        # si salva nessuno dei propri giocatori ha ancora un voto: non c'e' niente
+        # da sfruttare, e la regola non ha il suo motivo. E l'orologio e' il PRIMO
+        # GIOCATORE DELLA SQUADRA, non il primo calcio d'inizio della giornata: e'
+        # da li' che l'allenatore sa qualcosa di suo.
+        round_started = False
+        if per_player and league.reference_season_id is not None:
+            own_first, _ = matchday_state.team_first_kickoff(league, team, md_int)
+            round_started = own_first is not None and own_first <= timezone.now()
         if round_started and league.mode == FantasyLeague.MODE_CLASSIC and league.defense_bonus_enabled:
             from vfoot.services.classic_matchday_scoring import role_map_for
 

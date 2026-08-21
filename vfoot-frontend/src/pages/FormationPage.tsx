@@ -1009,12 +1009,18 @@ export default function FormationPage() {
                 className={`mt-1 text-[11px] ${closed ? 'font-semibold text-bad' : 'text-ink-faint'}`}
               >
                 {closed
-                  ? 'Giornata chiusa: la formazione non è più modificabile.'
+                  ? lock.mode === 'own' && lock.closes_with
+                    ? `Formazione chiusa: ${lock.closes_with.home}-${lock.closes_with.away} è iniziata (${fmtDeadline(lock.closes_at)}) e avevi un giocatore in quella partita.`
+                    : 'Giornata chiusa: la formazione non è più modificabile.'
                   : lock.mode === 'player'
                     ? lockedIds.size
                       ? `${lockedIds.size} giocatori hanno la partita iniziata e restano dove sono; sugli altri puoi decidere fino a ${fmtDeadline(lock.closes_at)}.`
                       : `Ogni giocatore si blocca all'inizio della sua partita. Ultimo calcio d'inizio: ${fmtDeadline(lock.closes_at)}.`
-                    : `La formazione si blocca al primo calcio d'inizio della giornata: ${fmtDeadline(lock.closes_at)}.`}
+                    : lock.mode === 'own'
+                      ? lock.closes_with
+                        ? `Si schiera fino a ${fmtDeadline(lock.closes_at)}, con ${lock.closes_with.home}-${lock.closes_with.away}: la prima partita in cui hai un giocatore.`
+                        : `Si schiera fino alla prima partita in cui hai un giocatore: ${fmtDeadline(lock.closes_at)}.`
+                      : `La formazione si blocca al primo calcio d'inizio della giornata: ${fmtDeadline(lock.closes_at)}.`}
               </div>
             ) : null}
             {/* «SE NON LA TOCCHI, GIOCA QUESTA». Detto qui perche' e' vero:

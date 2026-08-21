@@ -41,7 +41,6 @@ def _open_snapshots(league, team_id: int, now=None) -> list:
     Which of them may actually be touched is decided in ``swap_player`` — here the
     question is only whether the matchday is over and done with.
     """
-    locked = matchday_state.closed_matchdays(league, now)
     out = []
     for snap in SavedLineupSnapshot.objects.filter(
         league_id=str(league.id), lineup_id__startswith=f"team{team_id}"
@@ -55,7 +54,11 @@ def _open_snapshots(league, team_id: int, now=None) -> list:
             md = int(snap.matchday_id)
         except (TypeError, ValueError):
             continue
-        if md not in locked:
+        # Per snapshot and not for the whole season at once: under the ``own``
+        # deadline "closed" is a property of THIS team, and it counts the players
+        # he owned when their clubs kicked off — so a transfer can never reopen a
+        # round that had closed on him (see ``team_deadline``).
+        if not matchday_state.is_closed_for(league, md, team_id, now):
             out.append(snap)
     return out
 
