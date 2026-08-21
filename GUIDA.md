@@ -95,6 +95,11 @@ cd vfoot-backend/src
   periodicamente tiene il pool aggiornato.
 - Frontend in modalità `mock` (senza `VITE_API_PROVIDER=backend`): le pagine su dati
   reali (Serie A, Listone, dettaglio partita) mostrano un errore voluto.
+- **Scadenza della formazione**: tre modalità (`matchday` / `own` = default / `player`),
+  formazione di partenza scritta dal server quando la rosa si completa, mercato fermo per
+  tutta la giornata. Regole e riferimenti in `vfoot-backend/docs/classic_live_scoring.md`,
+  sezione «Fin quando si schiera». Per vedere congelati e scadenze senza aspettare il fine
+  settimana: `VFOOT_FAKE_NOW`, lo stesso che usa il server.
 
 ---
 

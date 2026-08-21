@@ -1004,38 +1004,88 @@ export default function LeagueAdminPage() {
                         </div>
                         {draft.enforce_lineup_deadline ? (
                           <div className="mt-2 space-y-2 border-l-2 border-line pl-3">
+                            {/* Le partite di una giornata vanno da venerdì a lunedì: se si
+                                può ancora toccare la formazione quando qualche voto è
+                                uscito, la si tocca sapendo. Le tre voci sono tre posti in
+                                cui mettere il confine. I testi vengono dal documento per
+                                gli allenatori, accorciati e non riscritti. */}
                             <label className="flex items-start gap-2 text-sm">
                               <input
                                 type="radio"
                                 className="mt-1"
                                 name="lineup_lock_mode"
-                                checked={(draft.lineup_lock_mode ?? 'matchday') === 'matchday'}
+                                checked={draft.lineup_lock_mode === 'matchday'}
                                 onChange={() => set({ lineup_lock_mode: 'matchday' })}
                               />
                               <span>
-                                <b>Al primo calcio d'inizio della giornata</b>
+                                <b>Chiusa alla giornata</b>
                                 <span className="mt-0.5 block text-[11px] text-ink-faint">
-                                  Tutta la formazione si chiude insieme, prima che si giochi la prima partita.
-                                  È la regola tradizionale del fantacalcio.
+                                  Si schiera fino al calcio d'inizio della prima partita della giornata, per
+                                  tutti allo stesso momento. La regola classica: nessuna regola in più, e la
+                                  panchina è una fila sola.
                                 </span>
                               </span>
                             </label>
                             <label className="flex items-start gap-2 text-sm">
+                              <input
+                                type="radio"
+                                className="mt-1"
+                                name="lineup_lock_mode"
+                                checked={(draft.lineup_lock_mode ?? 'own') === 'own'}
+                                onChange={() => set({ lineup_lock_mode: 'own' })}
+                              />
+                              <span>
+                                <b>Chiusa al tuo primo giocatore</b>{' '}
+                                <span className="rounded bg-good-bg px-1 text-[10px] font-bold uppercase tracking-wide text-good">
+                                  consigliata
+                                </span>
+                                <span className="mt-0.5 block text-[11px] text-ink-faint">
+                                  Si schiera fino alla prima partita che coinvolge uno dei tuoi 25, titolari e
+                                  panchina. Una partita in cui non hai nessuno non è affar tuo; quando salvi, di
+                                  nessuno dei tuoi esiste ancora un voto. Puoi conoscere il parziale
+                                  dell'avversario: pesano ore, non giorni.
+                                </span>
+                              </span>
+                            </label>
+                            <label
+                              className={`flex items-start gap-2 text-sm ${
+                                draft.lineup_lock_mode === 'player' ? '' : 'cursor-not-allowed opacity-60'}`}
+                              title={
+                                draft.lineup_lock_mode === 'player'
+                                  ? undefined
+                                  : 'Non ancora attivabile: resta aperta una falla (un giocatore inserito tardi che sicuramente non gioca fa entrare il primo della fila a voto noto).'
+                              }
+                            >
                               <input
                                 type="radio"
                                 className="mt-1"
                                 name="lineup_lock_mode"
                                 checked={draft.lineup_lock_mode === 'player'}
+                                // Offerta solo alle leghe che già la usano: finché la quinta
+                                // porta non è chiusa, offrirla vorrebbe dire offrire la falla.
+                                disabled={draft.lineup_lock_mode !== 'player'}
                                 onChange={() => set({ lineup_lock_mode: 'player' })}
                               />
                               <span>
-                                <b>Ogni giocatore all'inizio della sua partita</b>
+                                <b>Sempre aperta</b>
                                 <span className="mt-0.5 block text-[11px] text-ink-faint">
-                                  Chi ha la partita iniziata resta dov'è; sul resto della formazione si
-                                  decide fino all'ultimo calcio d'inizio della giornata.
+                                  Si schiera sempre, anche a giornata in corso, ma chi è sceso in campo
+                                  diventa un chiodo: non si sposta e nessuno lo scavalca. Col modificatore
+                                  difesa, altre due regole: il numero di difensori non cambia più dal tuo
+                                  primo giocatore, e in difesa entra prima un difensore (se nessuno ha voto,
+                                  il primo degli altri).
+                                  {draft.lineup_lock_mode === 'player' ? null : (
+                                    <span className="block text-warn">
+                                      Non ancora selezionabile per le nuove leghe.
+                                    </span>
+                                  )}
                                 </span>
                               </span>
                             </label>
+                            <div className="text-[11px] text-ink-faint">
+                              Da fissare alla creazione, o fra una giornata e l'altra con l'accordo di tutti:
+                              cambiarla a giornata cominciata cambierebbe le regole a metà partita.
+                            </div>
                           </div>
                         ) : null}
                       </div>
