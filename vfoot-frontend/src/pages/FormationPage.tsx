@@ -55,13 +55,15 @@ const ROLE_CHIP: Record<PlayerRole, string> = {
 const ROLE_ORDER: Record<PlayerRole, number> = { GK: 0, DEF: 1, MID: 2, ATT: 3 }; // P, D, C, A
 const ROLES: PlayerRole[] = ['GK', 'DEF', 'MID', 'ATT'];
 
-/** TUTTI I MODULI LEGALI, che sono otto e non un numero a caso: sono esattamente
- *  le terne che rispettano i vincoli classic (difesa 3–5, centrocampo 0–5,
- *  attacco 1–3, dieci di movimento). Con la rosa 3-8-8-6 sono sempre tutti
- *  raggiungibili, quindi nessuno di questi bottoni è mai una porta chiusa per
- *  colpa della rosa — solo, eventualmente, per colpa dei congelati. */
+/** TUTTI I MODULI LEGALI, che sono nove e non un numero a caso: sono esattamente
+ *  le terne che rispettano i vincoli classic (difesa 3–5, centrocampo fino a 6,
+ *  attacco 1–3, dieci di movimento). Il tetto dei sei vale in difesa e non a
+ *  centrocampo, ed è tutta la differenza fra il 3-6-1, che c'è, e il 6-3-1, che
+ *  non c'è; il 4-6-0 lo esclude il minimo di un attaccante. Con la rosa 3-8-8-6
+ *  sono sempre tutti raggiungibili, quindi nessuno di questi bottoni è mai una
+ *  porta chiusa per colpa della rosa — solo, eventualmente, dei congelati. */
 const MODULES: Array<[number, number, number]> = [
-  [3, 4, 3], [3, 5, 2], [4, 3, 3], [4, 4, 2], [4, 5, 1], [5, 2, 3], [5, 3, 2], [5, 4, 1],
+  [3, 4, 3], [3, 5, 2], [3, 6, 1], [4, 3, 3], [4, 4, 2], [4, 5, 1], [5, 2, 3], [5, 3, 2], [5, 4, 1],
 ];
 const moduleName = (m: [number, number, number]) => m.join('-');
 
@@ -78,7 +80,7 @@ function validateClassic(roles: PlayerRole[], c: ClassicConstraints): string[] {
   if (cnt.ATT > c.per_role.ATT.max) errs.push(`Al massimo ${c.per_role.ATT.max} attaccanti (ne hai ${cnt.ATT}).`);
   (['DEF', 'MID'] as PlayerRole[]).forEach((role) => {
     if (cnt[role] > c.per_role[role].max)
-      errs.push(`Meno di 6 ${ROLE_LABEL[role]} (${c.per_role[role].max} max, ne hai ${cnt[role]}).`);
+      errs.push(`Al massimo ${c.per_role[role].max} ${ROLE_LABEL[role]} (ne hai ${cnt[role]}).`);
   });
   return errs;
 }

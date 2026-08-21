@@ -19,15 +19,18 @@ ROLE_LABEL = {"GK": "POR", "DEF": "DIF", "MID": "CEN", "ATT": "ATT"}
 
 XI = 11
 
-# Per-role bounds for a legal classic XI. `max_strict` encodes "strictly fewer than
-# 6 in any role" (confirmed rule) as an inclusive max of 5; ATT is further capped at
-# 3 and DEF floored at 3; exactly one GK.
+# Bounds per reparto di un XI classic legale. Il tetto NON e' lo stesso ovunque, ed
+# e' deliberato: in difesa si resta sotto i sei (max 5, quindi niente 6-3-1), mentre
+# a centrocampo il sesto uomo e' legale e il 3-6-1 e' un modulo come gli altri.
+# Nessun reparto puo' restare vuoto: a farlo rispettare sono i minimi di DEF (3) e
+# ATT (1) — il centrocampo ha min 0 perche' l'aritmetica lo tiene comunque a 2 o
+# piu' (dieci di movimento, al massimo 5 dietro e 3 davanti). Un solo portiere.
 CLASSIC_CONSTRAINTS = {
     "starters": XI,
     "per_role": {
         "GK": {"min": 1, "max": 1},
         "DEF": {"min": 3, "max": 5},
-        "MID": {"min": 0, "max": 5},
+        "MID": {"min": 0, "max": 6},
         "ATT": {"min": 1, "max": 3},
     },
 }
@@ -56,10 +59,13 @@ def validate_classic_lineup(starter_roles: list[str]) -> list[str]:
         errors.append(f"Almeno {bounds['ATT']['min']} attaccante (ne hai {counts['ATT']}).")
     if counts["ATT"] > bounds["ATT"]["max"]:
         errors.append(f"Al massimo {bounds['ATT']['max']} attaccanti (ne hai {counts['ATT']}).")
+    # Il messaggio legge il tetto dal dizionario invece di dire "meno di 6": i due
+    # reparti hanno massimi diversi, e una frase che ne nomina uno solo mentirebbe
+    # sull'altro alla prima volta che uno dei due cambia.
     for role in ("DEF", "MID"):
         if counts[role] > bounds[role]["max"]:
             errors.append(
-                f"Meno di 6 {ROLE_LABEL[role]} ({bounds[role]['max']} max, ne hai {counts[role]})."
+                f"Al massimo {bounds[role]['max']} {ROLE_LABEL[role]} (ne hai {counts[role]})."
             )
     return errors
 

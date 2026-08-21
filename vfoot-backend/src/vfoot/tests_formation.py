@@ -36,10 +36,18 @@ class FormationRulesTests(SimpleTestCase):
         self.assertTrue(any("Almeno 1 attaccante" in e for e in validate_classic_lineup(_xi(1, 5, 5, 0))))
         self.assertTrue(any("Al massimo 3 attaccanti" in e for e in validate_classic_lineup(_xi(1, 3, 3, 4))))
 
-    def test_strict_less_than_six_per_role(self):
-        # 6 midfielders is illegal (strictly < 6)
-        errs = validate_classic_lineup(_xi(1, 3, 6, 1))
-        self.assertTrue(any("Meno di 6 CEN" in e for e in errs))
+    def test_legal_361(self):
+        # Il sesto centrocampista e' legale: il tetto dei sei vale in difesa, non a
+        # centrocampo. E' la sola differenza fra il 3-6-1 e il 6-3-1 qui sotto.
+        self.assertTrue(is_legal_classic(_xi(1, 3, 6, 1)))
+
+    def test_too_many_defenders(self):
+        errs = validate_classic_lineup(_xi(1, 6, 3, 1))
+        self.assertTrue(any("Al massimo 5 DIF" in e for e in errs))
+
+    def test_too_many_midfielders(self):
+        errs = validate_classic_lineup(_xi(1, 3, 7, 0))
+        self.assertTrue(any("Al massimo 6 CEN" in e for e in errs))
 
     def test_wrong_total(self):
         self.assertTrue(any("esattamente 11" in e for e in validate_classic_lineup(_xi(1, 4, 4, 1))))
