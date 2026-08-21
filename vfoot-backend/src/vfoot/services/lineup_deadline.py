@@ -20,11 +20,22 @@ The rule, and the reason for each half of it:
   unplayed man is left uncovered when it runs out. Either way the reason for wanting
   to reshuffle is that his 4.5 is already on the screen.
 
-So the free players are permuted among the FREE slots and the frozen ones never
-move. Nobody is passing anybody: with the 3rd frozen, the 2nd and the 4th exchange
-places and the 3rd is still the 3rd, with the same two players ahead of him as
-before. Everything else — the players nobody has taken the pitch with yet — is
-ordinary editing, and the formation rules judge the result as usual.
+* **nobody passes a locked player** — the other half of the same idea, and the
+  one the first two did not cover. Keeping the frozen man's slot defends HIS place
+  but not the order in which the others reach it: a free player could still step
+  in front of him or drop behind him, and the reason for wanting to is that his
+  7.0 is already on the board (bench him under a known vote, or bring an unknown
+  one ahead of it — each is choosing one's substitute with the results in hand).
+  So every free player stays on the same side of every locked player as he was.
+  The eleven count as ONE place, ahead of the whole bench: a change of formation
+  that reshuffles starters among themselves is not an overtaking, and neither is
+  leaving the XI for the bench or the reverse where the two did not stand in a
+  strict order before AND after. Only a strict order that flips is refused.
+
+So the free players are permuted among the FREE slots of their own stretch of the
+bench, and the frozen ones never move. Everything else — the players nobody has
+taken the pitch with yet — is ordinary editing, and the formation rules judge the
+result as usual.
 """
 from __future__ import annotations
 
@@ -135,6 +146,63 @@ def slots(lineup: dict, key: str, only: set[int]) -> dict[int, int]:
     return {i: pid for i, pid in enumerate(_as_ids(lineup.get(key))) if pid in only}
 
 
+def rank(lineup: dict) -> dict[int, int]:
+    """player_id -> his place in the order the bench is read: 0 for everybody in
+    the XI (goalkeeper included), ``1 + index`` on the bench. Absent = no place.
+
+    The XI is ONE place on purpose. Its internal order is derived (P-D-C-A, see
+    ``normalise_xi``) and a legitimate change of module reshuffles it; counting
+    those positions would refuse such a change with a message nobody could read.
+    """
+    out: dict[int, int] = {}
+    for pid in _as_ids(lineup.get("starter_player_ids")):
+        out[pid] = 0
+    gk = lineup.get("gk_player_id")
+    if gk not in (None, ""):
+        try:
+            out[int(gk)] = 0
+        except (TypeError, ValueError):
+            pass
+    for i, pid in enumerate(_as_ids(lineup.get("bench_player_ids"))):
+        out[pid] = 1 + i
+    return out
+
+
+def overtakings(old: dict | None, new: dict, locked_ids: set[int],
+                names: dict[int, str] | None = None) -> list[str]:
+    """Which free players this submission moves to the other side of a locked one.
+
+    For every (free, locked) pair that had a STRICT order before and has a strict
+    order after, the two must agree. A tie — both in the XI — is not an order, and
+    entering or leaving the block is not an overtaking; those pairs are skipped, or
+    every change of formation would be refused.
+    """
+    if not locked_ids:
+        return []
+    names = names or {}
+    before, after = rank(old or {}), rank(new)
+    out: list[str] = []
+    for free in sorted(set(after) | set(before)):
+        if free in locked_ids:
+            continue
+        for frozen in sorted(locked_ids):
+            b_free, b_fr = before.get(free), before.get(frozen)
+            a_free, a_fr = after.get(free), after.get(frozen)
+            if None in (b_free, b_fr, a_free, a_fr):
+                continue
+            if b_fr != a_fr:
+                continue        # the locked man himself moved: reported above, once
+            if b_free == b_fr or a_free == a_fr:
+                continue
+            if (b_free < b_fr) != (a_free < a_fr):
+                who = names.get(free, f"giocatore {free}")
+                other = names.get(frozen, f"giocatore {frozen}")
+                side = "davanti a" if a_free < a_fr else "dietro a"
+                out.append(f"{who} non può passare {side} {other}: la partita di {other} è iniziata.")
+                break       # one line per free player is enough to read
+    return out
+
+
 def violations(old: dict | None, new: dict, locked_ids: set[int],
                names: dict[int, str] | None = None) -> list[str]:
     """Which locked players this submission moves. Empty list = the save is legal."""
@@ -169,4 +237,5 @@ def violations(old: dict | None, new: dict, locked_ids: set[int],
                 f"{names.get(pid, f'giocatore {pid}')} non può passare dal posto "
                 f"{i + 1} al posto {moved_to + 1} {where}: la sua partita è iniziata."
             )
+    out.extend(m for m in overtakings(old, new, locked_ids, names) if m not in out)
     return out

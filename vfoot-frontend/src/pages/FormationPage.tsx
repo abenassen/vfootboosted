@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
@@ -495,12 +495,44 @@ export default function FormationPage() {
 
   const chosen = starterIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
   const notChosen = ctx.roster.filter((p) => !starterIds.includes(p.player_id));
+
+  // The bench as the page shows it and the save sends it: the manager's order,
+  // everybody not in the XI appended, frozen players pinned to their numbers.
+  const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
+
+  // NESSUNO SCAVALCA CHI HA GIÀ GIOCATO. The other half of the freeze, mirrored
+  // from the save (lineup_deadline.overtakings): a free player stays on the same
+  // side of every frozen one. The eleven count as one place AHEAD of the bench,
+  // so a bench player behind a frozen man cannot come up — and a starter cannot
+  // go down behind one. The reasons are said BEFORE the touch, not refused after.
+  const frozenAhead = (order: number[], id: number): number | null => {
+    const i = order.indexOf(id);
+    if (i < 0) return null;
+    return order.slice(0, i).find((x) => lockedIds.has(x)) ?? null;
+  };
+  const nameOf = (id: number) => byId.get(id)?.name ?? 'un compagno';
+  /** Why this bench player cannot be brought ahead of the wall — null when he can. */
+  const overtakeReason = (id: number): string | null => {
+    const f = frozenAhead(benchIds, id);
+    return f == null ? null : `Non può passare davanti a ${nameOf(f)}: la partita di ${nameOf(f)} è iniziata.`;
+  };
+  /** Where a benched starter lands: the last place of the first stretch, ahead of
+   *  every frozen man — the bench length when nobody is frozen. */
+  const benchCut = (order: number[]) => {
+    const i = order.findIndex((x) => lockedIds.has(x));
+    return i < 0 ? order.length : i;
+  };
+  const demotionReason = (): string | null =>
+    benchIds.length && lockedIds.has(benchIds[0])
+      ? `Non può andare in panchina: finirebbe dietro a ${nameOf(benchIds[0])}, la cui partita è iniziata.`
+      : null;
+
   const blockReasonFor = (p: TeamLineupPlayer) =>
     closed
       ? 'Giornata chiusa: la formazione non è più modificabile.'
       : lockedIds.has(p.player_id)
         ? lockedReason
-        : promotionBlock(p, chosen, notChosen, isClassic ? constraints : null);
+        : (overtakeReason(p.player_id) ?? promotionBlock(p, chosen, notChosen, isClassic ? constraints : null));
 
   // Toggling a player keeps the ordered bench in sync: a demoted starter joins the
   // bench at the LOWEST priority (end); a promoted bench player leaves it.
@@ -523,8 +555,18 @@ export default function FormationPage() {
       return;
     }
     if (starterIds.includes(id)) {
+      const why = demotionReason();
+      if (why) {
+        setRefused({ player_id: id, reason: why });
+        return;
+      }
       setStarterIds((s) => s.filter((x) => x !== id));
-      setBenchOrder((b) => pinFrozen(b.includes(id) ? b : [...b, id], frozenSlots));
+      // Ahead of the wall: the last place of the first stretch, not the end of
+      // the bench — behind a frozen man the save would refuse him.
+      const cut = benchCut(benchIds);
+      setBenchOrder(() =>
+        pinFrozen([...benchIds.slice(0, cut), id, ...benchIds.slice(cut).filter((x) => x !== id)], frozenSlots),
+      );
       if (role) setVacancies((v) => [...v, role]);
       setRefused(null);
     } else {
@@ -579,7 +621,18 @@ export default function FormationPage() {
     // L'indice VISIBILE conta anche i congelati; quello che serve è quanti liberi
     // stanno sopra la riga puntata.
     const freeAbove = order.slice(0, Math.max(0, visibleIndex)).filter((x) => !lockedIds.has(x)).length;
-    const to = Math.max(0, Math.min(free.length - 1, freeAbove > from ? freeAbove - 1 : freeAbove));
+    let to = Math.max(0, Math.min(free.length - 1, freeAbove > from ? freeAbove - 1 : freeAbove));
+    // ...and never across a frozen man: the move stops at the edge of the
+    // player's own stretch. `stretch` numbers the free players by how many
+    // frozen ones stand above them; the target must carry the same number.
+    const stretch: number[] = [];
+    let walls = 0;
+    for (const x of order) {
+      if (lockedIds.has(x)) walls += 1;
+      else stretch.push(walls);
+    }
+    const mine = stretch[from];
+    to = Math.max(stretch.indexOf(mine), Math.min(stretch.lastIndexOf(mine), to));
     if (to === from) return order;
     const moved = [...free];
     moved.splice(from, 1);
@@ -703,6 +756,11 @@ export default function FormationPage() {
       setRefused({ player_id: id, reason: closed ? closedReason : "Il suo posto in panchina è fissato: la sua partita è iniziata." });
       return;
     }
+    const wall = overtakeReason(id);
+    if (wall) {
+      setRefused({ player_id: id, reason: wall });
+      return;
+    }
     setRefused(null);
     setBenchOrder((b) => reorderBench(pinFrozen(orderBench(ctx.roster, starterIds, b), frozenSlots), id, 0));
   };
@@ -723,7 +781,6 @@ export default function FormationPage() {
 
   const byRole = (a: TeamLineupPlayer, b: TeamLineupPlayer) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form;
   const starters = ctx.roster.filter((p) => starterIds.includes(p.player_id)).sort(byRole);
-  const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
   const bench = benchIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
   // Mentre il dito è giù si mostra l'anteprima, non l'ordine salvato: è il senso
   // stesso del trascinare, vedere dove sta andando prima di lasciare.
@@ -1235,8 +1292,21 @@ export default function FormationPage() {
             onPointerCancel={dragEnd}
           >
             {shownBench.map((p, i) => (
+              <Fragment key={p.player_id}>
+              {/* IL MURO. A frozen bench player is a wall: the free rows above him
+                  stay above, the ones below stay below, and the drag stops here.
+                  Drawn so the limit is seen before it is felt. */}
+              {lockedIds.has(p.player_id) && i > 0 ? (
+                <div
+                  className="flex items-center gap-2 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[.12em] text-warn"
+                  aria-hidden="true"
+                >
+                  <span className="h-px flex-1 border-t border-dashed border-warn" />
+                  nessuno passa di qui
+                  <span className="h-px flex-1 border-t border-dashed border-warn" />
+                </div>
+              ) : null}
               <RosterRow
-                key={p.player_id}
                 p={p}
                 isStarter={false}
                 selected={selected === p.player_id}
@@ -1259,6 +1329,7 @@ export default function FormationPage() {
                   onPointerUp: rowPointerUp(p.player_id),
                 }}
               />
+              </Fragment>
             ))}
             {bench.length === 0 ? <div className="py-2 text-sm text-ink-faint">Panchina vuota.</div> : null}
           </div>

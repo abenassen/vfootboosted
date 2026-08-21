@@ -205,12 +205,48 @@ class ViolationRulesTests(TestCase):
         self.assertIn("dal posto 1 al posto 2 in panchina",
                       lineup_deadline.violations(old, new, {4})[0])
 
-    def test_the_free_ones_swap_over_a_frozen_head(self):
-        """Slots 2 and 4 exchange occupants; the frozen 3rd never moves. This is
-        the only reordering a half-played bench still allows."""
+    def test_the_free_ones_do_not_swap_over_a_frozen_head(self):
+        """Slots 2 and 4 exchanging occupants used to be "the only reordering a
+        half-played bench still allows". It is the fourth door: the 4th has his
+        vote on the board, and swapping 8 and 9 around him is choosing — with
+        that vote known — which of the two reaches the pitch first."""
         old = self._lineup(1, [2], [7, 8, 4, 9])
         new = self._lineup(1, [2], [7, 9, 4, 8])
+        errs = lineup_deadline.violations(old, new, {4})
+        self.assertEqual(len(errs), 2)
+        self.assertTrue(any("davanti a" in e for e in errs))
+        self.assertTrue(any("dietro a" in e for e in errs))
+
+    def test_the_free_ones_swap_inside_their_own_stretch(self):
+        old = self._lineup(1, [2], [7, 8, 4, 9, 10])
+        new = self._lineup(1, [2], [8, 7, 4, 10, 9])
         self.assertEqual(lineup_deadline.violations(old, new, {4}), [])
+
+    def test_a_change_of_module_with_frozen_starters_is_not_an_overtaking(self):
+        """The eleven are ONE place: frozen starters 2 and 3 stay in the XI while
+        the free ones around them move in and out, and the bench head is frozen
+        too. Nothing flips a strict order, so nothing is refused."""
+        old = self._lineup(1, [2, 3, 5, 6], [7, 4, 8])
+        new = self._lineup(1, [3, 7, 2, 5], [6, 4, 8])
+        self.assertEqual(lineup_deadline.violations(old, new, {2, 3, 4}), [])
+
+    def test_a_starter_may_drop_ahead_of_a_frozen_bench_player_but_not_behind(self):
+        old = self._lineup(1, [2, 5], [7, 4, 8])
+        ahead = self._lineup(1, [2, 7], [5, 4, 8])
+        behind = self._lineup(1, [2, 7], [8, 4, 5])
+        self.assertEqual(lineup_deadline.violations(old, ahead, {4}), [])
+        errs = lineup_deadline.violations(old, behind, {4})
+        self.assertTrue(any("5 non può passare dietro a" in e.replace("giocatore ", "") for e in errs), errs)
+
+    def test_only_the_stretch_ahead_of_a_frozen_man_can_reach_the_xi(self):
+        """The figure in the managers' document: the striker at 3 and the
+        defender at 4 have not played, and still cannot come up — to let them in,
+        the starter who leaves would have to go UNDER the 7.0 at slot 2."""
+        old = self._lineup(1, [2, 5], [7, 4, 8, 9])
+        from_ahead = self._lineup(1, [2, 7], [5, 4, 8, 9])
+        from_behind = self._lineup(1, [2, 8], [7, 4, 5, 9])
+        self.assertEqual(lineup_deadline.violations(old, from_ahead, {4}), [])
+        self.assertTrue(lineup_deadline.violations(old, from_behind, {4}))
 
     def test_the_goalkeeper_is_his_own_place(self):
         old = self._lineup(1, [2, 3], [])
