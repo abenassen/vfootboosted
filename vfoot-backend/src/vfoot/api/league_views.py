@@ -5750,7 +5750,11 @@ def _roster_budget(roster: list, initial: int, team_id: int) -> dict:
 def _deadline_sentence(deadline, match) -> str:
     """«sabato 22/02 alle 15:00, con Milan-Como»: the deadline as a manager reads
     it, for the refusal and for the page."""
-    local = timezone.localtime(deadline)
+    # Italian football, Italian clock: the server runs on UTC and the managers do
+    # not, so the hour is said in Rome time rather than in the server's.
+    from zoneinfo import ZoneInfo
+
+    local = deadline.astimezone(ZoneInfo("Europe/Rome"))
     days = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
     when = f"{days[local.weekday()]} {local.strftime('%d/%m')} alle {local.strftime('%H:%M')}"
     if match is None:
