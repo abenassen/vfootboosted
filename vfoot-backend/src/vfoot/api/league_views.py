@@ -5328,7 +5328,37 @@ class FixtureDetailView(APIView):
             # conclusa, quindi «assente» vale «bloccato».
             "lineups_locked": locked,
             "lock_at": lock_at.isoformat() if lock_at else None,
+            # QUANDO si blocca ciascuna delle due, che dipende dalla modalita' della
+            # lega e non e' «il primo calcio d'inizio» se non in quella classica:
+            # in ``own`` ogni squadra ha la sua scadenza (la prima partita di un suo
+            # giocatore), in ``player`` non c'e' una scadenza ma un congelamento
+            # progressivo fino all'ultimo calcio d'inizio. La frase in fondo al
+            # tabellino deve poterlo dire.
+            "lineup_lock": _fixture_lock_info(league, md, fx),
         })
+
+
+def _fixture_lock_info(league, md, fx) -> dict:
+    """Per il piede del tabellino in anteprima: la modalita' e, per lato, quando
+    quella squadra si blocca e con quale partita."""
+    mode = league.lineup_lock_mode if league.enforce_lineup_deadline else None
+    csid, real_md = md.real_competition_season_id, md.real_matchday
+    out = {"mode": mode, "home": None, "away": None,
+           "last_at": None}
+    if mode is None:
+        return out
+    if mode == FantasyLeague.LOCK_OWN:
+        for side, team in (("home", fx.home_team), ("away", fx.away_team)):
+            at, match = matchday_state.team_deadline(league, team, real_md)
+            out[side] = {
+                "at": at.isoformat() if at else None,
+                "with": (f"{match.home_team.team.short_name or match.home_team.team.name}-"
+                         f"{match.away_team.team.short_name or match.away_team.team.name}")
+                if match is not None else None,
+            }
+    last = matchday_state.matchday_last_kickoffs(csid).get(real_md)
+    out["last_at"] = last.isoformat() if last else None
+    return out
 
 
 def _zone_grid_keys(cols: int = 5, rows: int = 4) -> list[str]:

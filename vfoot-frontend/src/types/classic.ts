@@ -156,6 +156,17 @@ export interface ClassicFixtureDetail {
   lineups_locked?: boolean;
   /** Quando si bloccano: il primo calcio d'inizio confermato della giornata. */
   lock_at?: string | null;
+  /** Quando si blocca CIASCUNA, secondo la modalità della lega: in `own` ogni
+   *  squadra alla prima partita di un proprio giocatore (`home`/`away`, con la
+   *  partita che la chiude); in `player` nessuna scadenza unica, ma un
+   *  congelamento progressivo fino a `last_at`; in `matchday` vale `lock_at`.
+   *  `mode` nullo = scadenza spenta. */
+  lineup_lock?: {
+    mode: 'matchday' | 'own' | 'player' | null;
+    home: { at: string | null; with: string | null } | null;
+    away: { at: string | null; with: string | null } | null;
+    last_at: string | null;
+  } | null;
   /** Da dove viene la formazione mostrata, per lato: `lineup` = inviata per questa
    *  giornata; `previous` = ripescata dal turno precedente perché non ne ha
    *  inviata una; `forfait` = non ce n'è nessuna. Prima del blocco solo la prima

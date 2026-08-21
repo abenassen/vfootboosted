@@ -33,6 +33,29 @@ function fmt(n: number): string {
  *  Senza data non si inventa un'ora: il blocco è il primo calcio d'inizio
  *  CONFERMATO del turno, e finché la Lega non lo conferma quella giornata non
  *  blocca niente — dire «domani alle 15» sarebbe una promessa che non è nostra. */
+/** QUANDO si bloccano, nelle parole della modalità della lega. «Al primo calcio
+ *  d'inizio della giornata» è vero solo nella modalità classica: in `own` ogni
+ *  squadra si chiude alla prima partita di un proprio giocatore — e le due possono
+ *  chiudersi in momenti diversi — mentre in `player` non c'è una scadenza ma un
+ *  congelamento progressivo. Una frase sola per tre regole diverse mentiva a due
+ *  leghe su tre. */
+function lockSentence(d: ClassicFixtureDetail): string {
+  const lk = d.lineup_lock;
+  if (!lk || !lk.mode) return 'Le formazioni si possono ancora cambiare.';
+  if (lk.mode === 'own') {
+    const side = (s: { at: string | null; with: string | null } | null) =>
+      s?.at ? `${fmtLock(s.at)}${s.with ? ` (${s.with})` : ''}` : 'orario da definire';
+    const h = side(lk.home);
+    const a = side(lk.away);
+    if (h === a) return `Si bloccano ${h}: la prima partita in cui ognuna delle due ha un giocatore.`;
+    return `Ognuna si blocca alla prima partita di un proprio giocatore: ${d.home_team} ${h}, ${d.away_team} ${a}.`;
+  }
+  if (lk.mode === 'player') {
+    return `Ogni giocatore si blocca all’inizio della sua partita; l’ultimo calcio d’inizio è ${fmtLock(lk.last_at)}.`;
+  }
+  return `Si bloccano ${fmtLock(d.lock_at)}, al primo calcio d’inizio della giornata.`;
+}
+
 function fmtLock(iso?: string | null): string {
   if (!iso) return 'al primo calcio d’inizio';
   return new Date(iso).toLocaleString('it-IT', {
@@ -278,8 +301,7 @@ export function ClassicMatchDetail({
                  ha scritto il gioco, e messa qui suonava come una scusa. Il
                  motivo resta dov'è utile: nel codice che decide se scoprirle. */
               <div className="text-center text-[11px] text-ink-faint">
-                Si bloccano <b>{fmtLock(d.lock_at)}</b>, al primo calcio d’inizio della
-                giornata. Fino ad allora ognuno può cambiarla, e chi ha già schierato la
+                {lockSentence(d)} Fino ad allora ognuno può cambiarla, e chi ha già schierato la
                 mostra a tutti.
               </div>
             ) : (

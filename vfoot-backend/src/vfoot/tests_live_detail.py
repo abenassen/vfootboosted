@@ -232,6 +232,25 @@ class LiveDetailTests(TestCase):
         self.assertEqual(res.data["lineup_source"]["away"], "lineup")
         self.assertTrue(res.data["away"]["starters"])
 
+    def test_the_preview_says_when_each_side_locks_in_its_leagues_words(self):
+        """La frase in fondo dipende dalla modalita': in ``own`` ogni squadra si
+        chiude alla prima partita di un proprio giocatore, e il payload lo dice
+        per lato, con la partita che la chiude. Nessuna rosa qui, quindi la
+        scadenza di ciascuna ricade sul primo calcio d'inizio del turno."""
+        self._kickoffs_in_three_days()
+        self.league.lineup_lock_mode = FantasyLeague.LOCK_OWN
+        self.league.save(update_fields=["lineup_lock_mode"])
+        res = self.client.get(f"/api/v1/fixtures/{self.fixture.id}")
+        lk = res.data["lineup_lock"]
+        self.assertEqual(lk["mode"], "own")
+        self.assertEqual(lk["home"]["at"], res.data["lock_at"])
+        self.assertIn("-", lk["home"]["with"])
+        self.assertIsNotNone(lk["last_at"])
+        self.league.lineup_lock_mode = FantasyLeague.LOCK_MATCHDAY
+        self.league.save(update_fields=["lineup_lock_mode"])
+        lk = self.client.get(f"/api/v1/fixtures/{self.fixture.id}").data["lineup_lock"]
+        self.assertEqual((lk["mode"], lk["home"]), ("matchday", None))
+
     def test_and_it_opens_even_with_nobody_fielded_yet(self):
         """Perche' la regola e' della LEGA, non della singola partita.
 
