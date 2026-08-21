@@ -1,20 +1,26 @@
-"""Il numero di difensori, dal primo calcio d'inizio in poi.
+"""Il numero di difensori, e chi entra al posto di un difensore.
 
-LA FALLA. Schiero una difesa a quattro per il modificatore. Due difensori
-prendono 5. A quel punto SO che il modificatore non arrivera' — e mi conviene
-togliere un difensore che non ha ancora giocato per metterci un attaccante. E'
-una scommessa disdetta a risultato parziale noto, e funziona anche al contrario:
-aggiungere il quarto difensore dopo aver visto due bei voti.
+Due regole, tutte e due il prezzo della sola modalita' «sempre aperta»
+(``player``) e solo dove il modificatore difesa e' acceso:
 
-Il vincolo e' sul NUMERO DI DIFENSORI e non sul modulo, perche' il modificatore
-guarda solo quelli. Vale in due momenti — su cio' che invii (qui sotto,
-``DefenderCountOnSaveTests``) e su cio' che la panchina produce
-(``SubstitutionsKeepTheDefenceTests``) — perche' vietarne uno solo lascia aperta
-l'altra strada per lo stesso risultato.
+* **il numero** (R1, sul salvataggio): dal primo calcio d'inizio di un proprio
+  giocatore, i difensori negli undici restano quanti erano;
+* **le due passate** (sulle sostituzioni): al posto di un difensore senza voto ci
+  prova prima un difensore, nel proprio ordine di panchina; se nessuno ha voto,
+  si rilegge la lista daccapo con chiunque. E viceversa per gli altri ruoli.
+
+La seconda era nata come un lucchetto che si accendeva quando l'allenatore
+MODIFICAVA la formazione a giornata cominciata: un interruttore, azionato a voti
+visti. Ora e' una regola di lega nel ``Ruleset`` e non ha interruttore.
+
+In fondo il collaudo che vale per tutte e due: preso uno scenario, il
+modificatore e' identico in ogni ramo che le regole ammettono, con il gate su
+``starters`` e su ``effective``.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone as dttz
+from datetime import timedelta
+from itertools import permutations
 
 from django.contrib.auth.models import User
 from django.test import SimpleTestCase, TestCase
@@ -39,18 +45,19 @@ from vfoot.models import (
     LeagueMembership,
     SavedLineupSnapshot,
 )
+from vfoot.services import lineup_deadline
 from vfoot.services.classic_matchday_scoring import lineup_still_owned
+from vfoot.services.classic_scoring import Ruleset, defence_first_for, score_team
+from vfoot.services.defense_bonus import GATE_EFFECTIVE, GATE_STARTERS
+from vfoot.services.formation_rules import is_legal_classic
 from vfoot.services.lineup_substitution import apply_classic_substitutions
-
-SAT = datetime(2026, 2, 7, 14, 0, tzinfo=dttz.utc)    # gioca il "sabato"
-MON = datetime(2026, 2, 9, 19, 45, tzinfo=dttz.utc)   # gioca il "lunedi"
-SUNDAY = SAT + timedelta(days=1)                      # meta' giornata giocata
+from vfoot.tests_classic_scoring import line
 
 
 # --------------------------------------------------------------------------- #
-# R2 — la panchina non sposta il numero di difensori.                          #
+# Le due passate.                                                              #
 # --------------------------------------------------------------------------- #
-class SubstitutionsKeepTheDefenceTests(SimpleTestCase):
+class TheBenchIsReadTwiceTests(SimpleTestCase):
     """Un 4-4-2: 1 portiere, 4 difensori, 4 centrocampisti, 2 attaccanti."""
 
     def setUp(self):
@@ -59,49 +66,64 @@ class SubstitutionsKeepTheDefenceTests(SimpleTestCase):
                       2: "DEF", 3: "DEF", 4: "DEF", 5: "DEF",
                       6: "MID", 7: "MID", 8: "MID", 9: "MID",
                       10: "ATT", 11: "ATT"}
-        # In panchina: un difensore, un centrocampista, un attaccante.
+        # In panchina: un centrocampista, un attaccante, un difensore — in
+        # quest'ordine, col difensore per ultimo.
         self.roles.update({20: "DEF", 21: "MID", 22: "ATT"})
         self.bench = [21, 22, 20]
 
-    def _run(self, sv: int, **kw):
-        voted = {p for p in self.starters + self.bench if p != sv}
+    def _run(self, sv, **kw):
+        sv = {sv} if isinstance(sv, int) else set(sv)
+        voted = {p for p in self.starters + self.bench if p not in sv}
         return apply_classic_substitutions(
             self.starters, self.bench, self.roles, voted, **kw)
 
-    def test_without_the_lock_a_midfielder_covers_a_defender(self):
-        """Il comportamento di sempre, che non deve cambiare per chi non ha
-        toccato niente a giornata cominciata."""
+    def test_without_the_rule_the_bench_is_one_queue(self):
+        """Le modalita' 1 e 2: quando l'ultimo salva nessun voto esiste, e la
+        panchina e' la fila di sempre — il primo con voto che tiene il modulo."""
         res = self._run(5)
         self.assertEqual(res.subs, [(5, 21)])
 
-    def test_a_defender_is_replaced_by_a_defender(self):
-        res = self._run(5, def_locked=True)
+    def test_a_defender_is_covered_by_a_defender_first(self):
+        res = self._run(5, defence_first=True)
         self.assertEqual(res.subs, [(5, 20)])
         self.assertEqual(sum(1 for p in res.effective if self.roles[p] == "DEF"), 4)
 
-    def test_a_midfielder_is_not_replaced_by_a_defender(self):
-        """IL CRICCHETTO, che e' il verso meno ovvio: un difensore in piu' fra
-        quelli con voto fa scegliere i tre migliori su cinque invece che su
-        quattro, e i due voti brutti escono dalla media. Azionabile a voti visti,
-        e a senso unico — la media puo' solo migliorare."""
-        res = self._run(6, def_locked=True)
+    def test_a_midfielder_is_not_covered_by_a_defender_while_others_have_a_vote(self):
+        """IL CRICCHETTO: un difensore in piu' fra quelli con voto fa scegliere i
+        tre migliori su cinque invece che su quattro."""
+        self.bench = [20, 21, 22]          # il difensore e' PRIMO in panchina
+        res = self._run(6, defence_first=True)
         self.assertEqual(res.subs, [(6, 21)])
         self.assertEqual(sum(1 for p in res.effective if self.roles[p] == "DEF"), 4)
 
-    def test_midfielder_and_attacker_stay_free_to_swap(self):
-        """Il modificatore non li guarda: vietarli sarebbe una regola senza il suo
-        motivo."""
-        self.bench = [22, 20]          # in panchina solo un attaccante e un difensore
-        res = self._run(6, def_locked=True)
+    def test_midfielder_and_attacker_stay_on_the_same_side(self):
+        """Il modificatore non li guarda: fra loro vale l'ordine puro."""
+        self.bench = [22, 21, 20]
+        res = self._run(6, defence_first=True)
         self.assertEqual(res.subs, [(6, 22)])
 
-    def test_a_hole_rather_than_a_defender_out_of_nowhere(self):
-        """Il prezzo, e va conosciuto: senza difensori in panchina il buco resta.
-        E' cio' che la barra del Salva dice PRIMA, non a punteggi fatti."""
+    def test_the_second_pass_fills_the_defence_with_anybody_rather_than_a_hole(self):
+        """Il divieto secco lasciava il buco; le due passate no. Entra il primo
+        degli altri, e i difensori con voto restano TRE come col buco: il
+        ripiego non tocca niente di cio' che il modificatore guarda."""
         self.bench = [21, 22]
-        res = self._run(5, def_locked=True)
-        self.assertEqual(res.subs, [])
-        self.assertEqual(res.unresolved, [5])
+        res = self._run(5, defence_first=True)
+        self.assertEqual(res.subs, [(5, 21)])
+        self.assertEqual(res.unresolved, [])
+        self.assertEqual(sum(1 for p in res.effective if self.roles[p] == "DEF"), 3)
+
+    def test_the_second_pass_brings_a_defender_onto_another_slot_only_as_last_resort(self):
+        """Tutti i non difensori in panchina senza voto: allora il difensore copre
+        il centrocampista. Non e' fabbricabile — i panchinari gia' a voto non si
+        spostano — e quando capita completa la difesa, che e' cio' che il gate
+        «formazione acquisita» promette."""
+        res = self._run([6, 21, 22], defence_first=True)
+        self.assertEqual(res.subs, [(6, 20)])
+
+    def test_the_two_passes_respect_the_substitution_budget(self):
+        res = self._run([5, 6], defence_first=True, max_subs=1)
+        self.assertEqual(res.subs, [(5, 20)])
+        self.assertEqual(res.unresolved, [6])
 
 
 # --------------------------------------------------------------------------- #
@@ -128,15 +150,196 @@ class InheritedLineupTests(SimpleTestCase):
 
 
 # --------------------------------------------------------------------------- #
+# La regola e' della lega: nel Ruleset, non in un bit per squadra.             #
+# --------------------------------------------------------------------------- #
+class TheRuleBelongsToTheLeagueTests(SimpleTestCase):
+    class _League:
+        def __init__(self, **kw):
+            self.mode = "classic"
+            self.defense_bonus_enabled = True
+            self.enforce_lineup_deadline = True
+            self.lineup_lock_mode = "player"
+            self.__dict__.update(kw)
+
+    def test_player_mode_with_the_modifier_reads_the_bench_twice(self):
+        self.assertTrue(defence_first_for(self._League()))
+
+    def test_the_other_two_modes_do_not(self):
+        """Quando salvi nessun tuo voto esiste: la regola non ha il suo motivo."""
+        self.assertFalse(defence_first_for(self._League(lineup_lock_mode="own")))
+        self.assertFalse(defence_first_for(self._League(lineup_lock_mode="matchday")))
+
+    def test_without_the_modifier_or_the_deadline_it_does_not_exist(self):
+        self.assertFalse(defence_first_for(self._League(defense_bonus_enabled=False)))
+        self.assertFalse(defence_first_for(self._League(enforce_lineup_deadline=False)))
+        self.assertFalse(defence_first_for(self._League(mode="aura")))
+
+    def test_it_travels_in_the_snapshot(self):
+        """Una giornata conclusa ricorda la regola con cui e' stata calcolata: il
+        ricalcolo di una vecchia giornata non cambia semantica sotto i piedi."""
+        rs = Ruleset(defence_first=True)
+        self.assertTrue(Ruleset.from_snapshot(rs.to_snapshot()).defence_first)
+        self.assertFalse(Ruleset.from_snapshot({"defense_gate": "starters"}).defence_first)
+
+
+class TheRuleReachesTheScoreTests(SimpleTestCase):
+    """Provata sul PUNTEGGIO, non solo sulla funzione isolata: quattro difensori
+    per il modificatore, due hanno preso 5, e un centrocampista e' senza voto."""
+
+    def _lines(self):
+        starters = [
+            line(1, "GK", 6.0),
+            line(2, "DEF", 5.0), line(3, "DEF", 5.0), line(4, "DEF", 6.0), line(5, "DEF", 6.0),
+            line(6, "MID", 6.0, sv=True),   # il buco da coprire
+            line(7, "MID", 6.0), line(8, "MID", 6.0), line(9, "MID", 6.0),
+            line(10, "ATT", 6.0), line(11, "ATT", 6.0),
+        ]
+        bench = [line(20, "DEF", 7.5), line(21, "MID", 6.0)]
+        return starters, bench
+
+    def test_in_one_queue_the_ratchet_works(self):
+        """Le modalita' 1 e 2: entra il difensore, ed e' giusto cosi' — nessuno
+        ha potuto mettercelo a voti visti."""
+        starters, bench = self._lines()
+        r = score_team(starters, bench, Ruleset(defence_first=False))
+        self.assertEqual(r["substitutions"][0]["in"]["player_id"], 20)
+        self.assertEqual(r["defense"]["avg"], 6.375)
+        self.assertEqual(r["defense"]["bonus"], 2.0)
+
+    def test_read_twice_the_defence_keeps_its_number(self):
+        starters, bench = self._lines()
+        r = score_team(starters, bench, Ruleset(defence_first=True))
+        self.assertEqual(r["substitutions"][0]["in"]["player_id"], 21)
+        self.assertEqual(r["defense"]["avg"], 5.75)
+        self.assertEqual(r["defense"]["bonus"], 0.0)
+
+
+# --------------------------------------------------------------------------- #
+# Il collaudo: ogni ramo ammesso da' lo stesso modificatore.                   #
+# --------------------------------------------------------------------------- #
+class EveryAdmittedBranchGivesTheSameModifierTests(SimpleTestCase):
+    """Le porte dell'analisi del 21 agosto, rigiocate.
+
+    Per ogni scenario si enumerano le mosse che un allenatore potrebbe fare a
+    voti visti — ogni ordine di panchina, ogni scambio titolare/panchinaro — si
+    tengono solo quelle che le regole ammettono (undici legale, numero di
+    difensori invariato, nessuno scavalca un congelato), si calcola il punteggio
+    di ciascuna e si pretende che il modificatore sia lo stesso in tutte. Sotto
+    tutti e due i gate. Se esiste un ramo ammesso con un modificatore diverso,
+    esiste una scelta fatta sapendo.
+    """
+
+    def _branches(self, base, roles, locked, overtaking_rule=True):
+        """Ogni (undici, panchina) raggiungibile con uno scambio e un riordino,
+        filtrato dalle regole del salvataggio. ``overtaking_rule=False`` toglie
+        il solo controllo dei congelati: serve a mostrare che la porta c'era."""
+        gk, xi, bench = base
+        starts = [(xi, bench)]
+        for i, s in enumerate(xi):
+            for j, b in enumerate(bench):
+                nxi, nb = list(xi), list(bench)
+                nxi[i], nb[j] = b, s
+                starts.append((nxi, nb))
+        before = sum(1 for p in xi if roles[p] == "DEF")
+        out = []
+        for nxi, nb in starts:
+            if not is_legal_classic([roles[gk]] + [roles[p] for p in nxi]):
+                continue
+            if sum(1 for p in nxi if roles[p] == "DEF") != before:
+                continue                                    # R1
+            for order in permutations(nb):
+                new = {"gk_player_id": gk, "starter_player_ids": nxi,
+                       "bench_player_ids": list(order)}
+                old = {"gk_player_id": gk, "starter_player_ids": xi, "bench_player_ids": bench}
+                if overtaking_rule and lineup_deadline.violations(old, new, locked):
+                    continue                                # congelati e scavalco
+                out.append((nxi, list(order)))
+        return out
+
+    def _score(self, gk, xi, bench, roles, votes, gate, defence_first):
+        def L(p):
+            v = votes.get(p)
+            return line(p, roles[p], v if v is not None else 0.0, sv=v is None)
+        rs = Ruleset(defense_gate=gate, defence_first=defence_first)
+        r = score_team([L(gk)] + [L(p) for p in xi], [L(p) for p in bench], rs)
+        return (r["defense"]["eligible"], r["defense"]["bonus"])
+
+    def _modifiers(self, base, roles, votes, locked, defence_first):
+        out = {}
+        for gate in (GATE_STARTERS, GATE_EFFECTIVE):
+            seen = set()
+            for xi, bench in self._branches(base, roles, locked):
+                seen.add(self._score(base[0], xi, bench, roles, votes, gate, defence_first))
+            out[gate] = seen
+        return out
+
+    def test_door_one_the_phantom_defender(self):
+        """Difesa a quattro col quarto che non giochera'. In panchina un
+        attaccante a voto e un difensore che gioca dopo."""
+        roles = {1: "GK", 2: "DEF", 3: "DEF", 4: "DEF", 5: "DEF",
+                 6: "MID", 7: "MID", 8: "MID", 9: "MID", 10: "ATT", 11: "ATT",
+                 20: "ATT", 21: "DEF"}
+        votes = {1: 7.0, 2: 7.0, 3: 6.8, 4: 6.6, 5: None, 6: 6.0, 7: 6.0, 8: 6.0, 9: 6.0,
+                 10: 6.0, 11: 6.0, 20: 6.5, 21: 6.0}
+        base = (1, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [20, 21])
+        locked = {1, 2, 3, 4, 20}
+        for gate, seen in self._modifiers(base, roles, votes, locked, True).items():
+            self.assertEqual(len(seen), 1, (gate, seen))
+
+    def test_door_three_the_phantom_midfielder(self):
+        """3-4-3, il fittizio e' un centrocampista; primo panchinaro un
+        difensore, secondo un centrocampista. Senza la regola il riordino
+        decide se i difensori a voto sono tre o quattro."""
+        roles = {1: "GK", 2: "DEF", 3: "DEF", 4: "DEF",
+                 5: "MID", 6: "MID", 7: "MID", 8: "MID", 9: "ATT", 10: "ATT", 11: "ATT",
+                 20: "DEF", 21: "MID"}
+        votes = {1: 7.0, 2: 7.0, 3: 6.8, 4: 6.6, 5: None, 6: 6.0, 7: 6.0, 8: 6.0,
+                 9: 6.0, 10: 6.0, 11: 6.0, 20: 7.0, 21: 6.0}
+        base = (1, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [20, 21])
+        locked = {1, 2, 3, 4}
+        with_rule = self._modifiers(base, roles, votes, locked, True)
+        without = self._modifiers(base, roles, votes, locked, False)
+        for gate in (GATE_STARTERS, GATE_EFFECTIVE):
+            self.assertEqual(len(with_rule[gate]), 1, (gate, with_rule[gate]))
+        # ...e la porta esisteva davvero: senza la regola ci sono due esiti.
+        self.assertGreater(len(without[GATE_EFFECTIVE]), 1)
+
+    def test_door_four_the_overtaking(self):
+        """4-4-2 con un centrocampista senza voto. In panchina: un centrocampista
+        che non prendera' voto, un attaccante gia' a 9.0, un centrocampista che
+        giochera'. Scambiare primo e terzo sceglieva se prendere il 9.0. Non
+        c'entra il modificatore: la cosa che deve restare uguale in ogni ramo
+        ammesso e' se il 9.0 entra."""
+        roles = {1: "GK", 2: "DEF", 3: "DEF", 4: "DEF", 5: "DEF",
+                 6: "MID", 7: "MID", 8: "MID", 9: "MID", 10: "ATT", 11: "ATT",
+                 20: "MID", 21: "ATT", 22: "MID"}
+        votes = {1: 6.0, 2: 6.0, 3: 6.0, 4: 6.0, 5: 6.0, 6: None, 7: 6.0, 8: 6.0, 9: 6.0,
+                 10: 6.0, 11: 6.0, 20: None, 21: 9.0, 22: 6.0}
+        base = (1, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [20, 21, 22])
+        locked = {1, 2, 3, 4, 5, 6, 21}          # i liberi: 7-11 e i due centrocampisti
+
+        def nine_enters(xi, bench):
+            def L(p):
+                v = votes.get(p)
+                return line(p, roles[p], v if v is not None else 0.0, sv=v is None)
+            r = score_team([L(1)] + [L(p) for p in xi], [L(p) for p in bench],
+                           Ruleset(defence_first=True))
+            return any(sub["in"]["player_id"] == 21 for sub in r["substitutions"])
+
+        admitted = self._branches(base, roles, locked)
+        self.assertGreater(len(admitted), 1, "ci devono essere rami fra cui scegliere")
+        self.assertEqual({nine_enters(xi, b) for xi, b in admitted}, {True})
+        # ...e senza la regola dello scavalco si poteva scegliere.
+        free_for_all = self._branches(base, roles, locked, overtaking_rule=False)
+        self.assertEqual({nine_enters(xi, b) for xi, b in free_for_all}, {True, False})
+
+
+# --------------------------------------------------------------------------- #
 # R1 — l'invio non cambia il numero di difensori.                              #
 # --------------------------------------------------------------------------- #
 class _ClassicRound(TestCase):
-    """Una lega classic col modificatore, due club, e undici piu' panchina.
-
-    Il "sabato" gioca il club A, il "lunedi" il club B: a meta' giornata i
-    giocatori di A sono congelati e quelli di B no. E' l'unica situazione in cui
-    la falla esiste — se fosse tutto bloccato non ci sarebbe niente da modificare.
-    """
+    """Una lega classic col modificatore, in modalita' «sempre aperta», due club,
+    undici piu' panchina. Il "sabato" gioca il club A, il "lunedi" il club B."""
 
     ROLE_SEED = {"GK": "POR", "DEF": "DIF", "MID": "CEN", "ATT": "ATT"}
 
@@ -156,16 +359,12 @@ class _ClassicRound(TestCase):
             league=self.league, manager=self.membership, name="Squadra")
 
         self.ts = {}
-        for code in ("sab", "lun"):
+        for code in ("sab", "lun", "terzo", "quarto"):
             club = Team.objects.create(name=code.title())
             self.ts[code] = TeamSeason.objects.create(competition_season=self.cs, team=club)
-        # I due club della rosa NON si incontrano fra loro: se il club del lunedi
-        # comparisse anche nella partita del sabato, i suoi giocatori si
-        # congelerebbero li' e non resterebbe niente su cui decidere — cioe' il
-        # caso che questo file esiste per provare.
-        for code in ("terzo", "quarto"):
-            club = Team.objects.create(name=code.title())
-            self.ts[code] = TeamSeason.objects.create(competition_season=self.cs, team=club)
+        from datetime import datetime, timezone as dttz
+        SAT = datetime(2026, 2, 7, 14, 0, tzinfo=dttz.utc)
+        MON = datetime(2026, 2, 9, 19, 45, tzinfo=dttz.utc)
         Match.objects.create(
             competition_season=self.cs, matchday=22, kickoff=SAT, kickoff_provisional=False,
             home_team=self.ts["sab"], away_team=self.ts["terzo"],
@@ -177,7 +376,6 @@ class _ClassicRound(TestCase):
         FantasyMatchday.objects.create(
             league=self.league, real_competition_season=self.cs, real_matchday=22)
 
-        # La rosa: chi gioca il lunedi e' quello su cui si puo' ancora decidere.
         self.pid: dict[str, int] = {}
         def add(key, role, when):
             p = Player.objects.create(
@@ -188,13 +386,12 @@ class _ClassicRound(TestCase):
             self.pid[key] = p.id
 
         add("gk", "GK", "sab")
-        for i in range(1, 5):                       # 4 difensori: 3 sabato, 1 lunedi
+        for i in range(1, 5):
             add(f"d{i}", "DEF", "sab" if i < 4 else "lun")
-        for i in range(1, 5):                       # 4 centrocampisti
+        for i in range(1, 5):
             add(f"m{i}", "MID", "sab" if i < 4 else "lun")
-        for i in range(1, 3):                       # 2 attaccanti
+        for i in range(1, 3):
             add(f"a{i}", "ATT", "sab")
-        # Panchina: un difensore e un attaccante, tutti e due del lunedi.
         add("dbench", "DEF", "lun")
         add("abench", "ATT", "lun")
 
@@ -215,8 +412,7 @@ class _ClassicRound(TestCase):
             lineup_id=f"team{self.team.id}",
             gk_player_id=str(self.pid["gk"]),
             starter_player_ids=self._xi(*(outfield or self.OUTFIELD)),
-            bench_player_ids=self._xi(*(bench or ("dbench", "abench"))),
-        )
+            bench_player_ids=self._xi(*(bench or ("dbench", "abench"))))
 
     def _post(self, outfield, bench=("dbench", "abench")):
         return self._client().post(
@@ -227,12 +423,6 @@ class _ClassicRound(TestCase):
             format="json")
 
     def _play_the_saturday(self):
-        """Il sabato e' passato, il lunedi no.
-
-        Le date del fixture (una giornata di febbraio) non si possono usare come
-        stanno: l'endpoint legge l'orologio vero, e a stagione conclusa ogni caso
-        collasserebbe in «la giornata e' finita». Si sposta il calendario attorno
-        all'adesso, non l'adesso attorno al calendario."""
         from django.utils import timezone
 
         now = timezone.now()
@@ -255,23 +445,19 @@ class _ClassicRound(TestCase):
 
 class DefenderCountOnSaveTests(_ClassicRound):
     def test_before_the_first_kickoff_the_count_is_free(self):
-        """Prima non c'e' nessuna informazione da sfruttare: si sceglie."""
         self._before_any_kickoff()
         self._save_snapshot()
         r = self._post(("d1", "d2", "d3", "m1", "m2", "m3", "m4", "abench", "a1", "a2"))
         self.assertEqual(r.status_code, 200, r.data)
 
-    def test_after_the_first_kickoff_the_count_cannot_change(self):
+    def test_after_the_teams_first_kickoff_the_count_cannot_change(self):
         self._save_snapshot()
         self._play_the_saturday()
-        # Fuori il difensore del lunedi, dentro un attaccante: 4 difensori -> 3.
         r = self._post(("d1", "d2", "d3", "m1", "m2", "m3", "m4", "abench", "a1", "a2"))
         self.assertEqual(r.status_code, 409, r.data)
         self.assertIn("difensori", " ".join(r.data["errors"]).lower())
 
     def test_it_bites_in_the_other_direction_too(self):
-        """Aggiungere il quarto difensore dopo aver visto due bei voti e' la
-        stessa mossa letta al contrario."""
         self._save_snapshot(outfield=("d1", "d2", "d3", "m1", "m2", "m3", "m4",
                                       "a1", "a2", "abench"))
         self._play_the_saturday()
@@ -279,16 +465,23 @@ class DefenderCountOnSaveTests(_ClassicRound):
         self.assertEqual(r.status_code, 409, r.data)
 
     def test_a_defender_for_another_defender_is_still_allowed(self):
-        """Il vincolo e' sul NUMERO, non sulle persone: cambiare idea su chi
-        schierare in difesa resta una scelta legittima."""
         self._save_snapshot()
         self._play_the_saturday()
         r = self._post(("d1", "d2", "d3", "dbench", "m1", "m2", "m3", "m4", "a1", "a2"),
                        bench=("d4", "abench"))
         self.assertEqual(r.status_code, 200, r.data)
 
+    def test_the_clock_is_the_teams_first_player_not_the_rounds(self):
+        """La giornata e' cominciata, ma nessuno dei MIEI ha giocato: non so
+        niente, e il numero resta libero."""
+        PlayerTeamStint.objects.filter(team_season=self.ts["sab"]).update(
+            team_season=self.ts["lun"])
+        self._save_snapshot()
+        self._play_the_saturday()
+        r = self._post(("d1", "d2", "d3", "m1", "m2", "m3", "m4", "abench", "a1", "a2"))
+        self.assertEqual(r.status_code, 200, r.data)
+
     def test_without_the_modifier_the_rule_does_not_exist(self):
-        """Una regola senza il suo motivo e' peggio di una che varia."""
         self.league.defense_bonus_enabled = False
         self.league.save(update_fields=["defense_bonus_enabled"])
         self._save_snapshot()
@@ -296,49 +489,19 @@ class DefenderCountOnSaveTests(_ClassicRound):
         r = self._post(("d1", "d2", "d3", "m1", "m2", "m3", "m4", "abench", "a1", "a2"))
         self.assertEqual(r.status_code, 200, r.data)
 
-
-class EditedAfterKickoffFlagTests(_ClassicRound):
-    def test_saving_before_the_kickoff_does_not_raise_it(self):
-        self._before_any_kickoff()
-        self._save_snapshot()
-        self.assertEqual(self._post(self.OUTFIELD).status_code, 200)
-        self.assertFalse(self._snap().edited_after_kickoff)
-
-    def test_saving_without_changing_anything_does_not_raise_it(self):
-        """La trappola: chi apre la pagina alle 20:30, non tocca niente e preme
-        Salva non deve perdere i cambi di ruolo per nulla."""
-        self._save_snapshot()
-        self._play_the_saturday()
-        self.assertEqual(self._post(self.OUTFIELD).status_code, 200)
-        self.assertFalse(self._snap().edited_after_kickoff)
-
-    def test_reordering_the_bench_raises_it(self):
-        """Mettere il proprio miglior difensore in cima a voti visti non tocca ne'
-        gli undici ne' chi siede in panchina: e' esattamente la leva del secondo
-        verso del vincolo, e conta come modifica."""
+    def test_the_old_flag_is_no_longer_written(self):
+        """``edited_after_kickoff`` era l'interruttore. Resta la colonna, non il
+        dato: un campo che nessuno legge e qualcuno scrive e' una bugia."""
         self._save_snapshot()
         self._play_the_saturday()
         r = self._post(self.OUTFIELD, bench=("abench", "dbench"))
         self.assertEqual(r.status_code, 200, r.data)
-        self.assertTrue(self._snap().edited_after_kickoff)
-
-    def test_swapping_a_defender_raises_it(self):
-        self._save_snapshot()
-        self._play_the_saturday()
-        r = self._post(("d1", "d2", "d3", "dbench", "m1", "m2", "m3", "m4", "a1", "a2"),
-                       bench=("d4", "abench"))
-        self.assertEqual(r.status_code, 200, r.data)
-        self.assertTrue(self._snap().edited_after_kickoff)
+        self.assertFalse(self._snap().edited_after_kickoff)
 
 
 class ConclusionInheritsInsteadOfAskingTests(_ClassicRound):
-    """Chi non schiera non blocca piu' la conclusione della giornata.
-
-    Prima ``team_lines_for_conclusion`` tornava «missing» e il punteggio si
-    fermava finche' l'admin non sceglieva a mano, squadra per squadra, fra forfait
-    e formazione precedente: una decisione presa a voti gia' noti. Ora la regola e'
-    annunciata prima — vale l'ultima — e il forfait resta come scavalco esplicito.
-    """
+    """Chi non schiera non blocca piu' la conclusione della giornata: vale
+    l'ultima, e il forfait resta come scavalco esplicito dell'admin."""
 
     def _lines(self, resolution=None):
         from vfoot.services.classic_matchday_scoring import team_lines_for_conclusion
@@ -367,112 +530,8 @@ class ConclusionInheritsInsteadOfAskingTests(_ClassicRound):
         self.assertEqual(starters, [])
 
     def test_with_nothing_to_inherit_the_admin_is_still_asked(self):
-        """La prima giornata di chi non ha mai schierato: non c'e' nessuna
-        formazione precedente, e allora la domanda e' legittima."""
+        """Una rosa incompleta che non ha mai schierato: nessuna baseline e'
+        stata scritta, e allora la domanda e' legittima."""
         _, _, meta = self._lines()
         self.assertEqual(meta["source"], "missing")
         self.assertFalse(meta["has_previous_lineup"])
-
-    def test_the_inherited_lineup_does_not_lock_the_defence(self):
-        """Il flag riguarda la giornata da cui la formazione viene: per QUESTA il
-        suo allenatore non ha mosso niente, quindi non ha usato informazioni."""
-        self._previous_round_lineup()
-        SavedLineupSnapshot.objects.filter(matchday_id="21").update(edited_after_kickoff=True)
-        _, _, meta = self._lines()
-        self.assertFalse(meta["def_locked"])
-
-
-# --------------------------------------------------------------------------- #
-# Il filo: dallo snapshot fino al motore delle sostituzioni.                   #
-# --------------------------------------------------------------------------- #
-class TheLockReachesTheSubstitutionsTests(SimpleTestCase):
-    """R2 provata dove conta: sul PUNTEGGIO, non solo sulla funzione isolata.
-
-    Il caso e' l'exploit per intero. Ho schierato quattro difensori per il
-    modificatore, due hanno preso 5, e un mio centrocampista e' senza voto: se la
-    panchina puo' mandare dentro un difensore al posto suo, i difensori con voto
-    diventano cinque, i «tre migliori» scelgono su cinque invece che su quattro, i
-    due voti brutti escono dalla media e il modificatore sale. A voti visti, e a
-    senso unico.
-    """
-
-    def _lines(self):
-        from vfoot.tests_classic_scoring import line
-
-        starters = [
-            line(1, "GK", 6.0),
-            line(2, "DEF", 5.0), line(3, "DEF", 5.0), line(4, "DEF", 6.0), line(5, "DEF", 6.0),
-            line(6, "MID", 6.0, sv=True),   # il buco da coprire
-            line(7, "MID", 6.0), line(8, "MID", 6.0), line(9, "MID", 6.0),
-            line(10, "ATT", 6.0), line(11, "ATT", 6.0),
-        ]
-        # In panchina, in ordine di priorita': prima un ottimo difensore.
-        bench = [line(20, "DEF", 7.5), line(21, "MID", 6.0)]
-        return starters, bench
-
-    def _score(self, def_locked):
-        from vfoot.services.classic_scoring import Ruleset, score_team
-
-        starters, bench = self._lines()
-        return score_team(starters, bench, Ruleset(), def_locked=def_locked)
-
-    def test_without_the_lock_the_ratchet_works(self):
-        """Il comportamento di sempre, che e' anche la falla: entra il difensore."""
-        r = self._score(False)
-        self.assertEqual(r["substitutions"][0]["in"]["player_id"], 20)
-        self.assertEqual(r["defense"]["avg"], 6.375)
-        self.assertEqual(r["defense"]["bonus"], 2.0)
-
-    def test_with_the_lock_the_defence_keeps_its_number(self):
-        """Chi ha toccato la formazione a voti visti non puo' piu' aggiungerne uno:
-        entra il centrocampista, la media resta quella dei quattro schierati."""
-        r = self._score(True)
-        self.assertEqual(r["substitutions"][0]["in"]["player_id"], 21)
-        self.assertEqual(r["defense"]["avg"], 5.75)
-        self.assertEqual(r["defense"]["bonus"], 0.0)
-
-    def test_the_flag_travels_per_side_through_the_fixture(self):
-        """IL FILO. Le stesse identiche righe per le due squadre, un solo bit di
-        differenza: se il collegamento fra lo snapshot e il motore fosse rotto — un
-        parametro che non viene passato, un meta che si perde per strada — le due
-        squadre farebbero la stessa sostituzione e nessuno se ne accorgerebbe."""
-        from vfoot.services.classic_matchday_scoring import score_composed_fixture
-        from vfoot.services.classic_scoring import Ruleset
-
-        payload = score_composed_fixture(
-            self._lines(), self._lines(), Ruleset(),
-            {"fixture_id": 1, "fantasy_round": 1, "real_matchday": 22, "stage": None,
-             "competition_id": None, "home_advantage": False,
-             "home_team": "Bloccata", "away_team": "Libera"},
-            def_locked=(True, False),
-        )
-        self.assertEqual(payload["home"]["substitutions"][0]["in"]["player_id"], 21)
-        self.assertEqual(payload["away"]["substitutions"][0]["in"]["player_id"], 20)
-        self.assertEqual(payload["home"]["defense"]["bonus"], 0.0)
-        self.assertEqual(payload["away"]["defense"]["bonus"], 2.0)
-
-
-class TheFlagBecomesTheLockTests(_ClassicRound):
-    """E l'altro capo del filo: il booleano scritto al salvataggio diventa davvero
-    il `def_locked` che il punteggio consuma."""
-
-    def _meta(self):
-        from vfoot.services.classic_matchday_scoring import team_lines_for_conclusion
-
-        return team_lines_for_conclusion(self.league, self.team, None, 22, {}, None)[2]
-
-    def test_an_untouched_lineup_does_not_lock(self):
-        self._save_snapshot()
-        self.assertFalse(self._meta()["def_locked"])
-
-    def test_a_lineup_edited_after_kickoff_locks(self):
-        self._save_snapshot()
-        self._snap().__class__.objects.filter(matchday_id="22").update(edited_after_kickoff=True)
-        self.assertTrue(self._meta()["def_locked"])
-
-    def test_without_the_modifier_nothing_locks(self):
-        self._save_snapshot()
-        self._snap().__class__.objects.filter(matchday_id="22").update(edited_after_kickoff=True)
-        self.league.defense_bonus_enabled = False
-        self.league.save(update_fields=["defense_bonus_enabled"])
-        self.assertFalse(self._meta()["def_locked"])

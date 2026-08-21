@@ -15,20 +15,12 @@ class SavedLineupSnapshot(models.Model):
     starter_backups = models.JSONField(default=list)
 
     saved_at = models.DateTimeField(default=timezone.now)
-    # QUESTA FORMAZIONE E' STATA TOCCATA A GIORNATA GIA' COMINCIATA.
-    #
-    # Serve al vincolo sui difensori: chi modifica dopo il primo calcio d'inizio lo
-    # fa sapendo dei voti, e da quel momento le sostituzioni non possono piu'
-    # cambiare quanti difensori scendono in campo (v. `apply_classic_substitutions`,
-    # parametro ``def_locked``). Chi non ha toccato niente non ha usato nessuna
-    # informazione e non paga nulla.
-    #
-    # E' un campo e non un confronto fra date perche' `saved_at` non risponde: ha
-    # ``default=timezone.now`` e il salvataggio non lo rimette nei ``defaults``
-    # dell'``update_or_create``, quindi resta l'ora della PRIMA scrittura. E perche'
-    # la domanda vera non e' «ha salvato dopo il fischio» ma «ha CAMBIATO qualcosa
-    # dopo il fischio»: chi apre la pagina alle 20:30, non tocca niente e preme
-    # Salva non deve perdere i cambi di ruolo per nulla.
+    # SENZA PIU' CONSUMATORI, da rimuovere. Diceva «toccata a giornata gia'
+    # cominciata» e accendeva il vincolo sui difensori: un interruttore in mano
+    # all'allenatore, che lo azionava a voti visti. La regola e' diventata di lega
+    # (``Ruleset.defence_first``) e il salvataggio non scrive piu' questo campo.
+    # La colonna resta finche' la nuova regola non e' in produzione da qualche
+    # giornata; poi migrazione di rimozione.
     edited_after_kickoff = models.BooleanField(default=False)
     # CHI L'HA SCRITTA. ``manager``: l'allenatore, dalla pagina. ``baseline``: il
     # server, quando la rosa si e' completata — l'undici suggerito per la prima

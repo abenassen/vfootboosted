@@ -35,7 +35,7 @@ def apply_classic_substitutions(
     voted: set[int],
     max_subs: int | None = None,
     frozen: set[int] | None = None,
-    def_locked: bool = False,
+    defence_first: bool = False,
 ) -> SubResult:
     """Classic: first benched player (in stored order) with a vote that keeps the
     formation legal replaces each s.v. starter. ``bench`` is the priority order.
@@ -50,25 +50,26 @@ def apply_classic_substitutions(
     they are a different thing and the league decides them separately (wait for the
     recovery, or impose an office vote).
 
-    ``def_locked`` — LE SOSTITUZIONI NON CAMBIANO QUANTI DIFENSORI GIOCANO. Acceso
-    per una formazione che e' stata MODIFICATA a giornata gia' cominciata, in una
-    lega col modificatore difesa. Un difensore lo rimpiazza un difensore, e uno
-    slot che difensore non e' non lo puo' occupare un difensore.
+    ``defence_first`` — IN DIFESA ENTRANO PRIMA I DIFENSORI. Una regola di lega,
+    sempre accesa dove c'e' il modificatore difesa e la formazione resta
+    modificabile a giornata cominciata (modalita' ``player``): non un lucchetto che
+    si accende quando l'allenatore modifica. Legarla alla modifica le dava un
+    interruttore, e l'interruttore lo azionava lui a voti visti.
 
-    Serve nei due versi, e il secondo e' meno ovvio del primo. Il modificatore vale
-    la media dei TRE voti piu' alti fra i difensori dell'XI EFFETTIVO piu' quello
-    del portiere (v. ``compute_defense_bonus``: ``voted[:3]``), sotto entrambi i
-    gate. Quindi:
+    E' una ricerca a DUE PASSATE, non un divieto: per ogni slot la panchina si
+    percorre prima fra i pari reparto — difensore contro tutto il resto — nel suo
+    ordine, e poi daccapo fra tutti gli altri. Nessun buco creato da un cappio di
+    ruolo; la deviazione dall'ordine puro avviene solo dove il numero di difensori
+    a voto sarebbe cambiato. Centrocampista e attaccante restano sullo stesso lato
+    e non si scavalcano mai.
 
-    * vietare solo DIF <- non-DIF chiuderebbe la fuga (schierare quattro difensori,
-      vederne due prendere 5 e far entrare un attaccante al posto del terzo);
-    * ma lascerebbe aperto il RIPARO: basta un centrocampista s.v. per far entrare
-      un quarto difensore dalla panchina, e i tre migliori buttano fuori i due voti
-      brutti. La media puo' solo migliorare, ed e' un cricchetto azionabile a voti
-      visti.
-
-    Centrocampista e attaccante restano liberi di scambiarsi: il modificatore non
-    li guarda, e vietare anche loro sarebbe una regola senza il suo motivo.
+    Perche' i due versi: il modificatore vale la media dei TRE voti piu' alti fra
+    i difensori dell'XI EFFETTIVO piu' quello del portiere (v.
+    ``compute_defense_bonus``). Lasciare che un attaccante copra un difensore
+    permette di schierare quattro difensori, vederne due prendere 5 e incassare
+    l'attaccante; lasciare che un difensore copra un centrocampista porta a cinque
+    i difensori con voto, e i tre migliori buttano fuori i due voti brutti — un
+    cricchetto azionabile a voti visti.
     """
     effective = list(starters)
     cur_roles = [roles.get(p, "MID") for p in starters]
@@ -85,10 +86,14 @@ def apply_classic_substitutions(
             continue
         chosen = None
         starter_is_def = roles.get(starter, "MID") == "DEF"
-        for b in bench:
+        candidates = bench
+        if defence_first:
+            # Same side of the defence line first, in bench order; then the rest,
+            # in bench order. A stable sort on one key IS the two passes.
+            candidates = sorted(
+                bench, key=lambda b: 0 if (roles.get(b, "MID") == "DEF") == starter_is_def else 1)
+        for b in candidates:
             if b in used or b not in voted:
-                continue
-            if def_locked and (roles.get(b, "MID") == "DEF") != starter_is_def:
                 continue
             trial = list(cur_roles)
             trial[i] = roles.get(b, "MID")

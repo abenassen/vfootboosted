@@ -486,16 +486,7 @@ def team_lines_for_conclusion(league, team, competition_id, real_matchday, index
     starters, bench_lines = compose_team_lines(gk, outfield, bench, index, role_map,
                                                pending, office, vacant,
                                                names_for(all_ids))
-    # Il vincolo sui difensori vale per chi ha TOCCATO la formazione a giornata
-    # cominciata, e solo dove il modificatore c'e'. Non per la formazione ereditata
-    # («previous»): quel flag riguarda la giornata da cui viene, e per QUESTA il suo
-    # allenatore non ha mosso niente, quindi non ha usato nessuna informazione.
-    def_locked = bool(
-        source == "lineup"
-        and getattr(snap, "edited_after_kickoff", False)
-        and league.defense_bonus_enabled
-    )
-    return starters, bench_lines, {"source": source, "stale": len(vacant), "def_locked": def_locked}
+    return starters, bench_lines, {"source": source, "stale": len(vacant)}
 
 
 def score_composed_fixture(
@@ -503,7 +494,6 @@ def score_composed_fixture(
     away_lines: tuple[list[dict], list[dict]],
     ruleset: Ruleset,
     fixture_meta: dict,
-    def_locked: tuple[bool, bool] = (False, False),
 ) -> dict:
     """Score both composed teams and return the payload. Pure given the line lists.
 
@@ -511,8 +501,8 @@ def score_composed_fixture(
     conta: viaggia nel meta e non come argomento a parte perché è un dato della
     partita, come il turno e la fase, e ogni chiamante ce l'ha già in mano.
     """
-    home = score_team(home_lines[0], home_lines[1], ruleset, def_locked=def_locked[0])
-    away = score_team(away_lines[0], away_lines[1], ruleset, def_locked=def_locked[1])
+    home = score_team(home_lines[0], home_lines[1], ruleset)
+    away = score_team(away_lines[0], away_lines[1], ruleset)
     resolve_fixture(home, away, ruleset, bool(fixture_meta.get("home_advantage")))
     return build_fixture_payload(fixture_meta, home, away, ruleset)
 
@@ -635,8 +625,6 @@ def live_scorer(league, md, ruleset):
              "competition_id": fx.competition_id,
              "home_advantage": fx.home_advantage,
              "home_team": fx.home_team.name, "away_team": fx.away_team.name},
-            def_locked=(bool(lines["home"][2].get("def_locked")),
-                        bool(lines["away"][2].get("def_locked"))),
         )
         home_unstable = _mark_unstable(payload["home"], unstable)
         away_unstable = _mark_unstable(payload["away"], unstable)
@@ -731,8 +719,6 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
             if meta["source"] == "missing":
                 missing_teams[team.id] = {"team_id": team.id, "name": team.name, **meta}
             else:
-                # Il meta viaggia con le righe: `def_locked` si decide leggendo lo
-                # snapshot, e la seconda passata lo snapshot non ce l'ha piu'.
                 team_lines[(fx.id, side)] = (starters, bench, meta)
 
     if missing_teams and not force:
@@ -773,7 +759,7 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
             "stage": fx.stage_id, "competition_id": fx.competition_id,
             "home_advantage": fx.home_advantage,
             "home_team": fx.home_team.name, "away_team": fx.away_team.name,
-        }, def_locked=(bool(home_ln[2].get("def_locked")), bool(away_ln[2].get("def_locked"))))
+        })
         fx.home_total = float(payload["home_goals"])
         fx.away_total = float(payload["away_goals"])
         fx.status = FantasyFixture.STATUS_FINISHED

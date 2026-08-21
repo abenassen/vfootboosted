@@ -1141,19 +1141,19 @@ export default function FormationPage() {
             {moduleNote ? (
               <div className="mt-1 text-[11px] font-semibold text-bad">{moduleNote}</div>
             ) : null}
-            {/* LA REGOLA PER INTERO, dove c'e' spazio per dirla. La barra in fondo
-                ha una riga sola e la usa per il momento che conta — l'atto di
-                salvare; qui si spiega anche COME funziona e cosa costa, che e' la
-                parte che nessuno indovina: un difensore senza voto che nessun
-                difensore in panchina puo' coprire non viene tappato da un
-                centrocampista, resta un buco. */}
+            {/* LA REGOLA PER INTERO, dove c'e' spazio per dirla. E' una regola
+                della lega, non il prezzo di una modifica: vale per chi schiera,
+                che abbia toccato qualcosa o no. La parte che nessuno indovina e'
+                la panchina letta due volte — prima i pari reparto, poi gli altri —
+                e va detta cosi', perche' «entrano solo difensori» farebbe temere
+                un buco che non esiste. */}
             {defenceLocked ? (
               <div className="mt-1.5 rounded-lg bg-warn-bg px-2.5 py-1.5 text-[11px] leading-snug text-warn">
-                <b>La giornata è cominciata: i difensori restano {lock!.defence_count}.</b>{' '}
-                Se modifichi e salvi, il vincolo vale anche sui cambi: un difensore senza voto
-                potrà essere rimpiazzato solo da un difensore, e nessun difensore potrà entrare
-                al posto di un altro ruolo. Se in panchina non c'è un difensore con voto, quel
-                posto resta vuoto.
+                <b>Il tuo primo giocatore è sceso in campo: i difensori restano {lock!.defence_count}.</b>{' '}
+                Puoi ancora cambiare un difensore con un altro difensore. Nei cambi dalla panchina,
+                in difesa entra prima un difensore, nel tuo ordine; se nessuno ha voto, entra il
+                primo degli altri. Allo stesso modo un difensore copre un altro ruolo solo se
+                nessun altro ha voto.
               </div>
             ) : null}
           </div>
@@ -1444,15 +1444,11 @@ export default function FormationPage() {
                 Salvata. Niente di nuovo da mandare.
               </div>
             ) : defenceLocked ? (
-              /* IL PREZZO DELLA MODIFICA, detto quando si modifica e non a
-                 punteggi fatti. E detto per intero: «in difesa entrano solo
-                 difensori» si poteva leggere come una regola sull'undici che si
-                 sta componendo — dove sarebbe ovvia e inutile — mentre riguarda i
-                 CAMBI, cioe' una cosa che succedera' dopo, quando questa pagina
-                 sara' chiusa da un pezzo. */
+              /* LA REGOLA DI LEGA, detta a chi schiera e non a chi modifica: i
+                 cambi dalla panchina sono una cosa che succedera' dopo, quando
+                 questa pagina sara' chiusa da un pezzo, e vanno nominati. */
               <div className="mt-0.5 text-[11px] leading-snug text-warn">
-                Salvando, i cambi dalla panchina non potranno più cambiare quanti
-                difensori vanno a voto.
+                Nei cambi, in difesa entra prima un difensore; se nessuno ha voto, il primo degli altri.
               </div>
             ) : null}
           </div>

@@ -5980,35 +5980,8 @@ class LeagueTeamLineupSaveView(APIView):
                         status=status.HTTP_409_CONFLICT,
                     )
 
-        def _changed(prev: dict | None, now: dict) -> bool:
-            """Questo invio cambia qualcosa rispetto a quello di prima?
-
-            L'ORDINE DELLA PANCHINA CONTA. Mettere il proprio miglior difensore in
-            cima a voti visti non tocca ne' gli undici ne' chi siede in panchina, ed
-            e' esattamente la leva del secondo verso del vincolo: un difensore che
-            entra al posto di un centrocampista s.v. porta a cinque i difensori con
-            voto, e i tre migliori buttano fuori i due voti brutti.
-
-            Gli undici invece si confrontano come INSIEME: il loro ordine lo deriva
-            il server (P-D-C-A), quindi non e' una scelta di nessuno.
-            """
-            if prev is None:
-                return True
-            if str(prev.get("gk_player_id") or "") != str(now.get("gk_player_id") or ""):
-                return True
-            if ({int(x) for x in (prev.get("starter_player_ids") or [])}
-                    != {int(x) for x in (now.get("starter_player_ids") or [])}):
-                return True
-            return ([int(x) for x in (prev.get("bench_player_ids") or [])]
-                    != [int(x) for x in (now.get("bench_player_ids") or [])])
-
         for cid, key in zip(target_comp_ids, keys):
             payload = dict(defaults)
-            # Il fatto si registra sempre; e' il punteggio che decide se conta (lo
-            # fa solo dove il modificatore e' acceso). Un Salva che non cambia
-            # niente non lo accende: chi apre la pagina a giornata cominciata e non
-            # tocca nulla non ha usato nessuna informazione.
-            payload["edited_after_kickoff"] = round_started and _changed(previous.get(key), defaults)
             if role_of:
                 # The XI order is not the manager's — the page groups the eleven by
                 # role and never offers a way to reorder them — so it is DERIVED

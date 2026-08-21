@@ -8,6 +8,11 @@ Rules (league-configurable):
       - ``effective`` — four defenders WITH A VOTE in the XI as it ended, so a
         substitute defender does qualify, and a starting back four reduced to three
         by an s.v. nobody could cover does not.
+        Under the ``player`` deadline the bench is read defenders-first
+        (``Ruleset.defence_first``), so a defender covers a non-defender only when
+        no non-defender on the bench has a vote — and the "substitute qualifies"
+        half of this gate reduces to that case. The half that always bites is the
+        other one: a back four that loses a man does not collect.
     The gate is the ONLY thing the setting moves: under both readings the value is
     computed from the effective XI, because a vote that counted towards the total
     is a vote that was played.

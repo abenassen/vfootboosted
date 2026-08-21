@@ -59,6 +59,12 @@ class Ruleset:
     # Fattore campo: quanto vale giocare in casa. 0 = spento. SE valga, in una data
     # partita, non lo decide la lega ma il calendario — v. FantasyFixture.home_advantage.
     home_advantage_bonus: float = 0.0
+    # In difesa entrano prima i difensori (v. apply_classic_substitutions): la
+    # panchina si legge a due passate dove il modificatore c'e' E la formazione
+    # resta modificabile a giornata cominciata. Una regola della lega, quindi nel
+    # ruleset e nel suo snapshot — non un bit per squadra deciso da cio' che ha
+    # fatto l'allenatore.
+    defence_first: bool = False
 
     @classmethod
     def from_league(cls, league) -> "Ruleset":
@@ -72,6 +78,7 @@ class Ruleset:
             keeper_clean_sheet_enabled=bool(getattr(league, "keeper_clean_sheet_enabled", False)),
             keeper_clean_sheet_value=float(getattr(league, "keeper_clean_sheet_value", 1.0)),
             home_advantage_bonus=float(getattr(league, "home_advantage_bonus", 0.0) or 0.0),
+            defence_first=defence_first_for(league),
         )
 
     def to_snapshot(self) -> dict:
@@ -87,6 +94,7 @@ class Ruleset:
             "keeper_clean_sheet_enabled": self.keeper_clean_sheet_enabled,
             "keeper_clean_sheet_value": self.keeper_clean_sheet_value,
             "home_advantage_bonus": self.home_advantage_bonus,
+            "defence_first": self.defence_first,
         }
 
     @classmethod
@@ -102,7 +110,21 @@ class Ruleset:
             keeper_clean_sheet_enabled=snap.get("keeper_clean_sheet_enabled", False),
             keeper_clean_sheet_value=snap.get("keeper_clean_sheet_value", 1.0),
             home_advantage_bonus=snap.get("home_advantage_bonus", 0.0),
+            defence_first=bool(snap.get("defence_first", False)),
         )
+
+
+def defence_first_for(league) -> bool:
+    """Classic, modifier on, and the lineup still editable once the round has
+    begun — the ``player`` deadline. In the other two modes nobody can choose with
+    a vote in hand, so the rule has no reason and does not exist."""
+    mode = getattr(league, "mode", "classic")
+    return bool(
+        mode == "classic"
+        and getattr(league, "defense_bonus_enabled", False)
+        and getattr(league, "enforce_lineup_deadline", False)
+        and getattr(league, "lineup_lock_mode", "") == "player"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -203,8 +225,7 @@ def _fill_unresolved(s_by: dict, unresolved: list[int], vote: float) -> list[int
 # --------------------------------------------------------------------------- #
 # Per-team scoring.                                                            #
 # --------------------------------------------------------------------------- #
-def score_team(starters: list[dict], bench: list[dict], rs: Ruleset,
-               def_locked: bool = False) -> dict:
+def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
     """Score one fantasy team for one matchday.
 
     ``starters``/``bench`` are ordered lists of line dicts (bench in the manager's
@@ -223,12 +244,9 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset,
     # he is simply never eligible, which he already is by not being in ``voted``.
     frozen = {pid for pid in s_ids if s_by[pid].get("pending")}
 
-    # ``def_locked``: la formazione e' stata cambiata a giornata cominciata, in una
-    # lega col modificatore difesa. Da li' in poi la panchina non puo' piu' spostare
-    # il numero di difensori in campo — v. apply_classic_substitutions.
     res = apply_classic_substitutions(s_ids, b_ids, roles, voted,
                                       max_subs=rs.max_substitutions, frozen=frozen,
-                                      def_locked=def_locked)
+                                      defence_first=rs.defence_first)
 
     name = {l["player_id"]: l.get("name", str(l["player_id"])) for l in starters + bench}
     subs = []
