@@ -97,10 +97,16 @@ export interface TeamLineupContext {
    *  schierato riparte da li', non da zero), o niente. `vacant_roles` sono i posti
    *  rimasti scoperti perché quei giocatori non sono più in rosa. */
   lineup_source?: {
-    kind: 'saved' | 'previous' | 'none';
+    /** `baseline`: written by the server when the roster completed — the
+     *  suggested XI, a lineup in every respect until the manager overwrites it. */
+    kind: 'saved' | 'previous' | 'baseline' | 'none';
     from_matchday: number | null;
     vacant_roles: PlayerRole[];
   };
+  /** The server's suggested XI for this roster and matchday — the one suggester,
+   *  frozen players honoured. What «Suggerisci XI» applies, and what the page
+   *  starts from when nothing is saved. */
+  suggested_lineup?: { gk_player_id: number | null; starter_player_ids: number[] } | null;
   // The deadline as it applies to THIS matchday. `closes_at` is the moment there is
   // nothing left to decide: the first kickoff under the matchday-wide lock, the
   // first kickoff of one of THIS team's players under `own`, the last one under

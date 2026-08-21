@@ -41,7 +41,13 @@ from vfoot.models import (
     MarketSession,
 )
 from vfoot.services.auction_engine import ROLES, league_role_map, team_budgets
-from vfoot.services import currency, league_notifications, lineup_repair, matchday_state
+from vfoot.services import (
+    currency,
+    league_notifications,
+    lineup_baseline,
+    lineup_repair,
+    matchday_state,
+)
 
 # How long a leading offer stands before it is promoted to "accepted" absent a
 # higher rebid. A rebid mints a fresh leading offer, restarting the clock.
@@ -467,6 +473,8 @@ def apply_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
     # so the XI stays eleven and the module stays legal.
     touched = lineup_repair.swap_player(
         league, offer.team_id, offer.release_player_id, offer.target_player_id, now)
+    # A roster that has just become complete gets its starting lineup (idempotent).
+    lineup_baseline.ensure_for(acquire_slot.team, now)
     if touched:
         manager = getattr(getattr(offer.team, "manager", None), "user", None)
         if manager is not None:

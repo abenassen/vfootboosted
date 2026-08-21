@@ -30,6 +30,16 @@ class SavedLineupSnapshot(models.Model):
     # dopo il fischio»: chi apre la pagina alle 20:30, non tocca niente e preme
     # Salva non deve perdere i cambi di ruolo per nulla.
     edited_after_kickoff = models.BooleanField(default=False)
+    # CHI L'HA SCRITTA. ``manager``: l'allenatore, dalla pagina. ``baseline``: il
+    # server, quando la rosa si e' completata — l'undici suggerito per la prima
+    # giornata da giocare, cosi' che «non ha mandato la formazione» non esista
+    # piu' come caso (v. services/lineup_baseline). E' una formazione a tutti gli
+    # effetti: il punteggio la legge, le giornate successive la ereditano, il
+    # mercato la ripara. Il campo serve alla pagina, per dire «proposta dal
+    # suggeritore: se non la tocchi, gioca questa» invece di «salvata».
+    ORIGIN_MANAGER = "manager"
+    ORIGIN_BASELINE = "baseline"
+    origin = models.CharField(max_length=10, default=ORIGIN_MANAGER)
 
     class Meta:
         # A saved lineup is identified by league + matchday + lineup_id, where

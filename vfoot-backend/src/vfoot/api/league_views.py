@@ -84,14 +84,9 @@ from vfoot.services.auction_engine import (
     ROLES as AUCTION_ROLES, check_purchase, league_role_map, player_role, team_budgets,
 )
 from vfoot.services.auction_realtime import broadcast_auction
-import os as _os
-from functools import lru_cache as _lru_cache
 
-from django.conf import settings as _settings
 
 from vfoot.services.name_search import matches as name_matches
-from vfoot.services.player_profiles import player_profiles
-from vfoot.services.vector_zone_scoring import load_calibration
 from vfoot.services.fantasy_simulation import (
     bulk_assign_players_to_teams,
     generate_knockout_fixtures,
@@ -125,11 +120,12 @@ from vfoot.services.league_decisions import (
 from vfoot.services.listone import snapshot_league_listone
 from vfoot.services.listone import eligible_player_ids
 from vfoot.services.player_ratings import (
-    latest_market_values, player_values, previous_season_with_data,
+    latest_market_values, player_values,
 )
 from vfoot.services.match_resolver import matchday_fixtures_by_team
 from vfoot.services import (
-    currency, honours, knockout, lineup_deadline, lineup_repair, matchday_state,
+    currency, honours, knockout, lineup_baseline, lineup_deadline, lineup_repair, lineup_suggest,
+    matchday_state,
 )
 from vfoot.services.live_realtime import broadcast_live
 
@@ -1416,6 +1412,9 @@ class TeamRosterAddView(APIView):
                                 status=status.HTTP_400_BAD_REQUEST)
 
         slot = FantasyRosterSlot.objects.create(team=team, player=player, purchase_price=data["purchase_price"])
+        # Una rosa che si completa riceve la sua formazione di partenza: idempotente,
+        # quindi chiamarlo a ogni contratto non costa (v. lineup_baseline).
+        lineup_baseline.ensure_for(team)
         return Response({"slot_id": slot.id, "player_id": player.id}, status=status.HTTP_201_CREATED)
 
 
@@ -1558,6 +1557,8 @@ class LeagueRosterBulkAssignView(APIView):
                 FantasyRosterSlot.objects.create(team=target_team, player=player, purchase_price=price)
                 created += 1
 
+            for t in league.teams.all():
+                lineup_baseline.ensure_for(t)
             return Response({"assigned_players": created, "mode": "explicit"})
 
         if not data.get("player_ids"):
@@ -1664,6 +1665,7 @@ def _apply_roster_assignments(league, rows):
         FantasyRosterSlot.objects.create(team=team, player=player, purchase_price=max(1, price))
         created += 1
 
+    lineup_baseline.ensure_for(team)
     return created, skipped
 
 
@@ -4667,6 +4669,7 @@ class AuctionCloseNominationView(APIView):
             {"player_name": _player_label(nomination.player), "team_name": winner_team.name,
              "team_id": winner_team.id, "amount": top.amount, "via": "bid"},
             nomination=nomination)
+        lineup_baseline.ensure_for(winner_team)
         broadcast_auction(nomination.session_id)
         return Response({"nomination_id": nomination.id, "winner_team_id": winner_team.id,
                          "amount": top.amount}, status=status.HTTP_200_OK)
@@ -4721,6 +4724,7 @@ class AuctionAssignView(APIView):
         nom.winning_amount = price
         nom.roster_slot = slot
         nom.save()
+        lineup_baseline.ensure_for(team)
         _record_auction_event(
             session, AuctionEvent.TYPE_ASSIGNED, request.user,
             {"player_name": _player_label(player), "team_name": team.name,
@@ -5304,15 +5308,6 @@ def _zone_grid_keys(cols: int = 5, rows: int = 4) -> list[str]:
     return [f"Z_{c}_{r}" for c in range(cols) for r in range(rows)]
 
 
-@_lru_cache(maxsize=1)
-def _vector_calibration() -> dict:
-    path = _os.path.join(_os.path.dirname(str(_settings.BASE_DIR)), "calibration/vector_zone_duel_v1.json")
-    try:
-        return load_calibration(path)
-    except Exception:
-        return {"params": {}, "feature_scales": {}}
-
-
 class LeagueTeamLineupView(APIView):
     """Real lineup context for a team: its roster with spatial profiles
     (role/footprint/minutes), the league matchdays, and — for the caller's OWN
@@ -5394,39 +5389,19 @@ class LeagueTeamLineupView(APIView):
             FantasyRosterSlot.objects.filter(team=team, released_at__isnull=True).select_related("player")
         )
         player_ids = [s.player_id for s in slots]
-        cal = _vector_calibration()
-
         # Which season should the playing-time stats describe? The reference season
         # while it is under way, but BEFORE it starts it has no games at all — and
         # reporting "poco impiegato" for everybody because nobody has played yet is
-        # simply wrong. In that case fall back to the last season with data.
+        # simply wrong. In that case fall back to the last season with data. The
+        # choice and the profiles live in lineup_suggest, shared with the server-side
+        # suggester, so page and baseline rank the roster the same way.
         ref_cs = league.reference_season
-        stats_cs, stats_as_of = None, as_of
-        if ref_cs is not None:
-            played_here = MatchAppearance.objects.filter(
-                player_id__in=player_ids,
-                match__competition_season=ref_cs,
-                **({"match__matchday__lt": as_of} if as_of is not None else {}),
-            ).exists()
-            if played_here:
-                stats_cs = ref_cs
-            else:
-                prev = previous_season_with_data(ref_cs)
-                stats_cs, stats_as_of = (prev, None) if prev else (ref_cs, as_of)
-
+        profiles, stats_cs = lineup_suggest.roster_profiles(league, player_ids, as_of)
         total_matches = (
             Match.objects.filter(competition_season=stats_cs)
             .values("matchday").distinct().count()
             if stats_cs is not None
             else Match.objects.values("matchday").distinct().count()
-        )
-        profiles = player_profiles(
-            player_ids,
-            total_matches=total_matches,
-            as_of_matchday=stats_as_of,
-            params=cal.get("params", {}),
-            scales=cal.get("feature_scales", {}),
-            competition_season_id=stats_cs.id if stats_cs is not None else None,
         )
 
         # Average voto (measured, or estimated from the market): a number a manager
@@ -5584,6 +5559,21 @@ class LeagueTeamLineupView(APIView):
         snap = SavedLineupSnapshot.objects.filter(
             league_id=str(league_id), matchday_id=str(matchday), lineup_id=lineup_key
         ).first()
+        if snap is None and competition_id is not None:
+            # The competition-agnostic lineup counts for every competition, as it
+            # does at scoring time (read_saved_lineup): it is where the baseline is
+            # written, and where a manager who saved «per tutte» put his.
+            snap = SavedLineupSnapshot.objects.filter(
+                league_id=str(league_id), matchday_id=str(matchday), lineup_id=f"team{team.id}"
+            ).first()
+        # LA RETE DI SICUREZZA della formazione di partenza: se questa squadra non
+        # ne ha mai avuta una e la rosa e' completa, la si scrive adesso — ma solo
+        # se la sua giornata non e' ancora cominciata. ``ensure_for`` rifiuta da se'
+        # il caso contrario: dopo la scadenza ci si limita a PROPORRE, come sempre.
+        if snap is None and is_own:
+            written = lineup_baseline.ensure_for(team)
+            if written is not None and str(written.matchday_id) == str(matchday):
+                snap = written
 
         # LA FORMAZIONE EREDITATA.
         #
@@ -5602,6 +5592,8 @@ class LeagueTeamLineupView(APIView):
         # allenatore.
         inherited_from = None
         dropped_roles: list[str] = []
+        baseline = bool(snap is not None and snap.pk
+                        and snap.origin == SavedLineupSnapshot.ORIGIN_BASELINE)
         if snap is None and is_own:
             from vfoot.services.classic_matchday_scoring import (
                 lineup_still_owned,
@@ -5654,6 +5646,19 @@ class LeagueTeamLineupView(APIView):
             }
             lineup_lock["defence_count"] = sum(1 for r in base_roles.values() if r == "DEF")
 
+        suggested = None
+        if is_own:
+            sugg_roster = [{"player_id": r["player_id"], "role": r["role"], "form": r["form"]}
+                           for r in roster]
+            pinned_xi = []
+            if saved_lineup:
+                xi_now = ([saved_lineup["gk_player_id"]] if saved_lineup["gk_player_id"] else []) + [
+                    int(x) for x in (saved_lineup["starter_player_ids"] or [])]
+                pinned_xi = [p for p in xi_now if p in locked_pids]
+            suggested = lineup_suggest.suggest_xi(
+                sugg_roster, CLASSIC_CONSTRAINTS if is_classic else None,
+                pinned=pinned_xi, locked=locked_pids)
+
         return Response(
             {
                 "team": {"team_id": team.id, "name": team.name,
@@ -5699,10 +5704,16 @@ class LeagueTeamLineupView(APIView):
                 # frase che si puo' scrivere solo sapendo qual e' il caso.
                 "lineup_source": {
                     "kind": ("previous" if inherited_from is not None
+                             else "baseline" if baseline
                              else "saved" if saved_lineup else "none"),
                     "from_matchday": inherited_from,
                     "vacant_roles": dropped_roles,
                 },
+                # L'undici che il server suggerisce, per il pulsante «Suggerisci XI»
+                # e per chi non ha niente — la pagina non ha piu' un suggeritore
+                # suo. Tiene conto dei congelati: quelli gia' in campo restano,
+                # quelli fuori non si toccano.
+                "suggested_lineup": suggested,
                 "lineup_lock": lineup_lock,
             }
         )

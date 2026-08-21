@@ -377,71 +377,11 @@ export default function FormationPage() {
     setSearchParams(p, { replace: true });
   };
 
-  // Suggestion / default: a balanced 4-4-2 by inferred role, each slot the best
-  // available by recent form (falls back across roles if a line is short).
-  //
-  // `frozen` is the per-player deadline reaching in here: those players are where
-  // they are and the save will refuse to move them, so the suggestion must start
-  // FROM them (`frozen.pinned`, kept in the XI) and never reach for the others
-  // (`frozen.locked`, already playing and not currently fielded). Proposing a
-  // lineup the save would then reject is the same mistake the role ceilings above
-  // were added to avoid, arriving by a different road.
-  const suggest = (
-    roster: TeamLineupPlayer[],
-    c: ClassicConstraints | null,
-    frozen?: { pinned: number[]; locked: Set<number> },
-  ): number[] => {
-    const pinned = frozen?.pinned ?? [];
-    const unavailable = frozen?.locked ?? new Set<number>();
-    const pool = roster.filter(
-      (p) => pinned.includes(p.player_id) || !unavailable.has(p.player_id),
-    );
-    const byForm = (a: TeamLineupPlayer, b: TeamLineupPlayer) => b.form - a.form;
-    const pinnedGk = pinned.map((id) => pool.find((p) => p.player_id === id)).find((p) => p?.role === 'GK');
-    const gk = pinnedGk ?? [...pool].filter((p) => p.role === 'GK').sort(byForm)[0];
-    const chosen = new Set<number>();
-    const cnt: Record<PlayerRole, number> = { GK: 0, DEF: 0, MID: 0, ATT: 0 };
-    if (gk) {
-      chosen.add(gk.player_id);
-      cnt.GK = 1;
-    }
-    const targets: [PlayerRole, number][] = [['DEF', 4], ['MID', 4], ['ATT', 2]];
-    const out: number[] = [];
-    // The frozen outfielders take their places first: they are not a preference,
-    // they are a fact.
-    for (const id of pinned) {
-      const p = pool.find((x) => x.player_id === id);
-      if (!p || chosen.has(id) || p.role === 'GK') continue;
-      chosen.add(id);
-      cnt[p.role] += 1;
-      out.push(id);
-    }
-    for (const [role, n] of targets) {
-      pool
-        .filter((p) => p.role === role && !chosen.has(p.player_id))
-        .sort(byForm)
-        .slice(0, Math.max(0, n - cnt[role]))
-        .forEach((p) => {
-          chosen.add(p.player_id);
-          cnt[role] += 1;
-          out.push(p.player_id);
-        });
-    }
-    // Top up to 10 outfielders from whoever is left, by form — but never past a
-    // role's ceiling: a short line used to be filled with a sixth midfielder, so
-    // the suggestion itself proposed a lineup the save would then refuse.
-    pool
-      .filter((p) => p.role !== 'GK' && !chosen.has(p.player_id))
-      .sort(byForm)
-      .forEach((p) => {
-        if (out.length < XI - 1 && (!c || cnt[p.role] < c.per_role[p.role].max)) {
-          chosen.add(p.player_id);
-          cnt[p.role] += 1;
-          out.push(p.player_id);
-        }
-      });
-    return gk ? [gk.player_id, ...out] : out;
-  };
+  // The suggested XI comes from the SERVER (`suggested_lineup`): one suggester,
+  // shared with the baseline lineup it writes when a roster completes. The copy
+  // that lived here is gone — two suggesters are two the day one is touched.
+  const fromSuggestion = (sl: TeamLineupContext['suggested_lineup']): number[] =>
+    sl ? [...(sl.gk_player_id != null ? [sl.gk_player_id] : []), ...sl.starter_player_ids] : [];
 
   useEffect(() => {
     if (!selectedLeagueId) return;
@@ -475,13 +415,10 @@ export default function FormationPage() {
         if (saved && (saved.gk_player_id || saved.starter_player_ids.length)) {
           starters = [...(saved.gk_player_id ? [saved.gk_player_id] : []), ...saved.starter_player_ids].slice(0, XI);
         } else {
-          // Nothing was ever submitted for this round. If it has already begun,
-          // whoever is on the pitch is out of reach: proposing him would build an
-          // XI the save can only refuse.
-          starters = suggest(d.roster, d.mode === 'classic' ? d.rules.classic_constraints : null, {
-            pinned: [],
-            locked: new Set(d.lineup_lock?.locked_player_ids ?? []),
-          });
+          // Nothing was ever submitted for this round and the server could not
+          // write a baseline (round begun, or roster incomplete): start from its
+          // proposal, which already keeps clear of whoever is on the pitch.
+          starters = fromSuggestion(d.suggested_lineup).slice(0, XI);
         }
         const frozen = new Set(d.lineup_lock?.locked_player_ids ?? []);
         const slots = new Map<number, number>();
@@ -927,12 +864,7 @@ export default function FormationPage() {
       noticeLater(suggestBlock);
       return;
     }
-    setStarterIds(
-      suggest(ctx.roster, isClassic ? constraints : null, {
-        pinned: starterIds.filter((id) => lockedIds.has(id)),
-        locked: lockedIds,
-      }),
-    );
+    setStarterIds(fromSuggestion(ctx.suggested_lineup));
     setVacancies([]);
     setRefused(null);
   };
@@ -1027,6 +959,11 @@ export default function FormationPage() {
                 la formazione della giornata prima e' anche quella che il punteggio
                 usa per chi non schiera, e senza scriverlo la pagina sembrerebbe
                 proporre una bozza qualunque. */}
+            {ctx.lineup_source?.kind === 'baseline' ? (
+              <div className="mt-1 text-[11px] font-semibold text-ink-soft">
+                Proposta dal suggeritore quando la rosa si è completata: se non la tocchi, gioca questa.
+              </div>
+            ) : null}
             {ctx.lineup_source?.kind === 'previous' ? (
               <div className="mt-1 text-[11px] font-semibold text-ink-soft">
                 Ripresa dalla giornata {ctx.lineup_source.from_matchday}: se non la tocchi, gioca questa.
