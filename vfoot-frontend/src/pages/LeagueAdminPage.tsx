@@ -1068,8 +1068,10 @@ export default function LeagueAdminPage() {
                               </span>
                             </label>
                             <div className="text-[11px] text-ink-faint">
-                              Da fissare alla creazione, o fra una giornata e l'altra con l'accordo di tutti:
-                              cambiarla a giornata cominciata cambierebbe le regole a metà partita.
+                              Da fissare alla creazione, o fra una giornata e l'altra con l'accordo di tutti.
+                              A giornata in corso il cambio viene rifiutato: cambierebbe le regole a metà
+                              partita. Il regolamento di una giornata è comunque quello in vigore al suo
+                              primo calcio d'inizio.
                             </div>
                           </div>
                         ) : null}

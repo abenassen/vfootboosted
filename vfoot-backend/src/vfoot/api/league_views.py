@@ -1189,6 +1189,29 @@ class LeagueSettingsUpdateView(APIView):
             league.home_advantage_bonus = bonus
             fields.append("home_advantage_bonus")
 
+        # LA SCADENZA NON SI CAMBIA A GIORNATA IN CORSO. Chi puo' ancora toccare la
+        # formazione lo decide la modalita', letta dal vivo: cambiarla col turno
+        # cominciato riaprirebbe formazioni gia' chiuse (o chiuderebbe chi poteva
+        # ancora schierare) a voti in parte noti — e cambierebbe le regole delle
+        # sostituzioni sotto i piedi di chi ha schierato con le altre. Si cambia fra
+        # una giornata e l'altra, e vale dalla prossima. Il punteggio della giornata
+        # in corso e' comunque al riparo: il suo regolamento e' congelato al primo
+        # calcio d'inizio (``ruleset_for_round``).
+        wants_deadline_change = (
+            ("enforce_lineup_deadline" in request.data
+             and bool(request.data.get("enforce_lineup_deadline")) != league.enforce_lineup_deadline)
+            or ("lineup_lock_mode" in request.data
+                and str(request.data.get("lineup_lock_mode") or "") != league.lineup_lock_mode)
+        )
+        if wants_deadline_change:
+            playing = matchday_state.playing_matchday(league)
+            if playing is not None:
+                return Response(
+                    {"detail": f"Giornata {playing} in corso: la scadenza della formazione "
+                               "si cambia fra una giornata e l'altra, e varra' dalla prossima."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
         if "enforce_lineup_deadline" in request.data:
             league.enforce_lineup_deadline = bool(request.data.get("enforce_lineup_deadline"))
             fields.append("enforce_lineup_deadline")
@@ -2811,8 +2834,7 @@ def _live_totals(league: FantasyLeague, fixtures, locked_mds: set[int]) -> dict:
     """
     if not locked_mds:
         return {}
-    from vfoot.services.classic_matchday_scoring import live_scorer
-    from vfoot.services.classic_scoring import Ruleset
+    from vfoot.services.classic_matchday_scoring import live_scorer, ruleset_for_round
 
     by_md: dict[int, list] = {}
     for fx in fixtures:
@@ -2825,8 +2847,7 @@ def _live_totals(league: FantasyLeague, fixtures, locked_mds: set[int]) -> dict:
     out: dict[int, dict] = {}
     for group in by_md.values():
         md = group[0].fantasy_matchday
-        ruleset = (Ruleset.from_snapshot(md.ruleset_snapshot) if md.ruleset_snapshot
-                   else Ruleset.from_league(league))
+        ruleset = ruleset_for_round(league, md)
         try:
             score = live_scorer(league, md, ruleset)
         except Exception:  # noqa: BLE001 — a calendar must render without the extra
@@ -3324,10 +3345,14 @@ class LeagueMatchdayConcludeView(APIView):
             # Classic: the H2H result is the sum of the lineup's fantavoti converted to
             # goals (66/+6), NOT the real match scoreline. Freeze totals + per-player
             # payload + the ruleset used, all in this transaction.
-            from vfoot.services.classic_scoring import Ruleset
-            from vfoot.services.classic_matchday_scoring import score_and_persist_matchday
+            from vfoot.services.classic_matchday_scoring import (
+                ruleset_for_round,
+                score_and_persist_matchday,
+            )
 
-            ruleset = Ruleset.from_league(league)
+            # The rules the round was PLAYED under (frozen at its first kickoff),
+            # not the league's settings at the moment somebody presses Concludi.
+            ruleset = ruleset_for_round(league, md)
             result = score_and_persist_matchday(
                 md, league, ruleset, fixtures,
                 s.validated_data.get("lineup_resolutions", {}), force, update_snapshot=True)
@@ -5309,13 +5334,12 @@ class FixtureDetailView(APIView):
             return Response({"detail": "No rich detail for this fixture."},
                             status=status.HTTP_404_NOT_FOUND)
 
-        from vfoot.services.classic_matchday_scoring import score_fixture_live
-        from vfoot.services.classic_scoring import Ruleset
+        from vfoot.services.classic_matchday_scoring import (
+            ruleset_for_round,
+            score_fixture_live,
+        )
 
-        # The snapshot if the round already has one (it is what the conclusion will
-        # use), otherwise the league's current rules.
-        ruleset = (Ruleset.from_snapshot(md.ruleset_snapshot) if md.ruleset_snapshot
-                   else Ruleset.from_league(league))
+        ruleset = ruleset_for_round(league, md)
         lock_at = matchday_state.lineup_lock_at(md.real_competition_season_id,
                                                 md.real_matchday)
         return Response({

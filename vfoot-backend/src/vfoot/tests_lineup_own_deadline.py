@@ -262,3 +262,81 @@ class TheMarketFreezesForTheWholeRoundTests(_OwnRound):
         # ...and it is playing again on the day of the recovery.
         self.assertEqual(matchday_state.playing_matchday(
             self.league, self.MON + timedelta(days=30, hours=1)), 5)
+
+
+class ChangingTheModeTests(_OwnRound):
+    """Un cambio di modalita' vale dalla prossima giornata, mai da quella in
+    corso — e il regolamento di una giornata e' quello in vigore al suo primo
+    calcio d'inizio, non quello del momento in cui l'admin preme Concludi."""
+
+    def _patch(self, **data):
+        return self._client().patch(
+            f"/api/v1/leagues/{self.league.id}/settings", data, format="json")
+
+    def test_before_the_first_kickoff_the_mode_can_change_and_saved_lineups_follow(self):
+        """Il caso della lega in produzione: formazioni inserite in «own», poi il
+        passaggio a «player» prima di stasera. Lo snapshot non porta la modalita'
+        — solo portiere, undici e ordine della panchina — quindi tutto cio' che
+        dipende dalla modalita' si rilegge dal vivo e resta coerente."""
+        self.saturday_roster()
+        Match.objects.filter(matchday=5).update(kickoff=timezone.now() + timedelta(days=1))
+        self.assertEqual(self._post().status_code, 200)
+        r = self._patch(lineup_lock_mode="player")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.league.refresh_from_db()
+        self.assertEqual(self.league.lineup_lock_mode, "player")
+        d = self._get()
+        self.assertEqual(d["lineup_lock"]["mode"], "player")
+        self.assertEqual(d["lineup_source"]["kind"], "saved")
+        self.assertEqual(len(d["saved_lineup"]["starter_player_ids"]), 10)
+        # E le due passate sono accese, da ora, per tutti: regola di lega.
+        from vfoot.services.classic_scoring import Ruleset
+        self.assertTrue(Ruleset.from_league(self.league).defence_first)
+
+    def test_during_the_round_the_mode_cannot_change(self):
+        """Il venerdi' e' stato giocato, il sabato no: giornata in corso."""
+        r = self._patch(lineup_lock_mode="player")
+        self.assertEqual(r.status_code, 409, r.data)
+        self.assertIn("in corso", r.data["detail"])
+        r = self._patch(enforce_lineup_deadline=False)
+        self.assertEqual(r.status_code, 409, r.data)
+        self.league.refresh_from_db()
+        self.assertEqual(self.league.lineup_lock_mode, "own")
+        self.assertTrue(self.league.enforce_lineup_deadline)
+
+    def test_resending_the_same_mode_during_the_round_is_not_a_change(self):
+        """La pagina manda tutto il modulo: un valore uguale non e' un cambio."""
+        r = self._patch(lineup_lock_mode="own", enforce_lineup_deadline=True)
+        self.assertEqual(r.status_code, 200, r.data)
+
+    def test_after_the_round_has_settled_the_mode_can_change_again(self):
+        Match.objects.filter(matchday=5).update(
+            kickoff=timezone.now() - timedelta(days=3), status=Match.STATUS_FINISHED,
+            data_ready=True)
+        r = self._patch(lineup_lock_mode="player")
+        self.assertEqual(r.status_code, 200, r.data)
+
+    def test_the_rules_of_a_round_are_frozen_at_its_first_kickoff(self):
+        """Il regolamento si congela la prima volta che la giornata viene
+        calcolata dopo il calcio d'inizio, e la conclusione legge quello: un
+        cambio di impostazioni a giornata in corso — qui il voto d'ufficio —
+        non riscrive una giornata gia' giocata."""
+        from vfoot.services.classic_matchday_scoring import ruleset_for_round
+
+        md = FantasyMatchday.objects.get(league=self.league, real_matchday=5)
+        rs = ruleset_for_round(self.league, md)
+        self.assertEqual(rs.sv_office_vote, 0.0)
+        md.refresh_from_db()
+        self.assertTrue(md.ruleset_snapshot, "congelato: il venerdi' e' gia' stato giocato")
+        self.league.sv_office_vote = 4.0
+        self.league.save(update_fields=["sv_office_vote"])
+        self.assertEqual(ruleset_for_round(self.league, md).sv_office_vote, 0.0)
+
+    def test_before_the_kickoff_nothing_is_frozen(self):
+        from vfoot.services.classic_matchday_scoring import ruleset_for_round
+
+        Match.objects.filter(matchday=5).update(kickoff=timezone.now() + timedelta(days=1))
+        md = FantasyMatchday.objects.get(league=self.league, real_matchday=5)
+        ruleset_for_round(self.league, md)
+        md.refresh_from_db()
+        self.assertFalse(md.ruleset_snapshot)

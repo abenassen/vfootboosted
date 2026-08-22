@@ -564,6 +564,33 @@ def _mark_unstable(team: dict, unstable: set) -> bool:
     return any_unstable
 
 
+def ruleset_for_round(league, md):
+    """The rules THIS round is played under.
+
+    A league's settings are live, and a round takes three days: without this, a
+    setting changed on Sunday — the lock mode, the defence gate, the office vote —
+    re-scored Saturday's matches, and the conclusion on Tuesday used whatever the
+    settings happened to be on Tuesday. The rules of a round are the rules in force
+    when it BEGAN, so they are frozen into ``md.ruleset_snapshot`` the first time
+    the round is scored after its first kickoff — the live calendar, the fixture
+    detail and the tick all pass through here within minutes of it — and the
+    conclusion reads the same frozen copy. Before the kickoff nothing is frozen:
+    the admin can still change his mind about a round nobody has played.
+
+    The recompute endpoint keeps its explicit "with the CURRENT rules" option: that
+    is the admin overriding the freeze on purpose, and it rewrites the snapshot.
+    """
+    if md.ruleset_snapshot:
+        return Ruleset.from_snapshot(md.ruleset_snapshot)
+    ruleset = Ruleset.from_league(league)
+    from vfoot.services import matchday_state
+
+    if matchday_state.is_locked(md.real_competition_season_id, md.real_matchday):
+        md.ruleset_snapshot = ruleset.to_snapshot()
+        md.save(update_fields=["ruleset_snapshot"])
+    return ruleset
+
+
 def live_scorer(league, md, ruleset):
     """Prepare a matchday ONCE, then score any number of its fixtures.
 
