@@ -142,6 +142,34 @@ class RealChampionshipTests(TestCase):
         self.assertEqual(home["total"], 3.5)
         self.assertEqual(pag["away"]["starters"], [])  # no away appearances seeded
 
+    def test_the_vote_ledger_opens_the_altre_voci_line(self):
+        """La riga "altre N voci" del pannello si apre su una chiamata a parte: il
+        tabellino porta ventidue giocatori e si ricarica a ogni spinta live, questo
+        elenco lo vuole solo chi ha toccato la riga. Deve tornare le voci NON
+        mostrate, con un nome ciascuna, e sommare esattamente quella riga."""
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=self.df, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=30.0, team_side="home")
+        client = APIClient()
+        client.force_authenticate(user=User.objects.create_user("lettore", password="x"))
+
+        url = f"/api/v1/real-seasons/{self.cs.id}/vote-ledger/1/{self.df.id}"
+        r = client.get(url)
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["match_id"], self.match.id)
+        self.assertEqual(body["minutes"], 90)
+        self.assertTrue(all(row["label"] for row in body["terms"]))
+        total = sum(row["points"] for row in body["terms"]) + body["tiny"]["points"]
+        self.assertAlmostEqual(total, body["other_points"], places=2)
+        self.assertEqual(len(body["terms"]) + body["tiny"]["count"], body["other_count"])
+
+        # Chi in quella giornata non ha giocato non ha niente da spiegare, e lo si
+        # dice con un 404: una lista vuota si leggerebbe come "nessuna voce".
+        ghost = Player.objects.create(full_name="Mai Sceso", short_name="M. Sceso")
+        self.assertEqual(client.get(
+            f"/api/v1/real-seasons/{self.cs.id}/vote-ledger/1/{ghost.id}").status_code, 404)
+
     def test_own_goal_carries_the_minus_two_malus(self):
         """An own goal (raw_stats.ownGoals) is a -2 in the fantavoto. The voto puro
         is feature-based and blind to it, so the malus is the only place it lands."""

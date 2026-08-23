@@ -390,6 +390,74 @@ def _line(app: MatchAppearance, declared_role: str, vp_rows: dict,
             "bonus": bonus, "malus": malus, "fantavoto": round(vp + bonus - malus, 1)}
 
 
+def match_of_player(cs_id: int, matchday: int, player_id: int):
+    """La partita VERA in cui quel giocatore ha giocato quel turno, o None.
+
+    Si parte dalla presenza e non dal club (v. ``match_resolver.authoritative_match``,
+    che risolve dal contratto aperto): qui la domanda non e' "chi gioca oggi" ma
+    "da dove viene questo voto", e il voto ha dietro una MatchAppearance — quella
+    di chi si e' trasferito a stagione in corso compresa, che dal club di oggi non
+    si troverebbe piu'. Se per una qualunque ragione ce ne fossero due, vince la
+    partita conclusa: la sagoma del rinvio non ha voti da spiegare.
+    """
+    return (Match.objects
+            .filter(id__in=MatchAppearance.objects
+                    .filter(player_id=player_id)
+                    .values_list("match_id", flat=True),
+                    competition_season_id=cs_id, matchday=matchday)
+            .order_by("-data_ready", "-id")
+            .first())
+
+
+def vote_ledger(match, player_id: int) -> dict | None:
+    """Le voci che il riassunto NON mostra, per un giocatore di una partita.
+
+    Il pannello del voto ne tiene tre e chiude con "altre N voci": su una
+    prestazione buona dappertutto quelle N sono la maggior parte del voto, e questa
+    e' la loro lista. Si calcola l'intera pagella (una sola volta per partita, in
+    cache) perche' e' l'unico modo di essere certi che i numeri siano gli STESSI che
+    hanno prodotto la riga: un secondo percorso di calcolo, prima o poi, dissente.
+
+    La chiave della cache porta l'impronta del TURNO, non della stagione: a partita
+    in corso i voti si muovono a ogni giro del tick, e ``data_version`` non se ne
+    accorgerebbe (conta le partite finite).
+    """
+    key = (f"vfoot:vote_ledger:{match.id}:"
+           f"{matchday_data_version(match.competition_season_id, match.matchday)}")
+    rows = cache.get(key)
+    if rows is None:
+        pag = pagella_for_match(match, ledger=True)
+        rows = {}
+        for side in ("home", "away"):
+            for group in ("starters", "bench"):
+                for line in pag[side][group]:
+                    why = line.get("explanation")
+                    # ``explain`` torna una forma VUOTA quando non c'e' niente da
+                    # spiegare (nessuna feature pesata, o il ruolo senza taratura):
+                    # la si riconosce dal voto che non c'e', e quel giocatore non
+                    # entra nel registro invece di entrarci con dei buchi.
+                    if not why or "voto" not in why:
+                        continue
+                    rows[line["player_id"]] = {
+                        "player_id": line["player_id"],
+                        "name": line["name"],
+                        "match_id": match.id,
+                        "minutes": why["minutes"],
+                        # Il voto ricalcolato ADESSO. Chi ha in mano un referto
+                        # congelato puo' confrontarlo col proprio: se i due non
+                        # coincidono, quel tabellino e' stato scritto con un'altra
+                        # taratura del modello e il registro non lo spiega.
+                        "voto": why["voto"],
+                        "subtotal": why["subtotal"],
+                        "other_points": why["other_points"],
+                        "other_count": why["other_count"],
+                        "terms": why["other_terms"],
+                        "tiny": why["other_tiny"],
+                    }
+        cache.set(key, rows, 3600)
+    return rows.get(player_id)
+
+
 def _team_detail(starters: list[dict], bench: list[dict]) -> dict:
     # Order by role (GK->DEF->MID->ATT), then by fantavoto desc within a role,
     # with senza-voto players last in their role band.
@@ -411,7 +479,8 @@ def _team_detail(starters: list[dict], bench: list[dict]) -> dict:
 
 def pagella_for_match(match, reference: dict | None = None, league=None,
                       averages: dict | None = None,
-                      full_explanation: bool = False) -> dict:
+                      full_explanation: bool = False,
+                      ledger: bool = False) -> dict:
     """Full per-team pagella for a real match. Returns {'home': ClassicTeamDetail,
     'away': ClassicTeamDetail}. Only meaningful for a match with imported
     appearances (a finished, data-loaded fixture).
@@ -427,6 +496,12 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
     its value, its standing on the population scale, its weight and the vote points
     it moved) to each explained line. Off by default: it is several times the size of
     the vote it explains, which suits an analysis page and bloats an API response.
+
+    ``ledger`` attaches the shorter, spoken one: the entries the summary did NOT
+    show, each with a name — what the app's "altre N voci" line opens onto. Also off
+    by default, and for a sharper reason than size: this payload is re-fetched on
+    every live push while a match is being played, so it carries only what the
+    screen is showing.
     """
     if reference is None:
         reference = get_reference(match.competition_season_id)
@@ -518,7 +593,10 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           assists=a.assists or 0,
                           # the per-feature ledger: off by default (it is far bigger
                           # than the vote it explains), on for the analysis report
-                          full=full_explanation)
+                          full=full_explanation,
+                          # le voci non mostrate, nominate una per una: le chiede
+                          # solo chi apre il dettaglio di un voto (v. vote_ledger)
+                          ledger=ledger)
         line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded, why,
                      missed_pens=missed_pens.get(a.player_id, 0),
                      saved_pens=saved_pens.get(a.player_id, 0),

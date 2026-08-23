@@ -142,6 +142,7 @@ type ApiImpl = {
   getFixtureDetail: typeof backendApi.getFixtureDetail;
   getRealFixtures: typeof backendApi.getRealFixtures;
   getRealMatchDetail: typeof backendApi.getRealMatchDetail;
+  getVoteLedger: typeof backendApi.getVoteLedger;
   getChampionshipPlayers: typeof backendApi.getChampionshipPlayers;
   getTeamLineup: typeof backendApi.getTeamLineup;
   saveTeamLineup: typeof backendApi.saveTeamLineup;
@@ -241,6 +242,7 @@ export const getCompetitionStructure = typedImpl.getCompetitionStructure;
 export const getFixtureDetail = typedImpl.getFixtureDetail;
 export const getRealFixtures = typedImpl.getRealFixtures;
 export const getRealMatchDetail = typedImpl.getRealMatchDetail;
+export const getVoteLedger = typedImpl.getVoteLedger;
 export const getChampionshipPlayers = typedImpl.getChampionshipPlayers;
 export const getTeamLineup = typedImpl.getTeamLineup;
 export const saveTeamLineup = typedImpl.saveTeamLineup;

@@ -82,6 +82,42 @@ export interface ClassicPlayerLine {
   replaced_by: ClassicPlayerRef | null; // starter who was substituted
 }
 
+/** Le voci che il riassunto NON mostra, una per una: cosa c'è sotto la riga
+ *  «altre N voci». Non viaggia nel tabellino — ventidue giocatori per trenta righe,
+ *  ricaricati a ogni spinta live — ma si chiede quando qualcuno apre quella riga.
+ *
+ *  `terms` + `tiny` fanno esattamente `other_points`: la riga che si è aperta. */
+export interface VoteLedger {
+  player_id: number;
+  name: string;
+  match_id: number;
+  minutes: number;
+  /** Il voto RICALCOLATO ora. Un referto congelato può portarne un altro, se è
+   *  stato scritto con una taratura precedente del modello: allora questo elenco
+   *  non spiega quel numero, e il pannello lo dice invece di far finta di sì. */
+  voto: number;
+  subtotal: number;
+  other_points: number;
+  other_count: number;
+  terms: VoteLedgerTerm[];
+  /** Le voci sotto il centesimo, contate e sommate insieme (e con loro gli
+   *  arrotondamenti di tutte le altre): trenta righe di «+0,00» non si leggono. */
+  tiny: { count: number; points: number };
+}
+
+export interface VoteLedgerTerm {
+  key: string;
+  label: string;
+  points: number;
+  /** Quante volte l'ha fatto, come lo conta il tabellino — solo dove è un numero
+   *  di cose: un indice normalizzato o un valore atteso, messo lì nudo, non
+   *  spiegherebbe niente. */
+  value?: number;
+  /** La riga è la somma di più voci sovrapposte (le conclusioni, i dribbling). */
+  family?: string;
+  family_size?: number;
+}
+
 export type DefenseBonusGate = 'starters' | 'effective';
 
 export interface ClassicDefenseBonus {

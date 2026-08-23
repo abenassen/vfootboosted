@@ -108,7 +108,8 @@ from vfoot.services.competition_wizard import WizardError, create_competition, q
 from vfoot.services.league_competitions import main_competition
 from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic_lineup
 from vfoot.services.classic_pagella import (
-    elapsed_minutes, get_reference, match_in_progress, pagella_for_match,
+    elapsed_minutes, get_reference, match_in_progress, match_of_player,
+    pagella_for_match, vote_ledger,
 )
 from vfoot.services.classic_rating import current_role_map
 from vfoot.services import league_decisions
@@ -6318,6 +6319,52 @@ class SeasonRealMatchDetailView(APIView):
             return Response({"detail": "Nessun dato disponibile per questa partita."},
                             status=status.HTTP_404_NOT_FOUND)
         return Response(payload)
+
+
+class VoteLedgerView(APIView):
+    """Le voci che il pannello del voto non mostra, per UN giocatore di UN turno.
+
+    Perche' e' una chiamata a parte e non un pezzo del tabellino: il tabellino
+    porta ventidue giocatori e viene richiesto di nuovo a ogni spinta live, mentre
+    questo elenco serve solo a chi ha aperto un voto e ha toccato "altre N voci".
+    Trenta righe per ventidue persone, ricaricate ogni due minuti, per una cosa che
+    quasi sempre nessuno apre.
+
+    Si indirizza per (stagione, giornata, giocatore) e non per partita, perche' da
+    dentro una lega chi guarda ha in mano il turno, non l'incontro vero: la partita
+    la si ritrova dalla presenza (v. ``match_of_player``), che regge anche i
+    trasferimenti a stagione in corso.
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def _payload(self, cs_id: int, matchday: int, player_id: int):
+        match = match_of_player(cs_id, matchday, player_id)
+        if match is None:
+            return Response({"detail": "Nessuna partita per questo giocatore in questa giornata."},
+                            status=status.HTTP_404_NOT_FOUND)
+        led = vote_ledger(match, player_id)
+        if led is None:
+            return Response({"detail": "Nessun voto da spiegare per questo giocatore."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response(led)
+
+
+class LeagueVoteLedgerView(VoteLedgerView):
+    def get(self, request, league_id: int, matchday: int, player_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+        cs = league.reference_season
+        if cs is None:
+            return Response({"detail": "La lega non ha una stagione di riferimento."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return self._payload(cs.id, matchday, player_id)
+
+
+class SeasonVoteLedgerView(VoteLedgerView):
+    def get(self, request, season_id: int, matchday: int, player_id: int):
+        return self._payload(season_id, matchday, player_id)
 
 
 def championship_players_payload(cs, league=None) -> dict:

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { getFixtureDetail } from '../api';
+import { getFixtureDetail, getVoteLedger } from '../api';
 import { Card } from '../components/ui';
 import { MatchDetail } from '../components/match/MatchDetail';
 import { ClassicMatchDetail } from '../components/match/ClassicMatchDetail';
@@ -42,6 +42,21 @@ export default function LeagueMatchDetailPage() {
     }
   }, [fixtureCompetitionId, selectedCompetitionId, setSelectedCompetitionId]);
 
+  // Le voci che il pannello del voto non mostra. Si chiedono per LEGA: la giornata
+  // ce l'ha il referto, la stagione la sa la lega, e il permesso di leggerle è
+  // l'appartenenza alla lega — come per ogni altra cosa di questa pagina.
+  const classicData = data && 'mode' in data && data.mode === 'classic'
+    ? (data as ClassicFixtureDetail)
+    : null;
+  const md = classicData?.real_matchday ?? null;
+  const loadLedger = useMemo(
+    () =>
+      selectedLeagueId && md != null
+        ? (playerId: number) => getVoteLedger({ league: selectedLeagueId }, md, playerId)
+        : undefined,
+    [selectedLeagueId, md],
+  );
+
   if (loading && !data) return <div className="text-sm text-ink-faint">Caricamento partita…</div>;
   if ((error && !data) || (!loading && !data)) {
     // A fixture whose round has not kicked off has no detail, and the API says so
@@ -73,12 +88,13 @@ export default function LeagueMatchDetailPage() {
   if (!data) return null;
   // Classic leagues carry mode:'classic' in the payload -> fantavoto detail (no zone
   // duel). Aura leagues fall through to the zone-duel MatchDetail.
-  if ('mode' in data && data.mode === 'classic') {
+  if (classicData) {
     return (
       <ClassicMatchDetail
-        fixture={data as ClassicFixtureDetail}
+        fixture={classicData}
         backTo="/matches"
         myUserId={user?.id ?? null}
+        loadLedger={loadLedger}
       />
     );
   }

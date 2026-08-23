@@ -56,6 +56,7 @@ from vfoot.api.league_views import (
     LeagueChampionshipPlayersView,
     LeagueRealFixturesView,
     LeagueRealMatchDetailView,
+    LeagueVoteLedgerView,
     LeagueRosterBulkAssignView,
     LeagueRosterImportCSVView,
     LeagueRosterImportXLSXView,
@@ -68,6 +69,7 @@ from vfoot.api.league_views import (
     SeasonChampionshipPlayersView,
     SeasonRealFixturesView,
     SeasonRealMatchDetailView,
+    SeasonVoteLedgerView,
     TeamRosterAddView,
     TeamRosterSellView,
     TeamRosterVoidView,
@@ -181,6 +183,10 @@ urlpatterns = [
     path("leagues/<int:league_id>/championship-players", LeagueChampionshipPlayersView.as_view(), name="league-championship-players"),
     path("leagues/<int:league_id>/real-fixtures", LeagueRealFixturesView.as_view(), name="league-real-fixtures"),
     path("leagues/<int:league_id>/real-matches/<int:match_id>", LeagueRealMatchDetailView.as_view(), name="league-real-match-detail"),
+    # Il dettaglio esteso di UN voto: si chiede solo quando qualcuno apre "altre N
+    # voci", percio' non viaggia dentro il tabellino (v. VoteLedgerView).
+    path("leagues/<int:league_id>/vote-ledger/<int:matchday>/<int:player_id>",
+         LeagueVoteLedgerView.as_view(), name="league-vote-ledger"),
     path("leagues/<int:league_id>/standings", LeagueStandingsView.as_view(), name="league-standings"),
     path("leagues/<int:league_id>/lineup", LeagueTeamLineupView.as_view(), name="league-team-lineup"),
     path("leagues/<int:league_id>/lineup/save", LeagueTeamLineupSaveView.as_view(), name="league-team-lineup-save"),
@@ -231,6 +237,8 @@ urlpatterns = [
     # nessuna lega. Servono a chi si è appena iscritto e non ne ha ancora una.
     path("real-seasons/<int:season_id>/fixtures", SeasonRealFixturesView.as_view(), name="season-real-fixtures"),
     path("real-seasons/<int:season_id>/matches/<int:match_id>", SeasonRealMatchDetailView.as_view(), name="season-real-match-detail"),
+    path("real-seasons/<int:season_id>/vote-ledger/<int:matchday>/<int:player_id>",
+         SeasonVoteLedgerView.as_view(), name="season-vote-ledger"),
     path("real-seasons/<int:season_id>/players", SeasonChampionshipPlayersView.as_view(), name="season-championship-players"),
     path("leagues/<int:league_id>/teams/<int:team_id>/roster", TeamRosterView.as_view(), name="team-roster"),
     path("leagues/<int:league_id>/teams/<int:team_id>/roster/add", TeamRosterAddView.as_view(), name="team-roster-add"),

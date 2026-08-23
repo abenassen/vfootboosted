@@ -58,7 +58,7 @@ import type {
   TeamRoster,
 } from '../types/league';
 import type { SimFixtureDetail } from '../types/simulation';
-import type { ClassicFixtureDetail } from '../types/classic';
+import type { ClassicFixtureDetail, VoteLedger } from '../types/classic';
 import type {
   ChampionshipPlayersResponse,
   RealFixturesResponse,
@@ -1226,6 +1226,24 @@ export async function getRealMatchDetail(
     'league' in scope
       ? `/leagues/${scope.league}/real-matches/${matchId}`
       : `/real-seasons/${scope.season}/matches/${matchId}`;
+  const res = await fetch(`${baseUrl()}${path}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+// Le voci che il pannello del voto non mostra, per un giocatore di una giornata.
+// Chiamata a parte e non pezzo del tabellino: quello porta ventidue giocatori e si
+// ricarica a ogni spinta live, questo elenco lo vuole solo chi apre "altre N voci".
+export async function getVoteLedger(
+  scope: RealScope,
+  matchday: number,
+  playerId: number,
+): Promise<VoteLedger> {
+  const path =
+    'league' in scope
+      ? `/leagues/${scope.league}/vote-ledger/${matchday}/${playerId}`
+      : `/real-seasons/${scope.season}/vote-ledger/${matchday}/${playerId}`;
   const res = await fetch(`${baseUrl()}${path}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });

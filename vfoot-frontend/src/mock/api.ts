@@ -998,6 +998,15 @@ export async function getRealMatchDetail(
   throw new Error('Dettaglio partita disponibile solo con il backend reale.');
 }
 
+export async function getVoteLedger(
+  _scope: RealScope,
+  _matchday: number,
+  _playerId: number,
+): Promise<never> {
+  await sleep(80);
+  throw new Error('Dettaglio del voto disponibile solo con il backend reale.');
+}
+
 export async function getChampionshipPlayers(_scope: RealScope): Promise<never> {
   await sleep(80);
   throw new Error('Listone disponibile solo con il backend reale.');

@@ -163,6 +163,27 @@ MERGES = [
 MERGE_FAMILY = {k: name for keys, _pos, _neg, name in MERGES for k in keys}
 
 
+# Come si chiamano, nel REGISTRO ESTESO, le voci che la frase parlata non nomina
+# mai. Non sono le stesse di TABLE_ONLY_LABELS: quelle descrivono la feature a chi
+# legge la tabella tecnica del tuner ("proxy sintetico"), queste vanno sotto gli
+# occhi di chi ha appena aperto il dettaglio di un voto.
+#
+# ``defensive_value`` e' il caso che ha motivato tutto questo: puo' essere la voce
+# PIU' GRANDE del voto di un difensore (0.28 su 1.37, il 20%, in Rrahmani di
+# Genoa-Napoli) e finiva sempre e solo dentro "altre voci", perche' senza una riga
+# in LABELS ``_phrase`` non ha niente da dire. Nel registro deve avere un nome, e
+# il nome deve ammettere che cos'e': un indice di chi ci fornisce i dati, non una
+# cosa che contiamo noi.
+LEDGER_LABELS = {
+    "defensive_value": "valore difensivo (indice del fornitore)",
+    # Il lato negativo del SIGNAL e' None per scelta (creare poco non e' una
+    # notizia da dire ad alta voce): nel registro la riga c'e' lo stesso, quindi
+    # serve il sostantivo neutro, che col numero negativo accanto si legge bene.
+    "expected_assists": "occasioni create per i compagni",
+    "shots_off": "tiri fuori",
+}
+
+
 def _weight_of(role: str, key: str) -> float:
     if key == EXPOSURE_KEY:
         return -EXPOSURE_WEIGHT
@@ -194,6 +215,40 @@ def _phrase(role: str, key: str, term_delta: float, raw_value: float) -> str | N
     label, quant = entry[1], entry[2]
     high, low = QUANTIFIERS.get(quant, QUANTIFIERS["mp"])
     return f"{high if more else low} {label}"
+
+
+def _never_happened(entry) -> str:
+    """"nessun gol", "nessun'occasione nitida creata" — un EVENT che NON e'
+    successo. Nella frase parlata questi non si dicono (``_phrase`` restituisce
+    None: elencare cio' che uno non ha fatto e' rumore), ma nel registro la riga
+    esiste, con i suoi punti — un difensore che non segna perde il piccolo credito
+    che il difensore medio prende dai gol, ed e' giusto poterlo leggere.
+
+    Il genere viene dall'articolo del singolare, che e' l'unico posto in cui la
+    tabella LABELS lo dichiara: "un gol" -> "nessun gol", "un'occasione nitida
+    creata" -> "nessun'occasione nitida creata"."""
+    singular = entry[1]
+    for art, neg in (("un'", "nessun'"), ("uno ", "nessuno "), ("un ", "nessun ")):
+        if singular.startswith(art):
+            return neg + singular[len(art):]
+    return f"nessun {entry[2]}"
+
+
+def ledger_phrase(role: str, key: str, term_delta: float, raw_value: float) -> str:
+    """Il nome della voce nel REGISTRO ESTESO, dove tutto va nominato.
+
+    ``_phrase`` puo' tacere — e tace apposta — su tre casi: un evento che non e'
+    successo, il lato negativo di un SIGNAL, e le feature senza riga in LABELS. Nel
+    riassunto quel silenzio e' giusto; nel registro no, perche' li' la riga c'e' e
+    mostra i suoi punti, e una riga senza nome e' esattamente il buco da cui e'
+    nata questa funzione."""
+    said = _phrase(role, key, term_delta, raw_value)
+    if said:
+        return said
+    entry = LABELS.get(key)
+    if entry is not None and entry[0] == EVENT:
+        return _never_happened(entry)
+    return LEDGER_LABELS.get(key) or readable_label(key) or key
 
 
 # Features that carry weight but are never NAMED in a sentence, so they have no
@@ -388,6 +443,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             result_nudge: float = 0.0, red_adjustment: float = 0.0,
             own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
             evidence_weight: float = 1.0, full: bool = False,
+            ledger: bool = False,
             red_detail: dict | None = None, own_goal_detail: dict | None = None,
             assists: int = 0) -> dict:
     """Why this vote, decomposed so it ADDS UP to the vote.
@@ -410,7 +466,9 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     ref = reference.get(role)
     if not terms or not ref or not ref.get("std"):
         return {"positives": [], "negatives": [], "contributions": [],
-                "all_terms": [], "assist_note": "", "base": VOTE_CENTER,
+                "all_terms": [], "other_terms": [],
+                "other_tiny": {"count": 0, "points": 0.0},
+                "assist_note": "", "base": VOTE_CENTER,
                 "other_points": 0.0, "other_count": 0, "minutes": minutes,
                 "low_minutes": False, "note": ""}
 
@@ -466,7 +524,10 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                    + penalty_adjustment))
     voto = round(subtotal * 2) / 2
 
-    named = [(pts, ph, fam) for pts, _, ph, fam in scored
+    # The key travels with the line (it used to be dropped here): the ledger below
+    # lists the entries that did NOT make it into the summary, and without an
+    # identity there is no way to tell which ones those are.
+    named = [(pts, key, ph, fam) for pts, key, ph, fam in scored
              if ph and abs(pts) >= 0.05]
     named.sort(key=lambda x: x[0], reverse=True)
     # One-sided at the extremes (see POSITIVES_MIN_VOTE / NEGATIVES_MAX_VOTE): a bad
@@ -490,7 +551,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             out["kind"] = kind
         return out
 
-    contributions = [entry(pts, ph, fam) for pts, ph, fam in shown]
+    contributions = [entry(pts, ph, fam) for pts, _key, ph, fam in shown]
     # The result adjustment is a vote-level term, not a feature, so it rides on top
     # of the feature contributions and is named explicitly.
     # ``kind`` rides along so ``to_sentence`` (and any caller) can recognise these
@@ -515,6 +576,59 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         contributions.append(entry(penalty_adjustment, pen_label, kind="penalty"))
     shown_rounded = sum(c["points"] for c in contributions)
     other_points = round(subtotal - VOTE_CENTER - shown_rounded, 2)
+
+    # THE LEDGER BEHIND "altre N voci". The summary keeps three lines; on a game
+    # that was good at everything the rest is not a tail but most of the vote —
+    # Rrahmani, Genoa-Napoli: +0.56 shown, +0.81 unshown, and the biggest single
+    # slice of the lot (the defensive index, +0.28) sitting inside the fold with no
+    # name on it. So the fold has to be openable, and this is what is under it: the
+    # same entries the summary chose from, minus the ones it showed, each one named.
+    #
+    # Built only on request (see ``ledger``) because it rides in the match payload
+    # of twenty-two players, which is re-fetched on every live push.
+    other_terms, tiny_count = [], 0
+    if ledger:
+        shown_keys = {key for _p, key, _ph, _f in shown}
+        per90_keys = set(GK_PER90_WEIGHTS if role == Player.ROLE_GK else PER90_WEIGHTS)
+        for pts, key, _ph, fam in sorted(scored, key=lambda x: x[0], reverse=True):
+            if key in shown_keys:
+                continue
+            # Under a hundredth of a vote there is nothing to read: those are
+            # counted and summed at the bottom instead of printing thirty "+0.00".
+            if abs(round(pts, 2)) < 0.005:
+                tiny_count += 1
+                continue
+            row = {"key": key,
+                   "label": ledger_phrase(role, key, pts, raw_values.get(key, 0.0)),
+                   "points": round(pts, 2)}
+            if fam:
+                # A merged family is one row here too, as in the summary; the count
+                # says how many features it stands for.
+                row["family"], row["family_size"] = fam
+            else:
+                # QUANTE volte l'ha fatto, come si conta nel tabellino: il numero
+                # osservato, non quello che l'indice consuma. Per il blocco dei
+                # volumi i due differiscono — l'indice ragiona per densita' e
+                # proietta sui 90' — e "4,14 respinte" e' un numero che nessuno
+                # puo' verificare da nessuna parte, mentre 4 sta nel tabellino.
+                #
+                # E si scrive solo quando e' un NUMERO DI COSE. Un indice
+                # normalizzato (il valore difensivo, l'esposizione) o un valore
+                # atteso (xA 0,03) messo li' nudo non spiega niente: quelle righe
+                # portano il nome e i punti, che e' quanto si puo' dire con onesta'.
+                count = (totals.get(key, 0.0) if key in per90_keys
+                         else raw_values.get(key, 0.0))
+                event_that_did_not_happen = (
+                    (LABELS.get(key) or (None,))[0] == EVENT and round(count) == 0)
+                if abs(count - round(count)) < 0.01 and not event_that_did_not_happen:
+                    # "nessun gol" non ha bisogno di uno zero accanto: lo zero e'
+                    # gia' tutta la frase.
+                    row["value"] = int(round(count))
+            other_terms.append(row)
+    # The remainder is what the printed rows do not account for: the sub-hundredth
+    # entries AND the rounding of everything above them. It is carried as one line
+    # so the open ledger still adds up to the fold it opened.
+    tiny_points = round(other_points - sum(r["points"] for r in other_terms), 2)
     low = minutes < SHRINKAGE_MINUTES * 2
     note = ("Con pochi minuti giocati ogni voce pesa meno: il voto resta piu' "
             "vicino al 6.") if low else ""
@@ -529,10 +643,15 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         # per cui stiamo sotto una pagella su un giocatore che "ha fatto qualcosa"
         "assist_note": assist_note(assists, raw_values.get("expected_assists", 0.0),
                                    raw_values.get("big_chance_created", 0.0)),
-        "positives": [entry(p, ph, fam) for p, ph, fam in positives],
-        "negatives": [entry(p, ph, fam) for p, ph, fam in negatives],
+        "positives": [entry(p, ph, fam) for p, _k, ph, fam in positives],
+        "negatives": [entry(p, ph, fam) for p, _k, ph, fam in negatives],
         "contributions": contributions,
         "all_terms": all_terms,
+        # Le voci NON mostrate, una per una (solo con ``ledger``): la riga "altre N
+        # voci" del pannello si apre su queste, e insieme a ``other_tiny`` fanno
+        # esattamente ``other_points``.
+        "other_terms": other_terms,
+        "other_tiny": {"count": tiny_count, "points": tiny_points},
         # vote points per index point for THIS appearance (it carries both
         # shrinkages): the scale that turns the index into the vote.
         "per_unit": round(per_unit, 6),

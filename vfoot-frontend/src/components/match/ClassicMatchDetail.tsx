@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Card, SectionTitle } from '../ui';
 import { MatchScoreHeader, type MatchHeaderVM } from './MatchScoreHeader';
@@ -10,11 +10,23 @@ import type {
   ClassicPlayerLine,
   ClassicRole,
   ClassicTeamDetail,
+  VoteLedger,
 } from '../../types/classic';
 
 // Classic-mode match detail: voto puro + bonus/malus = fantavoto per player, the
 // ordered bench, and the substitutions that bring a benched player in for an s.v.
 // starter. No zone pitch (classic has no zone duel).
+
+/** Chi sa andare a prendere il registro esteso di un voto — le voci che il
+ *  riassunto non mostra. Passa per un contesto e non di mano in mano perché serve
+ *  in fondo a quattro componenti (tabellone → colonna → riga → pannello) e solo
+ *  all'ultimo: farlo scendere come proprietà vorrebbe dire dichiararlo in tre
+ *  posti che non se ne fanno niente.
+ *
+ *  Può mancare: dove nessuno lo fornisce la riga «altre N voci» resta quello che
+ *  era, un numero senza dettaglio, invece di essere un bottone che non fa nulla. */
+type LedgerLoader = (playerId: number) => Promise<VoteLedger>;
+const LedgerContext = createContext<LedgerLoader | null>(null);
 
 const ROLE_LABEL: Record<ClassicRole, string> = { POR: 'POR', DIF: 'DIF', CEN: 'CEN', ATT: 'ATT' };
 const ROLE_CHIP: Record<ClassicRole, string> = {
@@ -198,6 +210,7 @@ export function ClassicMatchDetail({
   backLabel = '← Partite',
   variant = 'fantasy',
   myUserId = null,
+  loadLedger,
 }: {
   fixture: ClassicFixtureDetail;
   backTo: string;
@@ -213,6 +226,11 @@ export function ClassicMatchDetail({
   // total, defence modifier, bench priority / s.v. replacement) are not — they
   // belong to a vfoot fixture, not to the real game, so they are hidden here.
   variant?: 'fantasy' | 'real';
+  /** Come si va a prendere il registro esteso di un voto (le voci che il riassunto
+   *  non mostra). Lo sa la pagina, non il tabellino: da dentro una lega si chiede
+   *  per lega, dal campionato vero per stagione. Senza, la riga «altre N voci» non
+   *  si apre. */
+  loadLedger?: LedgerLoader;
 }) {
   const d = fixture;
   const realMatch = variant === 'real';
@@ -251,6 +269,7 @@ export function ClassicMatchDetail({
   };
 
   return (
+    <LedgerContext.Provider value={loadLedger ?? null}>
     <div className="space-y-4">
       <Card className="p-4">
         <MatchScoreHeader
@@ -364,6 +383,7 @@ export function ClassicMatchDetail({
         />
       ) : null}
     </div>
+    </LedgerContext.Provider>
   );
 }
 
@@ -652,7 +672,133 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
         )}
       </div>
     </div>
-    {open && why ? <WhyThisVote why={why} /> : null}
+    {open && why ? <WhyThisVote why={why} playerId={p.player_id} /> : null}
+    </>
+  );
+}
+
+/** La riga «altre N voci», e cosa c'è sotto quando la si apre.
+ *
+ *  Il riassunto tiene tre voci e ripiega tutto il resto qui. Finché il resto è una
+ *  coda di inezie la riga basta; quando non lo è — una prestazione buona su tutto
+ *  sparpaglia il voto su dieci voci, nessuna delle quali entra nelle tre — quel
+ *  numero è la parte più grossa del voto e non spiega niente. Allora si apre.
+ *
+ *  L'elenco NON viaggia nel tabellino: ventidue giocatori per trenta righe, e a
+ *  partita in corso il tabellino si ricarica a ogni spinta. Si chiede al momento,
+ *  una volta sola per giocatore, e resta lì per la riapertura. */
+function OtherVoices({
+  why,
+  playerId,
+  fmtPts,
+}: {
+  why: NonNullable<ClassicPlayerLine['explanation']>;
+  playerId: number;
+  fmtPts: (n: number) => string;
+}) {
+  const load = useContext(LedgerContext);
+  const [ledger, setLedger] = useState<VoteLedger | null>(null);
+  const [state, setState] = useState<'closed' | 'loading' | 'open' | 'error'>('closed');
+  const label = `altre ${why.other_count} voci`;
+  const points = (
+    <span
+      className={`shrink-0 font-mono text-[11px] font-semibold ${
+        why.other_points >= 0 ? 'text-good' : 'text-bad'
+      }`}
+    >
+      {fmtPts(why.other_points)}
+    </span>
+  );
+
+  // Senza qualcuno che sappia andare a prenderle, la riga resta quello che era:
+  // un numero. Un bottone che non apre niente sarebbe peggio del numero.
+  if (!load) {
+    return (
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-ink-soft">{label}</span>
+        {points}
+      </div>
+    );
+  }
+
+  const toggle = () => {
+    if (state === 'open') return setState('closed');
+    if (ledger) return setState('open');
+    setState('loading');
+    load(playerId)
+      .then((l) => {
+        setLedger(l);
+        setState('open');
+      })
+      .catch(() => setState('error'));
+  };
+
+  // Il referto congelato di una giornata passata è stato scritto con la taratura
+  // del modello di allora: se il ricalcolo di adesso dà un altro voto, queste voci
+  // non sono quelle che hanno fatto QUEL numero, e dirlo è l'unica cosa onesta.
+  const stale = ledger != null && Math.abs(ledger.voto - why.voto) >= 0.05;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={state === 'open'}
+        className="flex w-full items-baseline justify-between gap-3 text-left"
+      >
+        <span className="text-ink-soft underline decoration-dotted underline-offset-2">
+          <span className="mr-1 inline-block text-ink-faint">{state === 'open' ? '▾' : '▸'}</span>
+          {label}
+        </span>
+        {points}
+      </button>
+      {state === 'loading' ? (
+        <div className="pl-3 text-[11px] text-ink-faint">Apro il dettaglio…</div>
+      ) : null}
+      {state === 'error' ? (
+        <div className="pl-3 text-[11px] text-bad">Non sono riuscito a caricare il dettaglio.</div>
+      ) : null}
+      {state === 'open' && ledger ? (
+        <div className="mt-1 space-y-0.5 border-l border-line pl-3">
+          {ledger.terms.map((t) => (
+            <div key={t.key} className="flex items-baseline justify-between gap-3">
+              <span className="text-ink-soft">
+                {t.label}
+                {/* Quante volte l'ha fatto, come lo conta il tabellino: è il numero
+                    che chi legge può andare a verificare da un'altra parte. */}
+                {t.value != null ? <span className="ml-1 text-ink-faint">· {t.value}</span> : null}
+                {t.family_size ? (
+                  <span className="ml-1 text-ink-faint">· {t.family_size} voci</span>
+                ) : null}
+              </span>
+              <span
+                className={`shrink-0 font-mono text-[11px] ${
+                  t.points >= 0 ? 'text-good' : 'text-bad'
+                }`}
+              >
+                {fmtPts(t.points)}
+              </span>
+            </div>
+          ))}
+          {ledger.tiny.count > 0 || Math.abs(ledger.tiny.points) >= 0.005 ? (
+            <div className="flex items-baseline justify-between gap-3 text-ink-faint">
+              <span>
+                {ledger.tiny.count > 0
+                  ? `altre ${ledger.tiny.count} voci sotto un centesimo di voto`
+                  : 'arrotondamenti'}
+              </span>
+              <span className="shrink-0 font-mono text-[11px]">{fmtPts(ledger.tiny.points)}</span>
+            </div>
+          ) : null}
+          {stale ? (
+            <div className="pt-1 text-[11px] text-warn">
+              Questo referto è congelato al {why.voto.toFixed(1)}: il dettaglio è ricalcolato
+              adesso e dà {ledger.voto.toFixed(1)}, quindi spiega il voto di oggi, non quello
+              scritto allora.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -660,7 +806,13 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
 /** The breakdown behind a voto puro, laid out so it ADDS UP: it starts from the
  *  role average and every slice moves it, ending on the vote itself — so the
  *  number can actually be derived from the rows, not just illustrated. */
-function WhyThisVote({ why }: { why: NonNullable<ClassicPlayerLine['explanation']> }) {
+function WhyThisVote({
+  why,
+  playerId,
+}: {
+  why: NonNullable<ClassicPlayerLine['explanation']>;
+  playerId: number;
+}) {
   const fmtPts = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(2)}`;
   const line = (label: string, pts: number, key?: string) => (
     <div key={key ?? label} className="flex items-baseline justify-between gap-3">
@@ -682,7 +834,15 @@ function WhyThisVote({ why }: { why: NonNullable<ClassicPlayerLine['explanation'
           <span className="shrink-0 font-mono text-[11px] font-semibold">{why.base.toFixed(1)}</span>
         </div>
         {why.contributions.map((c) => line(c.label, c.points))}
-        {why.other_count > 0 ? line(`altre ${why.other_count} voci minori`, why.other_points, '__other') : null}
+        {/* «altre 30 voci MINORI» era falso, ed è il motivo per cui questa riga si
+            apre: su una prestazione buona dappertutto quelle voci sono la maggior
+            parte del voto (Rrahmani in Genoa-Napoli: +0,56 mostrato, +0,81 lì
+            dentro, e la fetta più grossa di tutte era una di quelle). Il numero
+            resta uno solo finché non lo si chiede — l'elenco arriva con una
+            chiamata sua, non dentro il tabellino. */}
+        {why.other_count > 0 ? (
+          <OtherVoices why={why} playerId={playerId} fmtPts={fmtPts} />
+        ) : null}
         <div className="mt-1 flex items-baseline justify-between gap-3 border-t border-line pt-1 font-semibold text-ink">
           <span>Voto puro</span>
           <span className="shrink-0 font-mono">

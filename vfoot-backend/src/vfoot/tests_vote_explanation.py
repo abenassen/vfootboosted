@@ -4,8 +4,8 @@ from __future__ import annotations
 from django.test import SimpleTestCase
 
 from vfoot.services.vote_explanation import (
-    COUNT, EVENT, SIGNAL, LABELS, QUANTIFIERS, _phrase, explain, readable_label,
-    role_average_terms, to_sentence,
+    COUNT, EVENT, SIGNAL, LABELS, QUANTIFIERS, _phrase, explain, ledger_phrase,
+    readable_label, role_average_terms, to_sentence,
 )
 from vfoot.services.classic_rating import (
     VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, SHRINKAGE_MINUTES,
@@ -182,6 +182,65 @@ class VoteExplanationTests(SimpleTestCase):
         # and it agrees with the summary's own accounting
         shown = sum(c["points"] for c in e["contributions"]) + e["other_points"]
         self.assertAlmostEqual(total, shown, places=2)
+
+    # --- the ledger behind "altre N voci" --------------------------------
+    def test_the_ledger_names_every_unshown_entry_and_adds_up_to_the_fold(self):
+        """Il riassunto ne mostra tre e chiude con "altre N voci". Su una
+        prestazione buona dappertutto quelle N sono la maggior parte del voto, e
+        allora devono essere apribili: una per una, con un nome, e la loro somma
+        deve fare ESATTAMENTE il numero della riga che si e' aperta — altrimenti si
+        e' solo spostato il buco piu' in basso."""
+        average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0,
+                                         "duels_won": 5.0, "tackles_won": 1.0,
+                                         "defensive_value": 0.1})
+        feats = {"clearances": 20.0, "touches": 90.0, "duels_won": 13.0,
+                 "tackles_won": 4.0, "defensive_value": 0.44}
+        e = explain("DIF", feats, 90, self.REFERENCE, average, ledger=True)
+
+        self.assertTrue(e["other_terms"], "il registro non puo' essere vuoto")
+        self.assertTrue(all(r["label"] for r in e["other_terms"]))
+        # nessuna riga e' insieme mostrata e nascosta
+        shown = {c["label"] for c in e["contributions"]}
+        self.assertFalse(shown & {r["label"] for r in e["other_terms"]})
+        # e il conto torna: righe + resto = la riga che si e' aperta
+        total = (sum(r["points"] for r in e["other_terms"])
+                 + e["other_tiny"]["points"])
+        self.assertAlmostEqual(total, e["other_points"], places=2)
+        # quante voci dice la riga, tante ce ne sono sotto
+        self.assertEqual(len(e["other_terms"]) + e["other_tiny"]["count"],
+                         e["other_count"])
+        # il registro si costruisce solo se lo si chiede: viaggia dentro il
+        # tabellino di ventidue giocatori, che si ricarica a ogni spinta live
+        self.assertEqual(explain("DIF", feats, 90, self.REFERENCE, average)["other_terms"], [])
+
+    def test_the_ledger_names_what_the_spoken_summary_never_can(self):
+        """Le tre cose su cui ``_phrase`` tace apposta — l'evento che non e'
+        successo, il lato muto di un SIGNAL, e la feature senza etichetta parlata —
+        nel registro hanno una riga con dei punti accanto, quindi devono avere un
+        nome. ``defensive_value`` e' il caso che conta: puo' essere la voce piu'
+        grande del voto di un difensore e non e' nominabile in una frase."""
+        self.assertEqual(ledger_phrase("DIF", "defensive_value", +0.28, 0.44),
+                         "valore difensivo (indice del fornitore)")
+        self.assertEqual(ledger_phrase("DIF", "shots_goal", -0.03, 0.0), "nessun gol")
+        self.assertEqual(ledger_phrase("DIF", "big_chance_created", -0.02, 0.0),
+                         "nessun'occasione nitida creata")
+        self.assertEqual(ledger_phrase("DIF", "expected_assists", -0.03, 0.0),
+                         "occasioni create per i compagni")
+        # e quando la frase c'e', e' la stessa del riassunto
+        self.assertEqual(ledger_phrase("DIF", "clearances", +0.3, 8.0), "tante respinte")
+
+    def test_the_ledger_quotes_counts_the_way_the_tabellino_does(self):
+        """Il numero accanto alla voce e' quello OSSERVATO, non quello proiettato
+        sui 90' che l'indice consuma: "4,14 respinte" non sta da nessuna parte,
+        4 sta nel tabellino. E si scrive solo quando e' un numero di cose: un
+        indice normalizzato messo li' nudo non spiega niente."""
+        average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0,
+                                         "defensive_value": 0.1})
+        feats = {"clearances": 4.0, "touches": 40.0, "defensive_value": 0.44}
+        e = explain("DIF", feats, 45, self.REFERENCE, average, ledger=True)
+        rows = {r["label"]: r for r in e["other_terms"]}
+        self.assertEqual(rows["poche respinte"]["value"], 4)   # non 8, la proiezione
+        self.assertNotIn("value", rows["valore difensivo (indice del fornitore)"])
 
     # --- the graded events explain their own size ------------------------
     def test_a_sending_off_says_why_it_cost_what_it_cost(self):

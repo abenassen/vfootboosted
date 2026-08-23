@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getRealMatchDetail } from '../api';
+import { getRealMatchDetail, getVoteLedger } from '../api';
 import { Card } from '../components/ui';
 import { ClassicMatchDetail } from '../components/match/ClassicMatchDetail';
 import { useLeagueContext } from '../league/LeagueContext';
@@ -38,6 +38,18 @@ export default function RealMatchDetailPage() {
   // built the page rebuilds it, so the pushed path and the reload path are one.
   useLiveSocket(selectedLeagueId ?? null, useCallback(() => setTick((n) => n + 1), []));
 
+  // Le voci che il pannello del voto non mostra: si chiedono solo quando qualcuno
+  // apre quella riga, e da qui perché è la pagina a sapere in che ambito sta
+  // guardando (dentro una lega o sul campionato e basta) — v. getVoteLedger.
+  const md = data?.real_matchday ?? null;
+  const loadLedger = useMemo(
+    () =>
+      scope && md != null
+        ? (playerId: number) => getVoteLedger(scope, md, playerId)
+        : undefined,
+    [scope, md],
+  );
+
   // `loading && !data`, not `loading`: a re-fetch triggered by the socket must not
   // replace a page you are reading with a spinner.
   if (loading && !data) return <div className="text-sm text-ink-faint">Caricamento partita…</div>;
@@ -51,5 +63,13 @@ export default function RealMatchDetailPage() {
       </Card>
     );
   }
-  return <ClassicMatchDetail fixture={data} backTo="/serie-a" backLabel="← Serie A" variant="real" />;
+  return (
+    <ClassicMatchDetail
+      fixture={data}
+      backTo="/serie-a"
+      backLabel="← Serie A"
+      variant="real"
+      loadLedger={loadLedger}
+    />
+  );
 }
