@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
@@ -236,10 +236,14 @@ function fixtureLabel(nm: { team: string; opponent: string; home: boolean }): st
 
 /** What to call a frozen player, which is a statement about his MATCH and not
  *  about him. He is frozen because his club has kicked off — he may be on the
- *  pitch, may have finished, and may never have come on at all, so "in campo" is
- *  true for only some of them and "ha giocato" for none of them for certain. */
+ *  pitch, may have finished, and may never have come on at all.
+ *
+ *  Per questo NON dice «in campo», che è la cosa che si vorrebbe dire e l'unica che
+ *  non si sa: metà di questi giocatori sono in panchina al Meazza mentre la
+ *  pastiglia li dà in campo. «In corso» dice della partita esattamente quello che
+ *  sappiamo, ed è la stessa parola del suo tooltip. */
 function frozenLabel(nm?: { status: string } | null): string {
-  if (nm?.status === 'live') return 'in campo';
+  if (nm?.status === 'live') return 'in corso';
   if (nm?.status === 'finished') return 'finita';
   return 'iniziata';
 }
@@ -1284,7 +1288,11 @@ export default function FormationPage() {
             <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
               Titolari {starterIds.length}/{XI}
             </div>
-            <div className="divide-y">
+            {/* `divide-line` e non `divide-y` nudo: senza colore Tailwind usa il
+                suo grigio chiaro di riserva, che sul tema scuro diventa un filetto
+                quasi bianco fra una riga e l'altra. Lo stesso token del resto
+                dell'app, e i due temi si comportano uguale. */}
+            <div className="divide-y divide-line">
             {starters.map((p) => (
               <RosterRow
                 key={p.player_id}
@@ -1329,7 +1337,7 @@ export default function FormationPage() {
             Tieni premuto e trascina per cambiare l'ordine.
           </div>
           <div
-            className="divide-y"
+            className="divide-y divide-line"
             // Il gesto si segue sul CONTENITORE, non sulla riga: mentre la lista si
             // riordina sotto il dito la riga di partenza cambia posto, e gli eventi
             // agganciati a lei arriverebbero a singhiozzo.
@@ -1337,21 +1345,8 @@ export default function FormationPage() {
             onPointerCancel={dragEnd}
           >
             {shownBench.map((p, i) => (
-              <Fragment key={p.player_id}>
-              {/* IL MURO. A frozen bench player is a wall: the free rows above him
-                  stay above, the ones below stay below, and the drag stops here.
-                  Drawn so the limit is seen before it is felt. */}
-              {lockedIds.has(p.player_id) && i > 0 ? (
-                <div
-                  className="flex items-center gap-2 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[.12em] text-warn"
-                  aria-hidden="true"
-                >
-                  <span className="h-px flex-1 border-t border-dashed border-warn" />
-                  nessuno passa di qui
-                  <span className="h-px flex-1 border-t border-dashed border-warn" />
-                </div>
-              ) : null}
               <RosterRow
+                key={p.player_id}
                 p={p}
                 isStarter={false}
                 selected={selected === p.player_id}
@@ -1362,6 +1357,17 @@ export default function FormationPage() {
                 locked={lockedIds.has(p.player_id)}
                 immutable={!!immutableReason(p.player_id)}
                 immutableReason={immutableReason(p.player_id)}
+                /* IL CHIODO, disegnato per quello che è. Prima era una riga
+                   tratteggiata sopra di lui, «nessuno passa di qui», e diceva la
+                   cosa sbagliata: che il divieto stesse nello SPAZIO fra due
+                   giocatori. Da cui la domanda di chi guardava — sotto l'ultimo
+                   congelato non c'era nessuna riga, eppure nemmeno lì si passa. Il
+                   divieto non è fra le righe, è LA RIGA: chi ha la partita
+                   iniziata sta fermo, e chi gli sta sotto non gli passa sopra.
+                   Alzato dal foglio lo si vede senza leggerlo, non si ripete tre
+                   volte in dieci centimetri, e il gesto lo conferma — il dito ci
+                   sbatte contro. */
+                wall={!closed && lockedIds.has(p.player_id)}
                 order={i + 1}
                 rowRef={(el) => {
                   if (el) benchRowEls.current.set(p.player_id, el);
@@ -1374,7 +1380,6 @@ export default function FormationPage() {
                   onPointerUp: rowPointerUp(p.player_id),
                 }}
               />
-              </Fragment>
             ))}
             {bench.length === 0 ? <div className="py-2 text-sm text-ink-faint">Panchina vuota.</div> : null}
           </div>
@@ -1777,6 +1782,7 @@ function RosterRow({
   locked,
   immutable,
   immutableReason,
+  wall,
   order,
   drag,
   rowRef,
@@ -1795,6 +1801,10 @@ function RosterRow({
    *  click cannot do: you should be able to see it before pressing. */
   immutable?: boolean;
   immutableReason?: string | null;
+  /** Un chiodo in panchina: la sua riga è l'ostacolo che gli altri non superano,
+   *  e va disegnata come tale — alzata dal foglio. Solo in panchina, dove c'è un
+   *  ordine da difendere: fra gli undici l'ordine lo deriva il server. */
+  wall?: boolean;
   /** The refusal, shown after an attempt: the tooltip alone is invisible on touch. */
   note?: string | null;
   order?: number;
@@ -1839,6 +1849,13 @@ function RosterRow({
         // se sarà un trascinamento o una scorsa, e toglierlo in anticipo
         // bloccherebbe lo scorrimento della pagina su tutta la panchina.
         drag?.dragging && 'touch-none select-none',
+        // IN RILIEVO, e quindi in questo ordine: dopo `selected` e prima di
+        // `dragging`, perché una riga in mano vince su tutto e un chiodo non si
+        // prende mai in mano. Il bordo alto trasparente spegne il filetto che
+        // `divide-y` disegnerebbe attraverso l'angolo arrotondato; `z-10` fa
+        // cadere l'ombra SOPRA le righe vicine, che è ciò che dà lo spessore.
+        wall && 'relative z-10 -mx-1 rounded-lg border-t-transparent bg-surface-2 px-1'
+          + ' shadow-[0_1px_2px_rgba(0,0,0,0.10),0_4px_10px_-2px_rgba(0,0,0,0.16)]',
       )}
     >
       {drag ? (
