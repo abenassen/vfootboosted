@@ -146,31 +146,61 @@ function orderBench(roster: TeamLineupPlayer[], starterIds: number[], seed: numb
   return [...out, ...rest.map((p) => p.player_id)];
 }
 
-/** Put the frozen players back on their own bench numbers.
+/** Riporta ogni libero nel TRATTO di panchina che era il suo.
  *
- *  Under the per-player deadline a bench slot BELONGS to the player whose match has
- *  started: the third place stays his, at that number, because how many players sit
- *  ahead of him is what decides whether he comes on. So every edit is normalised
- *  through here — the free players fill the remaining slots in their own order, and
- *  the frozen ones are put back where they were. Without this a promotion two rows
- *  above would silently slide a frozen man down a place, and the save would refuse
- *  an edit the manager had no way of seeing was illegal. */
-function pinFrozen(order: number[], slots: Map<number, number>): number[] {
-  if (!slots.size) return order;
-  const frozen = new Set(slots.values());
-  const free = order.filter((id) => !frozen.has(id));
-  const total = free.length + slots.size;
-  const out: number[] = [];
-  let f = 0;
-  for (let i = 0; i < total; i++) {
-    const pinned = slots.get(i);
-    if (pinned != null) out.push(pinned);
-    else if (f < free.length) out.push(free[f++]);
+ *  Il muro non è un numero, è una posizione RELATIVA. La regola che il salvataggio
+ *  applica davvero (services/lineup_deadline.overtakings) è «ogni libero resta dalla
+ *  stessa parte di ogni congelato», e gli undici contano come una posizione sola,
+ *  davanti a tutta la panchina. Il posto fisso del congelato — il terzo che resta il
+ *  terzo — ne è una CONSEGUENZA quando gli undici sono undici: se nessuno lo
+ *  scavalca, il numero di giocatori che gli stanno davanti non cambia, quindi il suo
+ *  indice nemmeno.
+ *
+ *  Questa funzione fissava invece l'indice assoluto, e a metà modifica gli undici
+ *  non sono undici: mandando un titolare in panchina la lista cresce di uno, e
+ *  rimettere i congelati al loro numero significava SPINGERE SOTTO IL MURO il
+ *  giocatore appena retrocesso — che veniva dagli undici, cioè da davanti a tutti.
+ *  Da lì non risaliva più: `overtakeReason` glielo impediva, e con lui erano
+ *  bloccati tutti i candidati di quel ruolo. La formazione restava con un buco che
+ *  nessuno poteva riempire, e l'unica uscita era abbandonare la pagina.
+ *
+ *  Quindi si ragiona per tratti: `savedBench` dice quanti muri aveva sopra ciascun
+ *  libero quando la formazione è stata salvata, e ognuno torna fra i suoi. Chi in
+ *  quella panchina non c'era — un titolare appena retrocesso — vale tratto 0, che è
+ *  esattamente da dove viene. Rimessi gli undici a undici, gli indici dei congelati
+ *  tornano da soli quelli di prima: è la conseguenza di sopra, non un'altra regola.
+ */
+function pinFrozen(order: number[], savedBench: number[], lockedIds: Set<number>): number[] {
+  const walls = savedBench.filter((id) => lockedIds.has(id));
+  // Nessun muro nella panchina salvata (o nessuna formazione salvata): non c'è
+  // niente da conservare, e l'ordine è quello che è.
+  if (!walls.length) return order;
+  const stretchOf = new Map<number, number>();
+  let seen = 0;
+  for (const id of savedBench) {
+    if (lockedIds.has(id)) seen += 1;
+    else stretchOf.set(id, seen);
   }
-  // A frozen slot past the end of a shortened bench would be dropped by the loop;
-  // append rather than lose the player, and let the save speak if it matters.
-  for (const id of frozen) if (!out.includes(id)) out.push(id);
-  return out;
+  const wallSet = new Set(walls);
+  const tracts: number[][] = Array.from({ length: walls.length + 1 }, () => []);
+  // Congelato che nella panchina salvata non c'era: preso dopo, mentre la sua
+  // partita era già cominciata. Il salvataggio non ha nessuna opinione su di lui
+  // (il confronto salta le coppie senza un «prima»), quindi non ha un tratto da
+  // difendere e va in coda invece che a spostare quelli che ce l'hanno.
+  const strays: number[] = [];
+  for (const id of order) {
+    if (lockedIds.has(id)) {
+      if (!wallSet.has(id)) strays.push(id);
+      continue;
+    }
+    tracts[Math.min(stretchOf.get(id) ?? 0, walls.length)].push(id);
+  }
+  const out: number[] = [];
+  for (let s = 0; s <= walls.length; s++) {
+    out.push(...tracts[s]);
+    if (s < walls.length) out.push(walls[s]);
+  }
+  return [...out, ...strays];
 }
 
 // Kick-off of the real fixture; the provider ships a placeholder time until the
@@ -318,11 +348,13 @@ export default function FormationPage() {
   // Why the last attempted promotion was refused, pinned to the row that was
   // clicked — the explanation belongs where the finger is, not in the header.
   const [refused, setRefused] = useState<{ player_id: number; reason: string } | null>(null);
-  // Which bench numbers belong to a player whose match has started. Taken from the
-  // SAVED lineup, because that is what the server compares a submission against.
-  // The XI has no equivalent: its order is derived server-side (P-D-C-A, frozen
-  // players kept inside their own role), so the page has nothing to preserve there.
-  const [frozenSlots, setFrozenSlots] = useState<Map<number, number>>(new Map());
+  // LA PANCHINA COM'È SUL SERVER, che è il «prima» con cui il salvataggio
+  // confronta ogni invio (v. lineup_deadline). Serve tutta e non solo i posti dei
+  // congelati: quel che va conservato è da che parte di ciascun muro stava ognuno,
+  // e questo lo si legge soltanto dalla lista intera. Gli undici non hanno un
+  // equivalente — il loro ordine lo deriva il server (P-D-C-A, ogni congelato al suo
+  // posto dentro il reparto) — quindi qui non c'è niente da difendere.
+  const [savedBench, setSavedBench] = useState<number[]>([]);
   const [allComps, setAllComps] = useState(false);
   /** LA GIORNATA DA SCHIERARE, quando nessuno ne ha chiesta una.
    *
@@ -421,13 +453,10 @@ export default function FormationPage() {
           starters = fromSuggestion(d.suggested_lineup).slice(0, XI);
         }
         const frozen = new Set(d.lineup_lock?.locked_player_ids ?? []);
-        const slots = new Map<number, number>();
-        (saved?.bench_player_ids ?? []).forEach((id, i) => {
-          if (frozen.has(id)) slots.set(i, id);
-        });
-        setFrozenSlots(slots);
+        const savedBench0 = saved?.bench_player_ids ?? [];
+        setSavedBench(savedBench0);
         setStarterIds(starters);
-        setBenchOrder(pinFrozen(orderBench(d.roster, starters, saved?.bench_player_ids ?? []), slots));
+        setBenchOrder(pinFrozen(orderBench(d.roster, starters, savedBench0), savedBench0, frozen));
         // Una formazione appena caricata non ha posti lasciati liberi da nessuno —
         // tranne uno: quella EREDITATA dalla giornata prima, a cui puo' mancare
         // qualcuno che nel frattempo e' stato venduto. Quel buco ha un ruolo, e il
@@ -437,7 +466,7 @@ export default function FormationPage() {
         // Pulita SOLO se questa formazione è davvero quella salvata per questa
         // giornata. Una ereditata dalla giornata prima, o proposta dal
         // suggeritore, il server non ce l'ha: c'è ancora qualcosa da mandare.
-        const bench0 = pinFrozen(orderBench(d.roster, starters, saved?.bench_player_ids ?? []), slots);
+        const bench0 = pinFrozen(orderBench(d.roster, starters, savedBench0), savedBench0, frozen);
         setSavedPrint(
           d.lineup_source?.kind === 'saved'
             ? lineupPrint(saved?.gk_player_id ?? null, starters, bench0, false)
@@ -497,8 +526,9 @@ export default function FormationPage() {
   const notChosen = ctx.roster.filter((p) => !starterIds.includes(p.player_id));
 
   // The bench as the page shows it and the save sends it: the manager's order,
-  // everybody not in the XI appended, frozen players pinned to their numbers.
-  const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
+  // everybody not in the XI appended, everybody back in his own stretch.
+  const pinned = (order: number[]) => pinFrozen(order, savedBench, lockedIds);
+  const benchIds = pinned(orderBench(ctx.roster, starterIds, benchOrder));
 
   // NESSUNO SCAVALCA CHI HA GIÀ GIOCATO. The other half of the freeze, mirrored
   // from the save (lineup_deadline.overtakings): a free player stays on the same
@@ -516,15 +546,15 @@ export default function FormationPage() {
     const f = frozenAhead(benchIds, id);
     return f == null ? null : `Non può passare davanti a ${nameOf(f)}: la partita di ${nameOf(f)} è iniziata.`;
   };
-  /** Where a benched starter lands: the last place of the first stretch, ahead of
-   *  every frozen man — the bench length when nobody is frozen. */
-  const benchCut = (order: number[]) => {
-    const i = order.findIndex((x) => lockedIds.has(x));
-    return i < 0 ? order.length : i;
-  };
+  /** L'unico caso in cui un titolare non può scendere in panchina: il primo posto
+   *  è già di un congelato, quindi davanti al muro non c'è posto per nessuno. Non è
+   *  una scortesia dell'interfaccia — di lì la formazione non si completerebbe più
+   *  in nessun modo: l'unico che potrebbe tornare fra gli undici senza scavalcare
+   *  sarebbe lui stesso, e sarebbe tornare al punto di partenza. */
   const demotionReason = (): string | null =>
     benchIds.length && lockedIds.has(benchIds[0])
-      ? `Non può andare in panchina: finirebbe dietro a ${nameOf(benchIds[0])}, la cui partita è iniziata.`
+      ? `Non può andare in panchina: il primo posto è di ${nameOf(benchIds[0])}, `
+        + 'la cui partita è iniziata, e davanti a lui non c’è posto.'
       : null;
 
   const blockReasonFor = (p: TeamLineupPlayer) =>
@@ -534,13 +564,30 @@ export default function FormationPage() {
         ? lockedReason
         : (overtakeReason(p.player_id) ?? promotionBlock(p, chosen, notChosen, isClassic ? constraints : null));
 
-  // Toggling a player keeps the ordered bench in sync: a demoted starter joins the
-  // bench at the LOWEST priority (end); a promoted bench player leaves it.
-  //
-  // It also keeps the ELEVEN visible. The module is not fixed up front, it is read
-  // off the choices — so dropping a starter used to shrink his line and re-centre
-  // the pitch, leaving nine or ten dots and no sign of what was missing. Instead
-  // the vacated place stays, tagged with the role it came from.
+  /** IL TITOLARE CHE SCENDE VA IN TESTA ALLA PANCHINA. Sempre: a giornata ferma e
+   *  a giornata cominciata, che è il punto — una regola sola, e nominabile.
+   *
+   *  Prima andava in fondo, che a giornata ferma è una convenzione innocua («l'hai
+   *  tolto, è l'ultimo che vuoi far rientrare») e a giornata cominciata è
+   *  impossibile: in fondo vuol dire sotto i muri, e da sotto un muro non si
+   *  risale. La posizione intermedia — l'ultimo posto libero prima del primo
+   *  congelato — sarebbe legale ma non si sa dire dov'è: dipende dagli orari delle
+   *  partite di Serie A, quindi lo stesso gesto lo lascia secondo su quindici oggi
+   *  e sesto domenica prossima.
+   *
+   *  La testa invece non dipende da niente, ed è l'unica posizione che GARANTISCE
+   *  la strada di ritorno: davanti a lui non c'è nessun muro, quindi può sempre
+   *  tornare fra gli undici. E non costa niente in campo — un panchinaro entra solo
+   *  se ha un voto, quindi metterlo primo cambio non lo fa entrare al posto di
+   *  nessuno se l'hai tolto perché non gioca.
+   *  Nell'altro verso non c'è niente da decidere: un panchinaro promosso lascia
+   *  semplicemente la panchina.
+   *
+   *  E in entrambi i versi gli UNDICI restano visibili. Il modulo non è fissato in
+   *  partenza, si legge dalle scelte — quindi togliere un titolare accorciava il suo
+   *  reparto e ricentrava il campo, lasciando nove o dieci pallini e nessun segno di
+   *  cosa mancasse. Invece il posto lasciato libero resta, con addosso il ruolo da
+   *  cui viene. */
   const toggleStarter = (id: number) => {
     const player = byId.get(id);
     const role = player?.role;
@@ -561,12 +608,7 @@ export default function FormationPage() {
         return;
       }
       setStarterIds((s) => s.filter((x) => x !== id));
-      // Ahead of the wall: the last place of the first stretch, not the end of
-      // the bench — behind a frozen man the save would refuse him.
-      const cut = benchCut(benchIds);
-      setBenchOrder(() =>
-        pinFrozen([...benchIds.slice(0, cut), id, ...benchIds.slice(cut).filter((x) => x !== id)], frozenSlots),
-      );
+      setBenchOrder(() => pinned([id, ...benchIds.filter((x) => x !== id)]));
       if (role) setVacancies((v) => [...v, role]);
       setRefused(null);
     } else {
@@ -579,7 +621,7 @@ export default function FormationPage() {
       }
       setRefused(null);
       setStarterIds((s) => [...s, id]);
-      setBenchOrder((b) => pinFrozen(b.filter((x) => x !== id), frozenSlots));
+      setBenchOrder((b) => pinned(b.filter((x) => x !== id)));
       setVacancies((v) => {
         // Same role => he takes the place that was left open and the module is
         // unchanged. A different role => that place becomes his, which IS a change
@@ -609,11 +651,11 @@ export default function FormationPage() {
    *  riordino avviene fra i soli liberi, che poi riempiono le caselle rimaste
    *  libere nell'ordine nuovo.
    *
-   *  Le posizioni dei congelati si rileggono DALL'ORDINE CORRENTE e non da
-   *  `frozenSlots`, che è la memoria di una formazione già inviata: chi apre la
-   *  pagina a giornata cominciata e non aveva ancora schierato ha una panchina
-   *  piena di posti fissati e quella mappa vuota. Fidandosi di lei, il riordino
-   *  perdeva per strada tutti i congelati — quindici righe diventavano due. */
+   *  Le posizioni dei congelati si rileggono DALL'ORDINE CORRENTE e non dalla
+   *  panchina salvata, che chi apre la pagina a giornata cominciata senza aver mai
+   *  schierato non ha affatto: fidandosi di quella, il riordino perdeva per strada
+   *  tutti i congelati — quindici righe diventavano due. E l'ordine corrente è già
+   *  passato da `pinFrozen`, quindi i due tratti coincidono. */
   const reorderBench = (order: number[], id: number, visibleIndex: number): number[] => {
     const free = order.filter((x) => !lockedIds.has(x));
     const from = free.indexOf(id);
@@ -762,7 +804,7 @@ export default function FormationPage() {
       return;
     }
     setRefused(null);
-    setBenchOrder((b) => reorderBench(pinFrozen(orderBench(ctx.roster, starterIds, b), frozenSlots), id, 0));
+    setBenchOrder((b) => reorderBench(pinned(orderBench(ctx.roster, starterIds, b)), id, 0));
   };
 
   /** IL NUMERO DI DIFENSORI, CONGELATO DAL PRIMO CALCIO D'INIZIO.
@@ -887,9 +929,12 @@ export default function FormationPage() {
     setModuleNote(null);
     setRefused(null);
     setStarterIds(keep);
-    // I retrocessi in coda alla panchina, non sparsi per ruolo: chi esce dal
-    // campo è l'ultimo che si vuol far rientrare.
-    setBenchOrder((b) => pinFrozen(orderBench(ctx.roster, keep, [...b, ...dropped]), frozenSlots));
+    // In testa alla panchina, come chiunque altro esca dagli undici (v.
+    // `toggleStarter`): una regola sola per lo stesso fatto, invece di due a
+    // seconda del gesto con cui lo si è ottenuto. E qui è anche quello che serve —
+    // si sta provando un modulo, e chi è appena uscito è il primo che si potrebbe
+    // voler rimettere dentro.
+    setBenchOrder((b) => pinned(orderBench(ctx.roster, keep, [...dropped, ...b])));
     setVacancies(holes);
   };
 
@@ -932,7 +977,7 @@ export default function FormationPage() {
     try {
       // Send the bench in PRIORITY order (substitution order); append any roster
       // player not yet placed so nobody is dropped from the payload.
-      const benchIds = pinFrozen(orderBench(ctx.roster, starterIds, benchOrder), frozenSlots);
+      const benchIds = pinned(orderBench(ctx.roster, starterIds, benchOrder));
       const res = await saveTeamLineup(selectedLeagueId, {
         matchday,
         competition: sendAll ? null : competition,
