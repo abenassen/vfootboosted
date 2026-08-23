@@ -288,11 +288,14 @@ export function ClassicMatchDetail({
                   confirms an hour later), and labelling that "in corso" says the
                   ball is still rolling. The clock rides with the live label —
                   from the appearances, so it costs nothing. */}
-              {/* `live` sul referto vuol dire «calcolato adesso invece che
-                  congelato», non «la palla sta rotolando»: prima del calcio
-                  d'inizio è vero e direbbe una bugia grossa, cioè che la partita
-                  è in corso mentre le formazioni si possono ancora cambiare. */}
-              {preview ? null : d.live ? (
+              {/* `in_progress` e NON `live`. Su una sfida di lega `live` vuol dire
+                  «calcolato adesso invece che congelato», che è vero dal primo
+                  calcio d'inizio fino al clic dell'admin: il lunedì mattina il
+                  tabellino di sabato si dichiarava ancora in corso. Prima del
+                  calcio d'inizio era una bugia anche peggiore — partita in corso
+                  mentre le formazioni si possono ancora cambiare — e per quella
+                  c'era `preview`, che copriva metà del problema. */}
+              {preview ? null : d.in_progress ? (
                 <LiveBadge label={d.minute != null ? `in corso · ${d.minute}'` : 'in corso'} />
               ) : d.provisional ? (
                 <LiveBadge
@@ -432,7 +435,11 @@ function TeamColumn({
             <>
               {/* A total made in part of provisional votes is itself provisional —
                   there is no honest way to show a settled number on unsettled ones. */}
-              {team.provisional ? <LiveBadge label="provvisorio" /> : null}
+              {team.in_progress ? (
+                <LiveBadge label="in corso" />
+              ) : team.provisional ? (
+                <LiveBadge label="provvisorio" />
+              ) : null}
               <span>
                 {team.goals} gol{!realMatch ? <> · <b>{fmt(team.total)}</b> fanta</> : null}
               </span>
@@ -520,8 +527,15 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
   // own pulsing badge (so the generic "live" one beside it would say it again),
   // and a substitute who has just come on is anything but inactive.
   const onPitchNow = p.sv && svKind(p) === 'in_campo';
+  // NON SAPPIAMO ANCORA NIENTE DI LUI, e la sua partita è appena cominciata. Nei
+  // primi minuti il fornitore non ha pubblicato le formazioni: non esiste nemmeno
+  // una riga di presenza, quindi non risulta né in campo né in panchina, e la
+  // pastiglia cadeva sul verdetto più forte che ci sia — «S.V., impiego
+  // insufficiente» — su un giocatore regolarmente titolare al 3'. Non è un
+  // verdetto: è una partita che deve ancora dirci qualcosa.
+  const nothingYet = p.sv && !!p.in_progress && svKind(p) === 'sv';
   // a benched player who never entered and has no vote is greyed out
-  const inactive = bench && !p.entered && !played && !onPitchNow;
+  const inactive = bench && !p.entered && !played && !onPitchNow && !nothingYet;
   return (
     <>
     <div className={`flex items-center justify-between gap-2 py-1.5 ${inactive ? 'opacity-50' : ''}`}>
@@ -568,8 +582,20 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
         {/* Outside the s.v. branch on purpose: a player of a match in progress is
             provisional whether he has a vote yet or not. A reserve keeper reading
             a flat "n.d." at the fortieth minute says "we have nothing on him",
-            when what is true is "not yet". */}
-        {p.provisional && !onPitchNow ? <LiveBadge /> : null}
+            when what is true is "not yet".
+            «Live» solo se la sua partita è davvero sul campo: fra il fischio e la
+            conferma del fornitore passa un'ora, e in quell'ora questa pastiglia
+            pulsava su prestazioni concluse. */}
+        {p.provisional && !onPitchNow ? (
+          <LiveBadge
+            label={p.in_progress ? 'live' : 'provvisorio'}
+            title={
+              p.in_progress
+                ? 'Il dato arriva da una partita ancora in corso: questo numero può ancora cambiare.'
+                : 'La partita è finita, ma i dati non sono ancora confermati: questo numero può cambiare di poco.'
+            }
+          />
+        ) : null}
         {p.pending ? (
           // An unplayed match is not a senza voto and must not read like one:
           // nothing happened yet, the bench does not cover it, and the slot settles
@@ -590,7 +616,15 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
         ) : p.sv ? (
           // 'dati mancanti' is not a verdict on the player — say so, rather than
           // letting a gap in our data read as "he did nothing".
-          svKind(p) === 'in_campo' ? (
+          nothingYet ? (
+            <span
+              title="La sua partita è appena cominciata: non ci sono ancora dati sui giocatori"
+              className="inline-flex items-center gap-1 rounded-full bg-live-bg px-1.5 py-0.5 text-[10px] font-bold text-live"
+            >
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" />
+              in corso
+            </span>
+          ) : svKind(p) === 'in_campo' ? (
             // He is playing RIGHT NOW and we have nothing on him yet — which is
             // not a senza voto and must not be printed as one. S.V. is a verdict
             // on a finished performance; at the fifth minute there is no

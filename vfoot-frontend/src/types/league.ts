@@ -726,6 +726,11 @@ export interface LeagueFixtureItem {
    *  and some real match behind it has not settled. Distinguishes "0-0 because it
    *  has not started" from "0-0 at the twentieth minute" — the same two numbers. */
   score_provisional?: boolean;
+  /** E quale dei due modi di essere provvisorio: c'è una partita vera SUL CAMPO.
+   *  L'altro — tutte finite, il fornitore non ha ancora confermato i dati — dura
+   *  un'ora dopo il fischio, e chiamarlo «live» col pallino che pulsa contraddice
+   *  la notifica di fine partita che l'utente ha appena ricevuto. */
+  score_in_progress?: boolean;
   /** Knockout sections only: who went through. Not always the higher score — a tie
    *  is settled by the aggregate score and then by home advantage (see the backend
    *  `knockout` service). */
@@ -788,7 +793,14 @@ export interface LeagueMatchdayItem {
   real_completion: {
     total: number;
     completed: number;
+    /** Tutte CONFERMATE dal fornitore: è la condizione per concludere la giornata,
+     *  perché il registro di una lega non si scrive su numeri che si muovono. */
     is_completed: boolean;
+    /** Il fischio è suonato su tutte. Arriva un'ora prima di `is_completed` e non
+     *  autorizza niente: serve a poter DIRE che si è finito di giocare, in quell'ora
+     *  in cui «si gioca» è falso e «risultato finale» non è ancora vero. Assente
+     *  sulle risposte di un server più vecchio. */
+    is_over?: boolean;
   };
   fixtures: {
     total: number;

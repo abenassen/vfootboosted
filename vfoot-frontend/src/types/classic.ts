@@ -51,6 +51,11 @@ export interface ClassicPlayerLine {
   /** His club's match is being played, or has ended and the provider has not
    *  settled the data. There IS a vote — it is simply going to move. */
   provisional?: boolean;
+  /** Il sottoinsieme stretto: la sua partita è SUL CAMPO adesso. Vale un'ora in
+   *  meno di `provisional` (il fornitore conferma a +1h dal fischio) ed è l'unico
+   *  che autorizza a scrivere «in corso». Fin qui non era un buco: la panchina non
+   *  lo copre e il voto d'ufficio non lo riempie. */
+  in_progress?: boolean;
   voto_puro: number | null;
   bonus: number; // goal +3, assist +1, pen save +3
   malus: number; // own goal -2, pen miss -3, card, GK -1/goal conceded
@@ -154,6 +159,8 @@ export interface ClassicTeamDetail {
   modifiers?: Array<{ key: string; eligible: boolean; value: number; scope: string; detail?: unknown }>;
   /** At least one line is still moving, so this total is too. */
   provisional?: boolean;
+  /** Almeno una delle sue partite vere è ancora sul campo. */
+  in_progress?: boolean;
 }
 
 export interface ClassicFixtureDetail {
@@ -208,10 +215,16 @@ export interface ClassicFixtureDetail {
    *  inviata una; `forfait` = non ce n'è nessuna. Prima del blocco solo la prima
    *  si può mostrare come sua — le altre due sarebbero un'attribuzione falsa. */
   lineup_source?: { home?: string | null; away?: string | null };
-  /** Computed on the fly because the matchday is not concluded (nothing frozen). */
+  /** Computed on the fly because the matchday is not concluded (nothing frozen).
+   *  ATTENZIONE: su una sfida di lega vuol dire «calcolato adesso invece che
+   *  congelato», ed è vero dal primo calcio d'inizio fino al clic dell'admin —
+   *  anche il lunedì mattina. Non è «la palla sta rotolando»: quella è
+   *  `in_progress`, ed è quella che la pastiglia deve leggere. */
   live?: boolean;
   /** Some real match behind these votes has not settled: the score can still change. */
   provisional?: boolean;
+  /** Almeno una delle partite vere dietro questo tabellino è sul campo adesso. */
+  in_progress?: boolean;
   /**
    * Minutes played by whoever has been on longest — the clock of a real match in
    * progress. Null once it is over. Only the real-match detail sends it: a fantasy

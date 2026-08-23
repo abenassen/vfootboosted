@@ -91,12 +91,28 @@ class TwoClocksTests(TestCase):
 
     def test_playing_matchday_is_the_one_on_the_pitch(self):
         # An hour after kick-off the data cannot have settled yet — it is promoted at
-        # +1h from FULL TIME. The fixture is built already-ready for the ledger tests,
-        # so put it back to what it really is at this instant.
-        Match.objects.filter(external_id="a16").update(data_ready=False)
+        # +1h from FULL TIME — and the whistle has not blown either. The fixture is
+        # built finished-and-ready for the ledger tests, so put it back to what it
+        # really is at this instant: a match being played.
+        Match.objects.filter(external_id="a16").update(
+            data_ready=False, status=Match.STATUS_LIVE)
         self.assertEqual(matchday_state.playing_matchday(self.league, DEC20 + timedelta(hours=1)), 16)
         # ...and nothing between rounds, three hours after the last kickoff.
         self.assertIsNone(matchday_state.playing_matchday(self.league, DEC20 + timedelta(days=2)))
+
+    def test_the_whistle_takes_the_round_off_the_pitch_before_the_data_settles(self):
+        """L'ora fra il fischio finale e la conferma del fornitore.
+
+        Il punteggio si muove ancora — di poco — ma non si sta piu' giocando. Finche'
+        «finita» voleva dire solo ``data_ready`` o la finestra di tre ore, per
+        quell'ora la home diceva «Si gioca» col pallino che pulsa, allo stesso utente
+        a cui era appena arrivata la notifica di fine partita."""
+        whistled = DEC20 + timedelta(hours=2)
+        Match.objects.filter(external_id="a16").update(
+            data_ready=False, status=Match.STATUS_FINISHED)
+        self.assertIsNone(matchday_state.playing_matchday(self.league, whistled))
+        # Non e' la finestra a salvarci: siamo ancora dentro le tre ore.
+        self.assertLess(whistled, DEC20 + matchday_state.MATCH_WINDOW)
 
     def test_a_round_whose_data_has_settled_is_no_longer_on_the_pitch(self):
         """The time window is 3h from kick-off, the data settles at ~+2h45: for the

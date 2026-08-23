@@ -113,7 +113,12 @@ export function StandingsTable({
                   {s.provisional ? (
                     <span
                       className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-live"
-                      title="Partita in corso: questi numeri possono ancora cambiare"
+                      /* Non «in corso»: questo puntino resta acceso finché la
+                         giornata non viene CONCLUSA dall'admin, che può essere il
+                         martedì. Dice quel che sa — la riga contiene una partita
+                         non ancora chiusa — invece di raccontare una partita che
+                         è finita da un pezzo. */
+                      title="Contiene una partita non ancora conclusa: questi numeri possono ancora cambiare"
                     />
                   ) : null}
                 </span>

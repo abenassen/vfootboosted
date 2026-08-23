@@ -195,15 +195,41 @@ class ClassicScoringTest(SimpleTestCase):
         cs = next(m for m in team["modifiers"] if m.key == "keeper_clean_sheet")
         self.assertFalse(cs.eligible)
 
-    def test_a_moving_line_is_not_a_hole_yet(self):
+    def test_a_line_still_being_played_is_not_a_hole_yet(self):
         """Mid-round ogni giocatore in campo e' momentaneamente senza voto: coprirli
         mostrerebbe una squadra in vantaggio su undici voti d'ufficio al 5'."""
         rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
         starters = legal_xi(6.0)
-        starters[5] = {**line(6, "MID", 0, sv=True), "provisional": True}
+        starters[5] = {**line(6, "MID", 0, sv=True),
+                       "provisional": True, "in_progress": True}
         team = score_team(starters, [], rs)
         self.assertEqual(team["sv_filled"], [])
         self.assertEqual(team["base_total"], 60.0)
+
+    def test_a_line_still_being_played_is_not_substituted_either(self):
+        """IL CASO DEL CALCIO D'INIZIO. Nei primi minuti il fornitore non ha ancora
+        dati sui giocatori, quindi chi e' regolarmente in campo risulta senza voto:
+        la panchina lo copriva subito, e il cambio si disfaceva da solo qualche
+        minuto dopo. Un cambio e' la risposta a «non ha giocato», che di una partita
+        cominciata da cinque minuti non si sa ancora."""
+        rs = Ruleset(defense_enabled=False, max_substitutions=5)
+        starters = legal_xi(6.0)
+        starters[5] = {**line(6, "MID", 0, sv=True),
+                       "provisional": True, "in_progress": True}
+        team = score_team(starters, [line(99, "MID", 7.0)], rs)
+        self.assertEqual(team["substitutions"], [])
+        self.assertFalse(any(l["player_id"] == 99 for l in team["starters"]))
+
+    def test_after_the_whistle_a_moving_line_is_a_hole_again(self):
+        """Fra il fischio finale e la conferma del fornitore passa un'ora, e in
+        quell'ora la partita che ha fatto il buco E' finita: la panchina copre e il
+        voto d'ufficio riempie. Prima, legati a ``provisional``, arrivavano
+        entrambi con un'ora di ritardo."""
+        rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(6.0)
+        starters[5] = {**line(6, "MID", 0, sv=True), "provisional": True}
+        team = score_team(starters, [], rs)
+        self.assertEqual(team["sv_filled"], [6])
 
     def test_a_vacant_slot_is_not_filled(self):
         """Non e' un buco in una squadra schierata: e' una squadra non schierata."""

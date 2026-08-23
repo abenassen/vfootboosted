@@ -427,12 +427,26 @@ function FixtureRow({ f, myTeam }: { f: LeagueFixtureItem; myTeam: string | null
             <span
               className={clsx(
                 'mt-0.5 text-[9px] font-bold uppercase tracking-wide',
-                f.score_provisional ? 'text-live' : 'text-ink-faint',
+                f.score_in_progress
+                  ? 'text-live'
+                  : f.score_provisional
+                    ? 'text-warn'
+                    : 'text-ink-faint',
               )}
             >
-              {/* "live" = qualcosa si muove ancora; "da conteggiare" = il numero è
-                  quello definitivo, manca solo che l'amministratore chiuda. */}
-              {f.score_provisional ? 'live' : 'da conteggiare'}
+              {/* TRE stati, non due. "live" = c'è una partita vera sul campo;
+                  "provvisorio" = si è finito di giocare ma il fornitore non ha
+                  ancora confermato i dati, che dura un'ora buona dopo il fischio;
+                  "da conteggiare" = il numero è definitivo, manca solo che
+                  l'amministratore chiuda. I primi due erano detti con la stessa
+                  parola, e per quell'ora il calendario scriveva "live" su partite
+                  finite — allo stesso utente a cui era appena arrivata la notifica
+                  di fine partita. */}
+              {f.score_in_progress
+                ? 'live'
+                : f.score_provisional
+                  ? 'provvisorio'
+                  : 'da conteggiare'}
             </span>
           ) : null}
         </div>

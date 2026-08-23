@@ -2825,8 +2825,8 @@ def _fixture_phase(fx: FantasyFixture, current_real_md: int | None,
 
 
 def _live_totals(league: FantasyLeague, fixtures, locked_mds: set[int]) -> dict:
-    """{fixture_id: {"home_total", "away_total", "provisional"}} for the rounds that
-    have begun and are not concluded.
+    """{fixture_id: {"home_total", "away_total", "provisional", "in_progress"}} for
+    the rounds that have begun and are not concluded.
 
     Computed here rather than left to the client because it is the same number the
     tabellino shows, from the same functions: a calendar that said "vs" while the
@@ -2857,7 +2857,8 @@ def _live_totals(league: FantasyLeague, fixtures, locked_mds: set[int]) -> dict:
         for fx in group:
             p = score(fx)
             out[fx.id] = {"home_total": p["home_goals"], "away_total": p["away_goals"],
-                          "provisional": bool(p.get("provisional"))}
+                          "provisional": bool(p.get("provisional")),
+                          "in_progress": bool(p.get("in_progress"))}
     return out
 
 
@@ -2952,6 +2953,14 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         # status, because "0-0 because it has not started" and "0-0 at the
         # twentieth minute" are the same two numbers.
         "score_provisional": bool(live and live["provisional"]) if not played else False,
+        # E QUALE DEI DUE MODI DI ESSERE PROVVISORIO. Provvisorio vuol dire due cose
+        # che durano tempi diversi: c'e' una partita sul campo, oppure sono tutte
+        # finite e il fornitore non ha ancora confermato i dati — e quest'ultima
+        # dura un'ora tonda dopo il fischio. Detto con una parola sola, il
+        # calendario scriveva «live» col pallino che pulsa su partite finite da
+        # un pezzo, per le quali l'utente aveva gia' ricevuto la notifica di fine
+        # partita: l'app si contraddiceva da sola.
+        "score_in_progress": bool(live and live.get("in_progress")) if not played else False,
         # I PUNTEGGI, che non sono i gol: la somma dei fantavoto delle due
         # formazioni. Servono perché sono il primo spareggio di un turno secco
         # (v. services/knockout) e quindi il NUMERO che decide chi passa quando
@@ -3057,21 +3066,25 @@ def _real_matchday_stats_bulk(real_competition_season_id: int, matchdays: list[i
             OfficeOverride.objects.filter(league=league, is_active=True)
             .values_list("match_id", flat=True)
         )
-    by_md: dict[int, dict[tuple[int, int], bool]] = {md: {} for md in matchdays}
-    for mid, md, home_id, away_id, ready in Match.objects.filter(
+    by_md: dict[int, dict[tuple[int, int], list]] = {md: {} for md in matchdays}
+    for mid, md, home_id, away_id, ready, st in Match.objects.filter(
         competition_season_id=real_competition_season_id, matchday__in=matchdays
-    ).values_list("id", "matchday", "home_team_id", "away_team_id", "data_ready"):
+    ).values_list("id", "matchday", "home_team_id", "away_team_id", "data_ready",
+                  "status"):
         pairs = by_md.setdefault(int(md), {})
         key = (home_id, away_id)
         settled = bool(ready) or mid in office_match_ids
-        pairs[key] = pairs.get(key, False) or settled
+        was, over = pairs.get(key, (False, False))
+        pairs[key] = (was or settled, over or settled or st == Match.STATUS_FINISHED)
 
     out = {}
     for md, pairs in by_md.items():
         total = len(pairs)
-        completed = sum(1 for v in pairs.values() if v)
+        completed = sum(1 for settled, _ in pairs.values() if settled)
+        played = sum(1 for _, over in pairs.values() if over)
         out[md] = {"total": total, "completed": completed,
-                   "is_completed": total > 0 and completed == total}
+                   "is_completed": total > 0 and completed == total,
+                   "is_over": total > 0 and played == total}
     return out
 
 
@@ -3106,19 +3119,30 @@ def _real_matchday_stats(real_competition_season_id: int, real_matchday: int,
     # because scoring keys on data_ready too (see match_resolver.pending_matches). The
     # two now agree, which is the property that matters — the button is offered
     # exactly when it works.
-    done_by_pair: dict[tuple[int, int], bool] = {}
-    for mid, home_id, away_id, ready in Match.objects.filter(
+    #
+    # E DUE DOMANDE, NON UNA. ``is_completed`` e' «confermata», e resta la condizione
+    # per CONCLUDERE: il registro di una lega non si scrive su numeri che possono
+    # ancora muoversi. ``is_over`` e' «il fischio e' suonato su tutte», che arriva
+    # un'ora prima e non autorizza niente — serve solo a poterlo DIRE. Senza,
+    # nell'ora fra l'ultimo fischio e la conferma la home non aveva parole: o
+    # «si gioca», che era falso, o «risultato finale», che non era ancora vero.
+    done_by_pair: dict[tuple[int, int], tuple[bool, bool]] = {}
+    for mid, home_id, away_id, ready, st in Match.objects.filter(
         competition_season_id=real_competition_season_id, matchday=real_matchday
-    ).values_list("id", "home_team_id", "away_team_id", "data_ready"):
+    ).values_list("id", "home_team_id", "away_team_id", "data_ready", "status"):
         key = (home_id, away_id)
         settled = bool(ready) or mid in office_match_ids
-        done_by_pair[key] = done_by_pair.get(key, False) or settled
+        was, over = done_by_pair.get(key, (False, False))
+        done_by_pair[key] = (was or settled,
+                             over or settled or st == Match.STATUS_FINISHED)
     total = len(done_by_pair)
-    completed = sum(1 for v in done_by_pair.values() if v)
+    completed = sum(1 for settled, _ in done_by_pair.values() if settled)
+    played = sum(1 for _, over in done_by_pair.values() if over)
     return {
         "total": total,
         "completed": completed,
         "is_completed": total > 0 and completed == total,
+        "is_over": total > 0 and played == total,
     }
 
 
@@ -3231,7 +3255,8 @@ class LeagueMatchdayListView(APIView):
         payload = []
         for md in rows:
             real_stats = stats_by_md.get(md.real_competition_season_id, {}).get(
-                md.real_matchday, {"total": 0, "completed": 0, "is_completed": False})
+                md.real_matchday,
+                {"total": 0, "completed": 0, "is_completed": False, "is_over": False})
             fx_total, fx_finished = fx_counts.get(md.id, (0, 0))
             if md.status == FantasyMatchday.STATUS_CONCLUDED:
                 phase = "concluded"
@@ -6246,11 +6271,17 @@ def real_match_payload(match, league=None) -> dict | None:
                    and match.status in (Match.STATUS_LIVE, Match.STATUS_FINISHED))
     for side in ("home", "away"):
         pag[side]["provisional"] = provisional
+        pag[side]["in_progress"] = live
         if live:
             for line in pag[side].get("starters", []) + pag[side].get("bench", []):
                 line["provisional"] = True
+                # Lo stesso vocabolario del tabellino di lega (v.
+                # classic_matchday_scoring._mark_unstable), cosi' la pagina ha una
+                # domanda sola da fare a una riga, non due a seconda da dove viene.
+                line["in_progress"] = True
     return {
         "live": live,
+        "in_progress": live,
         "provisional": provisional,
         # The clock, only while it is running: on a match that is over the
         # number would be the final whistle dressed up as news.

@@ -193,10 +193,15 @@ def _fill_unresolved(s_by: dict, unresolved: list[int], vote: float) -> list[int
 
     Two slots are deliberately left empty even so:
 
-    * a line whose match is still MOVING (``provisional``). Mid-round every player
-      on the pitch is momentarily voteless, and filling those would show a team
-      "leading" on eleven office votes at the fifth minute, then sliding as the
+    * a line whose match is still BEING PLAYED (``in_progress``). Mid-round every
+      player on the pitch is momentarily voteless, and filling those would show a
+      team "leading" on eleven office votes at the fifth minute, then sliding as the
       real ones arrive. A hole is only a hole once the match that made it is over.
+
+      ``in_progress`` e non ``provisional``, che e' la stessa frase detta bene: fra
+      il fischio finale e la conferma del fornitore passa un'ora, e in quell'ora la
+      partita che ha fatto il buco E' finita — il buco e' un buco e il voto
+      d'ufficio deve coprirlo, invece di arrivare con un'ora di ritardo.
     * a VACANT slot — a player the team no longer has, in a lineup the manager never
       submitted for this round (see ``build_team_lines``). That is not a hole in a
       team that was fielded; it is the absence of one, and paying for it would pay a
@@ -209,7 +214,7 @@ def _fill_unresolved(s_by: dict, unresolved: list[int], vote: float) -> list[int
     filled: list[int] = []
     for pid in unresolved:
         line = s_by.get(pid)
-        if line is None or line.get("provisional") or line.get("vacant"):
+        if line is None or line.get("in_progress") or line.get("vacant"):
             continue
         # ``office``: the SAME channel an admin ruling travels on (_office_line),
         # so everything downstream — no bonus/malus, no clean sheet, the "ufficio"
@@ -242,7 +247,18 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
     # A player whose real match has not been played yet is s.v. on paper but is NOT
     # a hole the bench should cover — see apply_classic_substitutions. On the bench
     # he is simply never eligible, which he already is by not being in ``voted``.
-    frozen = {pid for pid in s_ids if s_by[pid].get("pending")}
+    #
+    # E LO STESSO VALE MENTRE LA SUA PARTITA SI GIOCA (``in_progress``). Nei primi
+    # minuti il fornitore non ha ancora nessun dato sui giocatori: chi e'
+    # regolarmente in campo risulta senza voto, e la panchina lo copriva subito —
+    # per poi disfare il cambio qualche minuto dopo, quando il voto arrivava.
+    # L'utente che seguiva la pagina vedeva un titolare in campo dato per s.v. e
+    # sostituito. Un cambio e' la risposta a «non ha giocato», che di una partita
+    # cominciata da cinque minuti non si sa ancora; al fischio finale, se davvero
+    # non ha giocato, la panchina entra. E' la stessa regola che ``_fill_unresolved``
+    # applicava gia' da sola, qui mancava.
+    frozen = {pid for pid in s_ids
+              if s_by[pid].get("pending") or s_by[pid].get("in_progress")}
 
     res = apply_classic_substitutions(s_ids, b_ids, roles, voted,
                                       max_subs=rs.max_substitutions, frozen=frozen,

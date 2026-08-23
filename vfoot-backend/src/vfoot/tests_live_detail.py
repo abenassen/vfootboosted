@@ -97,26 +97,32 @@ class LiveDetailTests(TestCase):
     def test_a_club_in_the_field_is_unstable_and_one_still_to_play_is_not_started(self):
         on_pitch = self._player("In Campo", self.playing[0])
         tonight = self._player("Stasera", self.later[0])
-        not_started, unstable = _live_states(
+        not_started, unstable, in_progress = _live_states(
             self.cs.id, 22, [on_pitch.id, tonight.id])
         self.assertEqual(unstable, {on_pitch.id})
+        self.assertEqual(in_progress, {on_pitch.id})
         self.assertEqual(not_started, {tonight.id})
 
     def test_a_settled_match_is_neither(self):
         p = self._player("Ieri", self.playing[0])
         Match.objects.filter(id=self.live_match.id).update(
             status=Match.STATUS_FINISHED, data_ready=True)
-        not_started, unstable = _live_states(self.cs.id, 22, [p.id])
-        self.assertEqual((not_started, unstable), (set(), set()))
+        not_started, unstable, in_progress = _live_states(self.cs.id, 22, [p.id])
+        self.assertEqual((not_started, unstable, in_progress), (set(), set(), set()))
 
     def test_full_time_is_still_unstable_until_the_data_settles(self):
         """data_ready, not the status, is the marker — the provider goes on
-        correcting a match for an hour after the whistle."""
+        correcting a match for an hour after the whistle.
+
+        Ma NON e' piu' «in corso»: il fischio e' suonato. I due insiemi si separano
+        esattamente qui, ed e' l'ora in cui la pagina scriveva «live» su una partita
+        finita e il motore rimandava il voto d'ufficio."""
         p = self._player("Finito", self.playing[0])
         Match.objects.filter(id=self.live_match.id).update(
             status=Match.STATUS_FINISHED, data_ready=False)
-        _not_started, unstable = _live_states(self.cs.id, 22, [p.id])
+        _not_started, unstable, in_progress = _live_states(self.cs.id, 22, [p.id])
         self.assertEqual(unstable, {p.id})
+        self.assertEqual(in_progress, set())
 
     def test_one_unstable_line_makes_the_whole_team_total_provisional(self):
         team = {"starters": [{"player_id": 1}, {"player_id": 2}], "bench": []}
@@ -124,6 +130,17 @@ class LiveDetailTests(TestCase):
         self.assertTrue(team["provisional"])
         self.assertNotIn("provisional", team["starters"][0])
         self.assertTrue(team["starters"][1]["provisional"])
+
+    def test_only_a_match_on_the_pitch_is_marked_in_progress(self):
+        """Provvisorio e in corso sono due marchi diversi: il primo dice che il
+        numero puo' muoversi, il secondo che la palla sta ancora rotolando — e solo
+        il secondo ferma la sostituzione."""
+        team = {"starters": [{"player_id": 1}, {"player_id": 2}], "bench": []}
+        self.assertTrue(_mark_unstable(team, {1, 2}, {2}))
+        self.assertTrue(team["starters"][0]["provisional"])
+        self.assertNotIn("in_progress", team["starters"][0])
+        self.assertTrue(team["starters"][1]["in_progress"])
+        self.assertTrue(team["in_progress"])
 
     def test_an_imposed_vote_is_never_marked_provisional(self):
         """The league has ruled; nothing the provider does afterwards moves it."""
@@ -168,7 +185,26 @@ class LiveDetailTests(TestCase):
         row = next(r for r in res.data if r["fixture_id"] == self.fixture.id)
         self.assertIsNotNone(row["score"])
         self.assertTrue(row["score_provisional"])
+        self.assertTrue(row["score_in_progress"])
         self.assertTrue(row["has_detail"])
+
+    def test_after_the_last_whistle_the_calendar_stops_saying_live(self):
+        """L'ora fra il fischio finale e la conferma del fornitore. Il punteggio si
+        muove ancora — di poco — ma non si sta piu' giocando, e dirlo con la stessa
+        parola faceva pulsare «live» su un turno finito, allo stesso utente a cui
+        era appena arrivata la notifica di fine partita."""
+        SavedLineupSnapshot.objects.create(
+            league_id=str(self.league.id), matchday_id="22",
+            lineup_id=f"team{self.mine.id}",
+            gk_player_id=str(self._player("Portiere", self.playing[0]).id),
+            starter_player_ids=[self._player("Attaccante", self.playing[1]).id],
+            bench_player_ids=[])
+        Match.objects.filter(competition_season=self.cs).update(
+            status=Match.STATUS_FINISHED, data_ready=False)
+        res = self.client.get(f"/api/v1/leagues/{self.league.id}/fixtures")
+        row = next(r for r in res.data if r["fixture_id"] == self.fixture.id)
+        self.assertTrue(row["score_provisional"])
+        self.assertFalse(row["score_in_progress"])
 
     def test_a_round_that_has_not_kicked_off_has_no_score_at_all(self):
         """Zero-zero because it has not started and zero-zero at the twentieth

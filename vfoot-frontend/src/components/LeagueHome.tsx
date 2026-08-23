@@ -314,14 +314,22 @@ export default function LeagueHome({
     return begun.find((m) => m.is_playing) ?? begun[begun.length - 1] ?? null;
   }, [matchdays]);
 
-  // Three states, three headlines. "Si gioca" while there is football on; "Risultato
-  // finale" once every real match has settled and only the admin's click is missing;
-  // and the plain in-between, which is most of a weekend.
-  const openPhase: 'playing' | 'final' | 'open' = openMd
+  // QUATTRO stati, e il quarto è quello che mancava. "Si gioca" mentre c'è del
+  // calcio in corso; "Voti in arrivo" nell'ora fra l'ultimo fischio e la conferma
+  // del fornitore; "Risultato finale" quando ogni partita vera è confermata e manca
+  // solo il clic dell'admin; e il semplice in-mezzo, che è quasi tutto il weekend.
+  //
+  // Senza il terzo, per un'ora tonda dopo l'ultimo fischio la home diceva "Si gioca"
+  // col pallino che pulsa, a un utente che aveva già ricevuto la notifica di fine
+  // partita: l'app si contraddiceva da sola. Il buco non era una svista, era che
+  // «finito di giocare» e «dati confermati» erano la stessa domanda e sono due.
+  const openPhase: 'playing' | 'settling' | 'final' | 'open' = openMd
     ? openMd.is_playing
       ? 'playing'
       : openMd.real_completion?.is_completed
       ? 'final'
+      : openMd.real_completion?.is_over
+      ? 'settling'
       : 'open'
     : 'open';
 
@@ -540,6 +548,8 @@ export default function LeagueHome({
             'border-2 p-4',
             openPhase === 'playing'
               ? 'border-live/35 bg-live/10'
+              : openPhase === 'settling'
+              ? 'border-warn/40 bg-warn-bg'
               : openPhase === 'final'
               ? 'border-good/40 bg-good-bg'
               : 'border-line',
@@ -552,16 +562,22 @@ export default function LeagueHome({
                   'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white',
                   openPhase === 'playing'
                     ? 'bg-live'
+                    : openPhase === 'settling'
+                    ? 'bg-warn'
                     : openPhase === 'final'
                     ? 'bg-good'
                     : 'bg-ink-faint',
                 )}
               >
+                {/* Il pallino che pulsa SOLO mentre si gioca: è il segno che
+                    qualcosa si muove adesso, e su una giornata finita mentiva. */}
                 {openPhase === 'playing' ? (
                   <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-surface" />
                 ) : null}
                 {openPhase === 'playing'
                   ? 'Si gioca'
+                  : openPhase === 'settling'
+                  ? 'Voti in arrivo'
                   : openPhase === 'final'
                   ? 'Risultato finale'
                   : 'In corso'}
@@ -571,6 +587,8 @@ export default function LeagueHome({
             <span className="text-[11px] text-ink-faint">
               {openPhase === 'playing'
                 ? 'I voti si aggiornano mentre si gioca e restano provvisori fino a fine partita.'
+                : openPhase === 'settling'
+                ? 'Si è finito di giocare: i voti si stanno stabilizzando e cambiano ancora di poco.'
                 : openPhase === 'final'
                 ? 'Tutte le partite reali sono finite: manca solo il conteggio della lega.'
                 : `${openMd?.real_completion.completed ?? 0} partite di Serie A su ${
@@ -929,7 +947,12 @@ function CompetitionBlock({
         : fixtures.filter((f) => f.real_matchday === openMatchday && f.status !== 'finished'),
     [fixtures, openMatchday],
   );
-  // Si sta ancora giocando, o è tutto finito e manca solo il conteggio.
+  // I tre modi in cui questo blocco può essere «aperto»: c'è una partita vera sul
+  // campo, si è finito di giocare ma i dati non sono confermati, oppure è tutto
+  // fermo e manca solo il conteggio. `score_provisional` da solo diceva i primi due
+  // con la stessa parola, e per l'ora dopo l'ultimo fischio la card pulsava
+  // «in corso» su un turno finito.
+  const openLive = openFixtures.some((f) => f.score_in_progress);
   const openMoving = openFixtures.some((f) => f.score_provisional);
 
   // DOVE LA COMPETIZIONE SI TROVA ADESSO, che non è la stessa cosa di "che forma
@@ -1023,20 +1046,25 @@ function CompetitionBlock({
         <div
           className={clsx(
             'mt-3 rounded-xl border p-2',
-            openMoving ? 'border-live/35 bg-live/10' : 'border-good/40 bg-good-bg',
+            openLive
+              ? 'border-live/35 bg-live/10'
+              : openMoving
+                ? 'border-warn/40 bg-warn-bg'
+                : 'border-good/40 bg-good-bg',
           )}
         >
           <div className="flex items-center gap-1.5">
-            {openMoving ? (
+            {openLive ? (
               <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" />
             ) : null}
             <span
               className={clsx(
                 'text-[11px] font-bold uppercase tracking-wide',
-                openMoving ? 'text-live' : 'text-good',
+                openLive ? 'text-live' : openMoving ? 'text-warn' : 'text-good',
               )}
             >
-              Giornata {openMatchday} · {openMoving ? 'in corso' : 'da concludere'}
+              Giornata {openMatchday} ·{' '}
+              {openLive ? 'in corso' : openMoving ? 'voti in arrivo' : 'da concludere'}
             </span>
           </div>
           <div className="mt-1.5 space-y-1">
@@ -1044,10 +1072,17 @@ function CompetitionBlock({
               <MiniFixture key={f.fixture_id} f={f} />
             ))}
           </div>
-          <div className={clsx('mt-1 text-[11px]', openMoving ? 'text-live' : 'text-good')}>
-            {openMoving
+          <div
+            className={clsx(
+              'mt-1 text-[11px]',
+              openLive ? 'text-live' : openMoving ? 'text-warn' : 'text-good',
+            )}
+          >
+            {openLive
               ? 'Punteggi provvisori: diventano definitivi quando la giornata viene conclusa.'
-              : 'Le partite sono finite: i punteggi si fissano con la conclusione della giornata.'}
+              : openMoving
+                ? 'Si è finito di giocare: i voti si stanno stabilizzando e cambiano ancora di poco.'
+                : 'Le partite sono finite: i punteggi si fissano con la conclusione della giornata.'}
           </div>
         </div>
       ) : null}
@@ -1266,7 +1301,10 @@ function MiniFixture({
   // dell'admin. Dirli allo stesso modo renderebbe sospetto un risultato che è
   // ormai fermo.
   const pending = !finished && f.score;
-  const moving = pending && f.score_provisional;
+  const moving = pending && f.score_in_progress;
+  // Finito di giocare ma non ancora confermato: il numero si muove ancora, di poco,
+  // e non è la stessa frase di «si sta giocando».
+  const settling = pending && !moving && f.score_provisional;
   const row = (
     // `min-w-0` qui E sul collegamento qui sotto, perché a turno sono l'uno o
     // l'altro a essere l'ELEMENTO DI GRIGLIA — e un elemento di griglia non
@@ -1304,14 +1342,22 @@ function MiniFixture({
         <span
           className={clsx(
             'shrink-0 tabular-nums',
-            moving ? 'font-bold text-live' : pending ? 'font-semibold text-ink-soft' : 'text-ink-faint',
+            moving
+              ? 'font-bold text-live'
+              : settling
+                ? 'font-semibold text-warn'
+                : pending
+                  ? 'font-semibold text-ink-soft'
+                  : 'text-ink-faint',
           )}
           title={
             moving
               ? 'Punteggio provvisorio: si sta ancora giocando'
-              : pending
-                ? 'In attesa della conclusione della giornata'
-                : undefined
+              : settling
+                ? 'Si è finito di giocare: i voti si stanno stabilizzando'
+                : pending
+                  ? 'In attesa della conclusione della giornata'
+                  : undefined
           }
         >
           {finished || pending

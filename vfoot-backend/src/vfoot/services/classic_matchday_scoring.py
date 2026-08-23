@@ -510,8 +510,9 @@ def score_composed_fixture(
 # --------------------------------------------------------------------------- #
 # The same score, computed while the matchday is still being played.           #
 # --------------------------------------------------------------------------- #
-def _live_states(cs_id: int, real_matchday: int, player_ids) -> tuple[set, set]:
-    """(not_started, unstable): the two ways a player's vote can fail to be final.
+def _live_states(cs_id: int, real_matchday: int, player_ids) -> tuple[set, set, set]:
+    """(not_started, unstable, in_progress): come il voto di un giocatore puo' non
+    essere definitivo.
 
     ``pending_player_ids`` collapses them into one, and rightly so at conclusion
     time — a vote that is not final is not a vote. During the round the difference
@@ -523,10 +524,22 @@ def _live_states(cs_id: int, real_matchday: int, player_ids) -> tuple[set, set]:
     * UNSTABLE — his club is playing, or has finished and the provider has not
       settled the data. There IS a vote, computed from what has happened so far;
       it is simply going to move. Showing it and saying so is the feature.
+    * IN PROGRESS — il sottoinsieme stretto di UNSTABLE: la palla sta ancora
+      rotolando. E' un insieme a parte perche' e' l'unico che il MOTORE deve
+      guardare, mentre l'altro riguarda soltanto quel che si legge.
+
+      La differenza dura un'ora tonda: ``data_ready`` arriva alla conferma di
+      +1h dopo il fischio (v. tick), quindi «instabile» resta vero per tutta
+      un'ora su una partita che e' finita e su cui e' gia' partita la notifica
+      di fine partita. Fusi insieme, i due dicevano a turno la cosa sbagliata:
+      al quinto minuto la panchina copriva un titolare che era regolarmente in
+      campo (nessuno ha ancora un voto, e un buco non e' un buco finche' la
+      partita che l'ha fatto non e' finita), e per l'ora dopo il fischio la
+      pagina scriveva «in corso» su partite abbondantemente concluse.
     """
     player_ids = list(player_ids)
     if not player_ids:
-        return set(), set()
+        return set(), set(), set()
     fixtures = matchday_fixtures_by_team(cs_id, real_matchday)
     stints = dict(
         PlayerTeamStint.objects.filter(
@@ -535,32 +548,55 @@ def _live_states(cs_id: int, real_matchday: int, player_ids) -> tuple[set, set]:
             end_date__isnull=True,
         ).values_list("player_id", "team_season_id")
     )
-    not_started, unstable = set(), set()
+    not_started, unstable, in_progress = set(), set(), set()
     for pid in player_ids:
         match = fixtures.get(stints.get(pid))
         if match is None or match.data_ready:
             continue
-        if match.status in (Match.STATUS_LIVE, Match.STATUS_FINISHED):
+        if match.status == Match.STATUS_LIVE:
+            unstable.add(pid)
+            in_progress.add(pid)
+        elif match.status == Match.STATUS_FINISHED:
             unstable.add(pid)
         else:
             not_started.add(pid)
-    return not_started, unstable
+    return not_started, unstable, in_progress
 
 
-def _mark_unstable(team: dict, unstable: set) -> bool:
+def _mark_unstable(team: dict, unstable: set, in_progress: set | None = None) -> bool:
     """Flag every line whose real match is still moving, and the team with it.
 
     A total made in part of provisional votes is itself provisional — there is no
     honest way to show a settled number on top of unsettled ones.
+
+    DUE MARCHI E NON UNO, perche' sono due affermazioni diverse:
+
+    * ``provisional`` — questo numero puo' ancora cambiare. Riguarda solo quel che
+      si legge, e vale sia per la partita in corso sia per quella finita che il
+      fornitore non ha ancora confermato.
+    * ``in_progress`` — la palla sta ancora rotolando. E' l'unico che il MOTORE
+      guarda (``classic_scoring.score_team``): finche' e' acceso, il titolare senza
+      voto non e' un buco e la panchina non lo copre.
+
+    Il secondo non e' deducibile dal primo: fra il fischio finale e la conferma
+    passa un'ora, e in quell'ora ``provisional`` e' vero mentre non c'e' piu'
+    niente in corso.
     """
+    in_progress = in_progress or set()
     any_unstable = False
     for line in team.get("starters", []) + team.get("bench", []):
         if line.get("player_id") in unstable and not line.get("office"):
             line["provisional"] = True
             any_unstable = True
+            if line["player_id"] in in_progress:
+                line["in_progress"] = True
         if line.get("pending"):
             any_unstable = True
     team["provisional"] = any_unstable
+    team["in_progress"] = any(
+        line.get("in_progress")
+        for line in team.get("starters", []) + team.get("bench", [])
+    )
     return any_unstable
 
 
@@ -618,11 +654,12 @@ def live_scorer(league, md, ruleset):
             ids.add(int(snap.gk_player_id))
         ids.update(int(x) for x in (snap.starter_player_ids or []))
         ids.update(int(x) for x in (snap.bench_player_ids or []))
-    not_started, unstable = _live_states(
+    not_started, unstable, in_progress = _live_states(
         md.real_competition_season_id, md.real_matchday, ids)
     office = office_votes_for(league, md, ids)
     not_started -= set(office)
     unstable -= set(office)
+    in_progress -= set(office)
 
     def score(fx) -> dict:
         lines = {}
@@ -635,12 +672,12 @@ def live_scorer(league, md, ruleset):
                 league, team, fx.competition_id, md.real_matchday, index, "previous",
                 not_started, office)
             starters, bench = starters or [], bench or []
-            # BEFORE scoring, not only after: the scorer now reads ``provisional``
-            # to decide what is a hole (classic_scoring._fill_unresolved). Marked
-            # afterwards, every player on the pitch of a match in progress would be
-            # a hole for the length of that match, and a league with the voto
-            # d'ufficio on would open the round showing eleven of them.
-            _mark_unstable({"starters": starters, "bench": bench}, unstable)
+            # BEFORE scoring, not only after: the scorer READS these marks. Con
+            # ``in_progress`` decide chi non va sostituito (score_team) e che cosa
+            # non e' un buco (_fill_unresolved); marcati dopo, al quinto minuto la
+            # panchina coprirebbe tutti quelli che sono regolarmente in campo, e una
+            # lega col voto d'ufficio aprirebbe il turno con undici buchi.
+            _mark_unstable({"starters": starters, "bench": bench}, unstable, in_progress)
             lines[side] = (starters, bench, meta)
 
         payload = score_composed_fixture(
@@ -653,10 +690,16 @@ def live_scorer(league, md, ruleset):
              "home_advantage": fx.home_advantage,
              "home_team": fx.home_team.name, "away_team": fx.away_team.name},
         )
-        home_unstable = _mark_unstable(payload["home"], unstable)
-        away_unstable = _mark_unstable(payload["away"], unstable)
+        home_unstable = _mark_unstable(payload["home"], unstable, in_progress)
+        away_unstable = _mark_unstable(payload["away"], unstable, in_progress)
+        # ``live`` qui vuol dire «calcolato adesso invece che congelato», ed e' vero
+        # dal primo calcio d'inizio fino alla conclusione dell'admin — cioe' anche
+        # il lunedi' mattina. Non e' «la palla sta rotolando», che e' ``in_progress``
+        # e dura quanto le partite. Chi disegna la pastiglia deve leggere il secondo.
         payload["live"] = True
         payload["provisional"] = home_unstable or away_unstable
+        payload["in_progress"] = bool(payload["home"].get("in_progress")
+                                      or payload["away"].get("in_progress"))
         payload["lineup_source"] = {"home": lines["home"][2].get("source"),
                                     "away": lines["away"][2].get("source")}
         return payload

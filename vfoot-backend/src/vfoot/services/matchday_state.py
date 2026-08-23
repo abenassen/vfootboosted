@@ -370,10 +370,19 @@ def playing_matchday(league, now=None) -> int | None:
     market settle on Saturday morning between Friday's match and Saturday's: a round
     is one thing, not a string of three-hour windows.
 
-    Per match, "over" is ``data_ready`` OR the three-hour window elapsed, whichever
-    comes first — the window so that a poller that is down cannot freeze the market
-    for good, the flag so that the quarter of an hour between full time and the
-    data settling does not read as both 'being played' and 'complete'.
+    Per match, "over" is the FULL-TIME WHISTLE (``status`` finished, which the tick
+    stamps and pushes a notification about), or ``data_ready``, or the three-hour
+    window elapsed — whichever comes first. Three readings and not one because each
+    covers the other's blind spot: the whistle is the true answer, the flag catches
+    a provider that reports the end only at confirmation, and the window is the net
+    for a poller that is down, so a silent egress cannot freeze the market for good.
+
+    IL FISCHIO E NON SOLO LA CONFERMA. ``data_ready`` arrives an hour after full
+    time, and the window three hours after kick-off: with only those two, a round
+    whose last match ended at 22:35 stayed "on the pitch" until 23:35 — the home
+    page pulsing "Si gioca" over a round that was over, to the same user who had
+    already been sent the full-time notification. The votes are still settling in
+    that hour, but "settling" is not "being played" and the page has a word for it.
 
     A postponed shell is skipped: it has been moved out of its window and its replay
     is a separate row with its own kickoff — which correctly makes the matchday
@@ -393,18 +402,18 @@ def playing_matchday(league, now=None) -> int | None:
             kickoff__lte=now + ROUND_SPAN,
         )
         .exclude(status__in=[Match.STATUS_POSTPONED, Match.STATUS_CANCELLED])
-        .values_list("matchday", "kickoff", "data_ready")
+        .values_list("matchday", "kickoff", "data_ready", "status")
     )
     by_md: dict[int, list] = {}
-    for md, k, ready in rows:
-        by_md.setdefault(int(md), []).append((k, ready))
+    for md, k, ready, st in rows:
+        by_md.setdefault(int(md), []).append((k, bool(ready) or st == Match.STATUS_FINISHED))
     playing = []
     for md, ms in by_md.items():
-        started = [(k, ready) for k, ready in ms if k <= now]
+        started = [(k, over) for k, over in ms if k <= now]
         if not started:
             continue
-        # A match still on the pitch, by either reading.
-        if any(not ready and now < k + MATCH_WINDOW for k, ready in started):
+        # A match still on the pitch, by any of the three readings.
+        if any(not over and now < k + MATCH_WINDOW for k, over in started):
             playing.append(md)
             continue
         # Between two matches of the same weekend: the last one that has begun
