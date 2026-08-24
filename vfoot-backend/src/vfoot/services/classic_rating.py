@@ -108,7 +108,12 @@ log = logging.getLogger(__name__)
 # shot. Its sibling big_chance_created is NOT the same statistic and is weighted
 # below: that earlier removal conflated the two faces of one event.
 TOTAL_WEIGHTS = {
-    "expected_assists": 0.05,   # xA: chance creation, credited to the CREATOR
+    # LINEARE dal 25/08/2026 (v. NO_COMPRESS_FEATURES) e peso rialzato di conseguenza:
+    # 0.05 e 0.14 NON sono confrontabili, perche' un peso vale "punti di indice per
+    # 1 sigma" e togliendo la compressione quel sigma e' un'altra cosa (sigma_z della
+    # xA passa da 0.4201 a 1.0000). A parita' di effetto sulla fascia media, 0.14
+    # lineare sta a 0.06 compressa.
+    "expected_assists": 0.14,   # xA: chance creation, credited to the CREATOR
     # The DISCRETE counterpart of xA, and the creator's side of a big chance —
     # verified as the PASSER's stat, not the shooter's: it never exceeds the
     # player's own key passes (0 violations in 10,067 player-matches), 36% of the
@@ -159,11 +164,27 @@ TOTAL_WEIGHTS = {
     # prefers the OLD 0.11 (r 0.7718 against 0.7676 here). Lowering xA is justified
     # by the coherence argument, not by that judge, and 0.07 would have kept the
     # pair under a goal at a third of the cost. 0.05 is the user's call.
-    "big_chance_created": 0.045,
+    # AZZERATO il 25/08/2026. Misurato: due terzi di quel che le pagelle sembrano
+    # pagare per un'occasione creata e' il bonus ASSIST che passa attraverso il
+    # flag — a parita' di xA scatta ~3 volte piu' spesso quando l'assist e' arrivato
+    # (20%->63% nella banda xA [0.10,0.20)). Il peso era stato tarato contro giudici
+    # che l'assist lo pagano, e il risultato era un'inversione: a parita' di xA E di
+    # assist pagavamo il flag +0.133 contro +0.080 della Redazione, +0.093 dello
+    # Statistico e +0.015 di SofaScore — il piu' alto del panel. Tenuto a zero e non
+    # cancellato: la feature si legge ancora e lo zero e' una decisione visibile.
+    # Tabelle in docs/voto_questioni_aperte.md §2.
+    "big_chance_created": 0.0,
     "shots_goal": 0.1386,         # the GOAL itself (own goals excluded), on top of +3 bonus
     "sga_post": 0.0905,           # = S: EXECUTION merit, derived (xGOT − xG + woodwork)
     "xg_shots": 0.0323,           # = β: the mass of chances occupied, β/S = 1/3
-    "key_passes": 0.0,
+    # RIACCESO il 25/08/2026 (era 0.0 dal commit dei pesi a mano, senza motivazione
+    # scritta; prima ancora 0.181). Porta segnale che la xA non ha, e lo conferma
+    # anche il giudice non contaminato dal bonus: a parita' di xA, gol e assist vale
+    # +0.055 sulla Redazione e +0.055 su SofaScore per un centrocampista (~5 sigma),
+    # +0.060/+0.074 per un attaccante. Serve soprattutto come RIDONDANZA: il 35%
+    # degli assist non porta nessuna big chance riconosciuta e li' la creazione
+    # restava appesa alla sola xA. v. docs/voto_questioni_aperte.md §2quater.
+    "key_passes": 0.100,
     "shots_on_target": 0.0494,
     "shots": 0.0558,              # shot ACTIVITY now rewarded (analyst v2.2), not penalised
     "shots_off": 0.0196,          # even an off-target attempt: small credit for shooting
@@ -603,7 +624,24 @@ COMPRESS_K = 1.0
 # and asks for nothing. And exempting the two save-volume features as well was
 # measured and REJECTED — it overshoots (>= 7.5 to 3.0%) and makes both correlations
 # worse than this single exemption.
-NO_COMPRESS_FEATURES = frozenset({"gk_goals_prevented"})
+# ``expected_assists`` esce dalla compressione il 25/08/2026. Il difetto non era
+# nella coda della distribuzione (la kurtosi compressa resta +3.15, quindi NON
+# sovra-corretta) ma nell'ORDINAMENTO: a u = 9.7 la compressione tratteneva il 24%
+# del valore, per cui una prestazione tre volte piu' creativa ne ricavava 1.7 volte
+# il credito — Dybala in Roma-Fiorentina, 3 assist e 3 occasioni nitide, si fermava
+# a 6.5 mentre le pagelle gli davano 8.5 e il rating del fornitore 9.1.
+#
+# Perche' la LINEARIZZAZIONE e non solo un peso piu' alto: alzare il peso sulla
+# curva compressa moltiplica ogni partita di ogni creativo e INCLINA la scala (il
+# gradiente del nostro scarto dalle pagelle passa da 0.127 a 0.271); linearizzare
+# agisce sull'alto della curva. Misurato sulla 25-26: Dybala a 8.0, massimo di
+# campionato e quota dei voti >= 8 invariati, dispersione 0.564 -> 0.562.
+#
+# ATTENZIONE per chi rimisura: ``feature_scales()`` NON ricalcola, legge le scale
+# congelate nel file. Cambiare la FORMA (questa lista, COMPRESS_K) e chiamare
+# ``build_reference`` senza rifare le scale con ``build_feature_scales`` misura un
+# modello che non esiste — per i soli PESI la scorciatoia invece e' corretta.
+NO_COMPRESS_FEATURES = frozenset({"gk_goals_prevented", "expected_assists"})
 
 
 def _compression_of(key: str):
