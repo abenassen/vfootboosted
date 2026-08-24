@@ -217,10 +217,10 @@ class VoteExplanationTests(SimpleTestCase):
         """Le tre cose su cui ``_phrase`` tace apposta — l'evento che non e'
         successo, il lato muto di un SIGNAL, e la feature senza etichetta parlata —
         nel registro hanno una riga con dei punti accanto, quindi devono avere un
-        nome. ``defensive_value`` e' il caso che conta: puo' essere la voce piu'
-        grande del voto di un difensore e non e' nominabile in una frase."""
-        self.assertEqual(ledger_phrase("DIF", "defensive_value", +0.28, 0.44),
-                         "valore difensivo (indice del fornitore)")
+        nome."""
+        # ``shots_off`` e' rimasta l'unica feature pesata senza frase parlata:
+        # compare solo dentro la riga unita delle conclusioni, mai da sola.
+        self.assertEqual(ledger_phrase("ATT", "shots_off", -0.02, 0.0), "tiri fuori")
         self.assertEqual(ledger_phrase("DIF", "shots_goal", -0.03, 0.0), "nessun gol")
         self.assertEqual(ledger_phrase("DIF", "big_chance_created", -0.02, 0.0),
                          "nessun'occasione nitida creata")
@@ -228,6 +228,13 @@ class VoteExplanationTests(SimpleTestCase):
                          "occasioni create per i compagni")
         # e quando la frase c'e', e' la stessa del riassunto
         self.assertEqual(ledger_phrase("DIF", "clearances", +0.3, 8.0), "tante respinte")
+        # ``defensive_value`` una frase ce l'ha dal 24/08/2026, generica per forza:
+        # e' una sintesi che non si scompone in un gesto del tabellino, ed e' in
+        # parte collettiva. Prima taceva, ed era la voce piu' grande del voto.
+        self.assertEqual(ledger_phrase("DIF", "defensive_value", +0.28, 0.44),
+                         "buona prestazione difensiva d'insieme")
+        self.assertEqual(ledger_phrase("DIF", "defensive_value", -0.28, -0.44),
+                         "prestazione difensiva d'insieme sottotono")
 
     def test_the_ledger_quotes_counts_the_way_the_tabellino_does(self):
         """Il numero accanto alla voce e' quello OSSERVATO, non quello proiettato
@@ -240,7 +247,12 @@ class VoteExplanationTests(SimpleTestCase):
         e = explain("DIF", feats, 45, self.REFERENCE, average, ledger=True)
         rows = {r["label"]: r for r in e["other_terms"]}
         self.assertEqual(rows["poche respinte"]["value"], 4)   # non 8, la proiezione
-        self.assertNotIn("value", rows["valore difensivo (indice del fornitore)"])
+        # un indice normalizzato non porta MAI un numero accanto: "0,44" non
+        # spiega niente. Ora e' la voce piu' grande e sta nel riassunto, dove i
+        # numeri accanto non ci vanno per costruzione.
+        shown = {c["label"]: c for c in e["contributions"]}
+        self.assertIn("buona prestazione difensiva d'insieme", shown)
+        self.assertNotIn("value", shown["buona prestazione difensiva d'insieme"])
 
     # --- the graded events explain their own size ------------------------
     def test_a_sending_off_says_why_it_cost_what_it_cost(self):
@@ -296,14 +308,29 @@ class VoteExplanationTests(SimpleTestCase):
         cheap = explain("CEN", {"expected_assists": 0.05, "touches": 60.0}, 90,
                         self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
                         average, assists=1)
-        self.assertIn("basso valore atteso", cheap["assist_note"])
-        self.assertIn("xA 0.05", cheap["assist_note"])
-        self.assertIn("basso valore atteso", to_sentence(cheap))
-        # a real chance created, or a valuable pass, says nothing of the sort
+        self.assertIn("pallone di poco valore", cheap["assist_note"])
+        self.assertIn("non il gol che ne e' nato", cheap["assist_note"])
+        self.assertIn("valgono 0.05 di xA", cheap["assist_note"])
+        self.assertIn("poco valore", to_sentence(cheap))
+        # Il passaggio che VALEVA non ha piu' bisogno di una nota: da quando
+        # big_chance_created pesa zero, la creazione la leggono xA e key_passes e
+        # il voto la paga per intero. Non c'e' niente da scusare.
         rich = explain("CEN", {"expected_assists": 0.6, "touches": 60.0}, 90,
                        self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
                        average, assists=1)
         self.assertEqual(rich["assist_note"], "")
+        due = explain("CEN", {"expected_assists": 0.05, "touches": 60.0}, 90,
+                      self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
+                      average, assists=2)
+        self.assertIn("gli assist nascono da palloni di poco valore", due["assist_note"])
+        self.assertIn("non i gol che ne sono nati", due["assist_note"])
+        for nota in (cheap["assist_note"], due["assist_note"]):
+            self.assertNotIn("pesa a parte", nota)
+            self.assertNotIn("valore atteso", nota)
+            # key_passes ora paga quel passaggio: la negazione secca era diventata falsa
+            self.assertNotIn("non nel voto base", nota)
+        # con l'occasione riconosciuta non c'e' niente da spiegare: il voto ha gia'
+        # pagato il gesto per intero, da entrambe le voci
         clear = explain("CEN", {"expected_assists": 0.05, "big_chance_created": 1.0,
                                 "touches": 60.0}, 90,
                         self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
@@ -431,8 +458,12 @@ class VoteExplanationTests(SimpleTestCase):
         average = self._averages("DIF", {"touches": 60.0})
         e = explain("DIF", {"touches": 20.0}, 15, self.REFERENCE, average)
         self.assertIn("pochi minuti", e["note"])
-        self.assertEqual(explain("DIF", {"touches": 60.0}, 90,
-                                 self.REFERENCE, average)["note"], "")
+        # a novanta minuti l'avvertenza sui minuti non si dice (quel fixture e' una
+        # prestazione piatta, quindi ``note`` porta l'altra avvertenza: si controlla
+        # che manchi QUESTA, non che la riga sia vuota)
+        self.assertNotIn("pochi minuti",
+                         explain("DIF", {"touches": 60.0}, 90,
+                                 self.REFERENCE, average)["note"])
 
     def test_no_measured_terms_explains_nothing_rather_than_guessing(self):
         e = explain("DIF", {}, 0, self.REFERENCE, {})
@@ -453,3 +484,119 @@ class VoteExplanationTests(SimpleTestCase):
                                 f"{key}: (EVENT, singolare, plurale)")
             else:  # SIGNAL — positive required, negative may be None
                 self.assertTrue(entry[1], f"{key}: manca la frase positiva")
+
+    # --- lo zero non e' "poco" -------------------------------------------
+    def test_a_count_at_zero_is_named_as_nothing_not_as_few(self):
+        """"pochi duelli vinti" a chi non ne ha giocato nessuno implica che qualcuno
+        l'abbia vinto, e chi va a cercarlo nel tabellino non lo trova. Sulla 25-26
+        una riga cosi' compariva nel 39,6% delle spiegazioni."""
+        self.assertEqual(_phrase("DIF", "duels_won", -0.3, 0.0), "nessun duello vinto")
+        self.assertEqual(_phrase("DIF", "clearances", -0.3, 0.0), "nessuna respinta")
+        self.assertEqual(_phrase("CEN", "long_balls_completed", -0.3, 0.0),
+                         "nessun lancio lungo riuscito")
+        # ma UNO e' ancora "pochi": lo zero e' l'unico caso speciale
+        self.assertEqual(_phrase("DIF", "clearances", -0.3, 1.0), "poche respinte")
+
+    def test_a_zero_that_helps_the_vote_is_not_praised(self):
+        """Elogiare per un duello non perso chi non e' mai entrato in un duello e'
+        rumore: era l'UNICO lato positivo di 449 spiegazioni della 25-26. I punti
+        restano e finiscono in "altre voci", quindi il conto torna lo stesso."""
+        self.assertIsNone(_phrase("DIF", "duels_lost", +0.3, 0.0))
+        self.assertIsNone(_phrase("DIF", "dribbled_past", +0.3, 0.0))
+        # con un duello perso davvero la lode torna a essere legittima
+        self.assertEqual(_phrase("DIF", "duels_lost", +0.3, 2.0), "pochi duelli persi")
+
+    def test_a_grandezza_continua_a_zero_resta_col_quantificatore(self):
+        """Solo le grandezze che si CONTANO hanno un "nessuno": per un indice
+        normalizzato lo zero e' un valore come un altro, non un'assenza."""
+        self.assertEqual(_phrase("POR", "gk_goals_prevented", -0.3, 0.0),
+                         "pochi gol evitati rispetto ai tiri affrontati")
+
+    def test_a_family_with_no_attempt_says_it_never_tried(self):
+        """Il netto della famiglia si sceglieva col solo segno, e con tutti i tiri a
+        zero il segno e' negativo perche' il pari ruolo medio qualche tiro lo fa: la
+        pagina diceva "una o piu' occasioni fallite" a chi non aveva tirato mai —
+        il 43,1% delle spiegazioni della 25-26."""
+        average = self._averages("DIF", {"shots": 2.0, "shots_on_target": 1.0,
+                                         "touches": 60.0})
+        e = explain("DIF", {"touches": 60.0}, 90, self.REFERENCE, average)
+        said = [c["label"] for c in e["contributions"]]
+        self.assertIn("nessuna conclusione tentata", said)
+        self.assertNotIn("una o più occasioni fallite", said)
+        # e chi ha tirato male resta rimproverato per come ha tirato
+        shot = explain("DIF", {"shots": 3.0, "touches": 60.0}, 90,
+                       self.REFERENCE, average)
+        self.assertIn("una o più occasioni fallite",
+                      [c["label"] for c in shot["contributions"]])
+
+    # --- la partita senza sporgenze --------------------------------------
+    def test_a_flat_game_shows_its_largest_entries_instead_of_nothing(self):
+        """113 spiegazioni della 25-26 non dicevano NIENTE perche' nessuna voce
+        arrivava al ventesimo di voto — fra queste portieri che avevano giocato
+        novanta minuti. Si mostrano lo stesso le piu' grandi, e ``flat`` avverte chi
+        scrive la frase di non spacciarle per un giudizio."""
+        average = self._averages("DIF", {"touches": 60.0, "duels_won": 3.0})
+        e = explain("DIF", {"touches": 61.0, "duels_won": 3.0}, 90,
+                    self.REFERENCE, average)
+        self.assertTrue(e["flat"])
+        self.assertTrue(e["positives"] or e["negatives"])
+        self.assertIn("in linea con la media", to_sentence(e))
+        self.assertIn("si avvicinano a spostarla", to_sentence(e))
+
+    def test_a_big_unnamed_driver_keeps_the_summary_silent(self):
+        """"Piatta" vuol dire che non c'e' niente di grosso, non che il pezzo grosso
+        non ha un nome: promuovere due voci da 0,01 direbbe che la partita e' stata
+        insignificante mentre il voto lo muoveva un'altra.
+
+        Da quando ``defensive_value`` parla, il caso resta solo per gli EVENT che
+        non sono accaduti — un attaccante che non segna perde il credito che
+        l'attaccante medio prende dai gol, e "nessun gol" nella frase parlata non
+        si dice per scelta di sempre."""
+        average = self._averages("ATT", {"shots_goal": 1.0, "touches": 60.0})
+        e = explain("ATT", {"touches": 60.0}, 90, self.REFERENCE, average)
+        self.assertFalse(e["flat"])
+        self.assertEqual(to_sentence(e),
+                         "Prestazione in linea con la media del suo ruolo.")
+
+    def test_no_label_mentions_who_supplies_the_data(self):
+        """Le etichette parlano al lettore della pagella, non della nostra catena di
+        fornitura: "indice del fornitore" chiede a chi legge di sapere che esiste un
+        fornitore. Forma impersonale ovunque."""
+        from vfoot.services.vote_explanation import LEDGER_LABELS, TABLE_ONLY_LABELS
+        for table in (LABELS, LEDGER_LABELS, TABLE_ONLY_LABELS):
+            for key, entry in table.items():
+                text = " ".join(x for x in (entry if isinstance(entry, tuple) else (entry,))
+                                if isinstance(x, str))
+                for banned in ("fornitore", "provider", "SofaScore"):
+                    self.assertNotIn(banned.lower(), text.lower(), key)
+
+    def test_the_creation_line_names_the_clear_chances_it_contains(self):
+        """La xA e' un valore atteso e si dice vaga ("una o piu'"). Ma quando ci sono
+        occasioni nitide riconosciute un intero da contare esiste, ed e' il fatto piu'
+        verificabile della partita di chi crea: Dybala in Roma-Fiorentina ne ha tre e
+        la sua spiegazione non le nominava. Il peso ZERO di big_chance_created dice
+        quanto quel dato vale nel voto, non se si puo' usare per raccontarlo."""
+        from vfoot.services.vote_explanation import creation_detail
+        base = "una o più occasioni create per i compagni"
+        self.assertEqual(creation_detail(base, 0, 0.05), base)   # xA bassa: si tace
+        self.assertEqual(creation_detail(base, 0, 0.34), f"{base} (nessuna nitida)")
+        self.assertEqual(creation_detail(base, 1), f"{base} (una nitida)")
+        self.assertEqual(creation_detail(base, 3), f"{base} (3 nitide)")
+        # e nella spiegazione vera
+        average = self._averages("ATT", {"touches": 60.0})
+        e = explain("ATT", {"expected_assists": 1.09, "big_chance_created": 3.0,
+                            "touches": 60.0}, 79,
+                    self.REFERENCE | {"ATT": {"mean": 0.47, "std": 0.44}}, average)
+        said = " ".join(c["label"] for c in e["contributions"])
+        self.assertIn("(3 nitide)", said)
+        # e il verso opposto: creazione sostanziosa ma nessuna palla-gol vera.
+        # Due partite che la sola xA confonderebbe.
+        senza = explain("CEN", {"expected_assists": 0.34, "key_passes": 3.0,
+                                "touches": 41.0}, 75,
+                        self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
+                        self._averages("CEN", {"touches": 60.0}))
+        self.assertIn("(nessuna nitida)",
+                      " ".join(c["label"] for c in senza["contributions"]))
+        # i punti restano tutti della xA: la parentesi non e' un secondo addendo
+        riga = [c for c in e["contributions"] if "nitide" in c["label"]][0]
+        self.assertNotIn("family", riga)

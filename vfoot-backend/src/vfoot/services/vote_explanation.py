@@ -53,6 +53,52 @@ COUNT, SIGNAL, EVENT = "count", "signal", "event"
 QUANTIFIERS = {"mp": ("tanti", "pochi"), "fp": ("tante", "poche"),
                "ms": ("tanto", "poco"), "fs": ("tanta", "poca")}
 
+# Come si nomina uno ZERO. "pochi duelli vinti" a chi non ne ha giocato nessuno non
+# e' un'imprecisione di stile: implica che qualche duello l'abbia vinto, e chi legge
+# il tabellino non ci ritrova niente. Sulla 25-26 la frase mostrata conteneva una
+# riga cosi' nel 39,6% dei casi.
+#
+# Solo per le grandezze che si CONTANO. Un indice normalizzato o un valore atteso
+# (``_exposure``, ``sga_post``, ``gk_goals_prevented``) puo' valere zero senza che
+# "nessuno" voglia dire niente, e quelli restano fuori: senza una voce qui la
+# frase torna al quantificatore di prima, che per una grandezza continua e' giusto.
+COUNT_NONE = {
+    "key_passes": "nessun passaggio chiave",
+    "duels_won": "nessun duello vinto",
+    "duels_lost": "nessun duello perso",
+    "aerials_won": "nessun duello aereo vinto",
+    "aerials_lost": "nessun duello aereo perso",
+    "dribbled_past": "nessun dribbling concesso all'avversario",
+    "tackles_won": "nessun contrasto vinto",
+    "interceptions": "nessun intercetto",
+    "ball_recoveries": "nessun pallone recuperato",
+    "blocks": "nessuna conclusione murata",
+    "clearances": "nessuna respinta",
+    "touches_in_box": "nessun pallone toccato in area",
+    "passes_opp_half": "nessun passaggio nella meta' campo avversaria",
+    "long_balls_completed": "nessun lancio lungo riuscito",
+    "crosses_completed": "nessun cross riuscito",
+    "passes_completed": "nessun passaggio riuscito",
+    "was_fouled": "nessun fallo subito",
+    "touches": "nessun pallone giocato",
+    "errors_bad_passes": "nessun passaggio sbagliato",
+    "errors_dispossessed": "nessun pallone perso in conduzione",
+    "errors_miscontrols": "nessun controllo sbagliato",
+    "errors_fouls_committed": "nessun fallo commesso",
+    "gk_saves": "nessuna parata",
+    "gk_saves_inside_box": "nessuna parata su tiri ravvicinati",
+    "gk_high_claims": "nessuna uscita alta",
+    "gk_punches": "nessuna respinta di pugno",
+    "gk_sweeper": "nessuna uscita fuori area",
+    "gk_crosses_not_claimed": "nessun cross mancato",
+    "xg_shots": "nessuna posizione di tiro conquistata",
+    "shots_on_target": "nessun tiro nello specchio",
+    "shots": "nessun tiro tentato",
+    "shots_blocked": "nessuna conclusione respinta dalla difesa",
+    "dribbles_won": "nessun dribbling riuscito",
+    "dribbles_attempted": "nessun dribbling tentato",
+}
+
 # The narrative is one-sided at the extremes, symmetrically around 6. A clearly
 # poor game's "positives" are only its least-bad deviations (faint praise), and a
 # clearly good game's "negatives" are trivialities on a fine display — neither is
@@ -85,6 +131,20 @@ RED_REASON_IT = {
 LABELS = {
     # SIGNAL — small high-value continuous; "una o più ...", (positive, negative)
     "expected_assists": (SIGNAL, "una o più occasioni create per i compagni", None),
+    # GENERICO PER FORZA, e la genericita' e' la parte onesta. E' una sintesi di un
+    # feed che non abbiamo (ogni duello con posizione, avversario e fase di gioco):
+    # non si puo' scomporre in un gesto che il lettore ritrovi nel tabellino, quindi
+    # promettergliene uno sarebbe una bugia. Ed e' in parte COLLETTIVO — correla
+    # -0.53 con i gol subiti mentre era in campo, piu' del rating che ci fornisce
+    # chi lo calcola (-0.32) — per cui "d'insieme" dice il vero due volte.
+    #
+    # Perche' ora ha una frase, dopo essere stato a lungo senza: puo' essere la voce
+    # PIU' GRANDE del voto di un difensore (il 20% in Rrahmani di Genoa-Napoli), e
+    # una voce che muove il voto piu' di ogni altra e non compare nel riassunto
+    # lascia il lettore davanti a un numero che nessuna delle righe mostrate
+    # spiega. Restava muta l'intera spiegazione di 11 presenze sulla 25-26.
+    "defensive_value": (SIGNAL, "buona prestazione difensiva d'insieme",
+                        "prestazione difensiva d'insieme sottotono"),
     # EVENT — counted exactly, (singular, plural)
     "shots_goal": (EVENT, "un gol", "gol"),
     "big_chance_created": (EVENT, "un'occasione nitida creata", "occasioni nitide create"),
@@ -151,16 +211,24 @@ LABELS = {
 # per-feature ledger who finds "una o più conclusioni pericolose +0.58" in the
 # summary and no such row in the table below is entitled to suspect one of the two
 # is wrong; the rows carrying this name are the ones that add up to it.
+# La QUARTA frase e' quella di chi non ci ha nemmeno provato. Il netto della
+# famiglia si sceglieva col solo segno, e con tutti i tiri a zero il segno e'
+# negativo — la media di ruolo e' positiva — per cui la pagina diceva "una o piu'
+# occasioni fallite" a chi non aveva tirato mai: il 43,1% delle spiegazioni della
+# 25-26. Il valore ZERO non e' un esito peggiore, e' un esito ASSENTE, e va detto
+# come tale: la penalizzazione c'e' davvero (il modello addebita il non-tiro) e
+# tacerla la nasconderebbe dentro "altre voci".
 MERGES = [
     (("sga_post", "xg_shots", "shots_on_target", "shots", "shots_blocked",
       "shots_off"),
      "una o più conclusioni pericolose", "una o più occasioni fallite",
-     "conclusioni"),
+     "conclusioni", "nessuna conclusione tentata"),
     (("dribbles_won", "dribbles_attempted"),
-     "uno o più dribbling riusciti", "uno o più dribbling falliti", "dribbling"),
+     "uno o più dribbling riusciti", "uno o più dribbling falliti",
+     "dribbling", "nessun dribbling tentato"),
 ]
 # {feature: family name} — the same table read the other way round.
-MERGE_FAMILY = {k: name for keys, _pos, _neg, name in MERGES for k in keys}
+MERGE_FAMILY = {k: name for keys, _pos, _neg, name, _none in MERGES for k in keys}
 
 
 # Come si chiamano, nel REGISTRO ESTESO, le voci che la frase parlata non nomina
@@ -168,14 +236,12 @@ MERGE_FAMILY = {k: name for keys, _pos, _neg, name in MERGES for k in keys}
 # legge la tabella tecnica del tuner ("proxy sintetico"), queste vanno sotto gli
 # occhi di chi ha appena aperto il dettaglio di un voto.
 #
-# ``defensive_value`` e' il caso che ha motivato tutto questo: puo' essere la voce
-# PIU' GRANDE del voto di un difensore (0.28 su 1.37, il 20%, in Rrahmani di
-# Genoa-Napoli) e finiva sempre e solo dentro "altre voci", perche' senza una riga
-# in LABELS ``_phrase`` non ha niente da dire. Nel registro deve avere un nome, e
-# il nome deve ammettere che cos'e': un indice di chi ci fornisce i dati, non una
-# cosa che contiamo noi.
+# ``defensive_value`` e' il caso che ha motivato tutto questo, ed e' uscito di qui
+# il 24/08/2026: la soluzione vera non era battezzarlo nel registro, era dargli una
+# frase parlata (v. LABELS) — se e' la voce piu' grande del voto di un difensore
+# deve stare nel riassunto, non sotto la riga ripiegata. Qui resta chi una frase
+# non ce l'ha e nel registro un nome deve averlo lo stesso.
 LEDGER_LABELS = {
-    "defensive_value": "valore difensivo (indice del fornitore)",
     # Il lato negativo del SIGNAL e' None per scelta (creare poco non e' una
     # notizia da dire ad alta voce): nel registro la riga c'e' lo stesso, quindi
     # serve il sostantivo neutro, che col numero negativo accanto si legge bene.
@@ -211,10 +277,59 @@ def _phrase(role: str, key: str, term_delta: float, raw_value: float) -> str | N
         # "una o più ..." — the noun carries the sense; the negative side may be
         # None (nothing worth saying, e.g. below-average creation).
         return entry[1] if more else entry[2]
+    # COUNT a ZERO: non e' "poco", e' NIENTE — e i due lati non si dicono allo
+    # stesso modo.
+    #
+    # Se lo zero pesa CONTRO (una cosa utile che non ha fatto) va nominato per quel
+    # che e': "nessun duello vinto". "pochi duelli vinti" implica che qualcuno
+    # l'abbia vinto, e chi va a cercarlo nel tabellino non lo trova.
+    #
+    # Se invece lo zero pesa A FAVORE (una cosa dannosa che non ha fatto) si TACE.
+    # "Bene: pochi duelli persi" a chi non e' mai entrato in un duello lo elogia per
+    # un merito che non ha: sulla 25-26 era l'UNICO lato positivo di 449
+    # spiegazioni. I punti restano, e finiscono in "altre voci" come ogni voce non
+    # mostrata, quindi il conto torna lo stesso.
+    if abs(raw_value) < 0.005:
+        if term_delta > 0:
+            return None
+        none_phrase = COUNT_NONE.get(key)
+        if none_phrase:
+            return none_phrase
     # COUNT: absolute quantifier vs the role average (the implicit yardstick).
     label, quant = entry[1], entry[2]
     high, low = QUANTIFIERS.get(quant, QUANTIFIERS["mp"])
     return f"{high if more else low} {label}"
+
+
+def creation_detail(phrase: str, big_chances: float, xa: float = 0.0) -> str:
+    """Ancora la riga della xA a un numero che sta nel tabellino, nei due versi.
+
+    ``expected_assists`` e' un SIGNAL, quindi si dice "una o piu' occasioni create":
+    vago per necessita', perche' un valore atteso non ha un intero da contare. Ma
+    ``big_chance_created`` un intero ce l'ha, ed e' il fatto piu' verificabile della
+    partita di chi crea. Il suo peso ZERO (v. TOTAL_WEIGHTS) dice quanto quel dato
+    VALE nel voto, non se possiamo USARLO per raccontarlo: i punti della riga
+    restano interamente della xA, il conteggio la rende leggibile. Va in parentesi
+    proprio per questo — e' una precisazione, non un secondo addendo.
+
+    IL VERSO NEGATIVO distingue due partite che la sola xA confonde: tanti palloni
+    discreti e una palla-gol vera valgono uguale in valore atteso e non sono la
+    stessa prestazione. Si dice SOLO sopra ``ASSIST_LOW_XA``, cioe' dove la riga
+    della creazione e' gia' sostanziosa e l'assenza e' una notizia: 613 presenze
+    sulla 25-26, il 3.4% del totale, contro le 609 che ricevono il conteggio. Sotto
+    quella soglia "nessuna nitida" non informa nessuno, e resta taciuto.
+
+    Il gol che ne e' nato NON si nomina, in nessuno dei due versi: la qualita'
+    dell'occasione e' una proprieta' del passaggio, l'esito no, e metterlo sulla
+    riga del merito confonderebbe la distinzione su cui il modello e' costruito."""
+    if not phrase:
+        return phrase
+    n = int(round(big_chances or 0))
+    if n >= 1:
+        return f"{phrase} ({'una nitida' if n == 1 else f'{n} nitide'})"
+    if xa >= ASSIST_LOW_XA:
+        return f"{phrase} (nessuna nitida)"
+    return phrase
 
 
 def _never_happened(entry) -> str:
@@ -248,17 +363,23 @@ def ledger_phrase(role: str, key: str, term_delta: float, raw_value: float) -> s
     entry = LABELS.get(key)
     if entry is not None and entry[0] == EVENT:
         return _never_happened(entry)
+    # Uno ZERO che il riassunto ha taciuto (lodare un'assenza e' rumore) nel
+    # registro la riga ce l'ha lo stesso, e li' si chiama col suo nome invece che
+    # col sostantivo nudo: "nessun duello perso" batte "duelli persi 0".
+    if (entry is not None and entry[0] == COUNT and abs(raw_value) < 0.005
+            and key in COUNT_NONE):
+        return COUNT_NONE[key]
     return LEDGER_LABELS.get(key) or readable_label(key) or key
 
 
-# Features that carry weight but are never NAMED in a sentence, so they have no
-# LABELS entry: one is a provider composite nobody would recognise from a pagella
-# ("tanto valore difensivo" explains nothing), the other only ever appears inside a
-# merged shooting line. A table that lists every feature still has to say what they
-# are, so they get a description here — and only here, which is why this is not in
-# LABELS: an entry there would put them into the spoken explanation too.
+# Come si chiamano nella TABELLA TECNICA, dove accanto stanno il valore, il peso e
+# la sigma: li' serve un NOME, non un giudizio. ``defensive_value`` una frase
+# parlata adesso ce l'ha (v. LABELS), ma "buona prestazione difensiva d'insieme"
+# come intestazione di riga risponderebbe a una domanda invece di dire di che cosa
+# si sta leggendo il peso; ``shots_off`` una frase parlata non ce l'ha affatto,
+# perche' compare solo dentro la riga unita delle conclusioni.
 TABLE_ONLY_LABELS = {
-    "defensive_value": "indice difensivo del provider (proxy sintetico)",
+    "defensive_value": "indice difensivo sintetico",
     "shots_off": "tiri fuori",
 }
 
@@ -306,24 +427,60 @@ def assist_note(assists: int, xa: float, big_chances: float) -> str:
     Not a claim about the finisher — measured on the case that prompted it (McKennie,
     g14) the scorer's own shot quality was only +0.67σ, so "he did the exceptional
     thing" would be inventing a merit. What IS measurable is the pass: an xA of 0.05
-    is a ball that did not, by itself, make a goal likely."""
+    is a ball that did not, by itself, make a goal likely.
+
+    IL NUMERO E' DI TUTTA LA PARTITA, non dei passaggi da assist — per questo la
+    frase lo dice di "i suoi passaggi" e non li' accanto all'assist. Nel gruppo che
+    riceve questa nota il 75% ha passaggi chiave OLTRE agli assist, mediana 3 contro
+    1: isolare la xA del singolo passaggio da assist non si puo', ``MatchShot`` non
+    porta il passatore.
+
+    LA NOTA SIMMETRICA E' STATA TOLTA il 25/08/2026, con la ritaratura. Diceva che
+    il passaggio valeva ma "non risulta un'occasione nitida", e aveva senso finche'
+    ``big_chance_created`` pesava: era la voce mancante che spiegava un credito
+    dimezzato. Ora quel peso e' ZERO — la creazione la leggono xA e ``key_passes``,
+    che un Diouf ce li ha — quindi non c'e' piu' niente che non abbia pagato, e la
+    nota avrebbe spiegato un meccanismo che non esiste. Il caso che la motivava
+    (Inter-Monza, 2 assist e 6.0) adesso e' 6.5 senza bisogno di scuse."""
+    # ``big_chances > 0`` continua a zittire la nota, ma per un'ALTRA ragione da
+    # quando quel peso e' zero: non piu' "il voto l'ha gia' pagata", bensi' che le
+    # due prove si contraddicono. Se chi fornisce i dati ha riconosciuto
+    # un'occasione nitida, dare del pallone "di poco valore" allo stesso passaggio
+    # sceglie una delle due prove e nasconde l'altra. Sono 131 presenze sulle 300
+    # con assist e xA bassa: meglio tacere che scegliere.
     if assists < 1 or big_chances > 0 or xa >= ASSIST_LOW_XA:
         return ""
-    # Short on purpose: this rides inside ``to_sentence``, which is one line in the
-    # app's match detail, and a player who also scored an own goal already has two
-    # clauses ahead of it.
-    return (f"L'assist nasce da un passaggio di basso valore atteso (xA {xa:.2f}): "
-            f"conta come bonus, non nel voto base.")
+    # Corta apposta: viaggia dentro ``to_sentence``, che nel dettaglio partita e'
+    # una riga sola, e chi ha fatto anche autogol ha gia' due clausole davanti.
+    #
+    # NON dice piu' "conta come bonus, non nel voto base": con ``key_passes`` a
+    # 0.100 il voto base quel passaggio lo paga (un passaggio chiave vale +0.055
+    # per un CEN a 90', tre ne valgono +0.236). La negazione secca era vera quando
+    # la creazione stava sulla sola xA, e con la ritaratura del 25/08/2026 non lo e'
+    # piu'. Quel che resta vero, ed e' il punto, e' COSA legge il voto base.
+    head = f"I suoi passaggi valgono {xa:.2f} di xA"
+    if assists == 1:
+        return (f"{head}: l'assist nasce da un pallone di poco valore, e il voto "
+                f"base legge quello, non il gol che ne e' nato.")
+    return (f"{head}: gli assist nascono da palloni di poco valore, e il voto "
+            f"base legge quelli, non i gol che ne sono nati.")
 
 
 def readable_label(key: str) -> str:
     """The feature's name in words, for a table that also shows its technical name.
 
     Deliberately the NOUN and not the phrasing ``_phrase`` builds: a sentence wants
-    "tanti duelli vinti", a table column wants "duelli vinti"."""
+    "tanti duelli vinti", a table column wants "duelli vinti".
+
+    TABLE_ONLY_LABELS ha la precedenza dove c'e': una feature puo' avere una frase
+    parlata E un nome tecnico diversi, e in una colonna di tabella il giudizio
+    ("buona prestazione difensiva d'insieme") non e' un nome, e' una risposta."""
+    table = TABLE_ONLY_LABELS.get(key)
+    if table:
+        return table
     entry = LABELS.get(key)
     if entry is None:
-        return TABLE_ONLY_LABELS.get(key, "")
+        return ""
     return entry[2] if entry[0] == EVENT else entry[1]
 
 
@@ -470,7 +627,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                 "other_tiny": {"count": 0, "points": 0.0},
                 "assist_note": "", "base": VOTE_CENTER,
                 "other_points": 0.0, "other_count": 0, "minutes": minutes,
-                "low_minutes": False, "note": ""}
+                "low_minutes": False, "flat": False, "note": ""}
 
     mean_terms = averages.get(role, {})
     # Same two shrinkages the vote applies: how long he played, and — for a keeper —
@@ -490,22 +647,33 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     all_terms = (_all_terms(role, terms, mean_terms, per_unit, totals, minutes,
                             exposure) if full else [])
 
+    # The raw value the phrasing quotes comes from the SAME builder the index uses,
+    # so a derived feature (sga_post) or the exposure is quoted as what it actually
+    # is, not looked up in a totals dict that has never heard of it. Letto PRIMA
+    # delle famiglie, che ne hanno bisogno: senza guardare i valori non si distingue
+    # "ha tirato male" da "non ha tirato".
+    raw_values = raw_feature_values(totals, minutes, exposure,
+                                    gk=role == Player.ROLE_GK)
+
     scored = []
     # Collapse the overlapping feature families (see MERGES) into one net line each.
     # ``family`` travels with the line so a reader can find the rows it stands for.
-    for group, label_pos, label_neg, family in MERGES:
+    for group, label_pos, label_neg, family, label_none in MERGES:
         present = [k for k in group if k in points_by_key]
         net = sum(points_by_key.pop(k, 0.0) for k in group)
         if abs(net) >= 1e-9:
-            scored.append((net, group[0], label_pos if net > 0 else label_neg,
-                           (family, len(present))))
-    # The raw value the phrasing quotes comes from the SAME builder the index uses,
-    # so a derived feature (sga_post) or the exposure is quoted as what it actually
-    # is, not looked up in a totals dict that has never heard of it.
-    raw_values = raw_feature_values(totals, minutes, exposure,
-                                    gk=role == Player.ROLE_GK)
+            # Il segno non basta: se in tutta la famiglia non c'e' un solo tentativo,
+            # il netto e' negativo soltanto perche' il pari ruolo medio qualcosa fa.
+            # Vedi la nota su MERGES.
+            attempted = sum(abs(raw_values.get(k, 0.0)) for k in group)
+            phrase = (label_none if attempted < 0.005
+                      else label_pos if net > 0 else label_neg)
+            scored.append((net, group[0], phrase, (family, len(present))))
     for key, pts in points_by_key.items():
         phrase = _phrase(role, key, pts, raw_values.get(key, 0.0))
+        if key == "expected_assists" and pts > 0:
+            phrase = creation_detail(phrase, raw_values.get("big_chance_created", 0.0),
+                                     raw_values.get("expected_assists", 0.0))
         scored.append((pts, key, phrase, None))
 
     # The subtotal is the vote's OWN raw value, computed exactly as the scorer
@@ -527,9 +695,9 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # The key travels with the line (it used to be dropped here): the ledger below
     # lists the entries that did NOT make it into the summary, and without an
     # identity there is no way to tell which ones those are.
-    named = [(pts, key, ph, fam) for pts, key, ph, fam in scored
-             if ph and abs(pts) >= 0.05]
-    named.sort(key=lambda x: x[0], reverse=True)
+    nameable = [(pts, key, ph, fam) for pts, key, ph, fam in scored if ph]
+    nameable.sort(key=lambda x: x[0], reverse=True)
+    named = [x for x in nameable if abs(x[0]) >= 0.05]
     # One-sided at the extremes (see POSITIVES_MIN_VOTE / NEGATIVES_MAX_VOTE): a bad
     # game's "positives" are faint praise, a fine game's "negatives" are nitpicks.
     # Suppressed items fold into "altre voci", so the breakdown still reconciles.
@@ -538,6 +706,23 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     negatives = ([] if voto > NEGATIVES_MAX_VOTE
                  else [x for x in (named[-top:][::-1]) if x[0] < 0])
     shown = positives + negatives
+
+    # PARTITA PIATTA: nessuna voce arriva al ventesimo di voto, e il pannello
+    # restava muto — 113 volte sulla 25-26, fra cui portieri che avevano giocato
+    # novanta minuti. Il silenzio non e' piu' onesto della soglia: si mostrano le
+    # due voci piu' grandi qualunque sia la loro taglia, e ``flat`` dice a chi
+    # scrive la frase di NON spacciarle per un giudizio (v. ``to_sentence``).
+    # GUARDIA: "piatta" vuol dire che non c'e' NIENTE di grosso, non che il pezzo
+    # grosso non ha un nome. ``defensive_value`` non e' nominabile in una frase e
+    # puo' valere il 20% del voto di un difensore: promuovere al suo posto due voci
+    # da 0,01 direbbe che la partita e' stata insignificante mentre il voto lo
+    # muoveva quella. In quel caso si tace come prima, e la voce sta nel registro
+    # col suo nome — v. LEDGER_LABELS.
+    flat = not shown and not any(abs(pts) >= 0.05 for pts, _k, _ph, _f in scored)
+    if flat:
+        positives = [x for x in nameable[:1] if x[0] > 0]
+        negatives = [x for x in nameable[-1:] if x[0] < 0]
+        shown = positives + negatives
 
     def entry(pts, label, family=None, kind=None):
         """One visible line. ``family`` is set when the line is the NET of several
@@ -618,9 +803,12 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                 # portano il nome e i punti, che e' quanto si puo' dire con onesta'.
                 count = (totals.get(key, 0.0) if key in per90_keys
                          else raw_values.get(key, 0.0))
-                event_that_did_not_happen = (
-                    (LABELS.get(key) or (None,))[0] == EVENT and round(count) == 0)
-                if abs(count - round(count)) < 0.01 and not event_that_did_not_happen:
+                # "nessun gol (0)" e "nessun duello aereo perso (0)" hanno lo
+                # zero scritto due volte: quando la frase DICE gia' che non e'
+                # successo, il numero accanto e' rumore.
+                already_says_zero = round(count) == 0 and (
+                    (LABELS.get(key) or (None,))[0] == EVENT or key in COUNT_NONE)
+                if abs(count - round(count)) < 0.01 and not already_says_zero:
                     # "nessun gol" non ha bisogno di uno zero accanto: lo zero e'
                     # gia' tutta la frase.
                     row["value"] = int(round(count))
@@ -632,6 +820,14 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     low = minutes < SHRINKAGE_MINUTES * 2
     note = ("Con pochi minuti giocati ogni voce pesa meno: il voto resta piu' "
             "vicino al 6.") if low else ""
+    if flat:
+        # Le due voci promosse sono minuscole per costruzione. Il pannello le
+        # mostra senza sapere quanto valgono, e senza questa riga sembrerebbero i
+        # motivi del voto invece che il poco che c'e' da leggere. Viaggia in
+        # ``note``, che il dettaglio partita gia' stampa.
+        note = ((note + " ") if note else "") + (
+            "Nessuna voce si stacca dalla media del suo ruolo: quelle qui sopra "
+            "sono le piu' grandi di una prestazione senza sporgenze.")
     if evidence_weight < 1.0:
         # A keeper who faced almost nothing: say so, or the muted breakdown reads
         # as a bug. This is the same statement the vote itself is making.
@@ -662,6 +858,9 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         "voto": voto,
         "minutes": minutes,
         "low_minutes": low,
+        # nessuna voce sopra la soglia: le due mostrate sono le piu' grandi di una
+        # prestazione senza sporgenze, non i motivi del voto
+        "flat": flat,
         "note": note,
     }
 
@@ -671,7 +870,13 @@ def to_sentence(explanation: dict) -> str:
     def names(entries):
         return ", ".join(e["label"] for e in entries)
     pos, neg = explanation.get("positives", []), explanation.get("negatives", [])
-    if pos and neg:
+    if explanation.get("flat") and (pos or neg):
+        # Niente supera la soglia: dire "Bene: ..." su un centesimo di voto
+        # spaccerebbe per giudizio quello che e' rumore. Si nomina la prestazione
+        # per quello che e', e le voci si offrono come il poco che c'e' da leggere.
+        core = ("Prestazione in linea con la media del suo ruolo; le voci che piu' "
+                f"si avvicinano a spostarla: {names(pos + neg)}.")
+    elif pos and neg:
         core = f"Bene: {names(pos)}. Male: {names(neg)}."
     elif pos:
         core = f"Bene: {names(pos)}."
