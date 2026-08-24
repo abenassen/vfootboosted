@@ -231,12 +231,37 @@ class ClassicScoringTest(SimpleTestCase):
         team = score_team(starters, [], rs)
         self.assertEqual(team["sv_filled"], [6])
 
-    def test_a_vacant_slot_is_not_filled(self):
-        """Non e' un buco in una squadra schierata: e' una squadra non schierata."""
+    def test_a_vacant_slot_is_filled_like_any_other_hole(self):
+        """IL POSTO DEL CEDUTO. Prima restava scoperto — «non e' un buco in una
+        squadra schierata, e' l'assenza di una» — e la conseguenza era doppia: niente
+        voto d'ufficio E un difensore in meno sotto il cancello del modificatore, che
+        quindi saltava. Cinque punti e un gol per una dimenticanza amministrativa,
+        misurati su una lega vera. Ora e' un senza voto come gli altri; chi lo vuole
+        piu' severo spegne il voto d'ufficio di lega."""
         rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
         starters = legal_xi(6.0)
         starters[5] = {**line(6, "MID", 0, sv=True), "vacant": True}
         team = score_team(starters, [], rs)
+        self.assertEqual(team["sv_filled"], [6])
+        self.assertEqual(team["base_total"], 64.0)   # 10 x 6.0 + il voto d'ufficio
+
+    def test_a_vacant_slot_is_covered_by_the_bench_like_any_other_sv(self):
+        """IL VENDUTO RIMASTO IN FORMAZIONE. Chi cede un giocatore e non rischiera
+        se la ritrova ereditata col posto vuoto, e quel posto lo copre la panchina
+        come qualunque senza voto: il divieto di scavalco vincola le MODIFICHE
+        dell'allenatore, non il motore che assegna i punti, quindi un panchinaro
+        dietro a un chiodo entra lo stesso quando i conti si fanno.
+
+        Costa un cambio del budget, non l'intero slot — che e' il punto: senza
+        questo la dimenticanza si pagherebbe due volte."""
+        rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(6.0)
+        starters[5] = {**line(6, "MID", 0, sv=True), "vacant": True}
+        team = score_team(starters, [line(90, "MID", 7.0)], rs)
+        self.assertEqual([(s["out"]["player_id"], s["in"]["player_id"])
+                          for s in team["substitutions"]], [(6, 90)])
+        self.assertEqual(team["base_total"], 67.0)   # 10 x 6.0 + il subentrato a 7.0
+        # E il voto d'ufficio resta fuori anche qui: non serve, il posto e' coperto.
         self.assertEqual(team["sv_filled"], [])
 
     def test_a_pending_starter_is_not_a_hole(self):

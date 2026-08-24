@@ -238,9 +238,10 @@ def _sv_line(pid: int, lineup_role: str, name: str | None = None,
     must NOT cover it — a postponement is not a performance.
 
     ``vacant`` marks the third: the slot holds somebody this team no longer has, in
-    a lineup it never submitted for this round. It is scored as an empty slot, and
-    the league's voto d'ufficio deliberately does not cover it (classic_scoring.
-    _fill_unresolved): a hole is what happens to a team that fielded one.
+    a lineup it never submitted for this round. Da qui in giu' e' un senza voto come
+    gli altri — panchina e voto d'ufficio lo coprono entrambi (v. classic_scoring.
+    _fill_unresolved, che spiega perche' non lo si punisce due volte). Il marchio
+    resta perche' dice una cosa vera e diversa: li' non c'e' nessuno da giudicare.
     """
     return {
         "player_id": pid, "name": name or str(pid), "lineup_role": lineup_role,
@@ -312,7 +313,8 @@ def compose_team_lines(
     ``vacant`` are slots to empty regardless — used ONLY when falling back to an
     older lineup the manager never submitted for this matchday: that one is the
     admin's substitute, not the manager's word, so it is right to strip from it the
-    players the team no longer has.
+    players the team no longer has. Svuotato il posto, quel che ne segue e' il
+    trattamento di un senza voto qualunque.
     """
     starter_ids = ([gk_id] if gk_id else []) + list(outfield_ids)
     pending = pending or set()
@@ -323,12 +325,15 @@ def compose_team_lines(
     def line_for(pid: int) -> dict:
         role = role_map.get(pid, "MID")
         name = names.get(pid)
-        if pid in vacant:
-            return _sv_line(pid, role, name, vacant=True)
         if pid in office:
             # The league has ruled on this match: the ruling wins over both the
-            # missing data and any partial data the provider may have shipped.
+            # missing data and any partial data the provider may have shipped — e
+            # anche sul posto del ceduto, che da quando e' un senza voto come gli
+            # altri non ha ragione di essere l'unico fuori dalla portata di una
+            # decisione della lega.
             return _office_line(pid, role, office[pid], name)
+        if pid in vacant:
+            return _sv_line(pid, role, name, vacant=True)
         if pid in pending:
             # Pending BEFORE the index on purpose: a match that is finished but whose
             # data has not stabilised can already have appearances imported, so a line

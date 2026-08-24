@@ -191,21 +191,27 @@ def _fill_unresolved(s_by: dict, unresolved: list[int], vote: float) -> list[int
     because only another keeper will do) is the difference between a bad weekend and
     a lost one. A league may decide that a hole is worth 3 or 4 rather than nothing.
 
-    Two slots are deliberately left empty even so:
+    UN SOLO caso resta deliberatamente scoperto: la riga la cui partita si sta
+    ancora GIOCANDO (``in_progress``). Mid-round every player on the pitch is
+    momentarily voteless, and filling those would show a team "leading" on eleven
+    office votes at the fifth minute, then sliding as the real ones arrive. A hole is
+    only a hole once the match that made it is over.
 
-    * a line whose match is still BEING PLAYED (``in_progress``). Mid-round every
-      player on the pitch is momentarily voteless, and filling those would show a
-      team "leading" on eleven office votes at the fifth minute, then sliding as the
-      real ones arrive. A hole is only a hole once the match that made it is over.
+    ``in_progress`` e non ``provisional``, che e' la stessa frase detta bene: fra il
+    fischio finale e la conferma del fornitore passa un'ora, e in quell'ora la
+    partita che ha fatto il buco E' finita — il buco e' un buco e il voto d'ufficio
+    deve coprirlo, invece di arrivare con un'ora di ritardo.
 
-      ``in_progress`` e non ``provisional``, che e' la stessa frase detta bene: fra
-      il fischio finale e la conferma del fornitore passa un'ora, e in quell'ora la
-      partita che ha fatto il buco E' finita — il buco e' un buco e il voto
-      d'ufficio deve coprirlo, invece di arrivare con un'ora di ritardo.
-    * a VACANT slot — a player the team no longer has, in a lineup the manager never
-      submitted for this round (see ``build_team_lines``). That is not a hole in a
-      team that was fielded; it is the absence of one, and paying for it would pay a
-      manager for not turning up.
+    IL POSTO DEL CEDUTO INVECE SI COPRE, dal 23/08/2026, e prima no. Chi vende un
+    giocatore e non rischiera se lo ritrova in una formazione ereditata col posto
+    vuoto (``vacant``), e l'argomento per non pagarlo era che quello non e' un buco
+    in una squadra schierata ma l'assenza di una. Argomento giusto, conseguenza
+    sproporzionata: quel posto non prendeva il voto d'ufficio E restava sotto il
+    cancello del modificatore difesa, che quindi saltava. Misurato su una lega vera
+    (voto d'ufficio 3,0, cancello «con voto»): 61,5 contro 66,5 e un gol di
+    differenza, per una dimenticanza amministrativa. La regola dice di voler punire
+    una volta, non due. Ora e' un senza voto come gli altri; una lega che lo voglia
+    piu' severo spegne il voto d'ufficio, che e' la leva che ha.
 
     Returns the player_ids actually filled (empty when the league has it off).
     """
@@ -214,7 +220,7 @@ def _fill_unresolved(s_by: dict, unresolved: list[int], vote: float) -> list[int
     filled: list[int] = []
     for pid in unresolved:
         line = s_by.get(pid)
-        if line is None or line.get("in_progress") or line.get("vacant"):
+        if line is None or line.get("in_progress"):
             continue
         # ``office``: the SAME channel an admin ruling travels on (_office_line),
         # so everything downstream — no bonus/malus, no clean sheet, the "ufficio"
