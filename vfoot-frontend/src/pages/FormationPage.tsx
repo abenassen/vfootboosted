@@ -555,10 +555,21 @@ export default function FormationPage() {
    *  una scortesia dell'interfaccia — di lì la formazione non si completerebbe più
    *  in nessun modo: l'unico che potrebbe tornare fra gli undici senza scavalcare
    *  sarebbe lui stesso, e sarebbe tornare al punto di partenza. */
+  /** CHI, DALLA PANCHINA, POTREBBE DAVVERO ENTRARE ADESSO: libero e senza nessun
+   *  chiodo davanti. È l'insieme da cui si riempie qualunque posto lasciato vuoto —
+   *  da un tocco o da un cambio di modulo — e a giornata cominciata può benissimo
+   *  essere vuoto anche con quattordici panchinari. */
+  const promotable = benchIds.filter(
+    (id) => !lockedIds.has(id) && frozenAhead(benchIds, id) == null,
+  );
   const demotionReason = (): string | null =>
     benchIds.length && lockedIds.has(benchIds[0])
-      ? `Non può andare in panchina: il primo posto è di ${nameOf(benchIds[0])}, `
-        + 'la cui partita è iniziata, e davanti a lui non c’è posto.'
+      // La CONSEGUENZA, non il meccanismo. Prima qui c'era scritto di chi fosse il
+      // primo posto in panchina — un compagno che con questo giocatore non c'entra
+      // niente, e chi leggeva si chiedeva giustamente cosa c'entrasse.
+      ? 'Non c’è niente da guadagnare a toglierlo: in panchina sono tutti dietro a '
+        + 'qualcuno che ha già giocato, quindi il suo posto potrebbe riprenderlo solo '
+        + 'lui. La formazione è ormai obbligata.'
       : null;
 
   const blockReasonFor = (p: TeamLineupPlayer) =>
@@ -903,6 +914,36 @@ export default function FormationPage() {
         return `Non puoi passare a ${moduleName(m)}: hai ${frozen} ${ROLE_WORD_PLURAL[role]} `
           + 'con la partita già iniziata, e restano dove sono.';
       }
+      /** ...E NON SI PUÒ NEMMENO ALLARGARE UN REPARTO SENZA QUALCUNO CHE LO RIEMPIA.
+       *
+       *  L'altra metà della stessa domanda, e mancava. Il controllo qui sopra guarda
+       *  chi il modulo vorrebbe FUORI; questo guarda chi vorrebbe DENTRO, che a
+       *  giornata cominciata non è affatto detto ci sia: un panchinaro entra solo se
+       *  è libero e non ha nessun chiodo davanti.
+       *
+       *  Il caso vero (Pagnottelle Kombuccia, giornata 1): 4-4-2 con dieci congelati
+       *  e un solo centrocampista libero. Il 4-3-3 sembrava disponibile — nessun
+       *  reparto da stringere sotto i suoi congelati — e applicandolo mandava in
+       *  panchina l'unico libero aprendo un posto da attaccante che nessuno poteva
+       *  prendere: i due attaccanti in panchina avevano già giocato e il terzo era
+       *  dietro a sei di loro. Restava un undici a dieci, da disfare a mano. È lo
+       *  stesso difetto che la panchina non ha più, un piano più su. */
+      const free = starterIds.filter(
+        (id) => !lockedIds.has(id) && byId.get(id)?.role === role,
+      ).length;
+      const holes = Math.max(0, target[role] - frozen - free);
+      if (!holes) continue;
+      const ready = promotable.filter((id) => byId.get(id)?.role === role).length;
+      if (ready >= holes) continue;
+      const need = holes === 1
+        ? `ti servirebbe un ${ROLE_WORD[role]} in più`
+        : `ti servirebbero ${holes} ${ROLE_WORD_PLURAL[role]} in più`;
+      const inBench = benchIds.some((id) => byId.get(id)?.role === role);
+      return `Non puoi passare a ${moduleName(m)}: ${need} e `
+        + (inBench
+          ? `nessuno di quelli che hai in panchina può entrare — ha già giocato, `
+            + 'o è dietro a chi ha già giocato.'
+          : 'non ne hai altri in panchina.');
     }
     return null;
   };
