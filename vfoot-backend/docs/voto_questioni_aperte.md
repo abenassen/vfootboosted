@@ -1101,6 +1101,101 @@ SofaScore −0.004): si sta pagando il suo peso, non è stato toccato. La tensio
 da nominare: quel numero il fornitore lo calcola SAPENDO di quel duello, e lo
 valuta comunque 0.55.
 
+### `dribbled_past` per ruolo, e i due limiti che ha fatto vedere
+
+**Prima eccezione al vettore unico di pesi** (`ROLE_WEIGHTS`): DIF −0.045, CEN 0,
+ATT 0. La previsione calcistica — essere saltati e' un evento di mestiere per un
+difensore, un non-evento per un attaccante in ripartenza — **regge nei dati
+grezzi**, e controllata per il duello perso ORDINARIO di cui e' sottoinsieme:
+
+| per 1σ | DIF | CEN | ATT |
+|---|---|---|---|
+| Redazione | **−0.040** ±0.011 | +0.004 | **+0.026** ±0.012 |
+| Statistico | **−0.035** ±0.012 | −0.007 | +0.003 |
+| SofaScore | −0.006 | +0.010 | +0.008 |
+
+Le due pagelle umane lo addebitano **solo al difensore**, con 3-4σ di margine;
+per l'attaccante la Redazione ha perfino il segno positivo. SofaScore non lo
+distingue per nessuno. Frequenza: 0.50/partita per un DIF (14.9% dei suoi duelli
+persi), 0.33 per un ATT (6.0%).
+
+**Ma nel modello non paga**, ed e' la seconda meta' della lezione. Lo spettro fra
+peso globale, peso per ruolo e azzeramento totale e' **0.003 di correlazione**, e
+l'arm nominalmente migliore sulla Redazione era azzerare la feature (0.6475
+contro 0.6445). Nessun arm muove un voto dei casi. La ragione: `duels_lost` pesa
+da noi −0.102 di voto per σ contro il −0.034 della Redazione, **tre volte** — il
+posto che il giudice riempie col dribbling subito, noi lo abbiamo gia' occupato
+col duello perso. Isolato, il peso per ruolo muove 7 voti su 288 (quasi tutti
+centrocampisti) e vale Redazione +0.0012, Statistico −0.0018, SofaScore −0.0005.
+Tenuto per il senso calcistico, non per la misura.
+
+### LA LEZIONE DELLA GIORNATA: un peso ORDINA, non alza
+
+Chiesto: quanto deve pesare `dribbled_past` sui DIF perche' Gila scenda da 7.0 a
+6.5? Risposta: **−0.30**, cioe' 4.8× il duello perso di cui e' un sottoinsieme.
+E la curva e' piattissima — da −0.045 a −0.20 (4.4×) Gila perde 0.14 di voto.
+
+Il motivo e' strutturale e vale per OGNI leva provata oggi: **alzando un peso si
+sposta anche la media di ruolo**. Tutti i difensori saltati scendono insieme, la
+media DIF scende con loro, e chi sta in mezzo alla distribuzione resta dov'era.
+Gila e' saltato UNA volta, che e' la media del ruolo (0.50): nessun peso su
+quella voce lo puo' isolare dai suoi pari. **Per muovere un giocatore singolo
+bisogna che su quella feature sia un caso estremo.**
+
+Lo stesso, in forma piu' forte, su `defensive_value` — dove Gila SI' e' un caso
+estremo (z=2.27 contro media 0.065), ed e' da li' che nasce il suo 7.0 (+0.369 di
+voto da solo, quattro volte il costo del duello con Njie):
+
+| peso `defensive_value` | Gila | **media voto DIF** |
+|---|---|---|
+| 0.100 | 6.912 | **6.002** |
+| 0.085 | 6.880 | **6.003** |
+| 0.070 | 6.846 | **6.002** |
+| 0.025 | 6.72 → 6.5 | — |
+
+**La media dei difensori NON si muove di un millesimo.** La
+z-standardizzazione per ruolo inchioda ogni ruolo al 6 per costruzione e la
+ricalibrazione riassorbe tutto (v. §2decies). Confermato invece che i difensori
+sono il ruolo piu' generoso: media nostra 6.002 contro 5.922 della Redazione
+(**+0.080**), contro +0.018 dei CEN e +0.014 degli ATT. Ma quello e' un problema
+di CENTRO, non di pesi, e l'offset di ruolo e' deciso e chiuso dal 02/08/2026.
+
+### `defensive_value` 0.100 → 0.085 — per esposizione, non per taratura
+
+Deciso il 25/08/2026 sapendo che **costa su tutti e tre i giudici**, e sui soli
+difensori due-tre volte tanto:
+
+| | tutti | solo DIF |
+|---|---|---|
+| Redazione | −0.0033 | −0.0076 |
+| Statistico | −0.0040 | −0.0100 |
+| SofaScore | −0.0051 | −0.0126 |
+
+(a 0.070 il conto raddoppia ancora.) La ragione tenuta e' **l'esposizione**: dare
+il peso piu' alto del modello a un numero che il fornitore calcola con un metodo
+ignoto e che puo' sparire senza preavviso — il RISCHIO OPERATIVO gia' scritto
+accanto a `DEFENSIVE_VALUE_SOURCE` — e' una dipendenza che vale la pena ridurre
+anche pagandola. La ragione SCARTATA, perche' misurata falsa, e' che abbassi il
+livello dei difensori: non lo fa.
+
+### Il conto totale della giornata
+
+Contro il modello in produzione, e scomposto per intervento:
+
+| | Redazione | Statistico | SofaScore | Red DIF |
+|---|---|---|---|---|
+| credito assenza + tentati | −0.0020 | −0.0039 | −0.0080 | −0.0079 |
+| `dribbled_past` per ruolo | +0.0012 | −0.0018 | −0.0005 | −0.0006 |
+| `defensive_value` 0.085 | −0.0033 | −0.0040 | −0.0051 | −0.0076 |
+| **totale** | **−0.0041** | **−0.0097** | **−0.0137** | **−0.0160** |
+
+Da 0.6465 / 0.6766 / 0.7700 a 0.6425 / 0.6669 / 0.7563. **Nessuno dei quattro
+interventi e' stato preso perche' migliorava l'accordo**: tre su quattro lo
+peggiorano e sono stati presi per ragioni di principio (il credito che premiava
+il non-fare, il rapporto del dribbling fuori dalla forbice dei giudici,
+l'esposizione a un numero opaco). E' una scelta legittima ma va vista in blocco,
+non una alla volta.
+
 ---
 
 ## 2bis. La trappola di taratura, che generalizza

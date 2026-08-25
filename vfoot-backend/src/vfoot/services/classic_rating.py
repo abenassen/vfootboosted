@@ -267,7 +267,7 @@ TOTAL_WEIGHTS = {
     "shots_blocked": 0.0278,      # the defence intervened
     # PROVIDER PROXY, and the only one in the model — read the note below before
     # touching it.
-    "defensive_value": 0.10,
+    "defensive_value": 0.085,
 }
 
 # --- The one feature we do not measure ourselves ------------------------------
@@ -306,6 +306,22 @@ TOTAL_WEIGHTS = {
 # 25-26: 99.9% above 15 minutes, 84.6% below (shrinkage already mutes those votes),
 # absent for unused subs — a missing value reads as 0.0, which is the population
 # median, i.e. "an ordinary defensive game" rather than a penalty.
+#
+# 0.10 -> 0.085 il 25/08/2026, e la ragione e' l'ESPOSIZIONE, non la taratura.
+# Dare il peso piu' alto del modello a un numero che il fornitore calcola con un
+# metodo che non conosciamo, e che puo' sparire senza preavviso (v. il RISCHIO
+# OPERATIVO qui sopra), e' una dipendenza che vale la pena ridurre anche pagandola.
+# E si paga: misurato sulla 25-26, 0.10 -> 0.085 costa Redazione -0.0033,
+# Statistico -0.0040, SofaScore -0.0051, e sui soli difensori due-tre volte tanto
+# (-0.0076 / -0.0100 / -0.0126). A 0.070 il conto raddoppia ancora.
+#
+# QUELLO CHE NON FA, e per cui era stato proposto: NON abbassa il livello dei
+# difensori. La loro media resta 6.002 a 0.100, 6.003 a 0.085, 6.002 a 0.070 —
+# la z-standardizzazione per ruolo inchioda ogni ruolo al 6 per costruzione e la
+# ricalibrazione se lo riassorbe. I difensori SONO piu' generosi degli altri ruoli
+# (+0.080 dalla Redazione contro +0.018 dei CEN e +0.014 degli ATT), ma quello e'
+# un problema di CENTRO, e l'offset di ruolo e' stato deciso e chiuso il
+# 02/08/2026. Un peso ordina, non alza.
 DEFENSIVE_VALUE_SOURCE = "defensiveValueNormalized"
 
 # VOLUME / involvement — rescaled to PER-90 (density is the signal: 120 touches in 90'
@@ -350,6 +366,7 @@ PER90_WEIGHTS = {
     "duels_won": 0.0632,
     "duels_lost": -0.0631,          # the losing side of the contests we reward
     "dribbled_past": -0.0341,       # subset of duels_lost: beaten one-on-one is worse
+                                    # ...ma SOLO per un difensore: v. ROLE_WEIGHTS
     "passes_opp_half": 0.0548,      # progression: a pass in the opponent half is worth more
     "aerials_won": 0.0318,
     "aerials_lost": -0.0314,
@@ -404,6 +421,61 @@ PER90_WEIGHTS = {
 }
 
 WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / breakdowns
+
+# --- Pesi PER RUOLO ------------------------------------------------------------
+# Il modello ha UN vettore di pesi per tutti i ruoli di movimento: i ruoli si
+# distinguono solo per la media e la dispersione contro cui l'indice viene
+# z-scorato. Questa tabella e' la prima e unica eccezione, e va tenuta tale — ogni
+# voce qui e' un pezzo di modello che va tarato e verificato tre volte invece di
+# una.
+#
+# ``dribbled_past`` (SofaScore ``challengeLost``, v. la nota sul suo peso): essere
+# saltati uno contro uno e' un evento di mestiere per un difensore e un non-evento
+# per un attaccante che perde una palla in ripartenza. Le due pagelle umane la
+# leggono cosi', e in modo netto. Coefficienti per 1σ sulla 25-26 (n=6829
+# presenze ≥60'), controllati per il duello perso ORDINARIO — di cui questo e' un
+# sottoinsieme — piu' duelli vinti, tocchi, gol e assist:
+#
+#                        DIF               CEN               ATT
+#   Redazione     -0.040 ±0.011     +0.004 ±0.010     +0.026 ±0.012
+#   Statistico    -0.035 ±0.012     -0.007 ±0.010     +0.003 ±0.013
+#   SofaScore     -0.006 ±0.009     +0.010 ±0.007     +0.008 ±0.010
+#
+# Il difensore lo paga con tre-quattro sigma di margine; il centrocampista no;
+# per l'attaccante la Redazione ha perfino il segno positivo. SofaScore non lo
+# distingue per nessuno: addebita il duello perso e si ferma. Quanto capita:
+# 0.50 volte a partita per un DIF (14.9% dei suoi duelli persi), 0.33 per un ATT
+# (6.0%).
+#
+# ONESTA' SULLA MISURA. Il guadagno d'accordo NON si vede: fra il peso globale di
+# prima, questa tabella, e l'azzeramento totale della feature, l'intero spettro e'
+# 0.003 di correlazione, e l'arm nominalmente migliore sulla Redazione era
+# azzerarla del tutto (0.6475 contro 0.6445). Nessun arm muove un solo voto dei
+# casi in esame. La ragione probabile e' che ``duels_lost`` pesa da noi -0.102 di
+# voto per σ contro il -0.034 della Redazione, cioe' tre volte: il posto che il
+# giudice riempie col dribbling subito, noi lo abbiamo gia' occupato col duello
+# perso. Se questa voce va rivista, il numero da guardare e' il LIVELLO di
+# ``duels_lost``, non un altro split per ruolo. Questa tabella e' tenuta per il
+# senso calcistico dell'evento, con la misura che non la contraddice ma nemmeno la
+# conferma — deciso il 25/08/2026.
+ROLE_WEIGHTS = {
+    Player.ROLE_DEF: {"dribbled_past": -0.045},
+    Player.ROLE_MID: {"dribbled_past": 0.0},
+    Player.ROLE_FWD: {"dribbled_past": 0.0},
+}
+
+
+def weights_for_role(role: str) -> dict:
+    """Il vettore dei pesi che l'indice usa per QUESTO ruolo.
+
+    Una funzione sola, perche' il voto e la sua SPIEGAZIONE devono leggere lo
+    stesso vettore: una spiegazione costruita sui pesi globali non tornerebbe col
+    voto che spiega."""
+    if role == Player.ROLE_GK:
+        return GK_WEIGHTS
+    over = ROLE_WEIGHTS.get(role)
+    return {**WEIGHTS, **over} if over else WEIGHTS
+
 
 # Shot-outcome detail lives in the event-level shot map (``MatchShot.shot_type``),
 # not the per-zone features, so it is fetched and merged separately (see
@@ -1434,7 +1506,7 @@ def index_for_role(role: str, totals: dict, minutes: int, exposure: float = 0.0,
     if minutes <= 0:
         return 0.0
     gk = role == Player.ROLE_GK
-    weights = GK_WEIGHTS if gk else WEIGHTS
+    weights = weights_for_role(role)
     scales = feature_scales(gk=gk) if scales is None else scales
     values = raw_feature_values(totals, minutes, exposure, gk=gk)
     idx = sum(w * scored_z(k, values.get(k, 0.0), scales)

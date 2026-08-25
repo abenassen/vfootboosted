@@ -41,6 +41,9 @@ def weights_fingerprint() -> str:
     payload = {
         "total": cr.TOTAL_WEIGHTS, "per90": cr.PER90_WEIGHTS,
         "gk_total": cr.GK_TOTAL_WEIGHTS, "gk_per90": cr.GK_PER90_WEIGHTS,
+        # Per-role overrides change the index of the roles they touch, hence those
+        # roles' mean and spread: same invalidation as any other weight.
+        "role_weights": cr.ROLE_WEIGHTS,
         "exposure": cr.EXPOSURE_WEIGHT, "exposure_lambda": cr.EXPOSURE_LAMBDA,
         "exposure_kernel": cr.EXPOSURE_KERNEL,
         # Changes the exposure the INDEX consumes, hence the per-role mean and spread

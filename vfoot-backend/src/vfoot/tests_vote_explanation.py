@@ -438,10 +438,17 @@ class VoteExplanationTests(SimpleTestCase):
         # clearances is worth barely more than 20 and the vote used to land on the
         # 6.5 boundary by luck. A defender who scores while dominating is the case
         # this test is about.
+        # Rinforzato una seconda volta il 25/08/2026: ``dribbled_past`` e' passato a
+        # -0.045 PER I DIFENSORI (ROLE_WEIGHTS), e 3 dribbling concessi valgono ora
+        # -0.16 invece di -0.12, che bastava a riportare il fixture da 6.780 a
+        # 6.730 — sotto la soglia dell'arrotondamento. La lezione, la stessa della
+        # prima volta: questo fixture deve avere MARGINE, non appoggiarsi al
+        # confine. Ora sta a 6.920, +0.17 sopra.
         average = self._averages("DIF", {"clearances": 8.0, "duels_won": 6.0,
                                          "touches": 60.0})
-        feats = {"clearances": 12.0, "duels_won": 14.0, "touches": 95.0,
-                 "interceptions": 4.0, "shots_goal": 1.0, "xg_on_target": 0.6,
+        feats = {"clearances": 12.0, "duels_won": 18.0, "touches": 95.0,
+                 "interceptions": 4.0, "tackles_won": 5.0,
+                 "shots_goal": 1.0, "xg_on_target": 0.6,
                  "dribbled_past": 3.0}
         e = explain("DIF", feats, 90, self.REFERENCE, average)
         self.assertGreater(e["voto"], 6.5)

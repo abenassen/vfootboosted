@@ -25,6 +25,7 @@ from vfoot.services.classic_rating import (
     GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, SHRINKAGE_MINUTES, TOTAL_WEIGHTS,
     VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, WEIGHTS,
     _feature_z, exposure_z, scored_z, feature_scales, raw_feature_values,
+    weights_for_role,
 )
 from realdata.models import Player
 
@@ -630,7 +631,10 @@ def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0,
     if minutes <= 0:
         return {}
     is_gk = role == Player.ROLE_GK
-    weights = GK_WEIGHTS if is_gk else WEIGHTS
+    # weights_for_role, non WEIGHTS: dal 25/08/2026 un peso dipende dal ruolo
+    # (ROLE_WEIGHTS), e una spiegazione costruita sul vettore globale non
+    # tornerebbe col voto che spiega.
+    weights = weights_for_role(role)
     if scales is None:
         scales = feature_scales(gk=is_gk)
     elif "outfield" in scales or "gk" in scales:
