@@ -9,6 +9,7 @@ from vfoot.services.vote_explanation import (
 )
 from vfoot.services.classic_rating import (
     VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, SHRINKAGE_MINUTES,
+    vote_center_for,
     index_for_role,
 )
 
@@ -117,7 +118,10 @@ class VoteExplanationTests(SimpleTestCase):
         idx = index_for_role("DIF", feats, 90)
         z = (idx - self.REFERENCE["DIF"]["mean"]) / self.REFERENCE["DIF"]["std"]
         w = 90 / (90 + SHRINKAGE_MINUTES)
-        raw = max(VOTE_MIN, min(VOTE_MAX, VOTE_CENTER + VOTE_SPREAD_K * w * z))
+        # vote_center_for: dal 25/08/2026 il centro dipende dal ruolo, e questo
+        # fixture e' un DIF (ROLE_VOTE_CENTER).
+        raw = max(VOTE_MIN, min(VOTE_MAX,
+                                vote_center_for("DIF") + VOTE_SPREAD_K * w * z))
         self.assertAlmostEqual(e["voto"], round(raw * 2) / 2, places=2)
 
     def test_result_nudge_and_red_card_reconcile_and_are_named(self):
@@ -178,7 +182,8 @@ class VoteExplanationTests(SimpleTestCase):
         self.assertTrue(all(t["points"] == 0 and t["index"] == 0 for t in zeroed))
         total = sum(t["points"] for t in e["all_terms"])
         # the merit vote before the adjustments the summary lists separately
-        self.assertAlmostEqual(6.0 + total, e["subtotal"], places=2)
+        # vote_center_for, non 6.0: il centro dipende dal ruolo (ROLE_VOTE_CENTER).
+        self.assertAlmostEqual(vote_center_for("DIF") + total, e["subtotal"], places=2)
         # and it agrees with the summary's own accounting
         shown = sum(c["points"] for c in e["contributions"]) + e["other_points"]
         self.assertAlmostEqual(total, shown, places=2)

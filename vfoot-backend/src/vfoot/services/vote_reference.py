@@ -67,6 +67,10 @@ def weights_fingerprint() -> str:
         # the wrong scale — exactly the state this fingerprint exists to catch.
         "pooled_role_spread": cr.POOLED_ROLE_SPREAD,
         "spread_k": cr.VOTE_SPREAD_K, "center": cr.VOTE_CENTER,
+        # Il centro per ruolo sposta il voto senza toccare l'indice: non cambia la
+        # calibrazione, ma cambia OGNI voto di quel ruolo, quindi l'impronta deve
+        # muoversi o la cache servirebbe un misto.
+        "role_center": cr.ROLE_VOTE_CENTER,
         "extrap_floor": cr.EXTRAP_FLOOR_MINUTES, "shrinkage": cr.SHRINKAGE_MINUTES,
         "min_ref": cr.MIN_MINUTES_REFERENCE,
         # Changes what a keeper's goals-prevented IS when his side scored an own

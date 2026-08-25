@@ -23,7 +23,7 @@ from __future__ import annotations
 from vfoot.services.classic_rating import (
     DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
     GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, SHRINKAGE_MINUTES, TOTAL_WEIGHTS,
-    VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, WEIGHTS,
+    VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, WEIGHTS, vote_center_for,
     _feature_z, exposure_z, scored_z, feature_scales, raw_feature_values,
     weights_for_role,
 )
@@ -703,7 +703,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         return {"positives": [], "negatives": [], "contributions": [],
                 "all_terms": [], "other_terms": [],
                 "other_tiny": {"count": 0, "points": 0.0},
-                "assist_note": "", "base": VOTE_CENTER,
+                "assist_note": "", "base": vote_center_for(role),
                 "other_points": 0.0, "other_count": 0, "minutes": minutes,
                 "low_minutes": False, "flat": False, "note": ""}
 
@@ -773,7 +773,11 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # numbers still reconcile to this subtotal.
     index = sum(terms.values())
     z = (index - ref["mean"]) / ref["std"]
-    raw = max(VOTE_MIN, min(VOTE_MAX, VOTE_CENTER + VOTE_SPREAD_K * weight * z))
+    # vote_center_for, non VOTE_CENTER: il centro dipende dal ruolo (v.
+    # ROLE_VOTE_CENTER), e una spiegazione che partisse dal 6 per tutti mostrerebbe
+    # un "altre N voci" gonfio dell'offset invece del vero resto.
+    centre = vote_center_for(role)
+    raw = max(VOTE_MIN, min(VOTE_MAX, centre + VOTE_SPREAD_K * weight * z))
     # Same order as the scorer: clamp the merit vote, add the (divergence-only)
     # result nudge, the red-card drop and the own-goal drop, then clamp back.
     subtotal = max(VOTE_MIN, min(VOTE_MAX,
@@ -849,7 +853,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                      else "rigore sbagliato")
         contributions.append(entry(penalty_adjustment, pen_label, kind="penalty"))
     shown_rounded = sum(c["points"] for c in contributions)
-    other_points = round(subtotal - VOTE_CENTER - shown_rounded, 2)
+    other_points = round(subtotal - centre - shown_rounded, 2)
 
     # THE LEDGER BEHIND "altre N voci". The summary keeps three lines; on a game
     # that was good at everything the rest is not a tail but most of the vote —
@@ -945,7 +949,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         # vote points per index point for THIS appearance (it carries both
         # shrinkages): the scale that turns the index into the vote.
         "per_unit": round(per_unit, 6),
-        "base": VOTE_CENTER,
+        "base": centre,
         "other_points": other_points,
         "other_count": max(0, len(scored) - len(shown)),
         "subtotal": round(subtotal, 2),

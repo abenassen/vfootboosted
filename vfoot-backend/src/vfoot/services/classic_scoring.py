@@ -293,6 +293,13 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
     # substitute defender's vote counts towards the average under both readings.
     ctx = {
         "starter_lineup_roles": [l["lineup_role"] for l in starters],
+        # Il 6.00 della soglia e' un numero FISSO del regolamento: non insegue il
+        # centro del ruolo. Dal 25/08/2026 i difensori sono centrati sotto il 6
+        # (ROLE_VOTE_CENTER) e il modificatore scatta di conseguenza meno spesso —
+        # misurato sulla 25-26, bonus medio +1.071 -> +0.920 e squadre a zero dal
+        # 39% al 44%. E' l'effetto voluto: se un difensore ordinario non vale piu'
+        # 6, la difesa che prende il bonus deve essere piu' brava. Deciso il
+        # 25/08/2026; una compensazione era stata scritta e poi tolta.
         "def_votes": [l["voto_puro"] for l in eff_lines
                       if l["lineup_role"] == "DEF" and l["voto_puro"] is not None],
         "gk_line": next((l for l in eff_lines if l["lineup_role"] == "GK"), None),

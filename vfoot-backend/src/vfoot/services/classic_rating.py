@@ -802,6 +802,69 @@ POOLED_ROLE_SPREAD = True
 # Tunables (calibrate against the real distribution before fixing).
 VOTE_CENTER = 6.0
 VOTE_SPREAD_K = 0.8        # vote points per 1 std of within-role index
+
+# --- Il centro PER RUOLO -------------------------------------------------------
+# Fino al 25/08/2026 il centro era 6.0 per tutti, e la questione era stata chiusa
+# (02/08/2026) con l'argomento che il portiere basso compensa la coda alta dei
+# difensori. La riapre un riscontro degli utenti — «i difensori sono valutati
+# troppo generosamente» — che la misura conferma: sulla 25-26 la nostra media DIF
+# e' 6.003 contro il 5.9225 della Redazione (+0.080), mentre i CEN stanno a +0.018
+# e gli ATT a +0.014.
+#
+# E' un problema di CENTRO, non di pesi. Nessun peso lo muove: la
+# z-standardizzazione per ruolo inchioda ogni ruolo al suo centro per costruzione,
+# e la ricalibrazione riassorbe qualunque cambio di peso (misurato: abbassando
+# `defensive_value` da 0.100 a 0.070 la media DIF resta 6.002). L'unica leva e'
+# questa.
+#
+# PERCHE' 5.91 E NON 5.920. Due cose, e nessuna e' un dettaglio.
+#
+# (a) Il centro non e' la media: e' il punto attorno a cui il voto e' costruito, e
+#     l'arrotondamento a mezzo punto su una distribuzione non simmetrica lo sposta
+#     di ~+0.008. Misurato sulla 25-26 (3908 presenze DIF):
+#
+#       centro 6.000 -> media 6.0026     centro 5.920 -> media 5.9278
+#       centro 5.905 -> media 5.9130     centro 5.930 -> media 5.9365
+#
+#     Se si ritocca, si guarda la media REALIZZATA, mai il centro.
+#
+# (b) IL CENTRO DEVE STARE SULLA GRIGLIA DEI CENTESIMI. La spiegazione del voto
+#     riconcilia a due decimali (`base` + le voci mostrate + `other_points` deve
+#     fare `subtotal`), e tutte le sue voci sono arrotondate al centesimo. Un
+#     centro a tre decimali lascia un residuo che nessuna di quelle voci assorbe:
+#     con 5.912 quattro test della riconciliazione fallivano di 0.008 esatti. Se
+#     serve una taratura piu' fine del centesimo, va prima resa robusta la
+#     riconciliazione — non alzata la tolleranza dei test.
+#
+# DUE CONSEGUENZE, entrambe volute e decise il 25/08/2026:
+#
+# 1. Il MODIFICATORE DIFESA scatta meno spesso. La sua soglia e' 6.00 assoluto —
+#    un numero FISSO del regolamento, che NON insegue il centro del ruolo — quindi
+#    se un difensore ordinario non vale piu' 6, la difesa che prende il bonus deve
+#    essere piu' brava. Misurato: bonus medio +1.071 -> +0.915, squadre a zero
+#    bonus dal 38.9% al 44.5%. Una compensazione era stata scritta e poi TOLTA:
+#    non riproporla.
+#
+# 2. La scala 66/+6 che converte i punti in gol e' anch'essa assoluta, e ogni
+#    squadra perde ~0.25 di totale (3-4 difensori x 0.08). E' uniforme, quindi non
+#    favorisce nessuno, ma rende i gol marginalmente piu' rari. Compensarla
+#    romperebbe la somma VISIBILE del tabellino (voto + bonus = fantavoto), quindi
+#    non si compensa.
+#
+# L'accordo non ci perde: una traslazione non muove una correlazione, ma
+# riallinea l'arrotondamento, e la Redazione GUADAGNA (0.6425 -> 0.6455) perche'
+# eravamo sistematicamente sopra di lei. Statistico -0.0006, SofaScore -0.0007.
+ROLE_VOTE_CENTER = {Player.ROLE_DEF: 5.91}
+
+
+def vote_center_for(role: str) -> float:
+    """Il centro attorno a cui il voto di QUESTO ruolo e' costruito.
+
+    E' anche il prior verso cui l'attenuazione sui minuti fa regredire una
+    presenza breve: per un difensore «non abbiamo visto abbastanza» significa
+    5.92, non 6.0."""
+    return ROLE_VOTE_CENTER.get(role, VOTE_CENTER)
+
 VOTE_MIN, VOTE_MAX = 3.0, 10.0
 MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distribution
 
@@ -2179,15 +2242,16 @@ def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: di
     — how much the match tells us about the player, over and above how long he was
     on it. Only the keeper channel uses it today (see GK_EVIDENCE_FULL); 1.0 leaves
     the vote exactly as it was."""
+    centre = vote_center_for(ref_key)
     r = reference.get(ref_key)
     if not r:
-        return VOTE_CENTER
+        return centre
     z = (index - r["mean"]) / r["std"]
     # Shrink toward the role prior (z -> 0) when minutes are few: we don't trust a
     # per-90 rate extrapolated from a short cameo, so the vote regresses to 6 in
     # proportion to the evidence. w -> 1 for full games, ~0.4 at 20', ~0.3 at 10'.
     w = minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0
-    raw = VOTE_CENTER + spread_k * w * evidence_weight * z
+    raw = centre + spread_k * w * evidence_weight * z
     return max(VOTE_MIN, min(VOTE_MAX, raw))
 
 
@@ -2205,7 +2269,8 @@ def result_mitigation(raw_vote: float, gd_on: int,
                       k: float = RESULT_MITIGATION_K,
                       base: float = RESULT_MITIGATION_BASE,
                       cap: float = RESULT_MITIGATION_CAP,
-                      max_share: float = RESULT_MITIGATION_MAX_SHARE) -> float:
+                      max_share: float = RESULT_MITIGATION_MAX_SHARE,
+                      centre: float = VOTE_CENTER) -> float:
     """Divergence-only nudge toward the on-pitch result (see RESULT_MITIGATION_K).
 
     Fires only for a high vote (>6) in a net defeat (gd_on<0) — pulled DOWN — or a
@@ -2218,9 +2283,15 @@ def result_mitigation(raw_vote: float, gd_on: int,
     ``max_share`` is the largest FRACTION of the divergence the result may erase —
     which is also what keeps the nudge on this side of 6, whatever the margin — and
     ``cap`` is the largest absolute drop in vote points.
+
+    ``centre`` e' il voto ORDINARIO del ruolo, non il 6 fisso: dal 25/08/2026 un
+    difensore e' costruito attorno a 5.905 (ROLE_VOTE_CENTER), e misurare la sua
+    divergenza dal 6 lo avrebbe fatto passare per «voto basso» anche quando era
+    esattamente nella media del suo ruolo — spinto su in ogni vittoria, cioe' un
+    offset che si mangiava da solo (misurato: +0.015 sulla media realizzata).
     """
-    over = max(0.0, raw_vote - VOTE_CENTER)   # only a high vote is tempered in a loss
-    under = max(0.0, VOTE_CENTER - raw_vote)  # only a low vote is lifted in a win
+    over = max(0.0, raw_vote - centre)   # only a high vote is tempered in a loss
+    under = max(0.0, centre - raw_vote)  # only a low vote is lifted in a win
     if gd_on == 0:
         return 0.0
     severity = min(max_share, base + k * abs(gd_on))
@@ -2309,7 +2380,8 @@ def voto_puro_for_match(match, reference: dict,
         raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k, ev_w)
         # Result mitigation: divergence-only, outfield only (the GK channel already
         # reflects the result). Recorded so the vote explanation can reconcile.
-        nudge = (result_mitigation(raw, gd_on[(mid, pid)])
+        nudge = (result_mitigation(raw, gd_on[(mid, pid)],
+                                   centre=vote_center_for(ref_key))
                  if role in outfield_roles and (mid, pid) in gd_on else 0.0)
         # Red-card + own-goal + missed-penalty performance drops (post-adjustments,
         # any role; the missed penalty stays a good shot in the index, this is the
@@ -2317,7 +2389,8 @@ def voto_puro_for_match(match, reference: dict,
         radj = red_adj.get(pid, 0.0)
         oadj = og_adj.get(pid, 0.0)
         padj = pen_adj.get(pid, 0.0)
-        voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, raw + nudge + radj + oadj + padj)))
+        voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX,
+                                              raw + nudge + radj + oadj + padj)))
                 if rated else None)
         results.append({
             "player_id": pid,
