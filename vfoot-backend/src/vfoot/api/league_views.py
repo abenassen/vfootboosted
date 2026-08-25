@@ -45,6 +45,7 @@ from vfoot.api.league_serializers import (
     CompetitionWizardSerializer,
     CreateAuctionSerializer,
     CreateLeagueSerializer,
+    GrantCreditsSerializer,
     ImportRosterCSVSerializer,
     JoinLeagueSerializer,
     MatchdayConcludeSerializer,
@@ -52,6 +53,7 @@ from vfoot.api.league_serializers import (
     PlaceBidSerializer,
     QualificationRuleCreateSerializer,
     SellRosterPlayerSerializer,
+    TradeSerializer,
     VoidRosterSlotSerializer,
     UpdateMemberRoleSerializer,
     UpdateMyTeamSerializer,
@@ -59,6 +61,7 @@ from vfoot.api.league_serializers import (
 from vfoot.models import (
     AuctionBid,
     AuctionEvent,
+    BudgetGrant,
     AuctionNomination,
     AuctionSession,
     CompetitionQualificationRule,
@@ -78,6 +81,7 @@ from vfoot.models import (
     LeagueMembership,
     LeaguePlayerRole,
     OfficeOverride,
+    PlayerTrade,
     SavedLineupSnapshot,
 )
 from vfoot.services.auction_engine import (
@@ -125,8 +129,8 @@ from vfoot.services.player_ratings import (
 )
 from vfoot.services.match_resolver import matchday_fixtures_by_team
 from vfoot.services import (
-    currency, honours, knockout, lineup_baseline, lineup_deadline, lineup_repair, lineup_suggest,
-    matchday_state,
+    currency, honours, knockout, league_economy, lineup_baseline, lineup_deadline,
+    lineup_repair, lineup_suggest, matchday_state,
 )
 from vfoot.services.live_realtime import broadcast_live
 
@@ -686,6 +690,56 @@ def _real_transfers(league, limit: int) -> list[dict]:
 NEWS_PIN_DAYS = 5
 
 
+def _trade_news(league: FantasyLeague, limit: int) -> list[dict]:
+    """Uno scambio e' UNA notizia: chi ha dato chi, e l'eventuale conguaglio.
+
+    Si legge dalla fotografia scritta al momento (``PlayerTrade.payload``) e non
+    dai contratti: quelli, mesi dopo, possono essere stati chiusi o rivenduti, e
+    la bacheca racconta cio' che accadde quel giorno."""
+    out = []
+    for t in PlayerTrade.objects.filter(league=league)[:limit]:
+        p = t.payload or {}
+        a_names = [x.get("name") for x in p.get("a") or []]
+        b_names = [x.get("name") for x in p.get("b") or []]
+        moved = " ⇄ ".join(x for x in (", ".join(n for n in a_names if n),
+                                       ", ".join(n for n in b_names if n)) if x)
+        cash = p.get("cash") or None
+        detail = moved or None
+        if cash:
+            payer = p.get("team_a_name") if cash.get("from") == "a" else p.get("team_b_name")
+            detail = f"{detail} · {currency.amount(cash.get('amount') or 0)} da {payer}"
+        out.append({
+            "kind": "scambio",
+            "at": t.created_at.isoformat() if t.created_at else None,
+            "text": f"Scambio: {p.get('team_a_name') or '—'} e {p.get('team_b_name') or '—'}",
+            "detail": detail,
+            "team_id": t.team_a_id,
+            "crest": "",
+        })
+    return out
+
+
+def _grant_news(league: FantasyLeague, limit: int) -> list[dict]:
+    """I crediti concessi dall'admin, un gesto per riga.
+
+    In bacheca per scelta: i budget sono gia' pubblici in asta e al mercato, e una
+    dote che cambia i rapporti di forza senza dirlo e' esattamente cio' che fa
+    nascere i sospetti."""
+    out = []
+    for row in _grant_rows(league)[:limit]:
+        who = "a tutti" if row["everyone"] else f"a {row['teams'][0]['name']}"
+        verb = "ha dato" if row["amount"] > 0 else "ha tolto"
+        out.append({
+            "kind": "concessione",
+            "at": row["at"],
+            "text": f"L'admin {verb} {currency.amount(abs(row['amount']))} {who}",
+            "detail": row["reason"] or None,
+            "team_id": None if row["everyone"] else row["teams"][0]["team_id"],
+            "crest": "",
+        })
+    return out
+
+
 class LeagueActivityView(APIView):
     """What has happened in the league lately, newest first — salvo ciò che è IN
     EVIDENZA, che sta in cima finché è fresco (v. NEWS_PIN_DAYS).
@@ -707,8 +761,12 @@ class LeagueActivityView(APIView):
 
         items: list[dict] = []
 
+        # Fuori i contratti arrivati per scambio: quello e' un altro fatto, ha la
+        # sua riga qui sotto, e chiamarlo "acquisto" direbbe che qualcuno ha speso
+        # crediti per prenderlo.
         for slot in (FantasyRosterSlot.objects
-                     .filter(team__league=league, released_at__isnull=True)
+                     .filter(team__league=league, released_at__isnull=True,
+                             from_trade__isnull=True)
                      .select_related("player", "team")
                      .order_by("-acquired_at")[:limit]):
             items.append({
@@ -722,6 +780,8 @@ class LeagueActivityView(APIView):
 
         items.extend(_real_signings(league, limit))
         items.extend(_real_transfers(league, limit))
+        items.extend(_trade_news(league, limit))
+        items.extend(_grant_news(league, limit))
 
         for d in (LeagueDecision.objects
                   .filter(league=league, status=LeagueDecision.STATUS_RESOLVED)
@@ -1401,6 +1461,8 @@ class TeamRosterView(APIView):
                 ],
                 "budget": None if budget is None else {
                     "initial": budget.initial_budget,
+                    "granted": budget.granted,
+                    "trade_cash": budget.trade_cash,
                     "spent": budget.spent,
                     "remaining": budget.remaining,
                     "slots": budget.slots,
@@ -1422,9 +1484,15 @@ class TeamRosterView(APIView):
 #                lascerebbe nello storico un acquisto seguito da una cessione che
 #                nessuno ha fatto, e lo storico serve a ricostruire le rose.
 #
-# Uno scambio fra due allenatori si scrive come una vendita di qua e un acquisto
-# di la': un'operazione unica che le impacchetta sarebbe struttura in piu' per un
-# caso che si presenta di rado.
+# Uno SCAMBIO fra due allenatori non e' una vendita di qua e un acquisto di la'.
+# Lo e' stato, e la scorciatoia reggeva finche' l'unica cosa che contava erano i
+# conti; tre cose pero' a mano si perdono, e sono le tre che fanno lo scambio:
+# il PREZZO viaggia col giocatore (chi lo riceve lo eredita a quella cifra, ed e'
+# quella che decidera' il suo recupero il giorno che lo svincola), la
+# CONTROPARTITA in crediti non esiste come operazione di rosa, e le formazioni
+# gia' consegnate vanno riparate dalle DUE parti nello stesso istante. Vive in
+# ``services/league_economy.py`` insieme all'altra cosa che l'admin fa
+# all'economia dal di fuori: dare crediti (v. LeagueTradeView, LeagueBudgetGrantsView).
 
 
 class TeamRosterAddView(APIView):
@@ -1550,6 +1618,160 @@ class TeamRosterVoidView(APIView):
                    if was_active else 0)
         return Response({"lineups_vacated": vacated, "player_id": player_id},
                         status=status.HTTP_200_OK)
+
+
+def _grant_rows(league: FantasyLeague) -> list[dict]:
+    """Le concessioni raggruppate per gesto: «50 a tutti» e' una riga, non dieci.
+
+    Fuori restano quelle legate a uno scambio: sono la sua contropartita, si
+    leggono li' dentro, e presentarle come regali dell'admin racconterebbe una
+    generosita' che non c'e' stata."""
+    rows: dict[str, dict] = {}
+    for g in (BudgetGrant.objects.filter(team__league=league, trade__isnull=True)
+              .select_related("team").order_by("-created_at", "-id")):
+        row = rows.setdefault(g.batch, {
+            "batch": g.batch, "amount": g.amount, "reason": g.reason,
+            "at": g.created_at.isoformat() if g.created_at else None,
+            "teams": [],
+        })
+        row["teams"].append({"team_id": g.team_id, "name": g.team.name})
+    out = list(rows.values())
+    for row in out:
+        row["everyone"] = len(row["teams"]) > 1
+    return out
+
+
+class LeagueBudgetGrantsView(APIView):
+    """I crediti che l'admin da' (o toglie) fuori dall'asta e dal mercato.
+
+    Lettura a chiunque sia nella lega: i budget sono gia' pubblici in asta e al
+    mercato, e una dote che sposta i rapporti di forza senza dirlo e' esattamente
+    cio' che fa nascere i sospetti. Scrittura solo all'admin."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+        return Response({"grants": _grant_rows(league)})
+
+    @transaction.atomic
+    def post(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        s = GrantCreditsSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        data = s.validated_data
+
+        teams = list(FantasyTeam.objects.filter(league=league))
+        wanted = data.get("team_ids") or []
+        if wanted:
+            teams = [t for t in teams if t.id in set(wanted)]
+            if len(teams) != len(set(wanted)):
+                return Response({"detail": "Squadra non trovata in questa lega."},
+                                status=status.HTTP_400_BAD_REQUEST)
+        try:
+            grants = league_economy.grant_credits(
+                league, teams, data["amount"], data.get("reason", ""),
+                actor=request.user)
+        except league_economy.EconomyError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"batch": grants[0].batch, "teams": len(grants),
+                         "amount": grants[0].amount},
+                        status=status.HTTP_201_CREATED)
+
+
+class LeagueBudgetGrantRevokeView(APIView):
+    """Annulla una concessione: la riga sparisce, come se non fosse mai stata."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, league_id: int, batch: str):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        try:
+            n = league_economy.revoke_batch(league, batch)
+        except league_economy.EconomyError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"revoked": n})
+
+
+class LeagueTradeView(APIView):
+    """Scambi fra due allenatori, registrati dall'admin."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _membership_or_404(league, request.user.id)
+        trades = list(PlayerTrade.objects.filter(league=league)[:30])
+        return Response({"trades": [{
+            "trade_id": t.id,
+            "at": t.created_at.isoformat() if t.created_at else None,
+            "team_a_id": t.team_a_id, "team_b_id": t.team_b_id,
+            "note": t.note,
+            **t.payload,
+        } for t in trades]})
+
+    @transaction.atomic
+    def post(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        s = TradeSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+
+        teams = {t.id: t for t in FantasyTeam.objects.filter(
+            league=league, id__in=[d["team_a"], d["team_b"]])}
+        team_a, team_b = teams.get(d["team_a"]), teams.get(d["team_b"])
+        if team_a is None or team_b is None:
+            return Response({"detail": "Squadra non trovata in questa lega."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            trade = league_economy.apply_trade(
+                league, team_a, team_b, d["players_a"], d["players_b"],
+                d.get("cash_amount", 0), d.get("cash_from", "a"),
+                d.get("note", ""), actor=request.user)
+        except league_economy.EconomyError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        budgets = team_budgets(league) if league.mode == FantasyLeague.MODE_CLASSIC else {}
+        return Response({
+            "trade_id": trade.id,
+            "remaining_a": budgets[team_a.id].remaining if team_a.id in budgets else None,
+            "remaining_b": budgets[team_b.id].remaining if team_b.id in budgets else None,
+        }, status=status.HTTP_201_CREATED)
+
+
+class LeagueTradeCheckView(APIView):
+    """Lo stesso controllo del salvataggio, ma senza scrivere niente: il pannello
+    lo chiama mentre l'admin compone, cosi' il rifiuto arriva prima del bottone e
+    non dopo."""
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, league_id: int):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        s = TradeSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        teams = {t.id: t for t in FantasyTeam.objects.filter(
+            league=league, id__in=[d["team_a"], d["team_b"]])}
+        team_a, team_b = teams.get(d["team_a"]), teams.get(d["team_b"])
+        if team_a is None or team_b is None:
+            return Response({"ok": False, "reason": "Squadra non trovata in questa lega."})
+        check = league_economy.check_trade(
+            league, team_a, team_b, d["players_a"], d["players_b"],
+            d.get("cash_amount", 0), d.get("cash_from", "a"))
+        return Response({"ok": check.ok, "reason": check.reason,
+                         "remaining_a": check.remaining_a,
+                         "remaining_b": check.remaining_b})
 
 
 class LeagueRosterBulkAssignView(APIView):
@@ -5848,7 +6070,19 @@ def _roster_budget(roster: list, initial: int, team_id: int) -> dict:
     Read that from the contracts (``sunk``) or this page would keep showing a
     manager credits the auction engine has already refused to let him spend —
     two numbers for one wallet, and the one on screen the wrong one.
+
+    Per la stessa ragione ci sono anche i crediti concessi dall'admin
+    (``BudgetGrant``): sono l'unico termine che non nasce da un contratto, e
+    dimenticarli qui rifarebbe esattamente quell'errore al contrario — la pagina
+    Squadra dichiarerebbe meno di quanto l'asta e il mercato lasciano spendere.
     """
+    granted = trade_cash = 0
+    for a, trade_id in (BudgetGrant.objects.filter(team_id=team_id)
+                        .values_list("amount", "trade_id")):
+        if trade_id is None:
+            granted += int(a)
+        else:
+            trade_cash += int(a)
     spent = sum(r["price"] for r in roster)
     sunk = 0
     for price, sale in (
@@ -5859,8 +6093,10 @@ def _roster_budget(roster: list, initial: int, team_id: int) -> dict:
     by_role: dict[str, int] = {}
     for r in roster:
         by_role[r["role"]] = by_role.get(r["role"], 0) + r["price"]
-    return {"initial": initial, "spent": spent, "sunk": sunk,
-            "remaining": max(0, initial - spent - sunk), "by_role": by_role}
+    return {"initial": initial, "granted": granted, "trade_cash": trade_cash,
+            "spent": spent, "sunk": sunk,
+            "remaining": max(0, initial + granted + trade_cash - spent - sunk),
+            "by_role": by_role}
 
 
 def _deadline_sentence(deadline, match) -> str:

@@ -64,6 +64,10 @@ export interface TeamLineupContext {
   competition: number | null; // the competition this lineup refers to
   budget?: {
     initial: number;
+    /** Crediti dati (o tolti) dall'admin fuori da asta e mercato. */
+    granted: number;
+    /** Conguagli di scambio incassati o pagati. */
+    trade_cash: number;
     spent: number;
     /** Crediti bruciati dai contratti chiusi: pagato meno incassato. Il residuo
      *  non e' initial - spent, e questo e' il pezzo che manca all'appello. */

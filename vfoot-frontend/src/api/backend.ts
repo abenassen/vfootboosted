@@ -546,6 +546,12 @@ export interface LeagueActivityItem {
    *  you may own right now). */
   kind:
     | 'acquisto'
+    /** Scambio fra due allenatori: i contratti cambiano squadra col loro prezzo.
+     *  Non e' un `acquisto` — nessuno ha speso crediti per prendere quel
+     *  giocatore — ed e' per questo che ha un tipo suo. */
+    | 'scambio'
+    /** Crediti dati (o tolti) dall'admin fuori da asta e mercato. */
+    | 'concessione'
     | 'mercato_reale'
     | 'trasferimento_reale'
     | 'decisione'
@@ -997,6 +1003,93 @@ function auctionPost(path: string, body: Record<string, unknown> = {}) {
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   }).then(parseJsonOrThrow);
+}
+
+/* ------------------------------------------------------------------ *
+ * Economia di lega: crediti dati dall'admin, e scambi fra allenatori.
+ * ------------------------------------------------------------------ */
+
+/** Una concessione = UN gesto dell'admin, anche quando ha toccato dieci squadre
+ *  (il server le raggruppa per `batch`). */
+export interface BudgetGrantRow {
+  batch: string;
+  amount: number;
+  reason: string;
+  at: string | null;
+  teams: { team_id: number; name: string }[];
+  /** Data a piu' di una squadra: in lista si dice "a tutti". */
+  everyone: boolean;
+}
+
+export interface TradeSidePlayer {
+  player_id: number;
+  name: string | null;
+  price: number;
+  role: string | null;
+}
+
+export interface TradeRow {
+  trade_id: number;
+  at: string | null;
+  team_a_id: number;
+  team_b_id: number;
+  team_a_name?: string;
+  team_b_name?: string;
+  note: string;
+  a: TradeSidePlayer[];
+  b: TradeSidePlayer[];
+  cash: { amount: number; from: 'a' | 'b' } | null;
+}
+
+export interface TradeRequest {
+  team_a: number;
+  team_b: number;
+  players_a: number[];
+  players_b: number[];
+  cash_amount?: number;
+  cash_from?: 'a' | 'b';
+  note?: string;
+}
+
+export async function getBudgetGrants(leagueId: number): Promise<{ grants: BudgetGrantRow[] }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/budget/grants`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function grantCredits(
+  leagueId: number,
+  opts: { amount: number; reason?: string; team_ids?: number[] },
+): Promise<{ batch: string; teams: number; amount: number }> {
+  return auctionPost(`/leagues/${leagueId}/budget/grants`, opts);
+}
+
+export async function revokeBudgetGrant(
+  leagueId: number, batch: string,
+): Promise<{ revoked: number }> {
+  return auctionPost(`/leagues/${leagueId}/budget/grants/${batch}/revoke`);
+}
+
+export async function getTrades(leagueId: number): Promise<{ trades: TradeRow[] }> {
+  const res = await fetch(`${baseUrl()}/leagues/${leagueId}/trades`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** Lo stesso controllo del salvataggio, senza scrivere: serve a dire NO mentre
+ *  si compone, invece che dopo aver premuto. */
+export async function checkTrade(
+  leagueId: number, body: TradeRequest,
+): Promise<{ ok: boolean; reason: string; remaining_a: number; remaining_b: number }> {
+  return auctionPost(`/leagues/${leagueId}/trades/check`, body as unknown as Record<string, unknown>);
+}
+
+export async function createTrade(
+  leagueId: number, body: TradeRequest,
+): Promise<{ trade_id: number; remaining_a: number | null; remaining_b: number | null }> {
+  return auctionPost(`/leagues/${leagueId}/trades`, body as unknown as Record<string, unknown>);
 }
 
 export async function createAuction(leagueId: number, playerIds?: number[]) {

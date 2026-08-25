@@ -70,6 +70,11 @@ const TEAMS_ENOUGH_TO_START = 6;
  *  trophy the admin picked for the prize itself. */
 const ACTIVITY_ICON: Record<LeagueActivityItem['kind'], string> = {
   acquisto: '🔁',
+  // Lo scambio non riusa il glifo dell'acquisto: li' qualcuno ha speso, qui due
+  // squadre si sono passate qualcosa, ed e' esattamente la differenza che la
+  // riga deve far vedere a colpo d'occhio.
+  scambio: '🤝',
+  concessione: '💰',
   // Not the same glyph as `acquisto`: one is a manager spending credits, the
   // other is a real club signing a player, and the feed shows them side by side.
   mercato_reale: '✍️',

@@ -17,11 +17,25 @@ largest legal bid is therefore ``budget_remaining - (slots_remaining_total - 1)`
 
 Budget is read from the team's CONTRACTS, never from a separate ledger that could
 drift from the roster — players assigned by any means (auction close, direct-assign,
-bulk import) are accounted for by the same sum. Two terms, not one:
+bulk import) are accounted for by the same sum. Three terms:
 
     remaining = initial_budget
+              + sum(amount) over BudgetGrant                   # dote dell'admin
+                                                               # + conguagli di scambio
               - sum(purchase_price) over OPEN contracts        # what is still owned
               - sum(purchase_price - sale_price) over CLOSED   # what was burned
+
+Il primo termine non e' il saldo che questo modulo evita: una concessione non e'
+un dato della rosa tenuto due volte, e' l'unico fatto che nessun contratto
+registra — la dote che l'admin distribuisce prima di una sessione di mercato non
+compra e non vende niente. Resta comunque una somma di righe, non un totale
+aggiornato a mano, quindi non puo' scollarsi da cio' che e' successo.
+
+Le righe pero' sono di due specie e vengono riportate separate (``granted`` e
+``trade_cash``): la contropartita in crediti di uno scambio passa dallo stesso
+registro, ma non e' un regalo dell'admin, e una squadra che ha incassato un
+conguaglio non deve leggere sulla propria pagina che quei crediti glieli ha dati
+l'amministratore.
 
 The second term is the one that had to be added. Reading only the open contracts
 meant that closing one gave back every credit paid for that player, whatever had
@@ -37,7 +51,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from realdata.models import Player
-from vfoot.models import FantasyLeague, FantasyRosterSlot, FantasyTeam, LeaguePlayerRole
+from vfoot.models import (
+    BudgetGrant, FantasyLeague, FantasyRosterSlot, FantasyTeam, LeaguePlayerRole,
+)
 from vfoot.services import currency
 
 ROLES = ("POR", "DIF", "CEN", "ATT")
@@ -51,6 +67,12 @@ class TeamBudget:
     initial_budget: int
     spent: int
     remaining: int
+    # Crediti concessi dall'admin (v. BudgetGrant): sommati, e negativi se ne ha
+    # tolti. Sta accanto a `initial_budget` perche' e' la stessa cosa — dote di
+    # partenza — arrivata dopo.
+    granted: int
+    # Conguagli incassati (o pagati) negli scambi: stesso registro, altra storia.
+    trade_cash: int
     # Per-role: filled / quota, and how many slots are still open.
     slots: dict[str, dict[str, int]]
     slots_remaining_total: int
@@ -102,6 +124,13 @@ def team_budgets(league: FantasyLeague) -> dict[int, TeamBudget]:
             filled.setdefault(team_id, {}).setdefault(role, 0)
             filled[team_id][role] += 1
 
+    granted: dict[int, int] = {}
+    trade_cash: dict[int, int] = {}
+    for team_id, amount, trade_id in (BudgetGrant.objects.filter(team__league=league)
+                                      .values_list("team_id", "amount", "trade_id")):
+        bucket = trade_cash if trade_id is not None else granted
+        bucket[team_id] = bucket.get(team_id, 0) + int(amount)
+
     # What the closed contracts took away for good. A sale above the purchase price
     # is a NEGATIVE hole — it gives credits back — and that is deliberate: a manager
     # who resells at a profit is ordinary, and the admin is transcribing a deal.
@@ -118,7 +147,10 @@ def team_budgets(league: FantasyLeague) -> dict[int, TeamBudget]:
     out: dict[int, TeamBudget] = {}
     for t in teams:
         t_spent = spent.get(t.id, 0)
-        remaining = league.initial_budget - t_spent - sunk.get(t.id, 0)
+        t_granted = granted.get(t.id, 0)
+        t_cash = trade_cash.get(t.id, 0)
+        remaining = (league.initial_budget + t_granted + t_cash
+                     - t_spent - sunk.get(t.id, 0))
         t_filled = filled.get(t.id, {})
         per_role: dict[str, dict[str, int]] = {}
         slots_remaining_total = 0
@@ -135,6 +167,8 @@ def team_budgets(league: FantasyLeague) -> dict[int, TeamBudget]:
             team_name=t.name,
             manager_username=t.manager.user.username,
             initial_budget=league.initial_budget,
+            granted=t_granted,
+            trade_cash=t_cash,
             spent=t_spent,
             remaining=remaining,
             slots=per_role,

@@ -255,12 +255,18 @@ def notify_conclusions_pending(league, matchdays, admins) -> None:
     _send([_message(u, subject, body) for u in users])
 
 
-def notify_lineup_repaired(league, manager, out_player_id, in_player_id, matchdays) -> None:
+def notify_lineup_repaired(league, manager, out_player_id, in_player_id, matchdays,
+                           cause: str = "market") -> None:
     """His acquisition landed in a lineup he had already sent.
 
     Not a courtesy: the swap changed a team sheet he had decided, and finding out at
     the tabellino would be the worst possible moment. He still has time — validations
     only happen before the lock — so the message is early enough to be acted on.
+
+    ``cause`` cambia la sola frase che dice PERCHE': la sostituzione arriva dalla
+    validazione di un'offerta oppure da uno scambio registrato dall'admin, e dire
+    "la tua offerta e' stata validata" a chi non ha offerto niente e' peggio del
+    silenzio.
     """
     if not _enabled() or manager is None:
         return
@@ -275,9 +281,11 @@ def notify_lineup_repaired(league, manager, out_player_id, in_player_id, matchda
           body=f"{in_name} prende il posto di {out_name} (giornata {rounds}).",
           tag=f"lineup-repair-{league.id}", url="/squad/formation")
     base = str(getattr(settings, "VFOOT_FRONTEND_BASE_URL", "")).rstrip("/")
+    why = ("l'admin ha registrato uno scambio" if cause == "trade"
+           else "la tua offerta è stata validata")
     body = (
         "{greeting}\n\n"
-        f"Nella lega \"{league.name}\" la tua offerta è stata validata: {out_name} "
+        f"Nella lega \"{league.name}\" {why}: {out_name} "
         f"lascia la rosa e al suo posto arriva {in_name}.\n\n"
         f"{out_name} era schierato nella formazione della giornata {rounds}, quindi "
         f"{in_name} ne ha preso esattamente il posto — stesso ruolo, stessa "

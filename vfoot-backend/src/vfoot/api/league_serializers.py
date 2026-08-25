@@ -338,6 +338,37 @@ class CreateMarketSessionSerializer(serializers.Serializer):
         return attrs
 
 
+class GrantCreditsSerializer(serializers.Serializer):
+    """Crediti dati (o tolti) dall'admin. Nessuna squadra indicata = tutta la lega,
+    che e' il caso normale: la dote prima di una sessione di mercato la ricevono
+    tutti, e chiedere di spuntare dieci caselle per dire "tutti" e' un modo di far
+    sbagliare."""
+
+    amount = serializers.IntegerField()
+    reason = serializers.CharField(max_length=200, required=False, allow_blank=True,
+                                   default="")
+    team_ids = serializers.ListField(
+        child=serializers.IntegerField(), required=False, allow_empty=True)
+
+
+class TradeSerializer(serializers.Serializer):
+    """Uno scambio: chi da' cosa, e l'eventuale contropartita in crediti.
+
+    ``cash_from`` dice il VERSO ("a" = paga la prima squadra), cosi' l'importo
+    resta positivo e non c'e' un meno da interpretare."""
+
+    team_a = serializers.IntegerField()
+    team_b = serializers.IntegerField()
+    players_a = serializers.ListField(
+        child=serializers.IntegerField(), allow_empty=True)
+    players_b = serializers.ListField(
+        child=serializers.IntegerField(), allow_empty=True)
+    cash_amount = serializers.IntegerField(required=False, min_value=0, default=0)
+    cash_from = serializers.ChoiceField(choices=["a", "b"], required=False, default="a")
+    note = serializers.CharField(max_length=200, required=False, allow_blank=True,
+                                 default="")
+
+
 class PlaceOfferSerializer(serializers.Serializer):
     target_player_id = serializers.IntegerField()
     release_player_id = serializers.IntegerField()

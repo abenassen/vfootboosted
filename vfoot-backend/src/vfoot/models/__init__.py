@@ -27,6 +27,8 @@ from vfoot.models.fantasy import (
     MarketSession,
     MarketOffer,
     MarketEvent,
+    PlayerTrade,
+    BudgetGrant,
 )
 from vfoot.models.crest import CrestImage, CrestReport
 from vfoot.models.decisions import LeagueDecision, LeagueDecisionVote
@@ -69,6 +71,8 @@ __all__ = [
     "MarketSession",
     "MarketOffer",
     "MarketEvent",
+    "PlayerTrade",
+    "BudgetGrant",
     "LeagueDecision",
     "LeagueDecisionVote",
     "OfficeOverride",

@@ -217,6 +217,13 @@ class FantasyRosterSlot(models.Model):
     acquired_at = models.DateTimeField(default=timezone.now)
     released_at = models.DateTimeField(null=True, blank=True)
     purchase_price = models.IntegerField(default=1)
+    # Lo scambio da cui questo contratto nasce (o in cui e' finito), se ce n'e'
+    # uno. Serve alla bacheca: uno scambio si racconta come uno scambio, e senza
+    # questo i due contratti nuovi comparivano anche come acquisti — cioe' come
+    # crediti spesi, che in uno scambio non e' quello che e' successo.
+    from_trade = models.ForeignKey(
+        "vfoot.PlayerTrade", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="slots")
     # Quanto e' rientrato in cassa chiudendo il contratto. Null finche' e' aperto.
     #
     # Senza questo campo il recupero non esisteva: il budget si ricalcola dai soli
@@ -1129,3 +1136,84 @@ class MarketEvent(models.Model):
     class Meta:
         indexes = [models.Index(fields=["session", "created_at"])]
         ordering = ["-created_at", "-id"]
+
+
+class PlayerTrade(models.Model):
+    """Uno scambio fra due allenatori, scritto come UN gesto solo.
+
+    Nasce ribaltando una decisione presa quando il mercato a offerte fu costruito
+    (v. il commento sopra le operazioni di rosa in ``api/league_views.py``): «uno
+    scambio si scrive come una vendita di qua e un acquisto di la'». Si puo' fare,
+    ma a mano si perdono tre cose che qui contano — il PREZZO che viaggia col
+    giocatore, la contropartita in crediti, e le formazioni aperte da riparare
+    dalle due parti nello stesso istante.
+
+    Il prezzo che viaggia e' il punto. Il contratto si chiude a incasso pieno di
+    qua e se ne apre uno identico di la': Yildiz comprato a 50 arriva alla nuova
+    squadra *a 50*, quindi se un domani lo svincola in una sessione col recupero
+    al 50% ne riprende 25 — la plusvalenza resta di chi l'ha fatta. Rivenderlo
+    all'altro come un acquisto qualunque avrebbe riscritto quel prezzo.
+
+    Il ``payload`` e' una fotografia denormalizzata (nomi, prezzi, ruoli) come
+    quella di ``MarketEvent``: la bacheca racconta lo scambio da qui invece di
+    rimettere insieme quattro contratti e indovinare che erano lo stesso gesto.
+    """
+
+    league = models.ForeignKey(
+        FantasyLeague, on_delete=models.CASCADE, related_name="player_trades")
+    team_a = models.ForeignKey(
+        FantasyTeam, on_delete=models.CASCADE, related_name="trades_as_a")
+    team_b = models.ForeignKey(
+        FantasyTeam, on_delete=models.CASCADE, related_name="trades_as_b")
+    payload = models.JSONField(default=dict)
+    note = models.CharField(max_length=200, blank=True, default="")
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_trades")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [models.Index(fields=["league", "created_at"])]
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"trade#{self.id} {self.team_a_id}<->{self.team_b_id}"
+
+
+class BudgetGrant(models.Model):
+    """Crediti che l'admin concede (o toglie) fuori dall'asta e dal mercato.
+
+    E' l'unica cosa che il budget NON puo' leggere dai contratti: la dote che si
+    da' alla lega prima di una sessione di mercato non e' un acquisto ne' una
+    cessione, non lascia traccia in nessuna rosa, e senza una riga sua dovrebbe
+    stare in un saldo accumulato — cioe' proprio il numero che ``team_budgets``
+    evita di tenere (v. il suo modulo). Qui il saldo resta una somma di fatti:
+
+        remaining = initial_budget + concessioni - contratti aperti - buchi chiusi
+
+    ``amount`` puo' essere negativo: una concessione sbagliata si corregge, e
+    togliere crediti e' una cosa che un admin fa per davvero.
+
+    ``batch`` tiene insieme le righe nate dallo stesso gesto — «50 a tutti» sono
+    dieci righe e una notizia sola. ``trade`` marca invece la contropartita in
+    crediti di uno scambio, che in bacheca si racconta dentro lo scambio e non
+    come un regalo a se' stante.
+    """
+
+    team = models.ForeignKey(
+        FantasyTeam, on_delete=models.CASCADE, related_name="budget_grants")
+    amount = models.IntegerField()
+    reason = models.CharField(max_length=200, blank=True, default="")
+    batch = models.CharField(max_length=32, db_index=True)
+    trade = models.ForeignKey(
+        PlayerTrade, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="cash_legs")
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="granted_budgets")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [models.Index(fields=["team", "created_at"])]
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"grant {self.amount:+d} -> {self.team_id}"

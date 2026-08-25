@@ -109,6 +109,11 @@ export interface TeamRoster {
   /** Portafoglio e caselle della squadra. Null in aura: non c'e' ne' asta ne' quota. */
   budget: {
     initial: number;
+    /** Crediti dati (o tolti) dall'admin, gia' compresi in `remaining`. */
+    granted: number;
+    /** Conguagli incassati (o pagati) negli scambi: stesso portafoglio, altra
+     *  storia — non li ha dati l'admin. */
+    trade_cash: number;
     spent: number;
     remaining: number;
     slots: Record<ClassicRole, AuctionSlotCount>;

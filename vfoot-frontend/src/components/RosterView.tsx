@@ -43,10 +43,21 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
       {budget ? (
         <Card className="p-4">
           <div className="grid grid-cols-3 gap-2">
-            <Stat label="Budget" value={budget.initial} />
+            {/* La dote di partenza COMPRESO quel che l'admin ha dato dopo: e'
+                lo stesso portafoglio, e mostrare i mille tondi accanto a un
+                residuo che ne conta millecinquanta e' un conto che non torna. */}
+            <Stat label="Budget" value={budget.initial + (budget.granted ?? 0) + (budget.trade_cash ?? 0)} />
             <Stat label="Speso" value={budget.spent} tone="rose" />
             <Stat label="Residuo" value={budget.remaining} tone="emerald" />
           </div>
+          {budget.granted || budget.trade_cash ? (
+            <div className="mt-1 text-[11px] text-ink-faint">
+              Compresi{' '}
+              {budget.granted ? <><b className="text-ink-soft">{price(budget.granted)}</b> dati dall’admin</> : null}
+              {budget.granted && budget.trade_cash ? ' e ' : null}
+              {budget.trade_cash ? <><b className="text-ink-soft">{price(budget.trade_cash)}</b> di conguagli da scambi</> : null}.
+            </div>
+          ) : null}
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
             {ROLES.filter((r) => budget.by_role[r]).map((r) => (
               <span key={r}>

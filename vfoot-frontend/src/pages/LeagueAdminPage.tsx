@@ -36,6 +36,7 @@ import { useLeagueContext } from '../league/LeagueContext';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
 import InviteShare from '../components/InviteShare';
 import MarketAdminPanel from '../components/MarketAdminPanel';
+import LeagueEconomyPanel from '../components/LeagueEconomyPanel';
 import LeagueSetupChecklist from '../components/LeagueSetupChecklist';
 import Crest from '../components/Crest';
 import { CrestModerationPanel } from '../components/CrestModeration';
@@ -51,7 +52,7 @@ import type {
 } from '../types/league';
 
 type AdminTab = 'user' | 'league';
-type LeagueTab = 'roster' | 'competitions' | 'matchdays' | 'auction' | 'market';
+type LeagueTab = 'roster' | 'competitions' | 'matchdays' | 'auction' | 'market' | 'economy';
 
 export default function LeagueAdminPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -247,7 +248,7 @@ export default function LeagueAdminPage() {
     if (tab === 'user') setActiveTab('user');
     // Deep link straight to a section of the league tab: the conclusion reminder
     // mails a link and it should land on the queue, not on the tab bar.
-    if (tab && (['roster', 'competitions', 'matchdays', 'auction', 'market'] as const)
+    if (tab && (['roster', 'competitions', 'matchdays', 'auction', 'market', 'economy'] as const)
         .includes(tab as LeagueTab)) {
       setActiveTab('league');
       setLeagueTab(tab as LeagueTab);
@@ -1215,8 +1216,8 @@ export default function LeagueAdminPage() {
           {league ? (
             <>
               <Card id="vfoot-league-tabs" className="p-4 scroll-mt-4">
-                {/* Five tabs do not fit 390px: the BAR scrolls, so the page does
-                    not get a horizontal scrollbar of its own. */}
+                {/* Le schede non stanno in 390px: scorre la BARRA, cosi' la pagina
+                    non si prende una barra orizzontale sua. */}
                 <div className="-mx-1 overflow-x-auto px-1">
                   <div className="inline-flex rounded-xl bg-surface-2 p-1">
                   {([
@@ -1225,6 +1226,7 @@ export default function LeagueAdminPage() {
                     ['matchdays', 'Matchdays'],
                     ['auction', 'Asta'],
                     ['market', 'Mercato'],
+                    ['economy', 'Crediti e scambi'],
                   ] as Array<[LeagueTab, string]>).map(([id, label]) => (
                     <button
                       key={id}
@@ -1984,6 +1986,21 @@ export default function LeagueAdminPage() {
 
               {leagueTab === 'market' && league ? (
                 <MarketAdminPanel leagueId={league.league_id} />
+              ) : null}
+
+              {leagueTab === 'economy' && league ? (
+                <LeagueEconomyPanel
+                  leagueId={league.league_id}
+                  teams={league.teams}
+                  mode={league.mode}
+                  /* Le rose sono cambiate sotto: quella aperta accanto va riletta,
+                     o resta a mostrare un giocatore che ha gia' cambiato squadra. */
+                  onChanged={() => {
+                    if (selectedLeagueId && selectedTeamId) {
+                      void loadRoster(selectedLeagueId, selectedTeamId).catch(() => {});
+                    }
+                  }}
+                />
               ) : null}
             </>
           ) : (
