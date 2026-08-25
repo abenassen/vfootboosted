@@ -100,6 +100,21 @@ npm run build
 grep -c "api/v1" dist/sw.js      # deve dire 0
 ```
 
+> **La build si rifiuta di partire se le variabili non ci sono.** Un `npm run
+> build` nudo eredita in silenzio `vfoot-frontend/.env.local` e cuoce
+> `http://localhost:8000/api/v1` nel JS spedito: ogni visitatore chiamerebbe il
+> proprio computer, senza un errore da nessuna parte. È successo il 25/08/2026.
+> La guardia in `vite.config.ts` blocca quel caso e quello del client id Google
+> mancante. Build locale voluta: `VFOOT_LOCAL_BUILD=1 npm run build`.
+
+Verifica sul bundle, prima di caricarlo:
+
+```sh
+JS=$(ls dist/assets/index-*.js)
+grep -o 'function oe(){const e="[^"]*"' "$JS"   # deve dire "/api/v1"
+grep -c 'gsi/client' "$JS"                       # deve essere > 0
+```
+
 ### 2. Push
 
 ```sh

@@ -106,6 +106,24 @@ VITE_API_BASE_URL=/api/v1 \
 VITE_GOOGLE_CLIENT_ID=989229675760-6jhl2l8hootj02j3urbm2c68soia67i8.apps.googleusercontent.com \
 npm run build          # -> dist/
 ```
+
+> **La build si rifiuta di partire se questo blocco non è completo.** Un `npm run
+> build` nudo non produce una build "senza configurazione": eredita in silenzio
+> `vfoot-frontend/.env.local` e cuoce `http://localhost:8000/api/v1` dentro il JS
+> spedito, così ogni visitatore chiama il proprio computer. Nessun errore, da
+> nessuna parte — è successo il 25/08/2026 e il sito è rimasto inutilizzabile
+> finché non è stato ricostruito. La guardia in `vite.config.ts` ora blocca
+> quella build e anche quella senza client id Google (che cancellerebbe il
+> bottone dal bundle). Per una build locale volutamente puntata al backend di
+> sviluppo: `VFOOT_LOCAL_BUILD=1 npm run build`.
+
+**Verifica prima di caricare** (sul bundle appena costruito, non sul server):
+
+```sh
+JS=$(ls dist/assets/index-*.js)
+grep -o 'function oe(){const e="[^"]*"' "$JS"   # deve dire "/api/v1", non localhost
+grep -c 'gsi/client' "$JS"                       # deve essere > 0
+```
 `VITE_API_BASE_URL=/api/v1` is RELATIVE (nginx proxies it); the Google client id is
 public (baked into the bundle) and must match, or Google login breaks.
 

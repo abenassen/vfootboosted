@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -16,8 +16,64 @@ import { VitePWA } from 'vite-plugin-pwa';
  *  response shows last week's votes with nothing on screen to explain why, and it
  *  is the single easiest way to make a PWA worse than the site it replaced.
  */
+/** Refuses to build a deployable bundle configured for a developer's laptop.
+ *
+ *  `VITE_*` values are substituted at BUILD time, so a bare `npm run build` does
+ *  not produce an unconfigured bundle: it silently inherits `.env.local`, bakes
+ *  `http://localhost:8000/api/v1` into the shipped JS, and every visitor's browser
+ *  then calls its own machine. Nothing errors — not the build, not the console,
+ *  not nginx — so the first sign is users unable to log in. That shipped to
+ *  production on 25/08/2026; this plugin is why it cannot ship again.
+ *
+ *  The same substitution deletes the Google button: with no client id the effect
+ *  returns on its first line and the minifier drops the whole sign-in path, so a
+ *  missing id is not a broken button but no button at all.
+ *
+ *  Deliberate local production builds (the offline-shell test, a preview against
+ *  a dev backend) set VFOOT_LOCAL_BUILD=1. Forgetting anything else fails the
+ *  build, which is the only outcome that cannot reach users.
+ */
+function guardProductionEnv(): Plugin {
+  return {
+    name: 'vfoot-guard-production-env',
+    apply: 'build',
+    config(_config, { mode }) {
+      if (process.env.VFOOT_LOCAL_BUILD === '1') return;
+
+      const env = loadEnv(mode, process.cwd(), 'VITE_');
+      const problems: string[] = [];
+
+      const base = env.VITE_API_BASE_URL?.trim();
+      if (!base) {
+        problems.push('VITE_API_BASE_URL manca: il bundle ripiegherebbe su http://localhost:8000/api/v1.');
+      } else if (/localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0/.test(base)) {
+        problems.push(`VITE_API_BASE_URL vale ${base} — e' l'indirizzo di sviluppo: in produzione ogni browser chiamerebbe se stesso. Deve essere /api/v1, relativo.`);
+      }
+
+      const clientId = env.VITE_GOOGLE_CLIENT_ID?.trim();
+      if (!clientId) {
+        problems.push('VITE_GOOGLE_CLIENT_ID manca: il bottone "Accedi con Google" verrebbe cancellato dal bundle, senza errori.');
+      } else if (!clientId.endsWith('.apps.googleusercontent.com')) {
+        problems.push(`VITE_GOOGLE_CLIENT_ID vale ${clientId}, che non e' un client id Google.`);
+      }
+
+      if (problems.length > 0) {
+        throw new Error(
+          ['', 'Build di produzione rifiutata:', ...problems.map((p) => `  - ${p}`), '',
+           'Usa il comando intero di deploy/DEPLOY.md §1:', '',
+           '  VITE_API_PROVIDER=backend \\', '  VITE_API_BASE_URL=/api/v1 \\',
+           '  VITE_GOOGLE_CLIENT_ID=<client id>.apps.googleusercontent.com \\', '  npm run build', '',
+           'Per una build locale volutamente puntata al backend di sviluppo: VFOOT_LOCAL_BUILD=1 npm run build', ''
+          ].join('\n')
+        );
+      }
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
+    guardProductionEnv(),
     react(),
     VitePWA({
       strategies: 'injectManifest',

@@ -13,7 +13,7 @@
     "test:e2e:install": "playwright install chromium",
     "test:pwa": "playwright test --grep @pwa",
     "test:pwa:roundtrip": "node tests/push-roundtrip.mjs",
-    "test:pwa:offline": "npm run build && node tests/offline-shell.mjs",
+    "test:pwa:offline": "VFOOT_LOCAL_BUILD=1 npm run build && node tests/offline-shell.mjs",
     "test:mobile": "node tests/mobile-overflow.mjs"
   },
   "dependencies": {
