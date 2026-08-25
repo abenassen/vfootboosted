@@ -47,6 +47,10 @@ def weights_fingerprint() -> str:
         # of the index: a change here invalidates the reference exactly as a weight
         # change does.
         "exposure_credit": cr.EXPOSURE_CREDIT,
+        # Same reasoning for the absence credit: it changes the z the index
+        # consumes for every credited count, hence the per-role mean and spread.
+        "absence_credit": cr.ABSENCE_CREDIT,
+        "credited_features": sorted(cr.CREDITED_FEATURES),
         # The compression shape and the derived-feature recipe both change what the
         # stored per-feature spreads mean, so a change to either must invalidate the
         # calibration exactly as a weight change does.

@@ -24,7 +24,7 @@ from vfoot.services.classic_rating import (
     DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
     GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, SHRINKAGE_MINUTES, TOTAL_WEIGHTS,
     VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, WEIGHTS,
-    _feature_z, exposure_z, feature_scales, raw_feature_values,
+    _feature_z, exposure_z, scored_z, feature_scales, raw_feature_values,
 )
 from realdata.models import Player
 
@@ -583,11 +583,11 @@ def _all_terms(role: str, terms: dict, mean_terms: dict, per_unit: float,
         kind = ("EXPOS" if key == EXPOSURE_KEY
                 else "DERIV" if key in DERIVED_FEATURES
                 else "TOT" if key in total_keys else "PER90")
-        # The exposure is standardised ASYMMETRICALLY (EXPOSURE_CREDIT), so its σ has
-        # to be read through the same function the index used — otherwise the row
-        # shows a σ that does not produce the contribution printed beside it.
-        z = (exposure_z(value, scales) if key == EXPOSURE_KEY
-             else _feature_z(key, value, scales))
+        # The exposure and the credited counts are standardised ASYMMETRICALLY
+        # (EXPOSURE_CREDIT / ABSENCE_CREDIT), so the σ has to be read through the
+        # same function the index used — otherwise the row shows a σ that does not
+        # produce the contribution printed beside it.
+        z = scored_z(key, value, scales)
         out.append({
             "key": key,
             "label": readable_label(key),
@@ -600,6 +600,9 @@ def _all_terms(role: str, terms: dict, mean_terms: dict, per_unit: float,
             # a σ is a fraction of an occurrence and a per-σ weight reads ten times
             # smaller than it acts. See the note on last_man_tackle.
             "event": (LABELS.get(key) or (None,))[0] == EVENT,
+            # NB: il z GREZZO di una occorrenza, senza il credito per l'assenza —
+            # e' consumato solo per le voci EVENT (tuner, benchmark) e nessuna
+            # delle CREDITED_FEATURES lo e' (sono tutte 'count').
             "z_one": round(_feature_z(key, 1.0, scales), 3),
             "value": round(value, 3),
             "z": round(z, 3),
@@ -637,7 +640,7 @@ def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0,
     for key, w in weights.items():
         if not w:
             continue
-        z = _feature_z(key, values.get(key, 0.0), scales)
+        z = scored_z(key, values.get(key, 0.0), scales)
         if z:
             out[key] = w * z
     if not is_gk:

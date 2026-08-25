@@ -965,6 +965,144 @@ aveva due, il salto è grande.
 
 ---
 
+## 3quater. Il credito per l'assenza, e le due leve del dribbling — 25/08/2026 pomeriggio
+
+Aperto da un'inversione: **Yıldız 7.0 e Conceição 6.5**, quando a occhio è il
+contrario. Yıldız 2 duelli su 2, 2 dribbling su 2, 34 tocchi; Conceição 5 su 16,
+4 dribbling riusciti su 9, 53 tocchi. Il primo aveva fatto poco e non aveva
+sbagliato niente, il secondo aveva provato molto.
+
+### Il credito per l'assenza
+
+**Che cos'è.** Lo `z` non è centrato: `z = compressione(valore/σ)/σ_z`, e per un
+conteggio è ≥ 0 sempre. La media della popolazione `mu_z` è positiva, quindi una
+feature a **peso negativo** che vale zero **paga**: il giocatore medio porta il
+malus, chi non ha giocato il duello no. In voto, quanto incassava chi ha zero:
+
+| voce | credito prima | credito dopo |
+|---|---|---|
+| duelli persi | 0.185 | 0.042 |
+| passaggi sbagliati | 0.064 | 0.013 |
+| duelli aerei persi | 0.047 | 0.021 |
+| dribbling concessi | 0.038 | 0.025 |
+| controlli sbagliati | 0.031 | 0.013 |
+| palloni persi in conduzione | 0.019 | 0.012 |
+| falli commessi | 0.019 | 0.008 |
+| **zero su tutte e sette** | **0.404** | **0.132** |
+
+Il premio per non aver perso un duello valeva **più** di quello per averne vinti
+quattro. È il difetto che la riduzione ×0.8 del blocco volume aveva individuato
+("un terzo del vantaggio veniva da cose che NON aveva fatto") ma non poteva
+curare: non è una coda, è il livello, e nessuna trasformazione per-feature lo
+tocca.
+
+**La cura, e il suo limite ONESTO.** `ABSENCE_CREDIT = 0.0` schiaccia sulla media
+la metà sotto la media: `z* = max(z, mu_z)`. Ma così **E[z\*] > E[z]**
+(duelli persi: 1.776 → 2.176), quindi chi sta a `mu_z` è sotto la nuova media e
+con peso negativo contribuisce **ancora** più della media. **Il credito non è
+eliminato: è reso uniforme** — 0.404 → 0.132, un terzo. Sparisce l'ordinamento
+DENTRO il gruppo dei non coinvolti, che è quel che serviva.
+
+**E non si può portare a zero.** Tagliando a una soglia `v`, il credito è
+`E[max(z,v)] − v`; azzerarlo vorrebbe `v = E[max(z,v)]`, ma
+`g(v) = E[max(z,v)] − v` ha `g'(v) = P(z<v) − 1 ≤ 0`: scende verso zero e non lo
+tocca a `v` finito. Misurato su `duels_lost`: a `mu_z` credito 0.042 (55%
+tagliati), a 1.5·`mu_z` 0.012 (82%), a 2·`mu_z` 0.002 (95%). **Per cancellare il
+credito bisogna cancellare la feature.**
+
+**La cura strutturale sarebbe un'altra forma, e non è stata provata.** Il credito
+esiste perché è un CONTEGGIO. Un **tasso** — `duelli persi / duelli ingaggiati` —
+è indefinito per chi non ne ha ingaggiati, gli si assegna la media, ed è
+esattamente medio: credito zero, esatto. È quel che la coppia
+`dribbles_won`/`dribbles_attempted` approssima. Cambio di disegno, non di peso.
+
+**Il livello del voto NON si sposta** (v. §2decies): la media dell'INDICE sì,
+0.3411 → 0.2612, ma `build_reference` prende la media dello stesso indice
+trasformato, e lo scarto medio dalla media di ruolo resta zero a precisione di
+macchina. Voto grezzo medio 6.0168 → 6.0196: i tre millesimi sono l'attenuazione
+sui minuti, non lo spostamento. **L'ordine è tutto**: `mu_z` congelato dentro la
+trasformazione (non insegue se stesso), media di ruolo ricalcolata dopo.
+
+**Che cosa NON è nell'insieme creditato, e perché**: `dribbles_attempted` (non è
+un evento negativo, è il denominatore di un tasso; misurato, è un pareggio:
+Redazione +0.0004, SofaScore −0.0022); `errors_led_to_goal`,
+`penalties_conceded`, `errors_led_to_shot` (mu_z ≈ 0.1, il credito vale 0.006 di
+voto a testa — coerente toglierlo, ma non misurato a parte); il canale del
+portiere (nessuna voce negativa è un conteggio di volume).
+
+### `dribbles_attempted` −0.0194 → −0.012
+
+Quel che conta è il **rapporto** con `dribbles_won`, e il nostro era fuori scala.
+Fittato sulla 25-26, n=6829 presenze ≥60', gol e assist controllati, per 1σ:
+
+| | riusciti | tentati | rapporto |
+|---|---|---|---|
+| Redazione | +0.069 | −0.022 | −0.32 |
+| SofaScore | +0.162 | −0.083 | −0.51 |
+| noi (era) | +0.0252 | −0.0194 | **−0.77** |
+| noi (ora) | +0.0252 | −0.012 | **−0.48** |
+
+**Il doppione col pallone perso è REALE ma MINORE di come veniva ricordato**: un
+dribbling fallito aggiunge +0.232 `dispossessed` registrati (0 falliti → 0.51 di
+essi, ≥3 falliti → 1.28), circa uno su quattro. Il 79% che sta nel commento del
+codice riguarda `possessionLostCtrl`, un aggregato che NON portiamo — non è
+questo. La sovrapposizione giustifica un ritocco; **il rapporto giustifica la
+misura**.
+
+### I tocchi: leva CHIUSA, misurata tre volte
+
+L'ipotesi era che il volume di gioco fosse sottopagato (noi 0.0203 di voto per
+1σ contro +0.070 della Redazione e +0.192 di SofaScore).
+
+1. **A bilancio aperto** (alzando solo `touches`): Redazione peggiora in modo
+   monotono, 0.6436 → 0.6418 (.020) → 0.6401 (.028) → 0.6380 (.036); SofaScore
+   fermo.
+2. **A bilancio chiuso** (travasando da `passes_completed`, che misura quasi la
+   stessa cosa): 0.6437 → 0.6437 (metà) → 0.6432 (totale). Niente.
+3. **Tocchi in metà campo avversaria** (colonne 3-4 della griglia zone, che si
+   ricavano senza riscaricare nulla), al netto dei tocchi totali: Redazione DIF
+   +0.001, CEN −0.011, ATT −0.039; SofaScore DIF −0.004, CEN −0.005, ATT −0.071.
+
+Il motivo del terzo è strutturale: **la quota di tocchi alti È il ruolo** (DIF
+22%, CEN 38%, ATT 59%), e separare i ruoli è quel che la z-standardizzazione per
+ruolo fa già. La partecipazione è già nel modello, la portano i passaggi, i
+passaggi in metà campo avversaria, i duelli e i recuperi.
+
+### Il risultato, e quello che NON risolve
+
+Contro il modello in produzione: **20 voti su 288** si muovono (6 su, 14 giù),
+spostamento medio −0.010. Yıldız 7.0 → 6.5, gli altri casi fermi. Accordo sulla
+25-26, stesso metodo per entrambi: Redazione −0.0020, Statistico −0.0039,
+SofaScore −0.0080, difensori sulla Redazione −0.0079.
+
+**Il bersaglio non è raggiunto e non era raggiungibile con queste leve.**
+Yıldız 6.734 e Conceição 6.662: l'inversione è corretta ma cadono nello stesso
+6.5, e a 6.734 Yıldız è a **16 millesimi** dal tornare 7.0. Tutte le leve li
+alzano INSIEME, perché 2/2 e 44 tocchi per 90' non sono sotto media. L'unica che
+li separa è il credito (−0.145 contro +0.028): il vantaggio di Yıldız *era* quel
+credito.
+
+### Gila e il duello con Njie: quel che il fornitore ci dà e quel che no
+
+L'evento **c'è**: `challengeLost` → `dribbled_past` = 1, −0.086 di voto **in
+più** del duello perso ordinario. Quel che non c'è, e non è recuperabile da
+questa fonte: **il minuto** (le statistiche per giocatore sono totali di partita;
+solo gli *incidents* portano un minuto), **il posto** (`challengeLost` è di
+distinta, non è posato sul campo — solo i *tocchi* lo sono, via la mappa di
+calore), **la gravità**. La conseguenza invece la sappiamo, ed è nulla:
+`errorLeadToAShot` e `errorLeadToAGoal` sono entrambi 0, e `clearances`/`blocks`
+pure. Pesare quell'evento per gravità richiede dati a livello di evento, che
+questo fornitore non espone.
+
+Il 7.0 di Gila non viene da lì: viene da **`defensive_value`**, +0.369 di voto da
+solo, quattro volte il costo del duello con Njie, con z=2.27 contro una media di
+0.065. Ridurlo 0.10 → 0.085 è stato misurato e **costa** (Redazione −0.005,
+SofaScore −0.004): si sta pagando il suo peso, non è stato toccato. La tensione
+da nominare: quel numero il fornitore lo calcola SAPENDO di quel duello, e lo
+valuta comunque 0.55.
+
+---
+
 ## 2bis. La trappola di taratura, che generalizza
 
 **Qualunque feature correlata con un evento bonus assorbe quel bonus, se la si

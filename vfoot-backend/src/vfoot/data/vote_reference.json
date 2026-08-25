@@ -326,19 +326,19 @@
   },
   "reference": {
     "ATT": {
-      "mean": 0.42521369716031876,
+      "mean": 0.364905933372754,
       "n": 2139,
-      "std": 0.48504129133199836
+      "std": 0.4841096614745497
     },
     "CEN": {
-      "mean": 0.3928022396995199,
+      "mean": 0.32454303795162764,
       "n": 3397,
-      "std": 0.48504129133199836
+      "std": 0.4841096614745497
     },
     "DIF": {
-      "mean": 0.23178906770701527,
+      "mean": 0.14525865451391076,
       "n": 3767,
-      "std": 0.48504129133199836
+      "std": 0.4841096614745497
     },
     "POR": {
       "mean": 1.3041459497458034,
@@ -346,15 +346,15 @@
       "std": 2.21716448044347
     },
     "_OUTFIELD": {
-      "mean": 0.33505651129071456,
+      "mean": 0.2612271141524134,
       "n": 9303,
-      "std": 0.48504129133199836
+      "std": 0.4841096614745497
     }
   },
   "role_averages": {
     "ATT": {
       "_exposure": -0.14147836335233066,
-      "aerials_lost": -0.03861306858870035,
+      "aerials_lost": -0.04923838264496874,
       "aerials_won": 0.027605779664548833,
       "assists": 0.010340186359327028,
       "ball_recoveries": 0.022689865505816656,
@@ -363,17 +363,17 @@
       "clearances_off_line": 9.907754171651568e-05,
       "crosses_completed": 0.009574775932871298,
       "defensive_value": 0.01962890718900741,
-      "dribbled_past": -0.015143987269591796,
-      "dribbles_attempted": -0.024837926577757477,
+      "dribbled_past": -0.032631335364906096,
+      "dribbles_attempted": -0.015363665924386111,
       "dribbles_won": 0.02277315428060217,
-      "duels_lost": -0.1391497589159129,
+      "duels_lost": -0.15516222150396106,
       "duels_won": 0.1135296081780167,
-      "errors_bad_passes": -0.03166448979687217,
-      "errors_dispossessed": -0.019129956560233877,
-      "errors_fouls_committed": -0.011262187042601245,
+      "errors_bad_passes": -0.04311511379964631,
+      "errors_dispossessed": -0.024075913738036938,
+      "errors_fouls_committed": -0.01643521256445989,
       "errors_led_to_goal": -0.0016376489470842186,
       "errors_led_to_shot": -0.0011132583199984416,
-      "errors_miscontrols": -0.030011855707924133,
+      "errors_miscontrols": -0.03409914870679408,
       "expected_assists": 0.08494169909476924,
       "interceptions": 0.006289926315867106,
       "key_passes": 0.08824400374671074,
@@ -396,7 +396,7 @@
     },
     "CEN": {
       "_exposure": -0.17238986531895356,
-      "aerials_lost": -0.023629183615533993,
+      "aerials_lost": -0.038148809546013705,
       "aerials_won": 0.021004794388368563,
       "assists": 0.008232107170077706,
       "ball_recoveries": 0.03540889519330056,
@@ -405,17 +405,17 @@
       "clearances_off_line": 0.0006862512449360899,
       "crosses_completed": 0.011229948064505644,
       "defensive_value": 0.006688463720778072,
-      "dribbled_past": -0.029659780413954357,
-      "dribbles_attempted": -0.01733207271785307,
+      "dribbled_past": -0.04266761552441031,
+      "dribbles_attempted": -0.010720869722383354,
       "dribbles_won": 0.01732852181566071,
-      "duels_lost": -0.11652560039392938,
+      "duels_lost": -0.13931948327985444,
       "duels_won": 0.11723399566993932,
-      "errors_bad_passes": -0.04046509161726396,
-      "errors_dispossessed": -0.013798054348866126,
-      "errors_fouls_committed": -0.012268362685882397,
+      "errors_bad_passes": -0.04742859987376884,
+      "errors_dispossessed": -0.01989639243711957,
+      "errors_fouls_committed": -0.016698368578039694,
       "errors_led_to_goal": -0.0027841960447734723,
       "errors_led_to_shot": -0.004067434176568255,
-      "errors_miscontrols": -0.019558374623934192,
+      "errors_miscontrols": -0.02661558320351955,
       "expected_assists": 0.08818033307269728,
       "interceptions": 0.019625140497555517,
       "key_passes": 0.09197272558760987,
@@ -438,7 +438,7 @@
     },
     "DIF": {
       "_exposure": -0.24086591774633506,
-      "aerials_lost": -0.02710045695561304,
+      "aerials_lost": -0.03919164237689424,
       "aerials_won": 0.03250578872919582,
       "assists": 0.00498269132906882,
       "ball_recoveries": 0.03159348503090026,
@@ -447,17 +447,17 @@
       "clearances_off_line": 0.002889796937329035,
       "crosses_completed": 0.010872211025100777,
       "defensive_value": -0.001181386662930239,
-      "dribbled_past": -0.021431577648557514,
-      "dribbles_attempted": -0.00914514374598978,
+      "dribbled_past": -0.03646355034539422,
+      "dribbles_attempted": -0.00565678994597309,
       "dribbles_won": 0.008956840808732887,
-      "duels_lost": -0.09261609502046986,
+      "duels_lost": -0.1253624980364324,
       "duels_won": 0.10964986974610964,
-      "errors_bad_passes": -0.041455331682398476,
-      "errors_dispossessed": -0.005468888142203489,
-      "errors_fouls_committed": -0.01097207042782696,
+      "errors_bad_passes": -0.04751392284040772,
+      "errors_dispossessed": -0.014395280957617504,
+      "errors_fouls_committed": -0.015614900332008914,
       "errors_led_to_goal": -0.005486406550862103,
       "errors_led_to_shot": -0.004270143581694344,
-      "errors_miscontrols": -0.011295612534424817,
+      "errors_miscontrols": -0.021817004515857087,
       "expected_assists": 0.06047015438393219,
       "interceptions": 0.025686701182705527,
       "key_passes": 0.057098533439465485,
@@ -491,5 +491,5 @@
       "passes_completed": 0.031010015493522967
     }
   },
-  "weights_fingerprint": "9be0bdd13d1ebd0f"
+  "weights_fingerprint": "6aecf82733059ffa"
 }

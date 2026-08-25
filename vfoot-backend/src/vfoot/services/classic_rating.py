@@ -376,13 +376,31 @@ PER90_WEIGHTS = {
     "errors_fouls_committed": -0.0114,
     # dribbles_won(+) / dribbles_attempted(-) is a deliberate RATE pairing, like
     # duels_won/duels_lost: the negative on the superset makes the net contribution
-    # turn negative below a ~36% success rate, so many failed take-ons cost even if a
-    # few come off. NOT here: possession_lost (possessionLostCtrl) — it is 79% the
-    # SAME losses already penalised by errors_dispossessed/miscontrols/bad_passes
-    # (same sign, no rate counterpart), so it just doubled the malus on one event and
-    # made those weights un-interpretable. Raise the specific errors_* to weigh ball
-    # loss more, not this aggregate.
-    "dribbles_attempted": -0.0194,
+    # turn negative below a break-even success rate, so many failed take-ons cost
+    # even if a few come off. NOT here: possession_lost (possessionLostCtrl) — it is
+    # 79% the SAME losses already penalised by errors_dispossessed/miscontrols/
+    # bad_passes (same sign, no rate counterpart), so it just doubled the malus on
+    # one event and made those weights un-interpretable. Raise the specific errors_*
+    # to weigh ball loss more, not this aggregate.
+    #
+    # -0.0194 -> -0.012 on 2026-08-25. What sets this number is the RATIO to
+    # dribbles_won, and at -0.0194 ours was -0.77 — far harsher on the attempt than
+    # either external judge. Fitted on 25-26 against the pagella and the SofaScore
+    # rating (n=6829 appearances over 60', goals and assists controlled), per σ:
+    #
+    #             riusciti   tentati   rapporto
+    #   Redazione   +0.069    -0.022     -0.32
+    #   SofaScore   +0.162    -0.083     -0.51
+    #   noi (era)   +0.0252   -0.0194    -0.77
+    #   noi (ora)   +0.0252   -0.012     -0.48   <- dentro la forbice dei due
+    #
+    # A SECOND argument was checked and is WEAKER than it was remembered: the
+    # failed take-on is only partly double-counted as a lost ball. Measured, one
+    # failed dribble adds +0.232 registered ``dispossessed`` (0 failed -> 0.51 of
+    # them, >=3 failed -> 1.28), i.e. about one in four. The 79% figure above is
+    # about possessionLostCtrl, an aggregate we do NOT carry — it is not this.
+    # The overlap justifies a nudge; the ratio is what justifies the size.
+    "dribbles_attempted": -0.012,
 }
 
 WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / breakdowns
@@ -962,6 +980,48 @@ _NEIGHBOURS = ((-1, 0), (1, 0), (0, -1), (0, 1))
 # on every judge (MAE 0.3398, sofa 0.7723), so the softer charge is kept.
 EXPOSURE_CREDIT = 0.0
 
+# --- Il credito per l'assenza -------------------------------------------------
+# Lo stesso meccanismo dell'esposizione, applicato ai conteggi negativi del blocco
+# volume: la metà SOTTO la media è schiacciata sulla media invece di pagare.
+#
+# Perché. Una feature a peso negativo che vale zero PAGA, perché il giocatore medio
+# ne porta il malus: chi non ha perso un duello incassa il malus medio che non ha
+# subito. Su ``duels_lost`` quel premio vale 0.18 di voto — più di quanto valga
+# vincerne quattro — e lo incassa chi al duello non è mai andato. È il difetto che
+# la riduzione ×0.8 del blocco volume aveva individuato ma non poteva curare
+# ("un terzo del vantaggio veniva da cose che NON aveva fatto"): nessuna
+# trasformazione per-feature lo tocca, perché non è una coda, è il livello.
+#
+# Quanto valeva, in punti di voto, il credito di chi ha zero (|w|·mu_z·K/σ):
+#   duels_lost 0.182 · errors_bad_passes 0.063 · errors_miscontrols 0.026
+#   errors_dispossessed 0.019 · aerials_lost 0.029 · dribbled_past 0.023
+#   errors_fouls_committed 0.019
+#
+# Costo misurato sulla 25-26 (n=6829, giornata per giornata): Redazione
+# -0.003, SofaScore -0.006, difensori sulla Redazione -0.011. Si paga: quel
+# credito è in parte la porta inviolata collettiva, che le pagelle premiano
+# davvero (stessa ragione per cui l'esposizione non si rende relativa alla
+# squadra). Si paga volentieri perché il caso che lo apre è un'inversione:
+# Yıldız 2 duelli su 2 e 0 persi finiva SOPRA Conceição, 5 su 16 con 4 dribbling
+# riusciti, e quel sorpasso era tutto credito per l'assenza (-0.145 contro
+# +0.028 quando lo si toglie — il differenziale più grande di ogni leva provata).
+#
+# Che cosa NON è in questo insieme, e perché:
+# * ``dribbles_attempted``: non è un evento negativo, è il denominatore di un
+#   tasso (v. la nota sul suo peso). Creditarlo o no interagisce con
+#   ``dribbles_won``, che qui non si tocca. Misurato: pareggio (Redazione +0.0004,
+#   SofaScore -0.0022).
+# * ``errors_led_to_goal``, ``penalties_conceded``, ``errors_led_to_shot``: eventi
+#   rari, mu_z ~0.1, il credito vale 0.006 di voto a testa. Toglierlo sarebbe
+#   coerente e impercettibile; resta fuori perché non è stato misurato a parte.
+# * il canale del portiere: nessuna delle sue voci negative è un conteggio di
+#   volume, e la sua esposizione è già il suo stesso canale.
+ABSENCE_CREDIT = 0.0
+CREDITED_FEATURES = frozenset({
+    "duels_lost", "aerials_lost", "dribbled_past", "errors_dispossessed",
+    "errors_miscontrols", "errors_bad_passes", "errors_fouls_committed",
+})
+
 # 'A voto' vs 'senza voto' (s.v.): classic fantacalcio rates a player only if he
 # played enough AND was involved enough; below that he gets NO vote (a bench player
 # replaces him), not a 6. Involvement is proxied by ball touches. Both tunable.
@@ -1327,20 +1387,37 @@ def _feature_z(key: str, value: float, scales: dict) -> float:
     return _compression_of(key)(value / s["sigma_raw"]) / s["sigma_z"]
 
 
-def exposure_z(value: float, scales: dict) -> float:
-    """The standardised exposure as the INDEX consumes it: charged in full above the
-    average, credited only ``EXPOSURE_CREDIT`` of the way below it.
+def _asymmetric_z(key: str, value: float, scales: dict, credit: float) -> float:
+    """The z with its BELOW-average half squeezed onto the average by ``credit``.
 
-    Lives here, in one function, because the vote and the vote's EXPLANATION both
-    have to apply it — a breakdown that used the raw z would not add up to the vote
-    it explains. ``mu_z`` comes from the frozen calibration, never from the match
-    being scored: "the average danger conceded" is a property of the population."""
-    z = _feature_z(EXPOSURE_KEY, value, scales)
-    mu = (scales.get(EXPOSURE_KEY) or {}).get("mu_z")
-    if mu is None or EXPOSURE_CREDIT >= 1.0:
+    1.0 leaves it symmetric, 0.0 makes every below-average value score exactly as
+    the average does. ``mu_z`` comes from the frozen calibration, never from the
+    match being scored: what "average" means is a property of the population."""
+    z = _feature_z(key, value, scales)
+    mu = (scales.get(key) or {}).get("mu_z")
+    if mu is None or credit >= 1.0:
         return z          # no frozen mean (fresh checkout) -> symmetric, as before
     d = z - mu
-    return mu + (d if d >= 0 else EXPOSURE_CREDIT * d)
+    return mu + (d if d >= 0 else credit * d)
+
+
+def exposure_z(value: float, scales: dict) -> float:
+    """The standardised exposure as the INDEX consumes it: charged in full above the
+    average, credited only ``EXPOSURE_CREDIT`` of the way below it."""
+    return _asymmetric_z(EXPOSURE_KEY, value, scales, EXPOSURE_CREDIT)
+
+
+def scored_z(key: str, value: float, scales: dict) -> float:
+    """The z of a feature AS THE INDEX CONSUMES IT — credit applied.
+
+    Lives here, in one function, because the vote and the vote's EXPLANATION both
+    have to apply the same transform: a breakdown built on the raw ``_feature_z``
+    would not add up to the vote it explains."""
+    if key == EXPOSURE_KEY:
+        return exposure_z(value, scales)
+    if key in CREDITED_FEATURES:
+        return _asymmetric_z(key, value, scales, ABSENCE_CREDIT)
+    return _feature_z(key, value, scales)
 
 
 def index_for_role(role: str, totals: dict, minutes: int, exposure: float = 0.0,
@@ -1360,7 +1437,7 @@ def index_for_role(role: str, totals: dict, minutes: int, exposure: float = 0.0,
     weights = GK_WEIGHTS if gk else WEIGHTS
     scales = feature_scales(gk=gk) if scales is None else scales
     values = raw_feature_values(totals, minutes, exposure, gk=gk)
-    idx = sum(w * _feature_z(k, values.get(k, 0.0), scales)
+    idx = sum(w * scored_z(k, values.get(k, 0.0), scales)
               for k, w in weights.items() if w)
     if not gk:
         idx -= EXPOSURE_WEIGHT * exposure_z(values.get(EXPOSURE_KEY, 0.0), scales)
