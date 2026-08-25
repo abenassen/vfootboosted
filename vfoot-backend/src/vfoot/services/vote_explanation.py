@@ -308,7 +308,13 @@ def _phrase(role: str, key: str, term_delta: float, raw_value: float,
         n = int(round(count))
         sing = _singular_of(key)
         if sing:
-            return f"{n} {sing}" if n == 1 else f"{n} {entry[1]}"
+            # "solo" quando e' SOTTO la media del ruolo — il numero nudo perde la
+            # direzione che il quantificatore portava, e senza di essa "3 duelli
+            # persi" accanto a un +0,02 sembra una contraddizione. Sopra la media
+            # non serve niente: "1 fallo commesso" con un meno accanto si legge
+            # da solo, e "ben 1 passaggio chiave" sarebbe ridicolo.
+            testa = f"{n} {sing}" if n == 1 else f"{n} {entry[1]}"
+            return testa if more else f"solo {testa}"
     # COUNT: absolute quantifier vs the role average (the implicit yardstick).
     label, quant = entry[1], entry[2]
     high, low = QUANTIFIERS.get(quant, QUANTIFIERS["mp"])

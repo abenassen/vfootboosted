@@ -613,7 +613,15 @@ class VoteExplanationTests(SimpleTestCase):
                          "2 falli subiti")
         self.assertEqual(ph("ATT", "key_passes", +0.06, 1.3, count=1),
                          "1 passaggio chiave")
-        self.assertEqual(ph("DIF", "clearances", -0.3, 3.9, count=3), "3 respinte")
+        # "solo" quando e' SOTTO la media del ruolo: il numero nudo perde la
+        # direzione che il quantificatore portava, e "3 duelli persi" accanto a un
+        # PIU' sembra una contraddizione senza di essa.
+        self.assertEqual(ph("DIF", "clearances", -0.3, 3.9, count=3),
+                         "solo 3 respinte")
+        self.assertEqual(ph("ATT", "duels_lost", +0.02, 4.0, count=3),
+                         "solo 3 duelli persi")
+        self.assertEqual(ph("ATT", "duels_lost", -0.02, 4.0, count=3),
+                         "3 duelli persi")
         # sopra la soglia il quantificatore torna, perche' li' porta l'informazione
         # in piu' che il numero da solo non da'
         self.assertEqual(ph("ATT", "touches", +0.01, 49.0, count=37),
@@ -631,7 +639,8 @@ class VoteExplanationTests(SimpleTestCase):
                     ledger=True)
         rows = {r["label"]: r for r in e["other_terms"]}
         rows.update({c["label"]: c for c in e["contributions"]})
-        detto = [l for l in rows if l.startswith(("1 ", "2 ", "3 ", "nessun"))]
+        detto = [l for l in rows
+                 if l.startswith(("1 ", "2 ", "3 ", "nessun", "solo "))]
         self.assertTrue(detto, "il ramo numerico non ha prodotto nessuna riga")
         for l in detto:
             self.assertNotIn("value", rows[l], f"numero scritto due volte: {l}")
