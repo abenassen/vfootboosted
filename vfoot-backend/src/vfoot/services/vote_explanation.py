@@ -151,6 +151,11 @@ LABELS = {
                         "poco contributo difensivo d'insieme"),
     # EVENT — counted exactly, (singular, plural)
     "shots_goal": (EVENT, "un gol", "gol"),
+    # L'assist entra nel voto base dal 25/08/2026 (peso 0.03, v. TOTAL_WEIGHTS), quindi
+    # va NOMINATO: una voce che muove il voto e non compare nella spiegazione e' il
+    # difetto che questo modulo esiste per non avere. In italiano e' invariabile —
+    # "un assist", "3 assist" — e il plurale della tabella lo rispetta.
+    "assists": (EVENT, "un assist", "assist"),
     "big_chance_created": (EVENT, "un'occasione nitida creata", "occasioni nitide create"),
     "big_chance_missed": (EVENT, "un'occasione nitida sprecata", "occasioni nitide sprecate"),
     "shots_post": (EVENT, "un tiro sul palo", "tiri sul palo"),
@@ -230,6 +235,17 @@ MERGES = [
     (("dribbles_won", "dribbles_attempted"),
      "uno o più dribbling riusciti", "uno o più dribbling falliti",
      "dribbling", "nessun dribbling tentato"),
+    # CREAZIONE: il merito del passaggio (xA) e il suo esito (assist) sono due voci
+    # dello stesso gesto, e separate raccontavano la stessa cosa due volte — "una o
+    # piu' occasioni create per i compagni" da una parte e "3 assist" dall'altra.
+    # Unite dicono la storia intera in una riga, e la precisazione fra parentesi
+    # porta i due numeri che stanno nel tabellino (v. ``creation_detail``).
+    #
+    # Il lato NEGATIVO e' None per la stessa ragione per cui lo era il SIGNAL da cui
+    # viene: creare poco non e' una notizia da dire ad alta voce. Con phrase a None
+    # la riga esce dal riassunto e resta nel registro col suo nome.
+    (("expected_assists", "assists"),
+     "una o più occasioni create per i compagni", None, "creazione", None),
 ]
 # {feature: family name} — the same table read the other way round.
 MERGE_FAMILY = {k: name for keys, _pos, _neg, name, _none in MERGES for k in keys}
@@ -321,7 +337,8 @@ def _phrase(role: str, key: str, term_delta: float, raw_value: float,
     return f"{high if more else low} {label}"
 
 
-def creation_detail(phrase: str, big_chances: float, xa: float = 0.0) -> str:
+def creation_detail(phrase: str, big_chances: float, xa: float = 0.0,
+                    assists: float = 0.0) -> str:
     """Ancora la riga della xA a un numero che sta nel tabellino, nei due versi.
 
     ``expected_assists`` e' un SIGNAL, quindi si dice "una o piu' occasioni create":
@@ -344,12 +361,16 @@ def creation_detail(phrase: str, big_chances: float, xa: float = 0.0) -> str:
     riga del merito confonderebbe la distinzione su cui il modello e' costruito."""
     if not phrase:
         return phrase
+    parti = []
     n = int(round(big_chances or 0))
     if n >= 1:
-        return f"{phrase} ({'una nitida' if n == 1 else f'{n} nitide'})"
-    if xa >= ASSIST_LOW_XA:
-        return f"{phrase} (nessuna nitida)"
-    return phrase
+        parti.append("una nitida" if n == 1 else f"{n} nitide")
+    elif xa >= ASSIST_LOW_XA:
+        parti.append("nessuna nitida")
+    a = int(round(assists or 0))
+    if a >= 1:
+        parti.append("un assist" if a == 1 else f"{a} assist")
+    return f"{phrase} ({', '.join(parti)})" if parti else phrase
 
 
 # Sopra quanti si puo' dire "tanti". Un quantificatore confronta con la media del
@@ -505,17 +526,15 @@ def assist_note(assists: int, xa: float, big_chances: float) -> str:
     # Corta apposta: viaggia dentro ``to_sentence``, che nel dettaglio partita e'
     # una riga sola, e chi ha fatto anche autogol ha gia' due clausole davanti.
     #
-    # NON dice piu' "conta come bonus, non nel voto base": con ``key_passes`` a
-    # 0.100 il voto base quel passaggio lo paga (un passaggio chiave vale +0.055
-    # per un CEN a 90', tre ne valgono +0.236). La negazione secca era vera quando
-    # la creazione stava sulla sola xA, e con la ritaratura del 25/08/2026 non lo e'
-    # piu'. Quel che resta vero, ed e' il punto, e' COSA legge il voto base.
+    # NON dice piu' ne' "conta come bonus, non nel voto base" ne' "il voto base
+    # legge il pallone, non il gol": da quando ``key_passes`` pesa 0.100 e
+    # ``assists`` 0.03, il voto base legge ENTRAMBI. La nota si limita al fatto —
+    # il pallone valeva poco — e lascia che siano le righe a mostrare quanto ha
+    # fruttato: l'assist adesso ha la sua voce, nominata (v. LABELS).
     head = f"I suoi passaggi valgono {xa:.2f} di xA"
     if assists == 1:
-        return (f"{head}: l'assist nasce da un pallone di poco valore, e il voto "
-                f"base legge quello, non il gol che ne e' nato.")
-    return (f"{head}: gli assist nascono da palloni di poco valore, e il voto "
-            f"base legge quelli, non i gol che ne sono nati.")
+        return f"{head}: l'assist nasce da un pallone di poco valore."
+    return f"{head}: gli assist nascono da palloni di poco valore."
 
 
 def readable_label(key: str) -> str:
@@ -729,12 +748,14 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             attempted = sum(abs(raw_values.get(k, 0.0)) for k in group)
             phrase = (label_none if attempted < 0.005
                       else label_pos if net > 0 else label_neg)
+            if family == "creazione" and phrase:
+                phrase = creation_detail(
+                    phrase, raw_values.get("big_chance_created", 0.0),
+                    raw_values.get("expected_assists", 0.0),
+                    raw_values.get("assists", 0.0))
             scored.append((net, group[0], phrase, (family, len(present))))
     for key, pts in points_by_key.items():
         phrase = _phrase(role, key, pts, raw_values.get(key, 0.0), observed(key))
-        if key == "expected_assists" and pts > 0:
-            phrase = creation_detail(phrase, raw_values.get("big_chance_created", 0.0),
-                                     raw_values.get("expected_assists", 0.0))
         scored.append((pts, key, phrase, None))
 
     # The subtotal is the vote's OWN raw value, computed exactly as the scorer
@@ -866,9 +887,13 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                 # successo, il numero accanto e' rumore. Lo stesso vale per il ramo
                 # numerico ("2 falli subiti · 2").
                 n = round(count)
+                # Un EVENT porta SEMPRE il conteggio dentro la frase ("3 gol",
+                # "nessun assist"), a qualunque numero; una COUNT solo sotto la
+                # soglia numerica. In entrambi i casi la colonna accanto tace.
+                is_event = (LABELS.get(key) or (None,))[0] == EVENT
                 already_says_number = (
-                    (n == 0 and ((LABELS.get(key) or (None,))[0] == EVENT
-                                 or key in COUNT_NONE))
+                    is_event
+                    or (n == 0 and key in COUNT_NONE)
                     or (1 <= n <= COUNT_SAY_NUMBER_UPTO and _singular_of(key)))
                 if abs(count - n) < 0.01 and not already_says_number:
                     # "nessun gol" non ha bisogno di uno zero accanto: lo zero e'

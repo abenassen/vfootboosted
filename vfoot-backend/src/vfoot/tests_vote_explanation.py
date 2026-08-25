@@ -309,7 +309,7 @@ class VoteExplanationTests(SimpleTestCase):
                         self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
                         average, assists=1)
         self.assertIn("pallone di poco valore", cheap["assist_note"])
-        self.assertIn("non il gol che ne e' nato", cheap["assist_note"])
+        self.assertNotIn("gol", cheap["assist_note"])
         self.assertIn("valgono 0.05 di xA", cheap["assist_note"])
         self.assertIn("poco valore", to_sentence(cheap))
         # Il passaggio che VALEVA non ha piu' bisogno di una nota: da quando
@@ -323,12 +323,14 @@ class VoteExplanationTests(SimpleTestCase):
                       self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}},
                       average, assists=2)
         self.assertIn("gli assist nascono da palloni di poco valore", due["assist_note"])
-        self.assertIn("non i gol che ne sono nati", due["assist_note"])
+        self.assertIn("palloni di poco valore", due["assist_note"])
         for nota in (cheap["assist_note"], due["assist_note"]):
             self.assertNotIn("pesa a parte", nota)
             self.assertNotIn("valore atteso", nota)
             # key_passes ora paga quel passaggio: la negazione secca era diventata falsa
             self.assertNotIn("non nel voto base", nota)
+            # key_passes E assists pesano: il voto base legge entrambi
+            self.assertNotIn("non il gol", nota)
         # con l'occasione riconosciuta non c'e' niente da spiegare: il voto ha gia'
         # pagato il gesto per intero, da entrambe le voci
         clear = explain("CEN", {"expected_assists": 0.05, "big_chance_created": 1.0,
@@ -597,9 +599,28 @@ class VoteExplanationTests(SimpleTestCase):
                         self._averages("CEN", {"touches": 60.0}))
         self.assertIn("(nessuna nitida)",
                       " ".join(c["label"] for c in senza["contributions"]))
-        # i punti restano tutti della xA: la parentesi non e' un secondo addendo
+        # la riga e' la famiglia CREAZIONE (xA + assist): la parentesi porta i due
+        # numeri del tabellino, i punti sono il netto delle due voci
         riga = [c for c in e["contributions"] if "nitide" in c["label"]][0]
-        self.assertNotIn("family", riga)
+        self.assertEqual(riga.get("family"), "creazione")
+
+    def test_creation_says_chances_and_assists_in_one_line(self):
+        """xA e assist sono due voci dello stesso gesto: separate raccontavano la
+        stessa cosa due volte. Unite dicono la storia intera in una riga."""
+        from vfoot.services.vote_explanation import creation_detail
+        base = "una o più occasioni create per i compagni"
+        self.assertEqual(creation_detail(base, 3, 1.09, 3), f"{base} (3 nitide, 3 assist)")
+        self.assertEqual(creation_detail(base, 0, 0.34, 2), f"{base} (nessuna nitida, 2 assist)")
+        self.assertEqual(creation_detail(base, 1, 0.20, 1), f"{base} (una nitida, un assist)")
+        self.assertEqual(creation_detail(base, 0, 0.02, 0), base)
+        average = self._averages("CEN", {"touches": 60.0})
+        e = explain("CEN", {"expected_assists": 0.34, "assists": 2.0, "touches": 60.0}, 75,
+                    self.REFERENCE | {"CEN": {"mean": 0.41, "std": 0.44}}, average)
+        said = " ".join(c["label"] for c in e["contributions"])
+        self.assertIn("(nessuna nitida, 2 assist)", said)
+        # una riga sola, non due
+        self.assertEqual(sum(1 for c in e["contributions"] if "occasioni create" in c["label"]), 1)
+        self.assertNotIn("2 assist,", said.replace("(nessuna nitida, 2 assist)", ""))
 
     def test_a_small_count_is_written_as_a_number_not_as_many(self):
         """"tanti falli commessi · 1" dice "molti" di UNO. Il quantificatore

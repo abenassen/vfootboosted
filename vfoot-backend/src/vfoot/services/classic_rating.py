@@ -108,12 +108,7 @@ log = logging.getLogger(__name__)
 # shot. Its sibling big_chance_created is NOT the same statistic and is weighted
 # below: that earlier removal conflated the two faces of one event.
 TOTAL_WEIGHTS = {
-    # LINEARE dal 25/08/2026 (v. NO_COMPRESS_FEATURES) e peso rialzato di conseguenza:
-    # 0.05 e 0.14 NON sono confrontabili, perche' un peso vale "punti di indice per
-    # 1 sigma" e togliendo la compressione quel sigma e' un'altra cosa (sigma_z della
-    # xA passa da 0.4201 a 1.0000). A parita' di effetto sulla fascia media, 0.14
-    # lineare sta a 0.06 compressa.
-    "expected_assists": 0.14,   # xA: chance creation, credited to the CREATOR
+    "expected_assists": 0.11,   # xA: chance creation, credited to the CREATOR
     # The DISCRETE counterpart of xA, and the creator's side of a big chance —
     # verified as the PASSER's stat, not the shooter's: it never exceeds the
     # player's own key passes (0 violations in 10,067 player-matches), 36% of the
@@ -174,6 +169,22 @@ TOTAL_WEIGHTS = {
     # cancellato: la feature si legge ancora e lo zero e' una decisione visibile.
     # Tabelle in docs/voto_questioni_aperte.md §2.
     "big_chance_created": 0.0,
+    # L'ASSIST, come il gol. La simmetria mancava: ``shots_goal`` sta qui col suo
+    # peso "on top of +3 bonus", quindi l'esito di una CONCLUSIONE il voto base lo
+    # pagava gia', quello di un PASSAGGIO no — e non c'era una ragione scritta per la
+    # differenza, solo che il gol arrivava dalla mappa dei tiri e l'assist da nessuna
+    # parte (ora da ``_merge_assists``).
+    #
+    # PICCOLO DI PROPOSITO. Caricarlo comprerebbe accordo con le pagelle — che
+    # l'assist lo pagano +0.57 — e sarebbe l'appiattimento su fantacalcio.it che
+    # questo modello esiste per evitare. Misurato sulla 25-26: portandolo da 0.03 a
+    # 0.05 l'accordo con la Redazione sale (0.660 -> 0.672) e quello con SofaScore
+    # SUI CREATORI scende (0.764 -> 0.751), cioe' si guadagna col giudice che legge
+    # l'esito e si perde con quello che legge la creazione. A 0.03 l'esito porta il
+    # 19% del credito di Dybala e il 28% di quello di Diouf: il merito resta padrone.
+    # Sotto (0.02) si perde su ENTRAMBI i giudici — un assist e' pur sempre un
+    # indizio, debole, che il passaggio era buono, e buttarlo via non compra purezza.
+    "assists": 0.03,
     "shots_goal": 0.1386,         # the GOAL itself (own goals excluded), on top of +3 bonus
     "sga_post": 0.0905,           # = S: EXECUTION merit, derived (xGOT − xG + woodwork)
     "xg_shots": 0.0323,           # = β: the mass of chances occupied, β/S = 1/3
@@ -396,7 +407,7 @@ DERIVED_FEATURES = ("sga_post",)
 # Weighted features that are neither zone features nor computed: folded in from
 # elsewhere in the DB (see ``_merge_defensive_value``). Kept apart from
 # DERIVED_FEATURES so "computed from other features" keeps meaning that.
-MERGED_FEATURES = ("defensive_value",)
+MERGED_FEATURES = ("defensive_value", "assists")
 # Inputs consumed by ``derived_features`` that carry no weight of their own and so
 # would otherwise never be fetched.
 DERIVED_INPUTS = frozenset({"xg_on_target", "shots_post"})
@@ -597,7 +608,21 @@ GK_EVIDENCE_FULL = 4.0
 # CONDITIONAL on the goal, i.e. converging on "a goal is worth 7 whatever else
 # happened" — the outcome-driven behaviour this model deliberately avoids. The
 # residual is therefore a choice, not a defect.
-COMPRESS_K = 1.0
+# ALZATO 1.0 -> 3.0 il 25/08/2026. La compressione accorciava le code di tutti, ma
+# su quelle grasse mordeva troppo: a u = 9,7 (Dybala, xA 1,09) tratteneva il 24% del
+# valore, per cui una prestazione tre volte piu' creativa ne ricavava 1,7 volte il
+# credito. Alzare K libera le code IN PROPORZIONE invece di esentare una feature
+# sola, che e' la stessa cura applicata a tutti — merito del passaggio e merito
+# della conclusione insieme.
+#
+# Quanto trattiene ora la xA: 94% al 50° percentile, 74% al 90°, 51% al 99°, 30% al
+# massimo di stagione. Cioe' morde dove deve, sopra il novantesimo.
+#
+# Misurato sulla 25-26 con i pesi di oggi: massimo di campionato 9.0, voti >= 8 allo
+# 0.83% e >= 9 allo 0.04% (esternamente 1.2% e 0.05%) — la coda alta degli
+# attaccanti, che l'abbassamento a 1.0 del 29/07 era servito a chiudere, NON si
+# riapre. Accordo: Redazione 0.660, Statistico 0.692, SofaScore 0.775.
+COMPRESS_K = 3.0
 
 # Features that are NOT compressed. The compression exists to shorten FAT tails —
 # the xA that motivated it reached 13σ with excess kurtosis +16. Applied to a
@@ -624,7 +649,14 @@ COMPRESS_K = 1.0
 # and asks for nothing. And exempting the two save-volume features as well was
 # measured and REJECTED — it overshoots (>= 7.5 to 3.0%) and makes both correlations
 # worse than this single exemption.
-# ``expected_assists`` esce dalla compressione il 25/08/2026. Il difetto non era
+# RIENTRATA la xA il 25/08/2026, poche ore dopo esserne uscita: v. la nota a
+# COMPRESS_K, alzato a 3.0. Esentare UNA delle due misure di merito (la xA del
+# passaggio) lasciando compressa l'altra (SGA, il merito della conclusione) era
+# un'asimmetria che il voto pagava subito — Malen, tripletta col Milan, perdeva
+# mezzo punto mentre Dybala ne guadagnava uno e mezzo, invertendoli rispetto a
+# ENTRAMBI i giudizi esterni. La compressione piu' mite li libera insieme.
+#
+# (storia) Il difetto originale non era
 # nella coda della distribuzione (la kurtosi compressa resta +3.15, quindi NON
 # sovra-corretta) ma nell'ORDINAMENTO: a u = 9.7 la compressione tratteneva il 24%
 # del valore, per cui una prestazione tre volte piu' creativa ne ricavava 1.7 volte
@@ -641,7 +673,7 @@ COMPRESS_K = 1.0
 # congelate nel file. Cambiare la FORMA (questa lista, COMPRESS_K) e chiamare
 # ``build_reference`` senza rifare le scale con ``build_feature_scales`` misura un
 # modello che non esiste — per i soli PESI la scorciatoia invece e' corretta.
-NO_COMPRESS_FEATURES = frozenset({"gk_goals_prevented", "expected_assists"})
+NO_COMPRESS_FEATURES = frozenset({"gk_goals_prevented"})
 
 
 def _compression_of(key: str):
@@ -1394,6 +1426,7 @@ def _per_match_player_totals(match_ids):
     _merge_shot_detail(out, sorted(covered))
     _merge_defensive_value(out, sorted(covered))
     _merge_own_goal_relief(out, sorted(covered))
+    _merge_assists(out, sorted(covered))
     return out
 
 
@@ -1459,6 +1492,27 @@ def _merge_defensive_value(out: dict, match_ids) -> None:
         log.warning("%s present on only %d of %d appearances over 15 minutes — the "
                     "defensive proxy is degraded and defender votes with it.",
                     DEFENSIVE_VALUE_SOURCE, seen, eligible)
+
+
+def _merge_assists(out: dict, match_ids) -> None:
+    """L'ASSIST nei totali, come il gol.
+
+    Simmetria mancante, non feature nuova: ``shots_goal`` sta nell'indice col suo
+    peso ("on top of +3 bonus"), quindi l'esito di una CONCLUSIONE il voto base lo
+    paga gia'. L'esito di un PASSAGGIO no, e non c'era una ragione scritta per la
+    differenza — solo il fatto che il gol arrivava dalla mappa dei tiri e l'assist
+    da nessuna parte.
+
+    Sta in ``MatchAppearance.assists``, non nelle zone, per la stessa ragione di
+    ``defensive_value``: e' uno scalare del canale classic, e spargerlo sulla
+    heatmap per poi risommarlo sarebbe un giro a vuoto con un reimport dietro.
+
+    Assente = 0: nessun assist, che e' il caso normale.
+    """
+    for mid, pid, n in (MatchAppearance.objects.filter(match_id__in=match_ids)
+                        .values_list("match_id", "player_id", "assists")):
+        if n:
+            out[(mid, pid)]["assists"] = float(n)
 
 
 def match_lineup_keepers(match_ids) -> dict:
