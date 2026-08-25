@@ -1196,6 +1196,71 @@ il non-fare, il rapporto del dribbling fuori dalla forbice dei giudici,
 l'esposizione a un numero opaco). E' una scelta legittima ma va vista in blocco,
 non una alla volta.
 
+### Il CENTRO del ruolo — la leva che i pesi non erano (25/08/2026, spedito)
+
+`ROLE_VOTE_CENTER = {DIF: 5.91}`, media DIF realizzata **5.917**. E' la sola cosa
+che muove il LIVELLO di un ruolo, ed e' la conferma per contrasto di tutto il
+resto della giornata: nessun peso lo muoveva, questo si', perche' non passa per
+l'indice.
+
+**Il centro non e' la media, e la differenza e' tutta l'ARROTONDAMENTO.** Misurato
+sulle 3908 presenze DIF:
+
+| centro | media PRIMA di arrotondare | scarto | media DOPO | bias |
+|---|---|---|---|---|
+| 6.000 | 6.0010 | +0.0010 | 6.0026 | +0.0016 |
+| 5.930 | 5.9310 | +0.0010 | 5.9365 | +0.0056 |
+| 5.920 | 5.9210 | +0.0010 | 5.9278 | +0.0069 |
+| 5.910 | 5.9110 | +0.0010 | 5.9173 | +0.0064 |
+| 5.750 | 5.7510 | +0.0010 | 5.7449 | **-0.0061** |
+
+Lo scarto prima di arrotondare e' **+0.0010 a qualunque centro**: il modello e'
+centrato esattamente dove gli si dice. Dopo, la griglia del mezzo punto e' FISSA
+sui multipli di 0.5 mentre la distribuzione la spostiamo — a centro 6.00 il picco
+sta su un nodo e i due lati si compensano, a 5.91 sta 0.09 sotto e piu' massa
+sale a 6.0 di quanta ne scenda a 5.5, a 5.75 il segno si rovescia. **La media
+dopo l'arrotondamento non e' una funzione liscia del centro.**
+
+**Il centro deve stare sui CENTESIMI.** La spiegazione del voto riconcilia a due
+decimali (`base` + voci mostrate + `other_points` = `subtotal`) e tutte le sue
+voci sono arrotondate al centesimo: con 5.912 quattro test della riconciliazione
+fallivano di 0.008 esatti. Per una taratura piu' fine va prima resa robusta la
+riconciliazione, non alzata la tolleranza dei test.
+
+**La mitigazione del risultato ora misura la divergenza dal centro DEL RUOLO.**
+Altrimenti un difensore esattamente nella media passava per «voto basso in una
+vittoria» e veniva spinto su in ogni vittoria: un offset che si mangia da solo
+(+0.015 sulla media realizzata).
+
+**Il MODIFICATORE DIFESA non si compensa, e scatta meno spesso.** La sua soglia e'
+6.00 assoluto, un numero FISSO del regolamento che non insegue il centro del
+ruolo: bonus medio **+1.071 -> +0.915**, squadre a zero bonus dal **38.9% al
+44.5%**. E' l'effetto voluto — se un difensore ordinario non vale piu' 6, la
+difesa che prende il bonus deve essere piu' brava. Una compensazione
+(`voto_puro_base6` + `vote_on_common_scale`) era stata scritta e poi TOLTA: non
+riproporla. Stesso discorso per la scala 66/+6, dove pero' compensare romperebbe
+la somma VISIBILE del tabellino.
+
+**E l'accordo ci guadagna dove serviva.** Una traslazione non muove una
+correlazione, ma riallinea l'arrotondamento, e noi eravamo sistematicamente sopra
+la Redazione: **0.6425 -> 0.6455**. Statistico -0.0006, SofaScore -0.0007.
+
+### Spedito in produzione il 25/08/2026 (`d3a661d`)
+
+Verificato sul server: media DIF della giornata 1 26-27 = **5.923** (POR 5.975,
+CEN 6.000, ATT 6.037), Yıldız 7.0 -> 6.5. Impronte del modello identiche fra
+locale e produzione (`d0296353612d9f75` / `a794ace234b1061b`); cache su file
+svuotata a mano, che il riavvio non basta.
+
+**Una divergenza PREESISTENTE trovata dal confronto, da non confondere con
+questo lavoro**: l'impronta dei VOTI differisce fra locale e produzione su 27
+presenze delle 11903 della 25-26 (0.23%, sempre mezzo punto). Causa: 396 presenze
+hanno ruolo **CEN in locale e ATT in produzione** — tutte trequartisti ed esterni
+al confine (Berardi, Nico Paz, De Ketelaere, Pellegrini, Baldanzi, Samardzic). E'
+`current_role_map` che diverge fra le due installazioni, non il modello. Il passo
+del runbook che la chiuderebbe e' `compute_classic_roles`, che pero' cambierebbe
+il ruolo di quei giocatori sulla stagione VIVA: non e' stato lanciato.
+
 ---
 
 ## 2bis. La trappola di taratura, che generalizza
