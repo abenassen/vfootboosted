@@ -248,6 +248,18 @@ export default function LeagueHome({
     [mine],
   );
 
+  // Se le ultime quattro sono tutte della STESSA competizione, il nome si dice
+  // una volta sola sopra l'elenco invece che su ogni riga. La targhetta per
+  // riga esiste perché quel blocco MESCOLA le competizioni — è lì che
+  // «Campionato» accanto a «Coppa» distingue due righe che altrimenti si
+  // somigliano — ma quando non c'è niente da distinguere ripeterla quattro
+  // volte occupa la riga più stretta della card per dire sempre la stessa cosa.
+  // Segnalato il 26/08/2026.
+  const soleCompetitionId = useMemo(() => {
+    const ids = new Set(lastResults.map((f) => f.competition_id));
+    return ids.size === 1 ? [...ids][0] : null;
+  }, [lastResults]);
+
   const alerts = useDecisionAlerts(selectedLeagueId ?? null);
 
   // What is waiting on the reader BESIDES fielding a team. Derived rather than
@@ -784,12 +796,27 @@ export default function LeagueHome({
                 (vedi `mine`), e un titolo generico prometteva i risultati della
                 lega — che stanno nei blocchi delle competizioni. */}
             <SectionTitle>Ultimi risultati della tua squadra</SectionTitle>
+            {/* Il nome della competizione UNA VOLTA, quando è una sola: stessa
+                misura e stesso colore della targhetta che stava sulle righe, così
+                è lo stesso segno spostato di posto e non un elemento nuovo. */}
+            {soleCompetitionId != null ? (
+              <div
+                className={clsx(
+                  'mt-0.5 text-[10px] font-bold uppercase tracking-wide',
+                  compColorById.get(soleCompetitionId)?.text700 ?? 'text-ink-faint',
+                )}
+              >
+                {compName.get(soleCompetitionId)}
+              </div>
+            ) : null}
             <div className="mt-2 space-y-1">
               {lastResults.map((f) => (
                 <MiniFixture
                   key={f.fixture_id}
                   f={f}
-                  competition={compName.get(f.competition_id)}
+                  competition={
+                    soleCompetitionId == null ? compName.get(f.competition_id) : undefined
+                  }
                   competitionClass={compColorById.get(f.competition_id)?.text700}
                   when
                 />
