@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 
@@ -312,8 +313,29 @@ class CreateMarketSessionSerializer(serializers.Serializer):
     credit_recovery_mode = serializers.ChoiceField(
         choices=["fixed", "frac30", "frac50", "frac75"], default="fixed")
     fixed_recovery_amount = serializers.IntegerField(min_value=0, required=False, default=1)
+    # Apertura programmata. Null/omessa = si apre subito. Nel futuro = la lega la
+    # vede annunciata e ne aspetta l'ora, cosi' l'admin puo' dirlo in anticipo.
+    opens_at = serializers.DateTimeField(required=False, allow_null=True)
     # Scheduled end. Null/omitted = indefinite (admin opens and closes by hand).
     closes_at = serializers.DateTimeField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        """Una finestra che si chiude prima di aprirsi non e' una finestra.
+
+        Il controllo manca(va) anche per la sola chiusura: una data gia' passata
+        creava una sessione che la prima richiesta trovava chiusa, senza che
+        nessuno avesse potuto offrire."""
+        now = timezone.now()
+        opens = attrs.get("opens_at")
+        closes = attrs.get("closes_at")
+        if closes is not None:
+            if closes <= now:
+                raise serializers.ValidationError(
+                    {"closes_at": "La chiusura e' gia' passata: scegli una data futura."})
+            if opens is not None and closes <= opens:
+                raise serializers.ValidationError(
+                    {"closes_at": "La chiusura deve venire dopo l'apertura."})
+        return attrs
 
 
 class PlaceOfferSerializer(serializers.Serializer):

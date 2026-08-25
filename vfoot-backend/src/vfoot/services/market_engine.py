@@ -195,6 +195,23 @@ def _target_locked(session: MarketSession, target_player_id: int) -> bool:
     ).exists()
 
 
+# Gemello di `_deadline_sentence` in api/league_views.py, e per la stessa ragione:
+# calcio italiano, orologio italiano. Il server sta su UTC (TIME_ZONE) e i manager
+# no, quindi `timezone.localtime` direbbe un'ora che nessuno sta guardando.
+_GIORNI = ["lunedi'", "martedi'", "mercoledi'", "giovedi'", "venerdi'", "sabato", "domenica"]
+
+
+def _when(moment) -> str:
+    """«sabato 27/08 alle 16:13» — l'ora dell'apertura come la legge un manager.
+
+    Col giorno della settimana: un mercato annunciato con giorni di anticipo si
+    colloca per quello, non per il numero sul calendario."""
+    from zoneinfo import ZoneInfo
+
+    local = moment.astimezone(ZoneInfo("Europe/Rome"))
+    return f"{_GIORNI[local.weekday()]} {local.strftime('%d/%m alle %H:%M')}"
+
+
 def check_offer(
     session: MarketSession,
     team: FantasyTeam,
@@ -210,6 +227,9 @@ def check_offer(
     league = session.league
     if session.status != MarketSession.STATUS_OPEN:
         return OfferCheck(False, "La sessione di mercato non e' aperta.")
+    if session.is_pending():
+        return OfferCheck(
+            False, f"Il mercato non e' ancora aperto: apre {_when(session.opens_at)}.")
 
     if release_player_id == target_player_id:
         return OfferCheck(False, "Il giocatore da svincolare e quello offerto coincidono.")
@@ -348,6 +368,28 @@ def place_offer(
     return offer
 
 
+def open_session(session: MarketSession, now=None) -> MarketSession:
+    """Fa scattare l'apertura di una sessione programmata. Una volta sola.
+
+    L'apertura non e' solo un'ora che passa: porta con se' l'aggiornamento del
+    listone, perche' fra il giorno in cui l'admin ha annunciato il mercato e il
+    giorno in cui comincia le squadre vere possono aver firmato qualcuno, e chi
+    e' arrivato dopo l'annuncio deve poter essere offerto. `opened_at` e' il
+    segno che e' gia' avvenuto: senza, si rifarebbe a ogni richiesta."""
+    from vfoot.models import MarketEvent
+    from vfoot.services.listone import snapshot_league_listone
+
+    now = now or timezone.now()
+    if session.opened_at is not None:
+        return session
+    snapshot_league_listone(session.league)
+    session.opened_at = now
+    session.save(update_fields=["opened_at"])
+    record_event(session, MarketEvent.TYPE_SESSION_OPENED, None,
+                 {"scheduled_for": session.opens_at.isoformat()})
+    return session
+
+
 def promote_expired(session: MarketSession, now=None) -> list[MarketOffer]:
     """Promote every leading offer past its deadline to `accepted` (queued for the
     admin). No-op unless the session is open. Returns the promoted offers."""
@@ -390,6 +432,11 @@ def sync_session(session: MarketSession, now=None) -> MarketSession:
                    .get(pk=session.pk))
         if session.status != MarketSession.STATUS_OPEN:
             return session
+        if session.opens_at is not None and session.opens_at > now:
+            # Programmata: non e' ancora cominciata, non c'e' niente da muovere.
+            return session
+        if session.opened_at is None:
+            open_session(session, now=now)
         if session.closes_at is not None and session.closes_at <= now:
             # La chiusura promuove tutto cio' che e' ancora in testa.
             close_session(session, now=now)

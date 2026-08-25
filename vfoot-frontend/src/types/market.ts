@@ -2,6 +2,10 @@
 
 export type MarketRecoveryMode = 'fixed' | 'frac30' | 'frac50' | 'frac75';
 export type MarketSessionStatus = 'open' | 'suspended' | 'closed';
+/** Come la si legge a schermo. `scheduled` non e' uno stato del server: e' una
+ *  sessione `open` la cui ora di apertura deve ancora arrivare (vedi
+ *  `sessionPhase` in utils/market). */
+export type MarketSessionPhase = MarketSessionStatus | 'scheduled';
 export type MarketOfferStatus =
   | 'leading'
   | 'outbid'
@@ -14,7 +18,11 @@ export interface MarketSessionInfo {
   id: number;
   name: string;
   status: MarketSessionStatus;
+  /** Quando il mercato APRE (programmabile in anticipo). Nel futuro = annunciato
+   *  ma non ancora cominciato: si guarda, non si offre. */
   opens_at: string | null;
+  /** Quando ha aperto DAVVERO. Null finche' l'ora non e' scattata. */
+  opened_at: string | null;
   closes_at: string | null;
   credit_recovery_mode: MarketRecoveryMode;
   fixed_recovery_amount: number;

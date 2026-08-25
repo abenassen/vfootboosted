@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ApiError,
@@ -29,12 +29,15 @@ import {
   SESSION_TONE,
   countdown,
   recoveryText,
+  sessionPhase,
+  stamp,
 } from '../utils/market';
 import type {
   MarketActive,
   MarketFreeAgent,
   MarketOfferRow,
   MarketSessionHistory,
+  MarketSessionPhase,
 } from '../types/market';
 import type { ActiveAuctionInfo } from '../types/league';
 
@@ -115,12 +118,26 @@ export default function MarketPage() {
     [history, sessionId],
   );
 
+  // Lo stato che conta a schermo: `open` con l'apertura ancora da venire e'
+  // "programmata". Si ricalcola a ogni secondo, quindi allo scadere del conto
+  // alla rovescia la pagina si apre da se'.
+  const phase = data?.session ? sessionPhase(data.session, nowMs) : null;
+  const wasPhase = useRef<MarketSessionPhase | null>(null);
+  useEffect(() => {
+    const before = wasPhase.current;
+    wasPhase.current = phase;
+    // All'apertura i dati a schermo sono ancora quelli dell'attesa: un giro
+    // subito, invece di restare fino a venti secondi davanti a un mercato aperto
+    // con l'elenco di prima.
+    if (before === 'scheduled' && phase === 'open') void refresh();
+  }, [phase, refresh]);
+
   if (!selectedLeagueId) return <div className="text-sm text-ink-faint">Seleziona una lega per vedere il mercato.</div>;
 
   const session = data?.session ?? null;
   const isClassic = (data?.mode ?? auction?.mode) === 'classic';
   const isAdmin = !!data?.is_admin;
-  const canOffer = session?.status === 'open' && data?.my_team_id != null;
+  const canOffer = phase === 'open' && data?.my_team_id != null;
 
   return (
     <div className="space-y-4">
@@ -151,7 +168,10 @@ export default function MarketPage() {
 
           <MyOffersCard offers={data?.my_offers ?? []} nowMs={nowMs} closesAt={session.closes_at} />
 
-          <LiveContestsCard data={data!} nowMs={nowMs} onPick={pickTarget} />
+          {/* Prima dell'apertura non puo' esistere nessuna offerta: la card
+              direbbe solo "nessuna", e inviterebbe ad aprirne una che il server
+              rifiuterebbe. */}
+          {phase !== 'scheduled' && <LiveContestsCard data={data!} nowMs={nowMs} onPick={pickTarget} />}
 
           <ClosedOffersCard offers={closedThisSession} />
         </>
@@ -194,6 +214,7 @@ function NoSessionCard({ isAdmin, auction }: { isAdmin: boolean; auction: Active
 
 function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: boolean; nowMs: number }) {
   const s = data.session!;
+  const phase = sessionPhase(s, nowMs);
   // Sotto il giorno la data non dice piu' nulla di utile: da li' in giu' conta
   // quanto manca, perche' e' meno del tempo che serve a un'offerta per maturare.
   const closeMs = s.closes_at ? new Date(s.closes_at).getTime() - nowMs : null;
@@ -204,10 +225,16 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
         <div>
           <div className="flex items-center gap-2">
             <SectionTitle>{s.name}</SectionTitle>
-            <Badge tone={SESSION_TONE[s.status]}>{SESSION_LABEL[s.status]}</Badge>
+            <Badge tone={SESSION_TONE[phase]}>{SESSION_LABEL[phase]}</Badge>
           </div>
+          {phase === 'scheduled' && <OpeningCountdown opensAt={s.opens_at} nowMs={nowMs} />}
           <div className="mt-1 text-sm text-ink-soft">
-            {s.opens_at && <>Aperta il {stamp(s.opens_at)}{' · '}</>}
+            {/* L'apertura VERA, non quella annunciata: una sessione programmata
+                che apre in ritardo (nessuno ha toccato la pagina) non e' aperta
+                dall'ora sul calendario, ma da quando lo e' diventata davvero. */}
+            {phase !== 'scheduled' && (s.opened_at ?? s.opens_at) && (
+              <>Aperta il {stamp(s.opened_at ?? s.opens_at)}{' · '}</>
+            )}
             Recupero: <b>{recoveryText(s.credit_recovery_mode, s.fixed_recovery_amount)}</b>
             {' · '}
             {!s.closes_at ? 'chiusura indefinita'
@@ -215,13 +242,19 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
                 <b className="text-warn">
                   chiude tra <span className="tabular-nums">{countdown(s.closes_at, nowMs)}</span>
                 </b>
-              ) : `chiude il ${new Date(s.closes_at).toLocaleString('it-IT')}`}
+              ) : `chiude il ${stamp(s.closes_at)}`}
           </div>
           {s.closes_at && (
             // La regola che rende sensato rilanciare sul filo: va detta, o la
             // scopre solo chi per caso e' collegato al momento giusto.
             <div className="mt-1 text-xs text-ink-faint">
               Alla chiusura chi è in testa passa in validazione, anche senza aver compiuto 24 ore.
+            </div>
+          )}
+          {phase === 'scheduled' && (
+            <div className="mt-1 text-xs text-ink-faint">
+              Puoi già vedere chi sarà svincolato e preparare le mosse: le offerte
+              si aprono all’ora fissata, non prima.
             </div>
           )}
           {data.my_budget && (
@@ -256,6 +289,25 @@ function SessionHeader({ data, isAdmin, nowMs }: { data: MarketActive; isAdmin: 
         <div className="mt-2 text-sm text-warn">Sessione sospesa: le offerte sono temporaneamente bloccate.</div>
       )}
     </Card>
+  );
+}
+
+/** Il conto alla rovescia dell'apertura.
+ *
+ *  E' la ragione per cui l'ora si programma: l'admin la annuncia alla lega, e
+ *  chi passa dalla pagina prima del via deve trovare quanto manca — non solo un
+ *  bottone spento. Sopra le 48 ore il conto passa ai giorni (vedi `countdown`). */
+function OpeningCountdown({ opensAt, nowMs }: { opensAt: string | null; nowMs: number }) {
+  return (
+    <div className="mt-2 inline-block rounded-xl border border-line bg-surface-2 px-3 py-2">
+      <div className="text-xs uppercase tracking-wide text-ink-faint">Il mercato apre tra</div>
+      <div className="text-2xl font-semibold tabular-nums">
+        {/* A zero non c'e' nulla da validare: manca solo il giro di dati che
+            apre la pagina, ed e' questione di un istante. */}
+        {countdown(opensAt, nowMs, 'un istante')}
+      </div>
+      <div className="mt-0.5 text-xs text-ink-faint">{stamp(opensAt)}</div>
+    </div>
   );
 }
 
@@ -438,7 +490,8 @@ function LiveContestsCard({
   nowMs: number;
   onPick: (playerId: number) => void;
 }) {
-  const canOffer = data.session?.status === 'open' && data.my_team_id != null;
+  const canOffer = !!data.session
+    && sessionPhase(data.session, nowMs) === 'open' && data.my_team_id != null;
   const contests = useMemo(() => {
     const rows = (data.free_agents ?? []).filter((f) => f.leading || f.locked);
     // Le bloccate (offerta accettata, in attesa dell'admin) non hanno piu' un
@@ -523,7 +576,8 @@ function FreeAgentSearch({
   const [q, setQ] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('');
   const freeAgents = data.free_agents ?? [];
-  const canOffer = data.session?.status === 'open' && data.my_team_id != null;
+  const canOffer = !!data.session
+    && sessionPhase(data.session, nowMs) === 'open' && data.my_team_id != null;
   const searching = q.trim().length > 0 || roleFilter !== '';
 
   const filtered = useMemo(() => {
@@ -612,21 +666,18 @@ function FreeAgentSearchCard({
   );
 }
 
-/** Giorno e ora in forma breve: nello storico la data serve a collocare la
- *  sessione nella stagione, non al minuto. */
-function stamp(iso: string | null): string | null {
-  if (!iso) return null;
-  return new Date(iso).toLocaleString('it-IT', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
-}
-
 /** Da quando a quando e' durata. La fine e' quella VERA (`closed_at`): una
  *  sessione chiusa a mano finisce prima della scadenza annunciata, e mostrare
  *  quest'ultima racconterebbe una durata mai esistita. Se manca, ripiega sulla
  *  scadenza prevista e lo dice. */
 function sessionSpan(s: MarketSessionHistory): string {
-  const from = stamp(s.opens_at);
+  // Una sessione programmata e poi annullata non e' mai stata aperta: dire "dal
+  // <data annunciata>" le attribuirebbe giorni che non ha avuto.
+  if (!s.opened_at && s.status === 'closed') {
+    const at = stamp(s.opens_at);
+    return at ? `annullata prima di aprire (era per il ${at})` : 'annullata prima di aprire';
+  }
+  const from = stamp(s.opened_at ?? s.opens_at);
   const to = stamp(s.closed_at);
   const planned = stamp(s.closes_at);
   const start = from ? `dal ${from}` : 'inizio non registrato';

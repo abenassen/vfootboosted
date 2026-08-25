@@ -145,23 +145,35 @@ class MarketSessionCreateView(APIView):
         s.is_valid(raise_exception=True)
         data = s.validated_data
 
-        # Catch up with the real market before opening, so a mid-season signing has
-        # a frozen role and can be offered/released.
+        # Catch up with the real market, so a mid-season signing has a frozen role
+        # and can be offered/released. Vale anche per una sessione programmata: da
+        # subito la lega puo' guardare chi sara' libero, e all'apertura vera il
+        # listone si aggiorna di nuovo (market_engine.open_session).
         snapshot_league_listone(league)
 
+        now = timezone.now()
+        opens_at = data.get("opens_at") or now
+        # Un'ora di apertura gia' passata vuol dire "adesso": non si fa aspettare
+        # nessuno per un momento gia' suonato.
+        immediate = opens_at <= now
         session = MarketSession.objects.create(
             league=league,
             name=data["name"],
             status=MarketSession.STATUS_OPEN,
-            opens_at=timezone.now(),
+            opens_at=now if immediate else opens_at,
+            # La sessione che parte subito e' aperta da questo istante; quella
+            # programmata non e' ancora aperta, e lo sara' quando scattera' l'ora.
+            opened_at=now if immediate else None,
             closes_at=data.get("closes_at"),
             credit_recovery_mode=data["credit_recovery_mode"],
             fixed_recovery_amount=data.get("fixed_recovery_amount", 1),
             created_by=request.user,
         )
         record_event(session, MarketEvent.TYPE_SESSION_CREATED, request.user,
-                     {"name": session.name, "recovery_mode": session.credit_recovery_mode})
-        return Response({"session_id": session.id}, status=status.HTTP_201_CREATED)
+                     {"name": session.name, "recovery_mode": session.credit_recovery_mode,
+                      "opens_at": session.opens_at.isoformat()})
+        return Response({"session_id": session.id, "opens_at": session.opens_at.isoformat()},
+                        status=status.HTTP_201_CREATED)
 
 
 class MarketSessionControlView(APIView):
@@ -372,6 +384,7 @@ class MarketActiveView(APIView):
             "session": {
                 "id": session.id, "name": session.name, "status": session.status,
                 "opens_at": session.opens_at.isoformat() if session.opens_at else None,
+                "opened_at": session.opened_at.isoformat() if session.opened_at else None,
                 "closes_at": session.closes_at.isoformat() if session.closes_at else None,
                 "credit_recovery_mode": session.credit_recovery_mode,
                 "fixed_recovery_amount": session.fixed_recovery_amount,
@@ -426,6 +439,7 @@ class MarketSessionListView(APIView):
             "sessions": [{
                 "id": s.id, "name": s.name, "status": s.status,
                 "opens_at": s.opens_at.isoformat() if s.opens_at else None,
+                "opened_at": s.opened_at.isoformat() if s.opened_at else None,
                 "closes_at": s.closes_at.isoformat() if s.closes_at else None,
                 "closed_at": s.closed_at.isoformat() if s.closed_at else None,
                 "credit_recovery_mode": s.credit_recovery_mode,

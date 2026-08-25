@@ -63,13 +63,30 @@ class MarketBase(TestCase):
                 player=p, team_season=self.team_season, end_date=None)
         return p
 
+    def _player_without_role(self, name, role):
+        """Un giocatore arrivato DOPO l'ultimo giro del listone: gioca nella
+        stagione di riferimento e ha il suo ruolo di provenienza, ma nessuna riga
+        congelata nella lega — quindi non e' ancora offribile."""
+        p = Player.objects.create(full_name=name, short_name=name,
+                                  classic_role_seed=role)
+        PlayerTeamStint.objects.create(
+            player=p, team_season=self.team_season, end_date=None)
+        return p
+
     def _own(self, team, player, price):
         return FantasyRosterSlot.objects.create(team=team, player=player, purchase_price=price)
 
-    def _session(self, mode=MarketSession.RECOVERY_FRAC50, fixed=1):
+    def _session(self, mode=MarketSession.RECOVERY_FRAC50, fixed=1, opens_in=None):
+        """Sessione viva. Di norma gia' aperta (``opened_at`` valorizzato): senza,
+        la prima richiesta la prenderebbe per un'apertura programmata appena
+        scattata e rifarebbe il giro del listone. ``opens_in`` la programma nel
+        futuro, com'e' quando l'admin la annuncia in anticipo."""
+        now = timezone.now()
+        opens_at = now + opens_in if opens_in is not None else now
         return MarketSession.objects.create(
             league=self.league, status=MarketSession.STATUS_OPEN,
             credit_recovery_mode=mode, fixed_recovery_amount=fixed,
+            opens_at=opens_at, opened_at=None if opens_in is not None else now,
             created_by=self.admin)
 
     def _as(self, user):

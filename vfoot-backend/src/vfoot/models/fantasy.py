@@ -1006,6 +1006,9 @@ class MarketSession(models.Model):
         FantasyLeague, on_delete=models.CASCADE, related_name="market_sessions")
     name = models.CharField(max_length=120, default="Mercato di riparazione")
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    # Apertura PROGRAMMATA. Nel futuro = sessione annunciata ma non ancora
+    # cominciata: si vede, si guarda chi e' libero, non si offre. L'admin la
+    # fissa per poterla annunciare alla lega prima che cominci.
     opens_at = models.DateTimeField(default=timezone.now)
     # Scheduled end. Null = indefinite: the admin opens and closes it by hand.
     closes_at = models.DateTimeField(null=True, blank=True)
@@ -1016,6 +1019,11 @@ class MarketSession(models.Model):
     created_by = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="created_market_sessions")
     created_at = models.DateTimeField(default=timezone.now)
+    # I FATTI accanto ai piani: `opens_at`/`closes_at` sono quel che l'admin ha
+    # annunciato, `opened_at`/`closed_at` quel che e' davvero successo. Serve
+    # anche all'apertura stessa, che porta con se' un aggiornamento del listone:
+    # senza un segno che sia gia' avvenuta si rifarebbe a ogni richiesta.
+    opened_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -1031,6 +1039,12 @@ class MarketSession(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.league_id}/{self.status})"
+
+    def is_pending(self, now=None) -> bool:
+        """Programmata: l'ora di apertura non e' ancora arrivata."""
+        return (self.status == self.STATUS_OPEN
+                and self.opens_at is not None
+                and self.opens_at > (now or timezone.now()))
 
 
 class MarketOffer(models.Model):
@@ -1091,6 +1105,7 @@ class MarketEvent(models.Model):
     """Append-only feed/audit of a market session (mirrors AuctionEvent)."""
 
     TYPE_SESSION_CREATED = "session_created"
+    TYPE_SESSION_OPENED = "session_opened"      # apertura programmata scattata
     TYPE_SESSION_SUSPENDED = "session_suspended"
     TYPE_SESSION_RESUMED = "session_resumed"
     TYPE_SESSION_CLOSED = "session_closed"

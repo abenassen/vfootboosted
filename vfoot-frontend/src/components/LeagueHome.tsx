@@ -13,9 +13,11 @@ import {
 import {
   getLeagueHonours,
   getMarketActive,
+  serverNow,
   type LeagueActivityItem,
   type LeagueHonoursBoard,
 } from '../api/backend';
+import { countdown, sessionPhase } from '../utils/market';
 import type { MarketSessionInfo } from '../types/market';
 import clsx from 'clsx';
 import { useLeagueContext } from '../league/LeagueContext';
@@ -1670,6 +1672,18 @@ function MarketBanner({
   auction: ActiveAuctionInfo | null;
   session: MarketSessionInfo | null;
 }) {
+  // Un mercato programmato e' proprio la cosa che questo banner deve saper dire:
+  // e' l'annuncio, ed e' qui che la lega passa. Finche' l'ora non arriva
+  // l'orologio gira (e poi si ferma da se': aperto, non c'e' piu' nulla da
+  // contare).
+  const [nowMs, setNowMs] = useState(() => serverNow());
+  const scheduled = !!session && sessionPhase(session, nowMs) === 'scheduled';
+  useEffect(() => {
+    if (!scheduled) return undefined;
+    const t = window.setInterval(() => setNowMs(serverNow()), 1000);
+    return () => window.clearInterval(t);
+  }, [scheduled]);
+
   if (auction?.auction_id) {
     return (
       <Card className="border-2 border-good/40 bg-good-bg p-4">
@@ -1698,8 +1712,15 @@ function MarketBanner({
       <span className="absolute inset-y-0 left-0 w-1.5 bg-accent" aria-hidden />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="text-sm font-bold text-accent">Mercato aperto</div>
-          <div className="text-xs text-accent">Puoi fare offerte sugli svincolati.</div>
+          <div className="text-sm font-bold text-accent">
+            {scheduled ? 'Mercato in arrivo' : 'Mercato aperto'}
+          </div>
+          <div className="text-xs text-accent">
+            {scheduled ? (
+              <>Apre tra <span className="tabular-nums">{countdown(session.opens_at, nowMs, 'un istante')}</span>{' '}
+                — intanto puoi studiare gli svincolati.</>
+            ) : 'Puoi fare offerte sugli svincolati.'}
+          </div>
         </div>
         <Link to="/market">
           <Button size="sm">Vai al mercato →</Button>

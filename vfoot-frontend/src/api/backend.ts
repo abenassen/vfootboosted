@@ -1102,9 +1102,11 @@ export async function createMarketSession(
     name?: string;
     credit_recovery_mode: MarketRecoveryMode;
     fixed_recovery_amount?: number;
+    /** Apertura programmata; omessa = il mercato apre subito. */
+    opens_at?: string | null;
     closes_at?: string | null;
   },
-): Promise<{ session_id: number }> {
+): Promise<{ session_id: number; opens_at: string }> {
   return auctionPost(`/leagues/${leagueId}/market/sessions/create`, opts);
 }
 

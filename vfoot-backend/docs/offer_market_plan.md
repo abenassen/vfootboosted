@@ -43,6 +43,16 @@ dall'admin.
   programmata (`closes_at`) sia per quella manuale dell'admin — due esiti diversi per lo
   stesso bottone sarebbero una trappola. L'admin mantiene comunque l'ultima parola: dalla
   coda può rifiutare. Test in `tests_market_close.py`.
+- **Apertura programmata** (2026-08-25): `opens_at` nel futuro = sessione **annunciata ma
+  non ancora cominciata**. La lega la vede col conto alla rovescia (pagina Mercato e banner
+  in home) e può già studiare gli svincolati, ma le offerte sono rifiutate — `check_offer`
+  dice quando apre. Era nel piano originale ("data/ora inizio–fine") ma mancava: l'admin
+  poteva fissare solo la fine, e per far partire un mercato a un'ora precisa doveva essere
+  al computer in quel momento. L'apertura è **un fatto e non solo un'ora che passa**:
+  `opened_at` la registra una volta sola e porta con sé un nuovo `snapshot_league_listone`,
+  perché fra l'annuncio e l'inizio le squadre vere possono aver firmato qualcuno e chi è
+  arrivato dopo dev'essere offribile. Scatta come la chiusura — alla prima richiesta che la
+  incontra (`sync_session`), o in anticipo con `market_tick`. Test in `tests_market_open.py`.
 - **Chi applica la scadenza**: `market_engine.sync_session`, chiamato da `_live_session` e
   quindi da **ogni endpoint** del mercato. La scadenza produce i suoi effetti alla prima
   richiesta che la incontra: nessuno riesce a offrire dopo il termine e nessuno vede aperta
@@ -58,7 +68,10 @@ dall'admin.
 
 - `MarketSession(league FK, status[open|suspended|closed], opens_at, closes_at nullable,
   credit_recovery_mode[fixed|frac30|frac50|frac75], fixed_recovery_amount, created_by,
-  created_at, closed_at)`. Vincolo: al più una `open|suspended` per lega.
+  created_at, opened_at nullable, closed_at)`. Vincolo: al più una `open|suspended` per lega
+  — e una programmata tiene il posto, quindi non se ne apre un'altra sopra. `opens_at`/
+  `closes_at` sono i **piani**, `opened_at`/`closed_at` i **fatti**: una sessione programmata
+  e poi annullata non è mai stata aperta, e lo storico lo dice.
 - `MarketOffer(session FK, team FK (offerente), target_player FK (svincolato),
   release_player FK (da svincolare), amount, status[leading|outbid|accepted|rejected|
   cancelled], created_at, deadline_at (now+24h, aggiornata sui rilanci del target))`.

@@ -1,5 +1,5 @@
-"""Manutenzione del mercato di riparazione: chiude le sessioni scadute e promuove
-le offerte che hanno compiuto le 24h.
+"""Manutenzione del mercato di riparazione: apre le sessioni programmate, chiude
+quelle scadute e promuove le offerte che hanno compiuto le 24h.
 
 NON serve alla correttezza. Ogni endpoint del mercato passa da
 ``market_engine.sync_session``, quindi una scadenza produce i suoi effetti alla
@@ -37,10 +37,16 @@ class Command(BaseCommand):
             status__in=(MarketSession.STATUS_OPEN, MarketSession.STATUS_SUSPENDED)))
 
         closed = 0
+        opened = 0
         promoted = 0
         for session in live:
             if session.status != MarketSession.STATUS_OPEN:
                 continue
+            if session.opens_at is not None and session.opens_at > now:
+                # Programmata: annunciata alla lega, ma non e' ancora la sua ora.
+                continue
+            # L'apertura vera (aggiorna il listone) di una sessione programmata.
+            due_open = session.opened_at is None
 
             due_close = session.closes_at is not None and session.closes_at <= now
             # Alla chiusura passa in validazione TUTTO cio' che e' in testa, non
@@ -52,6 +58,8 @@ class Command(BaseCommand):
             ).count()
 
             if dry:
+                if due_open:
+                    self.stdout.write(f"[dry] would open session {session.id}")
                 if due:
                     self.stdout.write(f"[dry] session {session.id}: would promote {due} offer(s)")
                 if due_close:
@@ -59,7 +67,9 @@ class Command(BaseCommand):
             else:
                 sync_session(session, now=now)
             promoted += due
+            opened += 1 if due_open else 0
             closed += 1 if due_close else 0
 
         self.stdout.write(self.style.SUCCESS(
-            f"market_tick: sessions={len(live)} closed={closed} promoted={promoted}"))
+            f"market_tick: sessions={len(live)} opened={opened} closed={closed} "
+            f"promoted={promoted}"))

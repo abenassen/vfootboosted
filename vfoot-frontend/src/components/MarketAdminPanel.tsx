@@ -13,7 +13,10 @@ import { CURRENCY_NAME_PLURAL } from '../utils/currency';
 import {
   SESSION_LABEL,
   SESSION_TONE,
+  countdown,
   recoveryText,
+  sessionPhase,
+  stamp,
 } from '../utils/market';
 import type { MarketActive, MarketFreeAgent, MarketOfferRow, MarketRecoveryMode } from '../types/market';
 
@@ -60,6 +63,9 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
   }, [load]);
 
   const session = data?.session ?? null;
+  // "aperta" con l'ora di apertura ancora da venire vuol dire programmata: e'
+  // lo stato che l'admin deve vedere, ed e' quello che decide i bottoni.
+  const phase = session ? sessionPhase(session, nowMs) : null;
   const isClassic = data?.mode === 'classic';
   const queue = data?.admin_queue ?? [];
   const leadingOffers = useMemo(
@@ -87,42 +93,69 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
               <div>
                 <div className="flex items-center gap-2">
                   <SectionTitle>{session.name}</SectionTitle>
-                  <Badge tone={SESSION_TONE[session.status]}>{SESSION_LABEL[session.status]}</Badge>
+                  <Badge tone={SESSION_TONE[phase!]}>{SESSION_LABEL[phase!]}</Badge>
                 </div>
                 <div className="mt-1 text-sm text-ink-soft">
+                  {phase === 'scheduled' && (
+                    <>
+                      Apre il <b>{stamp(session.opens_at)}</b>{' '}
+                      <span className="text-ink-faint">
+                        (tra <span className="tabular-nums">{countdown(session.opens_at, nowMs, 'un istante')}</span>)
+                      </span>
+                      {' · '}
+                    </>
+                  )}
                   Recupero: <b>{recoveryText(session.credit_recovery_mode, session.fixed_recovery_amount)}</b>
                   {' · '}
-                  {session.closes_at ? `chiude il ${new Date(session.closes_at).toLocaleString('it-IT')}` : 'chiusura indefinita'}
+                  {session.closes_at ? `chiude il ${stamp(session.closes_at)}` : 'chiusura indefinita'}
                 </div>
               </div>
               {session.status !== 'closed' && (
                 <div className="flex gap-2">
-                  {session.status === 'open' ? (
+                  {/* Niente "Sospendi" su una sessione che non e' ancora cominciata:
+                      non c'e' nulla da fermare, e l'unica cosa sensata da farne e'
+                      disdirla. */}
+                  {phase !== 'scheduled' && (session.status === 'open' ? (
                     <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(() => controlMarketSession(leagueId, session.id, 'suspend'))}>Sospendi</Button>
                   ) : (
                     <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(() => controlMarketSession(leagueId, session.id, 'resume'))}>Riattiva</Button>
-                  )}
+                  ))}
                   <Button size="sm" variant="danger" disabled={busy}
-                    onClick={() => { if (window.confirm('Chiudere la sessione? Ogni offerta ancora in testa passa in validazione, anche se non ha compiuto 24 ore: le troverai qui sotto da accettare o rifiutare.')) void act(() => controlMarketSession(leagueId, session.id, 'close')); }}>
-                    Chiudi
+                    onClick={() => {
+                      const ask = phase === 'scheduled'
+                        ? 'Annullare il mercato programmato? La lega smetterà di vederlo in arrivo, e potrai riprogrammarlo quando vuoi.'
+                        : 'Chiudere la sessione? Ogni offerta ancora in testa passa in validazione, anche se non ha compiuto 24 ore: le troverai qui sotto da accettare o rifiutare.';
+                      if (window.confirm(ask)) void act(() => controlMarketSession(leagueId, session.id, 'close'));
+                    }}>
+                    {phase === 'scheduled' ? 'Annulla' : 'Chiudi'}
                   </Button>
                 </div>
               )}
             </div>
             <div className="mt-3 text-xs text-ink-faint">
-              Le offerte che restano in testa 24h senza rilanci passano in “da validare”. Applicando l’offerta
-              il giocatore svincolato lascia la rosa e quello acquistato entra al prezzo offerto.
+              {phase === 'scheduled' ? (
+                <>La lega la vede già in arrivo, col conto alla rovescia: puoi annunciarla adesso.
+                  Fino all’ora fissata si guardano gli svincolati, ma non si offre.</>
+              ) : (
+                <>Le offerte che restano in testa 24h senza rilanci passano in “da validare”. Applicando l’offerta
+                  il giocatore svincolato lascia la rosa e quello acquistato entra al prezzo offerto.</>
+              )}
             </div>
           </Card>
         </>
       )}
 
       {/* Fuori dal ramo "c'e' una sessione": la coda le sopravvive. */}
-      <QueueCard queue={queue} sessionLive={!!session} busy={busy}
+      {/* `sessionLive` decide se la card resta a vuoto: prima dell'apertura non
+          c'e' nessuna coda da questa sessione, e se ne arriva una da quella
+          precedente e' `queue` a tenerla in piedi. */}
+      <QueueCard queue={queue} sessionLive={!!session && phase !== 'scheduled'} busy={busy}
         onAccept={(id) => act(() => adminMarketOffer(leagueId, id, 'accept'))}
         onReject={(id) => act(() => adminMarketOffer(leagueId, id, 'reject'))} />
 
-      {session && (
+      {/* Prima dell'apertura non ci sono offerte da guardare: la card direbbe
+          soltanto "nessuna", ogni volta. */}
+      {session && phase !== 'scheduled' && (
         <>
           <Card className="p-4">
             <SectionTitle>Offerte in testa ({leadingOffers.length})</SectionTitle>
@@ -226,19 +259,29 @@ function CreateSessionCard({
   busy, onCreate,
 }: {
   busy: boolean;
-  onCreate: (opts: { name?: string; credit_recovery_mode: MarketRecoveryMode; fixed_recovery_amount?: number; closes_at?: string | null }) => void;
+  onCreate: (opts: { name?: string; credit_recovery_mode: MarketRecoveryMode; fixed_recovery_amount?: number; opens_at?: string | null; closes_at?: string | null }) => void;
 }) {
   const [mode, setMode] = useState<MarketRecoveryMode>('frac50');
   const [fixed, setFixed] = useState(1);
   const [name, setName] = useState('Mercato di riparazione');
+  const [opensAt, setOpensAt] = useState('');
+  const [deferred, setDeferred] = useState(false);
   const [closesAt, setClosesAt] = useState('');
   const [scheduled, setScheduled] = useState(false);
+
+  // Una finestra che si chiude prima di aprirsi: il server la rifiuta, ma dirlo
+  // qui evita di scoprirlo dopo aver compilato tutto.
+  const backwards = deferred && scheduled && !!opensAt && !!closesAt
+    && new Date(closesAt).getTime() <= new Date(opensAt).getTime();
+  const incomplete = (deferred && !opensAt) || (scheduled && !closesAt);
 
   return (
     <Card className="p-4">
       <SectionTitle>Apri una sessione di mercato</SectionTitle>
       <div className="mt-1 text-sm text-ink-soft">
-        Nessuna sessione aperta. Apri una finestra di offerte sugli svincolati; una sola sessione viva per lega.
+        Nessuna sessione aperta. Apri una finestra di offerte sugli svincolati — subito
+        o a una data fissata, così puoi annunciarla alla lega in anticipo; una sola
+        sessione viva per lega.
       </div>
       <div className="mt-4 space-y-3 border-t border-line pt-4">
         <label className="block text-sm">
@@ -260,6 +303,22 @@ function CreateSessionCard({
             <input type="number" min={0} className="mt-1 w-32 rounded-xl border border-line px-3 py-2 text-sm" value={fixed} onChange={(e) => setFixed(Math.max(0, Number(e.target.value)))} />
           </label>
         )}
+        {/* L'apertura viene prima della chiusura anche nel modulo: si programma
+            per poterla annunciare, e l'annuncio si scrive prima che cominci. */}
+        <label className="flex items-center gap-2 text-sm text-ink-soft">
+          <input type="checkbox" checked={deferred} onChange={(e) => setDeferred(e.target.checked)} />
+          Apertura programmata (altrimenti apre subito)
+        </label>
+        {deferred && (
+          <label className="block text-sm">
+            <span className="text-ink-soft">Data/ora di apertura</span>
+            <input type="datetime-local" className="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm" value={opensAt} onChange={(e) => setOpensAt(e.target.value)} />
+            <span className="mt-1 block text-xs text-ink-faint">
+              Fino a quel momento la lega vede il mercato in arrivo, col conto alla
+              rovescia, e può studiare gli svincolati: le offerte si aprono all’ora fissata.
+            </span>
+          </label>
+        )}
         <label className="flex items-center gap-2 text-sm text-ink-soft">
           <input type="checkbox" checked={scheduled} onChange={(e) => setScheduled(e.target.checked)} />
           Chiusura programmata (altrimenti indefinita, la chiudi a mano)
@@ -274,14 +333,18 @@ function CreateSessionCard({
             </span>
           </label>
         )}
-        <Button disabled={busy || (scheduled && !closesAt)}
+        {backwards && (
+          <div className="text-xs text-bad">La chiusura deve venire dopo l’apertura.</div>
+        )}
+        <Button disabled={busy || incomplete || backwards}
           onClick={() => onCreate({
             name: name.trim() || undefined,
             credit_recovery_mode: mode,
             fixed_recovery_amount: mode === 'fixed' ? fixed : undefined,
+            opens_at: deferred && opensAt ? new Date(opensAt).toISOString() : null,
             closes_at: scheduled && closesAt ? new Date(closesAt).toISOString() : null,
           })}>
-          Apri sessione
+          {deferred ? 'Programma sessione' : 'Apri sessione'}
         </Button>
       </div>
     </Card>

@@ -1,6 +1,8 @@
 // Shared presentation helpers for the repair market, used by the manager-facing
 // Mercato page and the admin Mercato panel in Gestione lega.
-import type { MarketRecoveryMode } from '../types/market';
+import type {
+  MarketRecoveryMode, MarketSessionInfo, MarketSessionPhase,
+} from '../types/market';
 import { amount } from './currency';
 
 export const ROLE_LABEL: Record<string, string> = {
@@ -25,13 +27,19 @@ export function recoveryText(mode: MarketRecoveryMode, fixed: number): string {
 // cosi' la stringa non cambia larghezza a ogni tick.
 const pad = (n: number) => String(n).padStart(2, '0');
 
-export function countdown(deadlineIso: string | null, nowMs: number): string {
+export function countdown(
+  deadlineIso: string | null, nowMs: number, elapsed = 'in validazione',
+): string {
   if (!deadlineIso) return '—';
   const ms = new Date(deadlineIso).getTime() - nowMs;
-  if (ms <= 0) return 'in validazione';
+  if (ms <= 0) return elapsed;
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   const s = Math.floor((ms % 60_000) / 1000);
+  // Oltre le due giornate le ore non si contano piu' a mente ("52h" non dice
+  // quando). Sotto, restano il modo piu' diretto di dirlo. Riguarda solo
+  // l'attesa dell'apertura: nessun timer di offerta supera le 24h.
+  if (h >= 48) return `${Math.floor(h / 24)}g ${pad(h % 24)}h ${pad(m)}m`;
   if (h > 0) return `${h}h ${pad(m)}m ${pad(s)}s`;
   if (m > 0) return `${m}m ${pad(s)}s`;
   return `${s}s`;
@@ -69,9 +77,35 @@ export const OFFER_LABEL: Record<string, string> = {
   cancelled: 'annullata',
 };
 
-export const SESSION_TONE: Record<string, 'green' | 'amber' | 'slate'> = {
-  open: 'green', suspended: 'amber', closed: 'slate',
+export const SESSION_TONE: Record<string, 'green' | 'amber' | 'slate' | 'blue'> = {
+  open: 'green', scheduled: 'blue', suspended: 'amber', closed: 'slate',
 };
 export const SESSION_LABEL: Record<string, string> = {
-  open: 'aperta', suspended: 'sospesa', closed: 'chiusa',
+  open: 'aperta', scheduled: 'programmata', suspended: 'sospesa', closed: 'chiusa',
 };
+
+/** Lo stato che conta a schermo.
+ *
+ *  Una sessione `open` con l'ora di apertura ancora da venire non e' aperta: e'
+ *  annunciata. Il server lo sa gia' (rifiuta le offerte prima del momento
+ *  fissato), ma la pagina deve saperlo dire — e deve passare da se' ad "aperta"
+ *  quando il conto alla rovescia arriva a zero, senza aspettare il prossimo giro
+ *  di polling: l'orologio ce l'ha, ed e' quello del server. */
+/** Giorno e ora in forma breve, «27 ago 2026, 16:13». Senza i secondi: nessuna
+ *  data del mercato si decide al secondo, e `toLocaleString` da solo li mette
+ *  («31/08/2026, 13:13:01», che si legge come un timestamp di log). */
+export function stamp(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString('it-IT', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+export function sessionPhase(
+  s: Pick<MarketSessionInfo, 'status' | 'opens_at'>, nowMs: number,
+): MarketSessionPhase {
+  if (s.status === 'open' && s.opens_at && new Date(s.opens_at).getTime() > nowMs) {
+    return 'scheduled';
+  }
+  return s.status;
+}
