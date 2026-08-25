@@ -143,8 +143,12 @@ LABELS = {
     # una voce che muove il voto piu' di ogni altra e non compare nel riassunto
     # lascia il lettore davanti a un numero che nessuna delle righe mostrate
     # spiega. Restava muta l'intera spiegazione di 11 presenze sulla 25-26.
-    "defensive_value": (SIGNAL, "buona prestazione difensiva d'insieme",
-                        "prestazione difensiva d'insieme sottotono"),
+    # "prestazione ... sottotono" suonava come un verdetto sulla PARTITA, e su un
+    # attaccante da tripletta (Malen col Milan, -0.03) leggeva assurdo. L'indice
+    # misura il CONTRIBUTO difensivo, confrontato coi pari ruolo: dirlo cosi' e'
+    # accurato e non pretende di giudicare il resto.
+    "defensive_value": (SIGNAL, "buon contributo difensivo d'insieme",
+                        "poco contributo difensivo d'insieme"),
     # EVENT — counted exactly, (singular, plural)
     "shots_goal": (EVENT, "un gol", "gol"),
     "big_chance_created": (EVENT, "un'occasione nitida creata", "occasioni nitide create"),
@@ -256,7 +260,8 @@ def _weight_of(role: str, key: str) -> float:
     return (GK_WEIGHTS if role == Player.ROLE_GK else WEIGHTS).get(key, 0.0)
 
 
-def _phrase(role: str, key: str, term_delta: float, raw_value: float) -> str | None:
+def _phrase(role: str, key: str, term_delta: float, raw_value: float,
+            count: float | None = None) -> str | None:
     """How to name this deviation, or None when it is not worth saying."""
     entry = LABELS.get(key)
     if entry is None:
@@ -295,6 +300,15 @@ def _phrase(role: str, key: str, term_delta: float, raw_value: float) -> str | N
         none_phrase = COUNT_NONE.get(key)
         if none_phrase:
             return none_phrase
+    # POCHE UNITA': si scrive il numero, non "tanti" (v. COUNT_SAY_NUMBER_UPTO).
+    # ``count`` e' quello OSSERVATO e lo passa solo chi ce l'ha (il registro):
+    # ``raw_value`` per il blocco volumi e' la proiezione sui 90', e "tanti falli
+    # commessi · 1,3" non lo puo' verificare nessuno.
+    if count is not None and 1 <= round(count) <= COUNT_SAY_NUMBER_UPTO:
+        n = int(round(count))
+        sing = _singular_of(key)
+        if sing:
+            return f"{n} {sing}" if n == 1 else f"{n} {entry[1]}"
     # COUNT: absolute quantifier vs the role average (the implicit yardstick).
     label, quant = entry[1], entry[2]
     high, low = QUANTIFIERS.get(quant, QUANTIFIERS["mp"])
@@ -332,6 +346,37 @@ def creation_detail(phrase: str, big_chances: float, xa: float = 0.0) -> str:
     return phrase
 
 
+# Sopra quanti si puo' dire "tanti". Un quantificatore confronta con la media del
+# ruolo, e su un numero piccolo quel confronto produce frasi assurde: "tanti falli
+# commessi · 1" dice "molti" di UNO. Su Malen (tripletta col Milan) sei righe su 23
+# erano cosi'. Fino a questa soglia si scrive il numero, che e' preciso e non
+# discutibile; sopra torna il quantificatore, che li' porta l'informazione in piu'
+# ("tanti palloni giocati · 37" dice qualcosa che "37" da solo non dice).
+COUNT_SAY_NUMBER_UPTO = 3
+
+# Grandezze che NON si contano: indici normalizzati e valori attesi. Accanto a
+# queste il numero non va mai scritto — "pericolo concesso nella sua zona · 0" su
+# un'esposizione di 0,004 afferma una precisione che non c'e', e "valore difensivo
+# · 0" non spiega niente. La regola c'era gia' nell'intento (v. il commento nel
+# registro) ma il test "e' quasi intero" lasciava passare proprio i quasi-zero.
+CONTINUOUS_KEYS = frozenset({
+    EXPOSURE_KEY, "defensive_value", "sga_post", "expected_assists",
+    "xg_shots", "xg_on_target", "gk_goals_prevented", "touches_in_box",
+})
+
+
+def _singular_of(key: str) -> str:
+    """"fallo commesso" da "nessun fallo commesso" — il singolare esiste gia' in
+    COUNT_NONE, che e' l'unico posto in cui la tabella lo dichiara."""
+    none = COUNT_NONE.get(key)
+    if not none:
+        return ""
+    for neg in ("nessun'", "nessuna ", "nessuno ", "nessun "):
+        if none.startswith(neg):
+            return none[len(neg):]
+    return ""
+
+
 def _never_happened(entry) -> str:
     """"nessun gol", "nessun'occasione nitida creata" — un EVENT che NON e'
     successo. Nella frase parlata questi non si dicono (``_phrase`` restituisce
@@ -349,7 +394,8 @@ def _never_happened(entry) -> str:
     return f"nessun {entry[2]}"
 
 
-def ledger_phrase(role: str, key: str, term_delta: float, raw_value: float) -> str:
+def ledger_phrase(role: str, key: str, term_delta: float, raw_value: float,
+                  count: float | None = None) -> str:
     """Il nome della voce nel REGISTRO ESTESO, dove tutto va nominato.
 
     ``_phrase`` puo' tacere — e tace apposta — su tre casi: un evento che non e'
@@ -357,7 +403,7 @@ def ledger_phrase(role: str, key: str, term_delta: float, raw_value: float) -> s
     riassunto quel silenzio e' giusto; nel registro no, perche' li' la riga c'e' e
     mostra i suoi punti, e una riga senza nome e' esattamente il buco da cui e'
     nata questa funzione."""
-    said = _phrase(role, key, term_delta, raw_value)
+    said = _phrase(role, key, term_delta, raw_value, count)
     if said:
         return said
     entry = LABELS.get(key)
@@ -655,6 +701,15 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     raw_values = raw_feature_values(totals, minutes, exposure,
                                     gk=role == Player.ROLE_GK)
 
+    per90_keys = set(GK_PER90_WEIGHTS if role == Player.ROLE_GK else PER90_WEIGHTS)
+
+    def observed(key):
+        """Quante volte l'ha fatto DAVVERO. None per le grandezze che non si
+        contano: il ramo numerico non deve toccarle."""
+        if key in CONTINUOUS_KEYS:
+            return None
+        return totals.get(key, 0.0) if key in per90_keys else raw_values.get(key, 0.0)
+
     scored = []
     # Collapse the overlapping feature families (see MERGES) into one net line each.
     # ``family`` travels with the line so a reader can find the rows it stands for.
@@ -670,7 +725,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                       else label_pos if net > 0 else label_neg)
             scored.append((net, group[0], phrase, (family, len(present))))
     for key, pts in points_by_key.items():
-        phrase = _phrase(role, key, pts, raw_values.get(key, 0.0))
+        phrase = _phrase(role, key, pts, raw_values.get(key, 0.0), observed(key))
         if key == "expected_assists" and pts > 0:
             phrase = creation_detail(phrase, raw_values.get("big_chance_created", 0.0),
                                      raw_values.get("expected_assists", 0.0))
@@ -774,7 +829,6 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     other_terms, tiny_count = [], 0
     if ledger:
         shown_keys = {key for _p, key, _ph, _f in shown}
-        per90_keys = set(GK_PER90_WEIGHTS if role == Player.ROLE_GK else PER90_WEIGHTS)
         for pts, key, _ph, fam in sorted(scored, key=lambda x: x[0], reverse=True):
             if key in shown_keys:
                 continue
@@ -783,32 +837,34 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             if abs(round(pts, 2)) < 0.005:
                 tiny_count += 1
                 continue
+            # QUANTE volte l'ha fatto, come si conta nel tabellino — letto PRIMA
+            # dell'etichetta, che ne ha bisogno per non dire "tanti" di uno solo.
+            count = None if fam else observed(key)
             row = {"key": key,
-                   "label": ledger_phrase(role, key, pts, raw_values.get(key, 0.0)),
+                   "label": ledger_phrase(role, key, pts, raw_values.get(key, 0.0),
+                                          count),
                    "points": round(pts, 2)}
             if fam:
                 # A merged family is one row here too, as in the summary; the count
                 # says how many features it stands for.
                 row["family"], row["family_size"] = fam
-            else:
+            elif count is not None:
                 # QUANTE volte l'ha fatto, come si conta nel tabellino: il numero
                 # osservato, non quello che l'indice consuma. Per il blocco dei
                 # volumi i due differiscono — l'indice ragiona per densita' e
                 # proietta sui 90' — e "4,14 respinte" e' un numero che nessuno
                 # puo' verificare da nessuna parte, mentre 4 sta nel tabellino.
                 #
-                # E si scrive solo quando e' un NUMERO DI COSE. Un indice
-                # normalizzato (il valore difensivo, l'esposizione) o un valore
-                # atteso (xA 0,03) messo li' nudo non spiega niente: quelle righe
-                # portano il nome e i punti, che e' quanto si puo' dire con onesta'.
-                count = (totals.get(key, 0.0) if key in per90_keys
-                         else raw_values.get(key, 0.0))
                 # "nessun gol (0)" e "nessun duello aereo perso (0)" hanno lo
                 # zero scritto due volte: quando la frase DICE gia' che non e'
-                # successo, il numero accanto e' rumore.
-                already_says_zero = round(count) == 0 and (
-                    (LABELS.get(key) or (None,))[0] == EVENT or key in COUNT_NONE)
-                if abs(count - round(count)) < 0.01 and not already_says_zero:
+                # successo, il numero accanto e' rumore. Lo stesso vale per il ramo
+                # numerico ("2 falli subiti · 2").
+                n = round(count)
+                already_says_number = (
+                    (n == 0 and ((LABELS.get(key) or (None,))[0] == EVENT
+                                 or key in COUNT_NONE))
+                    or (1 <= n <= COUNT_SAY_NUMBER_UPTO and _singular_of(key)))
+                if abs(count - n) < 0.01 and not already_says_number:
                     # "nessun gol" non ha bisogno di uno zero accanto: lo zero e'
                     # gia' tutta la frase.
                     row["value"] = int(round(count))

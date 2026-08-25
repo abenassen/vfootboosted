@@ -232,9 +232,9 @@ class VoteExplanationTests(SimpleTestCase):
         # e' una sintesi che non si scompone in un gesto del tabellino, ed e' in
         # parte collettiva. Prima taceva, ed era la voce piu' grande del voto.
         self.assertEqual(ledger_phrase("DIF", "defensive_value", +0.28, 0.44),
-                         "buona prestazione difensiva d'insieme")
+                         "buon contributo difensivo d'insieme")
         self.assertEqual(ledger_phrase("DIF", "defensive_value", -0.28, -0.44),
-                         "prestazione difensiva d'insieme sottotono")
+                         "poco contributo difensivo d'insieme")
 
     def test_the_ledger_quotes_counts_the_way_the_tabellino_does(self):
         """Il numero accanto alla voce e' quello OSSERVATO, non quello proiettato
@@ -251,8 +251,8 @@ class VoteExplanationTests(SimpleTestCase):
         # spiega niente. Ora e' la voce piu' grande e sta nel riassunto, dove i
         # numeri accanto non ci vanno per costruzione.
         shown = {c["label"]: c for c in e["contributions"]}
-        self.assertIn("buona prestazione difensiva d'insieme", shown)
-        self.assertNotIn("value", shown["buona prestazione difensiva d'insieme"])
+        self.assertIn("buon contributo difensivo d'insieme", shown)
+        self.assertNotIn("value", shown["buon contributo difensivo d'insieme"])
 
     # --- the graded events explain their own size ------------------------
     def test_a_sending_off_says_why_it_cost_what_it_cost(self):
@@ -600,3 +600,53 @@ class VoteExplanationTests(SimpleTestCase):
         # i punti restano tutti della xA: la parentesi non e' un secondo addendo
         riga = [c for c in e["contributions"] if "nitide" in c["label"]][0]
         self.assertNotIn("family", riga)
+
+    def test_a_small_count_is_written_as_a_number_not_as_many(self):
+        """"tanti falli commessi · 1" dice "molti" di UNO. Il quantificatore
+        confronta con la media del ruolo, e su un numero piccolo quel confronto
+        produce frasi assurde: su Malen (tripletta col Milan) sei righe su 23 erano
+        cosi'. Fino a COUNT_SAY_NUMBER_UPTO si scrive il numero."""
+        from vfoot.services.vote_explanation import _phrase as ph
+        self.assertEqual(ph("ATT", "errors_fouls_committed", -0.01, 1.3, count=1),
+                         "1 fallo commesso")
+        self.assertEqual(ph("ATT", "was_fouled", +0.01, 2.6, count=2),
+                         "2 falli subiti")
+        self.assertEqual(ph("ATT", "key_passes", +0.06, 1.3, count=1),
+                         "1 passaggio chiave")
+        self.assertEqual(ph("DIF", "clearances", -0.3, 3.9, count=3), "3 respinte")
+        # sopra la soglia il quantificatore torna, perche' li' porta l'informazione
+        # in piu' che il numero da solo non da'
+        self.assertEqual(ph("ATT", "touches", +0.01, 49.0, count=37),
+                         "tanti palloni giocati")
+        # e senza count (il riassunto parlato) il comportamento e' quello di sempre
+        self.assertEqual(ph("ATT", "was_fouled", +0.01, 2.6), "tanti falli subiti")
+
+    def test_the_number_is_not_written_twice(self):
+        """"2 falli subiti · 2" e "nessun gol · 0" scrivono lo stesso numero due
+        volte: quando la frase lo DICE gia', la colonna del conteggio tace."""
+        average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0,
+                                         "was_fouled": 4.0, "duels_won": 6.0})
+        e = explain("DIF", {"clearances": 2.0, "touches": 40.0, "was_fouled": 1.0,
+                            "duels_won": 1.0}, 45, self.REFERENCE, average,
+                    ledger=True)
+        rows = {r["label"]: r for r in e["other_terms"]}
+        rows.update({c["label"]: c for c in e["contributions"]})
+        detto = [l for l in rows if l.startswith(("1 ", "2 ", "3 ", "nessun"))]
+        self.assertTrue(detto, "il ramo numerico non ha prodotto nessuna riga")
+        for l in detto:
+            self.assertNotIn("value", rows[l], f"numero scritto due volte: {l}")
+
+    def test_a_continuous_quantity_never_carries_a_count(self):
+        """Un indice normalizzato o un valore atteso non e' un numero di cose:
+        "pericolo concesso nella sua zona · 0" su un'esposizione di 0,004 afferma
+        una precisione che non esiste. Il test "e' quasi intero" lasciava passare
+        proprio i quasi-zero."""
+        from vfoot.services.vote_explanation import CONTINUOUS_KEYS
+        average = self._averages("ATT", {"touches": 60.0, "defensive_value": 0.1})
+        e = explain("ATT", {"touches": 60.0, "defensive_value": 0.44,
+                            "expected_assists": 0.004}, 90,
+                    self.REFERENCE | {"ATT": {"mean": 0.47, "std": 0.44}},
+                    average, exposure=0.004, ledger=True)
+        for r in e["other_terms"]:
+            if r["key"] in CONTINUOUS_KEYS:
+                self.assertNotIn("value", r, f"{r['key']} non si conta")
