@@ -762,7 +762,14 @@ export default function LeagueHome({
       <div className="grid gap-4 lg:grid-cols-2">
         {/* 2 — how the last ones went */}
         {lastResults.length ? (
-          <Card className="p-4">
+          // `min-w-0`, come su «Da fare»: è la CARD a essere l'elemento di
+          // griglia, e un elemento di griglia non scende mai sotto la larghezza
+          // minima del proprio contenuto. Il `min-w-0` che MiniFixture ha già
+          // addosso non serviva a niente qui — dentro la card è un blocco in
+          // flusso normale, non è lui a bloccare la colonna. Due nomi lunghi
+          // portavano la pagina a 642 pixel su uno schermo da 390. Segnalato il
+          // 26/08/2026; misurabile con `npm run test:mobile`.
+          <Card className="min-w-0 p-4">
             {/* DELLA TUA SQUADRA, detto nel titolo: la lista è filtrata su di te
                 (vedi `mine`), e un titolo generico prometteva i risultati della
                 lega — che stanno nei blocchi delle competizioni. */}
@@ -1601,7 +1608,10 @@ function NewsCard({
   empty?: string;
 }) {
   return (
-    <Card className="p-4">
+    // `min-w-0`: sta nella stessa griglia degli ultimi risultati, e una news
+    // lunga (il nome di una squadra, quello di un giocatore) allargherebbe la
+    // colonna allo stesso modo.
+    <Card className="min-w-0 p-4">
       <SectionTitle>News</SectionTitle>
       {activity.length ? (
         <ul className="mt-2 space-y-1.5">
