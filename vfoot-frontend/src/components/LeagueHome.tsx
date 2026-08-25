@@ -51,6 +51,16 @@ import type {
  *  beside this weekend's match only made both look equally urgent. */
 const NEXT_MATCH_HORIZON = 4;
 
+/** Quante partite di un turno stanno nella card della competizione prima di
+ *  mandare al calendario.
+ *
+ *  Otto copre PER INTERO il turno di una lega fino a sedici squadre, cioè tutte
+ *  quelle che esistono davvero: la regola «tutte, a meno che non siano troppe»
+ *  vuole che il rinvio al calendario sia l'eccezione, non l'abitudine. Il taglio
+ *  di prima era quattro, e su una lega da dieci nascondeva una partita su cinque
+ *  senza dire che lo stava facendo. */
+const ROUND_FIXTURES_SHOWN = 8;
+
 /** Quante squadre bastano perché «fai entrare gli altri» smetta di essere la
  *  prima cosa da fare.
  *
@@ -1027,6 +1037,32 @@ function CompetitionBlock({
   const calendarTo = `/matches?competition=${competition.competition_id}`;
   const standingsTo = `/standings?competition=${competition.competition_id}`;
 
+  // IL TURNO, chiunque sia a giocarlo. `tables` e `knockoutPhase` nascono
+  // entrambi da `current` e non possono essere pieni insieme — o la fase in
+  // corso è un girone, o è un tabellone — quindi le due liste sono UNA lista, e
+  // tenerle come due rami separati serviva solo a far sembrare diverse due cose
+  // che rispondono alla stessa domanda: cosa si gioca adesso.
+  const roundFixtures = knockoutPhase.length ? knockoutPhase : shownPhase;
+  const roundName = knockoutPhase.length
+    ? knockoutRound?.label || `Turno ${knockoutRound?.round_no ?? round}`
+    : new Set(shownPhase.map((f) => f.stage_name)).size === 1
+      ? shownPhase[0]?.round_label ?? `Turno ${round}`
+      : `Turno ${round}`;
+
+  // La classifica c'è quando c'è (v. `started`), il turno anche: NON sono due
+  // alternative. Erano scritti come i rami di un `? :`, e siccome `started`
+  // diventa vero appena UNA partita è conclusa, dalla fine della prima giornata
+  // in poi il calendario del turno successivo spariva per il resto della
+  // stagione — la card sapeva dire dove sei ma non più cosa ti aspetta, e il
+  // programma restava solo nel calendario, da raggiungere. Sono le due domande
+  // di due momenti diversi della settimana, e in un campionato convivono.
+  // Segnalato in produzione il 26/08/2026, lega «Quelli che il fanta».
+  const tablesShown = started && tables.length > 0;
+  // «Non è ancora cominciata» solo se davvero non c'è NIENTE da dire: prima era
+  // l'ultimo ramo della catena e quindi già escluso da tutti gli altri.
+  const nothingToSay =
+    !tablesShown && !roundFixtures.length && !openFixtures.length && !upcoming.length;
+
   return (
     <Card className="relative overflow-hidden p-4 pl-5">
       {/* la firma della competizione, a filo del bordo sinistro */}
@@ -1082,10 +1118,18 @@ function CompetitionBlock({
             </span>
           </div>
           <div className="mt-1.5 space-y-1">
-            {openFixtures.slice(0, 5).map((f) => (
+            {openFixtures.slice(0, ROUND_FIXTURES_SHOWN).map((f) => (
               <MiniFixture key={f.fixture_id} f={f} />
             ))}
           </div>
+          {openFixtures.length > ROUND_FIXTURES_SHOWN ? (
+            <Link
+              to={calendarTo}
+              className="mt-1 inline-block text-[11px] font-semibold text-ink-faint hover:text-ink"
+            >
+              Altre {openFixtures.length - ROUND_FIXTURES_SHOWN} partite →
+            </Link>
+          ) : null}
           <div
             className={clsx(
               'mt-1 text-[11px]',
@@ -1103,7 +1147,7 @@ function CompetitionBlock({
 
       {/* A competition that has not started has nothing to report: a table of
           zeros is not a standing. */}
-      {started && tables.length ? (
+      {tablesShown ? (
         <div className="mt-3 space-y-3">
           {tables.map((s) => (
             <div key={s.name}>
@@ -1167,23 +1211,20 @@ function CompetitionBlock({
             </div>
           ))}
         </div>
-      ) : knockoutPhase.length ? (
-        <PlayingNow
-          label={knockoutRound?.label || `Turno ${knockoutRound?.round_no ?? round}`}
-          fixtures={knockoutPhase}
-        />
-      ) : shownPhase.length ? (
-        <PlayingNow
-          label={
-            new Set(shownPhase.map((f) => f.stage_name)).size === 1
-              ? shownPhase[0]?.round_label ?? `Turno ${round}`
-              : `Turno ${round}`
-          }
-          fixtures={shownPhase}
-        />
-      ) : openFixtures.length || upcoming.length ? null : (
+      ) : null}
+
+      {/* E cosa si gioca: sotto la classifica quando c'è, al posto suo quando
+          non c'è. Una competizione appena cominciata e una alla ventesima
+          giornata mostrano la stessa cosa — il turno — perché la domanda è la
+          stessa; l'unica differenza legittima è che la seconda ha anche una
+          classifica da mettere sopra. */}
+      {roundFixtures.length ? (
+        <PlayingNow label={roundName} fixtures={roundFixtures} to={calendarTo} />
+      ) : null}
+
+      {nothingToSay ? (
         <div className="mt-2 text-sm text-ink-faint">Non è ancora cominciata.</div>
-      )}
+      ) : null}
 
       {/* What is still to come and has no teams yet. A line, not a card: the detail
           — the rule, the matchdays, what is holding it up — lives in the calendar,
@@ -1216,18 +1257,36 @@ function CompetitionBlock({
  *  semplicemente rotta. Il numero della giornata è quello che l'admin deve
  *  concludere, cioè l'azione che fa comparire i risultati.
  */
-function PlayingNow({ label, fixtures }: { label: string; fixtures: LeagueFixtureItem[] }) {
+function PlayingNow({
+  label,
+  fixtures,
+  to,
+}: {
+  label: string;
+  fixtures: LeagueFixtureItem[];
+  /** Dove si vedono le altre, quando il turno non ci sta. */
+  to?: string;
+}) {
   const pending = fixtures.filter((f) => f.status !== 'finished');
   const waiting = pending.filter((f) => f.phase === 'current' || f.phase === 'awaiting');
   const matchday = waiting.map((f) => f.real_matchday).find((m) => typeof m === 'number');
+  // TUTTE, e se sono troppe si dice quante e dove stanno. Un elenco tagliato in
+  // silenzio è peggio di un elenco corto: chi cerca la propria partita e non la
+  // trova non ha modo di sapere se manca lei o se manca la riga.
+  const extra = fixtures.length - ROUND_FIXTURES_SHOWN;
   return (
     <div className="mt-3">
       <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">{label}</div>
       <div className="mt-1.5 space-y-1">
-        {fixtures.slice(0, 4).map((f) => (
+        {fixtures.slice(0, ROUND_FIXTURES_SHOWN).map((f) => (
           <MiniFixture key={f.fixture_id} f={f} />
         ))}
       </div>
+      {extra > 0 && to ? (
+        <Link to={to} className="mt-1 inline-block text-xs font-semibold text-ink-faint hover:text-ink">
+          Altre {extra} partite del turno →
+        </Link>
+      ) : null}
       {waiting.length ? (
         <div className="mt-1.5 text-xs text-ink-faint">
           {waiting.length === pending.length && pending.length === 1
