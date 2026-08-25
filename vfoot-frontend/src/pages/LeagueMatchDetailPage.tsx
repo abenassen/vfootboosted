@@ -18,9 +18,16 @@ export default function LeagueMatchDetailPage() {
   const { user } = useAuth();
   // Bumped by the socket; the only reason this page ever re-fetches on its own.
   const [tick, setTick] = useState(0);
+  // «Se la giornata finisse adesso»: la seconda lettura dello stesso turno. Sta
+  // qui e non nel tabellino perché è la CHIAMATA a cambiare — a rispondere è il
+  // motore vero, con le regole di questa lega, invece di un conto rifatto nel
+  // browser che prima o poi si sarebbe scollato da quello ufficiale. Resta accesa
+  // fra un colpo di socket e l'altro: chi l'ha chiesta vuole vedere la previsione
+  // muoversi, non riaccenderla a ogni gol.
+  const [projection, setProjection] = useState(false);
   const { data, loading, error } = useAsync(
-    () => getFixtureDetail(matchId ?? ''),
-    [matchId, tick],
+    () => getFixtureDetail(matchId ?? '', { projection }),
+    [matchId, tick, projection],
   );
   // The nudge carries no data: it says "something moved", and the same REST call
   // that built this page rebuilds it. One code path, whether you reloaded or the
@@ -95,6 +102,7 @@ export default function LeagueMatchDetailPage() {
         backTo="/matches"
         myUserId={user?.id ?? null}
         loadLedger={loadLedger}
+        projection={{ on: projection, busy: loading, onChange: setProjection }}
       />
     );
   }

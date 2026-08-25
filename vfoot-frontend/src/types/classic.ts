@@ -225,6 +225,28 @@ export interface ClassicFixtureDetail {
   provisional?: boolean;
   /** Almeno una delle partite vere dietro questo tabellino è sul campo adesso. */
   in_progress?: boolean;
+  /** Questo tabellino risponde a «se la giornata finisse adesso?» invece che
+   *  «quanto sto facendo?». Cambia una cosa sola: il titolare con zero minuti in
+   *  una partita in corso viene trattato come un senza voto definitivo — la
+   *  panchina entra, il voto d'ufficio tappa. Chi è IN CAMPO non si tocca
+   *  nemmeno qui. Non è il punteggio della sfida e non va presentato come tale:
+   *  si chiede con `?projection=1` e non viene salvato da nessuna parte. */
+  projected?: boolean;
+  /** Il punteggio VERO, quello che si legge con l'interruttore spento. Viaggia
+   *  solo dentro un tabellino previsionale, e serve a UNA domanda: le due
+   *  risposte coincidono? Quando sì, i numeri in pagina non si muovono e senza
+   *  una parola il tasto sembra rotto invece che d'accordo.
+   *
+   *  NON per mostrare il confronto: da acceso cambia già tutto il tabellino —
+   *  testata, totali di squadra, cambi — e ristampare qui «56,5 → 68,5» diceva
+   *  una terza volta la stessa cosa, per giunta con un delta che si leggeva come
+   *  una somma ancora da fare. */
+  actual?: {
+    home_total: number;
+    away_total: number;
+    home_goals: number;
+    away_goals: number;
+  } | null;
   /**
    * Minutes played by whoever has been on longest — the clock of a real match in
    * progress. Null once it is over. Only the real-match detail sends it: a fantasy

@@ -39,9 +39,12 @@ export function MatchScoreHeader({
   return (
     <div>
       {eyebrow || action ? (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">{eyebrow}</div>
-          {action}
+          {/* `shrink-0`: l'occhiello cresce (una pastiglia in più e va a capo da
+              solo, che è quel che deve fare), l'azione no — schiacciata, un
+              «← Partite» si spezzava in due righe. */}
+          {action ? <div className="shrink-0">{action}</div> : null}
         </div>
       ) : null}
       <div className="mt-3 flex items-center justify-center gap-4 sm:gap-8">

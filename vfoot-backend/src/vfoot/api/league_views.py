@@ -5368,8 +5368,17 @@ class FixtureDetailView(APIView):
         ruleset = ruleset_for_round(league, md)
         lock_at = matchday_state.lineup_lock_at(md.real_competition_season_id,
                                                 md.real_matchday)
+        # «Se la giornata finisse adesso»: la stessa sfida letta con l'altra
+        # domanda (v. classic_matchday_scoring.live_scorer). E' un parametro di
+        # LETTURA e non ha un ramo suo: stesso endpoint, stesse regole, stesso
+        # motore, e sopra un ramo che non scrive niente per costruzione — cosi'
+        # «non ha impatto su nulla» e' una proprieta' del codice invece di una
+        # promessa. Sul referto congelato la chiave si ignora da sola: quel ramo
+        # ritorna prima, e a giornata conclusa non c'e' piu' niente da prevedere.
+        projected = request.query_params.get("projection") in ("1", "true", "yes")
         return Response({
-            **score_fixture_live(fx, league, md, ruleset), **managers,
+            **score_fixture_live(fx, league, md, ruleset, projected=projected),
+            **managers,
             # Prima del blocco quello che si sta guardando e' un'ANTEPRIMA: nessuno
             # ha ancora giocato, i totali sono zero per costruzione e le formazioni
             # si possono ancora cambiare. Il client ne fa una pagina diversa — dirlo

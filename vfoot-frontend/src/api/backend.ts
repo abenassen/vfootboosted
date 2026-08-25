@@ -1191,10 +1191,16 @@ export async function getCompetitionStructure(
   return parseJsonOrThrow(res);
 }
 
+// `projection` chiede la SECONDA lettura di un turno in corso: «se la giornata
+// finisse adesso?». Stesso endpoint e stesse regole di lega — è il motore vero a
+// rispondere, non un conto rifatto qui — e non scrive niente: chiederla non
+// cambia il punteggio che la pagina mostra con l'interruttore spento.
 export async function getFixtureDetail(
   fixtureId: number | string,
+  opts?: { projection?: boolean },
 ): Promise<SimFixtureDetail | ClassicFixtureDetail> {
-  const res = await fetch(`${baseUrl()}/fixtures/${fixtureId}`, {
+  const qs = opts?.projection ? '?projection=1' : '';
+  const res = await fetch(`${baseUrl()}/fixtures/${fixtureId}${qs}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });
   return parseJsonOrThrow(res);

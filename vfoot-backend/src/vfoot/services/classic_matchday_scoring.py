@@ -605,6 +605,37 @@ def _mark_unstable(team: dict, unstable: set, in_progress: set | None = None) ->
     return any_unstable
 
 
+def _engine_in_progress(in_progress: set, index: dict, projected: bool) -> set:
+    """Quali «partita in corso» il MOTORE deve continuare a rispettare.
+
+    Fuori dalla previsione, tutte: finche' la palla rotola, un titolare senza voto
+    non e' un buco e la panchina non lo copre (v. ``classic_scoring.score_team``).
+
+    Nella previsione, SOLO CHI E' IN CAMPO — ed e' tutta la differenza fra le due
+    letture. La domanda «se la giornata finisse adesso?» risponde diversamente dal
+    solito per una categoria di righe sola: il titolare con zero minuti in una
+    partita che si sta giocando. Al fischio finale la panchina lo coprirebbe, e il
+    voto d'ufficio tapperebbe il buco che resta; la previsione lo dice subito.
+
+    CHI E' IN CAMPO RESTA INTOCCABILE ANCHE QUI, e questa e' la riga che separa la
+    funzione dalla scorciatoia sbagliata: nei primi minuti chi sta giocando non ha
+    ancora un voto — il fornitore non ha ancora dati su di lui — e sostituirlo
+    sarebbe la stessa cosa sbagliata di sempre, un cambio dato come risposta a «non
+    ha giocato» a uno che sta giocando, stavolta offerta come funzione invece che
+    subita come bug. La differenza fra i due la dice gia' la pagella, che scrive
+    ``sv_reason == "in_campo"`` per l'uno e ``non_entrato`` per l'altro.
+
+    L'insieme piu' stretto lo vede il motore e basta: la marcatura DOPO il calcolo
+    riceve quello vero, quindi la pagina continua a scrivere «in corso» su quelle
+    righe. Ed e' giusto — la partita e' in corso davvero, ed e' esattamente il
+    motivo per cui questo numero puo' cambiare fra dieci minuti.
+    """
+    if not projected:
+        return in_progress
+    return {pid for pid in in_progress
+            if (index.get(pid) or {}).get("sv_reason") == "in_campo"}
+
+
 def ruleset_for_round(league, md):
     """The rules THIS round is played under.
 
@@ -632,7 +663,7 @@ def ruleset_for_round(league, md):
     return ruleset
 
 
-def live_scorer(league, md, ruleset):
+def live_scorer(league, md, ruleset, projected: bool = False):
     """Prepare a matchday ONCE, then score any number of its fixtures.
 
     The expensive half is per-MATCHDAY, not per-fixture: ``build_matchday_index``
@@ -640,6 +671,13 @@ def live_scorer(league, md, ruleset):
     the two instability sets are the same question for the whole league. A
     calendar showing the five provisional scores of a round paid that five times
     before this existed.
+
+    ``projected`` — «SE LA GIORNATA FINISSE ADESSO». Non e' una previsione di come
+    andra' a finire (quella vorrebbe un modello sulle partite non ancora
+    cominciate, e non abita qui): e' lo stesso conto di sempre con una sola
+    domanda risposta diversamente, v. ``_engine_in_progress``. Non si salva, non
+    si spinge e non entra in classifica — e' un secondo modo di LEGGERE il turno,
+    chiesto dalla pagina che lo mostra.
 
     Returns a callable ``score(fixture) -> payload``.
     """
@@ -665,8 +703,13 @@ def live_scorer(league, md, ruleset):
     not_started -= set(office)
     unstable -= set(office)
     in_progress -= set(office)
+    engine_in_progress = _engine_in_progress(in_progress, index, projected)
 
-    def score(fx) -> dict:
+    def score_with(fx, frozen_by_kickoff: set) -> dict:
+        """Il tabellino, dato l'insieme di «sta ancora giocando» che il motore deve
+        rispettare. Chiamabile due volte sullo stesso fixture: ogni giro ricompone
+        le righe da zero (``compose_team_lines`` copia quelle dell'indice), quindi
+        il secondo non eredita niente dal primo."""
         lines = {}
         for side, team in (("home", fx.home_team), ("away", fx.away_team)):
             # ``previous`` rather than None: mid-round there is no admin to ask what
@@ -682,7 +725,12 @@ def live_scorer(league, md, ruleset):
             # non e' un buco (_fill_unresolved); marcati dopo, al quinto minuto la
             # panchina coprirebbe tutti quelli che sono regolarmente in campo, e una
             # lega col voto d'ufficio aprirebbe il turno con undici buchi.
-            _mark_unstable({"starters": starters, "bench": bench}, unstable, in_progress)
+            #
+            # QUI l'insieme che decide, e solo qui: e' il motore che risponde alla
+            # domanda fatta (v. _engine_in_progress). La marcatura di sotto, quella
+            # che la pagina legge, riceve sempre l'insieme vero.
+            _mark_unstable({"starters": starters, "bench": bench}, unstable,
+                           frozen_by_kickoff)
             lines[side] = (starters, bench, meta)
 
         payload = score_composed_fixture(
@@ -709,10 +757,39 @@ def live_scorer(league, md, ruleset):
                                     "away": lines["away"][2].get("source")}
         return payload
 
+    def score(fx) -> dict:
+        payload = score_with(fx, engine_in_progress)
+        # Il payload si dichiara. Senza, la pagina puo' finire per mostrare un
+        # totale previsto sotto la pastiglia «in corso» — cioe' un numero che non
+        # e' il punteggio della sfida presentato come se lo fosse. Chi lo riceve
+        # deve sapere quale delle due domande ha fatto.
+        payload["projected"] = projected
+        if projected:
+            # E ANCHE L'ALTRA RISPOSTA, nello stesso giro, per una domanda sola:
+            # LE DUE COINCIDONO? Spesso si' — quando sono tutti in campo non c'e'
+            # niente da anticipare — e allora in pagina non si muove un numero. Chi
+            # ha appena premuto il tasto vede una pagina identica a prima, e senza
+            # una parola quello e' un tasto rotto invece che un tasto d'accordo.
+            # L'assenza di differenza e' un'informazione, e da qui la si ricava.
+            #
+            # NON serve a stampare il confronto accanto al totale: da acceso cambia
+            # gia' tutto il tabellino, e ripetere «56,5 → 68,5» era dire una terza
+            # volta la stessa cosa.
+            #
+            # Costa un secondo passaggio di aritmetica su una trentina di righe: le
+            # dieci pagelle del turno — la mezza secondo — sono gia' fatte e
+            # condivise fra i due giri.
+            actual = score_with(fx, in_progress)
+            payload["actual"] = {
+                "home_total": actual["home_total"], "away_total": actual["away_total"],
+                "home_goals": actual["home_goals"], "away_goals": actual["away_goals"],
+            }
+        return payload
+
     return score
 
 
-def score_fixture_live(fx, league, md, ruleset) -> dict:
+def score_fixture_live(fx, league, md, ruleset, projected: bool = False) -> dict:
     """The tabellino of a league fixture whose matchday is NOT concluded.
 
     Same functions as the conclusion, in the same order — that is deliberate, and
@@ -724,8 +801,12 @@ def score_fixture_live(fx, league, md, ruleset) -> dict:
     there, which is what makes reopening a closed matchday pure reading (see
     docs/classic_live_scoring.md). Writing a provisional payload into
     FantasyFixtureDetail would destroy that property for the sake of a cache.
+
+    ``projected`` — v. ``live_scorer``. Che la previsione passi di qui e non da un
+    conto tutto suo E' il motivo per cui ci si puo' fidare: sono le stesse regole
+    della lega, applicate dallo stesso motore, con una domanda sola cambiata.
     """
-    return live_scorer(league, md, ruleset)(fx)
+    return live_scorer(league, md, ruleset, projected=projected)(fx)
 
 
 def _warn_about_unrepaired_lineups(league, md, team_lines) -> list[dict]:

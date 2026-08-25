@@ -204,6 +204,91 @@ function LiveBadge({
   );
 }
 
+/** «Se la giornata finisse adesso»: l'interruttore, e il confronto fra le due
+ *  risposte.
+ *
+ *  L'INTERRUTTORE STA QUI E NON NELLA TESTATA, di proposito. Il punteggio della
+ *  sfida è quello che sta sopra; questo è un modo diverso di leggerlo, e mescolare
+ *  le due cose in una riga sola era il modo per far sembrare la previsione il
+ *  risultato. Sotto, staccato, si legge come quello che è: una domanda che si può
+ *  fare al tabellino.
+ *
+ *  E COSTA UNA RIGA QUANDO E' SPENTO, che è lo stato in cui questo pannello si
+ *  trova quasi sempre. Prima erano un titolo, tre righe di spiegazione e il
+ *  bottone: su un telefono spingevano in giù le formazioni — cioè il contenuto
+ *  della pagina — per spiegare una funzione che nessuno aveva ancora chiesto. Il
+ *  titolo poi ripeteva parola per parola il bottone che gli stava accanto. Adesso
+ *  il bottone È il titolo, e la spiegazione compare solo da accesa, quando serve
+ *  a leggere quello che si sta guardando.
+ *
+ *  E NON RIPETE I NUMERI DI SOPRA. Da acceso cambia tutto il tabellino — la
+ *  testata, i totali di squadra, i cambi — quindi il confronto «56,5 → 68,5 +12»
+ *  qui sotto diceva una terza volta cose che si leggono venti pixel più in alto.
+ *  Peggio: il delta accanto al totale si legge come una somma ancora da fare,
+ *  mentre è già dentro. Una sola risposta per volta, e la pastiglia PREVISIONE
+ *  in testata dice quale delle due si sta guardando.
+ *
+ *  Resta l'unico caso che la testata NON sa raccontare: quando le due risposte
+ *  coincidono. Lì i numeri non si muovono, e senza una parola il tasto sembra
+ *  rotto invece che d'accordo — l'assenza di differenza è un'informazione, non
+ *  una ripetizione. */
+function ProjectionBar({
+  d,
+  on,
+  busy,
+  onChange,
+}: {
+  d: ClassicFixtureDetail;
+  on: boolean;
+  busy: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  const actual = (on && d.projected ? d.actual : null) ?? null;
+  const moved = (a: number, b: number) => Math.abs(a - b) > 0.001;
+  const changed =
+    actual != null &&
+    (moved(d.home_total, actual.home_total) || moved(d.away_total, actual.away_total));
+
+  return (
+    <Card className="p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <Button
+          variant={on ? 'secondary' : 'ghost'}
+          size="sm"
+          disabled={busy}
+          onClick={() => onChange(!on)}
+          /* La spiegazione per esteso vive qui da spenta: chi passa il puntatore la
+             legge, chi non la cerca non la paga in altezza. */
+          title={
+            on
+              ? undefined
+              : 'Fa entrare la panchina al posto di chi non è ancora sceso in campo in una partita cominciata. Chi sta giocando non si tocca.'
+          }
+        >
+          {on ? '← Punteggio attuale' : 'Se finisse adesso →'}
+        </Button>
+
+        {/* Da accesa, una riga sola. Se qualcosa cambia è la REGOLA — che il
+            tabellino da solo non racconta: senza, un titolare a zero che NON viene
+            sostituito perché è in campo si legge come un errore del conto. Se non
+            cambia niente è il fatto che non cambia niente, che è l'unica cosa che
+            i numeri di sopra non possono dire da soli. */}
+        {actual ? (
+          <span className="min-w-0 text-[11px] text-ink-faint">
+            {changed ? (
+              <>
+                Entra la panchina per chi <b>non è ancora in campo</b>; chi gioca no.
+              </>
+            ) : (
+              'Nessuno da rimpiazzare: stesso punteggio.'
+            )}
+          </span>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
 export function ClassicMatchDetail({
   fixture,
   backTo,
@@ -211,10 +296,16 @@ export function ClassicMatchDetail({
   variant = 'fantasy',
   myUserId = null,
   loadLedger,
+  projection,
 }: {
   fixture: ClassicFixtureDetail;
   backTo: string;
   backLabel?: string;
+  /** L'interruttore «se finisse adesso», se la pagina che ospita il tabellino sa
+   *  richiederlo (è lei a rifare la chiamata: la risposta la calcola il motore
+   *  vero, non questo componente). Assente = niente interruttore, che è il caso
+   *  delle pagelle di una partita di Serie A e di ogni referto già congelato. */
+  projection?: { on: boolean; busy: boolean; onChange: (on: boolean) => void };
   /** Chi sta guardando, se è uno dei due fantallenatori.
    *
    *  Serve a una cosa sola, e prima del blocco: mettere sulla PROPRIA colonna il
@@ -295,6 +386,19 @@ export function ClassicMatchDetail({
                   calcio d'inizio era una bugia anche peggiore — partita in corso
                   mentre le formazioni si possono ancora cambiare — e per quella
                   c'era `preview`, che copriva metà del problema. */}
+              {/* Il numero là sopra non è il punteggio della sfida: è la risposta
+                  a un'altra domanda. Va detto ACCANTO al numero, non solo nella
+                  barra che l'ha chiesto — chi scorre la pagina e torna in cima
+                  vede solo la testata, e due totali diversi nella stessa sessione
+                  senza niente che li distingua sono un tabellino che si contraddice. */}
+              {d.projected ? (
+                <span
+                  title="Non è il punteggio della sfida: è quanto farebbe se la giornata finisse adesso."
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warn-bg px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-warn"
+                >
+                  previsione
+                </span>
+              ) : null}
               {preview ? null : d.in_progress ? (
                 <LiveBadge label={d.minute != null ? `in corso · ${d.minute}'` : 'in corso'} />
               ) : d.provisional ? (
@@ -353,6 +457,19 @@ export function ClassicMatchDetail({
           }
         />
       </Card>
+
+      {/* Si offre finché c'è qualcosa da anticipare — cioè finché una delle
+          partite vere è sul campo — e resta finché è acceso, o non ci sarebbe più
+          il modo di spegnerlo. Mai in anteprima (non ha giocato nessuno) né su una
+          partita vera di Serie A (non c'è nessuna panchina da far entrare). */}
+      {projection && !realMatch && !preview && (d.in_progress || (projection.on && d.projected)) ? (
+        <ProjectionBar
+          d={d}
+          on={projection.on}
+          busy={projection.busy}
+          onChange={projection.onChange}
+        />
+      ) : null}
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
         <TeamColumn
