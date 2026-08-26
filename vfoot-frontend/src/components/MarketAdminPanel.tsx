@@ -9,7 +9,7 @@ import {
 } from '../api/backend';
 import { Badge, Button, Card, SectionTitle } from './ui';
 import { OfferDeadline } from './OfferDeadline';
-import { CURRENCY_NAME_PLURAL } from '../utils/currency';
+import { CURRENCY_NAME_PLURAL, price } from '../utils/currency';
 import {
   SESSION_LABEL,
   SESSION_TONE,
@@ -229,7 +229,7 @@ function QueueRow({ o, busy, onAccept, onReject }: { o: MarketOfferRow; busy: bo
       <div>
         <Badge tone="blue">{o.role}</Badge>{' '}
         <b>{o.target_name}</b> <span className="text-ink-faint">← {o.team_name} svincola {o.release_name}</span>
-        {' · '}<b>{o.amount}</b> cr <span className="text-ink-faint">(recupero {o.recovery})</span>
+        {' · '}<b>{price(o.amount)}</b> <span className="text-ink-faint">(recupero {o.recovery})</span>
       </div>
       <div className="flex gap-2">
         <Button size="sm" disabled={busy} onClick={onAccept}>Accetta (applica rose)</Button>
@@ -247,7 +247,7 @@ function LeadingRow({ f, nowMs, closesAt, busy, onCancel }: {
     <div className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
       <div>
         <Badge tone="blue">{f.role}</Badge>{' '}
-        <b>{f.name}</b> <span className="text-ink-faint">· {l.team_name} a <b>{l.amount}</b>
+        <b>{f.name}</b> <span className="text-ink-faint">· {l.team_name} a <b>{price(l.amount)}</b>
           {l.release_name && <> svincolando <b>{l.release_name}</b></>} ·{' '}
           <OfferDeadline deadlineAt={l.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} /></span>
       </div>

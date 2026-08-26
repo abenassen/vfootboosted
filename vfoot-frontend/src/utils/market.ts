@@ -18,7 +18,10 @@ const RECOVERY_LABEL: Record<MarketRecoveryMode, string> = {
 };
 
 export function recoveryText(mode: MarketRecoveryMode, fixed: number): string {
-  return mode === 'fixed' ? `${amount(fixed)} fissi` : RECOVERY_LABEL[mode];
+  // «1 vfooty fissi» era una stonatura in una riga che si legge come una frase.
+  return mode === 'fixed'
+    ? `${amount(fixed)} fiss${fixed === 1 ? 'o' : 'i'}`
+    : RECOVERY_LABEL[mode];
 }
 
 // Sempre fino ai secondi: il tick e' di 1s, e senza il campo che scorre un

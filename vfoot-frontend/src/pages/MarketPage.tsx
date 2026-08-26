@@ -369,7 +369,7 @@ function OfferPanel({
             <b>{target.name}</b>
             {target.leading && (
               <span className="text-ink-faint">
-                · in testa {target.leading.team_name} a <b>{target.leading.amount}</b>
+                · in testa {target.leading.team_name} a <b>{price(target.leading.amount)}</b>
                 {target.leading.release_name && <> svincolando <b>{target.leading.release_name}</b></>} ·{' '}
                 <OfferDeadline deadlineAt={target.leading.deadline_at} sessionClosesAt={data.session?.closes_at} nowMs={nowMs} />
               </span>
@@ -400,9 +400,9 @@ function OfferPanel({
                 value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
             </label>
             <div className="text-sm text-ink-soft">
-              Tetto: <b>{release ? maxAmount : '—'}</b>
-              {release && <span className="text-ink-faint"> ({available} disp. + {release.recovery} recupero)</span>}
-              {target.leading && <span className="text-ink-faint"> · minimo rilancio {minAmount}</span>}
+              Tetto: <b>{release ? price(maxAmount) : '—'}</b>
+              {release && <span className="text-ink-faint"> ({available} disponibili + {release.recovery} di recupero)</span>}
+              {target.leading && <span className="text-ink-faint"> · minimo rilancio {price(minAmount)}</span>}
             </div>
           </div>
           <div className="flex gap-2">
@@ -461,7 +461,7 @@ function MyOffersCard({ offers, nowMs, closesAt }: {
                 <b>{o.target_name}</b> <span className="text-ink-faint">← svincoli {o.release_name}</span>
               </div>
               <div className="flex items-center gap-3">
-                <span>{o.amount} cr <span className="text-ink-faint">(recupero {o.recovery})</span></span>
+                <span>{price(o.amount)} <span className="text-ink-faint">(recupero {o.recovery})</span></span>
                 {o.status === 'leading' && (
                   <span className="text-ink-faint">
                     <OfferDeadline deadlineAt={o.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} />
@@ -493,7 +493,7 @@ function FreeAgentRow({
         <Badge tone="blue">{f.role}</Badge> <b>{f.name}</b>
         {f.leading && (
           <span className="ml-2 text-ink-faint">
-            in testa {f.leading.mine ? <b className="text-good">tu</b> : f.leading.team_name} a <b>{f.leading.amount}</b>
+            in testa {f.leading.mine ? <b className="text-good">tu</b> : f.leading.team_name} a <b>{price(f.leading.amount)}</b>
             {f.leading.release_name && <> svincolando <b>{f.leading.release_name}</b></>}
             {' · '}<OfferDeadline deadlineAt={f.leading.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} />
           </span>
@@ -502,7 +502,7 @@ function FreeAgentRow({
           <span className="ml-2">
             <Badge tone="amber">in validazione</Badge>
             {f.pending && (
-              <span className="text-ink-faint"> · vinto da {f.pending.mine ? <b className="text-good">te</b> : f.pending.team_name} a <b>{f.pending.amount}</b>
+              <span className="text-ink-faint"> · vinto da {f.pending.mine ? <b className="text-good">te</b> : f.pending.team_name} a <b>{price(f.pending.amount)}</b>
                 {f.pending.release_name && <> svincolando <b>{f.pending.release_name}</b></>}</span>
             )}
           </span>
@@ -590,7 +590,7 @@ function ClosedOffersCard({ offers }: { offers: MarketOfferRow[] }) {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span>{o.amount} cr</span>
+              <span>{price(o.amount)}</span>
               <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>
             </div>
           </div>
@@ -773,7 +773,7 @@ function HistorySession({ s }: { s: MarketSessionHistory }) {
                     <b>{o.target_name}</b> <span className="text-ink-faint">← {o.team_name} / {o.release_name}</span>
                   </span>
                   <span className="flex items-center gap-2">
-                    {o.amount} cr <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>
+                    {price(o.amount)} <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>
                   </span>
                 </div>
               ))}
