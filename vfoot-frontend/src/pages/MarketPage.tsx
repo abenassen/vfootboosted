@@ -369,7 +369,8 @@ function OfferPanel({
             <b>{target.name}</b>
             {target.leading && (
               <span className="text-ink-faint">
-                · in testa {target.leading.team_name} a <b>{target.leading.amount}</b> ·{' '}
+                · in testa {target.leading.team_name} a <b>{target.leading.amount}</b>
+                {target.leading.release_name && <> svincolando <b>{target.leading.release_name}</b></>} ·{' '}
                 <OfferDeadline deadlineAt={target.leading.deadline_at} sessionClosesAt={data.session?.closes_at} nowMs={nowMs} />
               </span>
             )}
@@ -464,10 +465,19 @@ function FreeAgentRow({
         {f.leading && (
           <span className="ml-2 text-ink-faint">
             in testa {f.leading.mine ? <b className="text-good">tu</b> : f.leading.team_name} a <b>{f.leading.amount}</b>
+            {f.leading.release_name && <> svincolando <b>{f.leading.release_name}</b></>}
             {' · '}<OfferDeadline deadlineAt={f.leading.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} />
           </span>
         )}
-        {f.locked && <span className="ml-2"><Badge tone="amber">in validazione</Badge></span>}
+        {f.locked && (
+          <span className="ml-2">
+            <Badge tone="amber">in validazione</Badge>
+            {f.pending && (
+              <span className="text-ink-faint"> · vinto da {f.pending.mine ? <b className="text-good">te</b> : f.pending.team_name} a <b>{f.pending.amount}</b>
+                {f.pending.release_name && <> svincolando <b>{f.pending.release_name}</b></>}</span>
+            )}
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-2">
         {canOffer && !f.locked && !f.leading?.mine && (

@@ -312,6 +312,62 @@ class MarketApiTests(MarketBase):
         self.assertTrue(FantasyRosterSlot.objects.filter(
             team=self.t2, player=fa, released_at__isnull=True).exists())
 
+    def test_the_leading_row_names_the_promised_release(self):
+        """Un'offerta e' uno scambio pari ruolo: la lista deve dire anche chi
+        esce, non solo chi entra e a quanto. Vale per chiunque guardi — qui un
+        rivale, che e' proprio chi deve decidere se rilanciare."""
+        d2 = self._player("MarioDef", "DIF", fieldable=False)
+        self._own(self.t2, d2, 40)
+        fa = self._player("FreeDef", "DIF")
+        self._as(self.admin).post(
+            f"/api/v1/leagues/{self.league.id}/market/sessions/create",
+            {"credit_recovery_mode": "frac50"}, format="json")
+        r = self._as(self.u2).post(
+            f"/api/v1/leagues/{self.league.id}/market/offers",
+            {"target_player_id": fa.id, "release_player_id": d2.id, "amount": 30},
+            format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+
+        body = self._as(self.u3).get(
+            f"/api/v1/leagues/{self.league.id}/market/active").json()
+        lead = next(f for f in body["free_agents"] if f["player_id"] == fa.id)["leading"]
+        self.assertEqual(lead["release_player_id"], d2.id)
+        self.assertEqual(lead["release_name"], "MarioDef")
+
+    def test_a_won_offer_still_says_who_won_it_while_it_waits(self):
+        """Fra la vittoria e la validazione l'offerta non deve sparire: era
+        pubblica un istante prima (stava in testa) e torna pubblica appena
+        l'admin decide. Qui la guarda un rivale, che e' chi ci rimane male."""
+        d2 = self._player("MarioDef", "DIF", fieldable=False)
+        self._own(self.t2, d2, 40)
+        fa = self._player("FreeDef", "DIF")
+        self._as(self.admin).post(
+            f"/api/v1/leagues/{self.league.id}/market/sessions/create",
+            {"credit_recovery_mode": "frac50"}, format="json")
+        r = self._as(self.u2).post(
+            f"/api/v1/leagues/{self.league.id}/market/offers",
+            {"target_player_id": fa.id, "release_player_id": d2.id, "amount": 30},
+            format="json")
+        MarketOffer.objects.filter(id=r.json()["offer_id"]).update(
+            deadline_at=timezone.now() - timedelta(minutes=1))
+
+        # La lettura stessa promuove l'offerta a `accepted`: da qui in poi il
+        # giocatore e' bloccato e la decisione e' dell'admin.
+        body = self._as(self.u3).get(
+            f"/api/v1/leagues/{self.league.id}/market/active").json()
+        row = next(f for f in body["free_agents"] if f["player_id"] == fa.id)
+        self.assertTrue(row["locked"])
+        self.assertIsNone(row["leading"])
+        self.assertEqual(row["pending"]["team_name"], "MarioFC")
+        self.assertEqual(row["pending"]["amount"], 30)
+        self.assertEqual(row["pending"]["release_name"], "MarioDef")
+        self.assertFalse(row["pending"]["mine"])
+        # E per chi l'ha vinta e' "tua".
+        mine = next(f for f in self._as(self.u2).get(
+            f"/api/v1/leagues/{self.league.id}/market/active").json()["free_agents"]
+            if f["player_id"] == fa.id)
+        self.assertTrue(mine["pending"]["mine"])
+
     def test_one_live_session_per_league(self):
         self._as(self.admin).post(
             f"/api/v1/leagues/{self.league.id}/market/sessions/create",

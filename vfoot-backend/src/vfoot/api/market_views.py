@@ -333,9 +333,20 @@ class MarketActiveView(APIView):
         # decide resta svincolato, e senza questo la sessione nuova lo rimetterebbe
         # all'asta come se fosse libero.
         locked |= {o.target_player_id for o in pending}
+        # E chi se l'e' aggiudicato, in attesa che l'admin decida. Era pubblico un
+        # istante prima — la stessa offerta stava in testa, con squadra e cifra a
+        # schermo — e torna pubblico appena la validazione passa: sparire proprio
+        # nel frattempo era una svista, non una riservatezza. `pending` e' di lega,
+        # quindi copre anche le code rimaste da una sessione precedente.
+        pending_by_target = {o.target_player_id: o for o in pending}
 
-        # Collect every player id we need a name for in one query.
-        need_ids = set(pool) | set(leading.keys()) | locked
+        # Collect every player id we need a name for in one query. Il promesso
+        # svincolo compreso, di chi e' in testa e di chi ha gia' vinto: un'offerta
+        # e' uno scambio, e leggerne solo la meta' che entra nasconde meta' della
+        # trattativa.
+        need_ids = (set(pool) | set(leading.keys()) | locked
+                    | {o.release_player_id for o in leading.values()}
+                    | {o.release_player_id for o in pending})
         my_offers = list(MarketOffer.objects.filter(session=session, team=team)
                          .order_by("-created_at")) if team else []
         for o in my_offers:
@@ -353,6 +364,7 @@ class MarketActiveView(APIView):
         free_agents = []
         for pid in pool:
             lead = leading.get(pid)
+            pend = pending_by_target.get(pid)
             free_agents.append({
                 "player_id": pid,
                 "name": names.get(pid),
@@ -365,6 +377,15 @@ class MarketActiveView(APIView):
                     "team_name": team_names.get(lead.team_id),
                     "deadline_at": lead.deadline_at.isoformat() if lead.deadline_at else None,
                     "mine": bool(team and lead.team_id == team.id),
+                    "release_player_id": lead.release_player_id,
+                    "release_name": names.get(lead.release_player_id),
+                },
+                "pending": None if not pend else {
+                    "amount": pend.amount, "team_id": pend.team_id,
+                    "team_name": team_names.get(pend.team_id),
+                    "release_player_id": pend.release_player_id,
+                    "release_name": names.get(pend.release_player_id),
+                    "mine": bool(team and pend.team_id == team.id),
                 },
             })
         free_agents.sort(key=lambda r: (r["role"] or "", r["name"] or ""))

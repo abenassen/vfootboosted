@@ -247,7 +247,8 @@ function LeadingRow({ f, nowMs, closesAt, busy, onCancel }: {
     <div className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
       <div>
         <Badge tone="blue">{f.role}</Badge>{' '}
-        <b>{f.name}</b> <span className="text-ink-faint">· {l.team_name} a <b>{l.amount}</b> ·{' '}
+        <b>{f.name}</b> <span className="text-ink-faint">· {l.team_name} a <b>{l.amount}</b>
+          {l.release_name && <> svincolando <b>{l.release_name}</b></>} ·{' '}
           <OfferDeadline deadlineAt={l.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} /></span>
       </div>
       <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Annulla</Button>

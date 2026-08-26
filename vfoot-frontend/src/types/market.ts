@@ -35,6 +35,23 @@ export interface MarketLeading {
   team_name: string | null;
   deadline_at: string | null;
   mine: boolean;
+  /** Chi il primo della fila promette di svincolare: un'offerta e' uno scambio
+   *  pari ruolo, e senza questa meta' non si sa cosa sta davvero mettendo sul
+   *  piatto. */
+  release_player_id: number;
+  release_name: string | null;
+}
+
+/** Chi si e' gia' aggiudicato lo svincolato e aspetta la validazione dell'admin.
+ *  Stessa sostanza di `MarketLeading`, ma la corsa e' finita: niente scadenza,
+ *  e la decisione non e' piu' della lega. */
+export interface MarketPending {
+  amount: number;
+  team_id: number;
+  team_name: string | null;
+  release_player_id: number;
+  release_name: string | null;
+  mine: boolean;
 }
 
 export interface MarketFreeAgent {
@@ -46,6 +63,8 @@ export interface MarketFreeAgent {
   role: string | null;
   locked: boolean;
   leading: MarketLeading | null;
+  /** Valorizzato quando `locked` viene da un'offerta vinta e ancora in coda. */
+  pending?: MarketPending | null;
 }
 
 export interface MarketRosterPlayer {
