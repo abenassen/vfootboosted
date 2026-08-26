@@ -418,32 +418,61 @@ function OfferPanel({
   );
 }
 
+/** Un'offerta ancora in gioco: o e' in testa, o ha gia' vinto e aspetta la
+ *  validazione dell'admin. Tutte le altre sono cronaca della sessione. */
+const offerLive = (o: MarketOfferRow) => o.status === 'leading' || o.status === 'accepted';
+
 function MyOffersCard({ offers, nowMs, closesAt }: {
   offers: MarketOfferRow[]; nowMs: number; closesAt: string | null | undefined;
 }) {
+  // Filtrata di default: bastano due rilanci perche' le superate siano piu'
+  // delle vive, e la lista si allunga proprio con le righe su cui non c'e'
+  // piu' niente da fare.
+  const [onlyLive, setOnlyLive] = useState(true);
+  const live = useMemo(() => offers.filter(offerLive), [offers]);
   if (offers.length === 0) return null;
+  const past = offers.length - live.length;
+  const shown = onlyLive ? live : offers;
   return (
     <Card className="p-4">
-      <SectionTitle>Le mie offerte</SectionTitle>
-      <div className="mt-2 divide-y divide-line">
-        {offers.map((o) => (
-          <div key={o.offer_id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-            <div>
-              <Badge tone="blue">{o.role}</Badge>{' '}
-              <b>{o.target_name}</b> <span className="text-ink-faint">← svincoli {o.release_name}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span>{o.amount} cr <span className="text-ink-faint">(recupero {o.recovery})</span></span>
-              {o.status === 'leading' && (
-                <span className="text-ink-faint">
-                  <OfferDeadline deadlineAt={o.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} />
-                </span>
-              )}
-              <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>
-            </div>
-          </div>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SectionTitle>Le mie offerte ({shown.length})</SectionTitle>
+        {/* Senza niente da nascondere la casella non deciderebbe nulla. */}
+        {past > 0 && (
+          <label className="flex items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink-soft">
+            <input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />
+            Solo attive
+            {onlyLive && (
+              <span className="font-normal text-ink-faint">
+                ({past} {past === 1 ? 'nascosta' : 'nascoste'})
+              </span>
+            )}
+          </label>
+        )}
       </div>
+      {shown.length === 0 ? (
+        <div className="mt-2 text-sm text-ink-faint">Nessuna offerta ancora in gioco.</div>
+      ) : (
+        <div className="mt-2 divide-y divide-line">
+          {shown.map((o) => (
+            <div key={o.offer_id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+              <div>
+                <Badge tone="blue">{o.role}</Badge>{' '}
+                <b>{o.target_name}</b> <span className="text-ink-faint">← svincoli {o.release_name}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span>{o.amount} cr <span className="text-ink-faint">(recupero {o.recovery})</span></span>
+                {o.status === 'leading' && (
+                  <span className="text-ink-faint">
+                    <OfferDeadline deadlineAt={o.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} />
+                  </span>
+                )}
+                <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
