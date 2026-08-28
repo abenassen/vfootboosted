@@ -121,11 +121,27 @@ npm run build          # -> dist/
 
 ```sh
 JS=$(ls dist/assets/index-*.js)
-grep -o 'function oe(){const e="[^"]*"' "$JS"   # deve dire "/api/v1", non localhost
-grep -c 'gsi/client' "$JS"                       # deve essere > 0
+grep -c '"/api/v1"' "$JS"    # deve essere 1: è il valore inlinato dall'ambiente
+grep -c 'gsi/client' "$JS"   # deve essere > 0
 ```
 `VITE_API_BASE_URL=/api/v1` is RELATIVE (nginx proxies it); the Google client id is
 public (baked into the bundle) and must match, or Google login breaks.
+
+**Si contano le VIRGOLETTE, e non si nomina la funzione.** Fino al 28/08/2026 qui
+c'era `grep -o 'function oe(){const e="[^"]*"'`, e `oe` non è un nome del nostro
+codice: è quello che il minificatore aveva dato a quella funzione nella build del
+giorno in cui il runbook è stato scritto. Quei nomi si riassegnano a ogni build —
+nel rilascio di quel giorno la stessa funzione si chiamava `se` — e il grep
+stampava **una riga vuota**. Che è esattamente ciò che si vedrebbe anche da una
+build giusta: la stessa uscita per «va tutto bene» e per «non ho guardato
+niente», cioè un controllo che tace proprio nel caso che deve intercettare.
+
+Il conteggio invece dà **0** quando la build è sbagliata, e zero si vede. Regge
+perché `"/api/v1"` **fra virgolette** può venire solo dal valore inlinato: la
+costante di riserva contiene `http://localhost:8000/api/v1`, dove prima di
+`/api/v1` c'è uno `0` e non una virgoletta, quindi non fa rumore. Un `grep
+localhost` nudo, al contrario, suona sempre: quella costante è nel bundle anche
+quando è tutto a posto, e non è lei che viene usata.
 
 ### 2. Backup (always, before migrating)
 
