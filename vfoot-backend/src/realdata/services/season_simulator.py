@@ -75,6 +75,8 @@ from realdata.models import (
     TeamSeason,
 )
 
+from realdata.services.identity import synthetic_sofascore_id
+
 PROVIDER = "sofascore"
 SERIE_A_TOURNAMENT_ID = 23
 
@@ -238,16 +240,10 @@ class SimTeam:
     depth: dict[str, list[SimPlayer]] = field(default_factory=dict)
 
 
-def _synthetic_sofa_id(player_id: int) -> str:
-    """A provider id for a squad member the provider has never seen.
-
-    Two hundred of the 660 players registered for 2026-27 come from Transfermarkt
-    and have no SofaScore identity: youth players, and signings who had not yet
-    appeared when the squads were scraped. They still have to be fieldable, so they
-    get a stable id in a range no real one occupies, registered as a PlayerAlias so
-    the importer resolves it to the EXISTING player instead of minting a duplicate.
-    """
-    return f"9{player_id:08d}"
+# Il formato vive in ``identity`` insieme al suo riconoscimento: v. la nota la'.
+# Qui resta solo il nome locale, perche' e' questo modulo a decidere CHI ne ha
+# bisogno — un giocatore senza identita' SofaScore — non come sia fatto.
+_synthetic_sofa_id = synthetic_sofascore_id
 
 
 def ensure_aliases(players: list[SimPlayer]) -> int:

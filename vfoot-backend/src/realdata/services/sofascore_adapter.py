@@ -75,7 +75,7 @@ from realdata.services.statsbomb_adapter import (
     BOX_X_MIN, BOX_Y_MIN, BOX_Y_MAX, _zone_key)
 from realdata.services.sofascore_client import SofaScoreBlocked
 from realdata.services.identity import (
-    is_placeholder_dob, norm_name, spell_out_particles,
+    is_placeholder_dob, is_synthetic_sofascore_id, norm_name, spell_out_particles,
 )
 
 PROVIDER = PROVIDER_SOFASCORE
@@ -423,9 +423,64 @@ def _player(player_id: Any, name: str, short_name: str,
 
 
 def _player_by_alias(ext_id: str) -> Player | None:
-    a = (PlayerAlias.objects.filter(source=PROVIDER, alias=ext_id)
-         .select_related("player").first())
-    return a.player if a else None
+    """Il giocatore dietro un id di questo fornitore, per alias.
+
+    Un id VERO ha la precedenza su uno sintetico. Un giocatore puo' averne due —
+    il simulatore gliene ha coniato uno quando SofaScore non lo conosceva, e poi
+    SofaScore l'ha conosciuto — e in quel caso l'unico che nomina qualcuno fuori
+    di qui e' il vero. Senza questo ordine, `.first()` sceglie per id di riga.
+    """
+    rows = list(PlayerAlias.objects.filter(source=PROVIDER, alias=ext_id)
+                .select_related("player"))
+    for a in rows:
+        if not is_synthetic_sofascore_id(a.alias):
+            return a.player
+    return rows[0].player if rows else None
+
+
+def real_sofascore_ids(player_ids=None) -> dict[int, str]:
+    """{player_id: id SofaScore VERO}, senza quelli che ci siamo coniati noi.
+
+    L'accesso onesto all'identita' SofaScore di un giocatore, e l'unico da usare
+    quando l'id deve valere FUORI di qui: un incrocio con un altro fornitore (le
+    probabili formazioni), un artefatto spedito, un confronto. Due sorgenti e un
+    ordine, per un motivo:
+
+    * ``Player.external_id`` quando il giocatore E' arrivato da SofaScore — pulito
+      per costruzione, e' l'id con cui e' stato importato;
+    * ``PlayerAlias`` per chi e' arrivato da Transfermarkt e SofaScore ha
+      riconosciuto dopo.
+
+    E in ENTRAMBE si scarta l'id sintetico del simulatore, che ha la forma di uno
+    vero e non fallisce mai in modo rumoroso: si aggancia a nulla, in silenzio.
+    Chi vuole anche quelli — il simulatore, che deve schierarli — legge
+    ``PlayerAlias`` da se'; il nome di questa funzione dice che qui non passano.
+
+    ``player_ids=None`` significa tutti; conviene passarne una lista, perche' la
+    tabella e' l'intera anagrafica.
+    """
+    out: dict[int, str] = {}
+    aliases = PlayerAlias.objects.filter(source=PROVIDER)
+    players = Player.objects.filter(external_source=PROVIDER).exclude(external_id="")
+    if player_ids is not None:
+        ids = list(player_ids)
+        aliases = aliases.filter(player_id__in=ids)
+        players = players.filter(id__in=ids)
+    # Gli alias per primi, i propri id dopo: ``dict`` tiene l'ultimo scritto, e
+    # l'ultimo dev'essere ``external_id``.
+    for pid, alias in aliases.values_list("player_id", "alias"):
+        if not is_synthetic_sofascore_id(alias):
+            out[pid] = str(alias)
+    for pid, ext in players.values_list("id", "external_id"):
+        if not is_synthetic_sofascore_id(ext):
+            out[pid] = str(ext)
+    return out
+
+
+def real_sofascore_id(player) -> str | None:
+    """L'id SofaScore vero di UN giocatore, o None se non ne abbiamo uno."""
+    pid = getattr(player, "id", player)
+    return real_sofascore_ids([pid]).get(pid)
 
 
 def _kickoff(event: dict[str, Any]) -> datetime | None:

@@ -96,3 +96,40 @@ def spell_out_particles(short_name: str | None, full_name: str | None) -> str:
     # Invariato se non c'e' niente da aprire: il rientro delle parole toglierebbe
     # anche spazi anomali del fornitore, che non e' quello che ci hanno chiesto.
     return " ".join(out) if changed else (short_name or "")
+
+
+# --- id di fornitore che nessun fornitore ha mai emesso ----------------------
+#
+# Circa duecento dei giocatori tesserati per una stagione arrivano da
+# Transfermarkt e un'identita' SofaScore non ce l'hanno affatto: giovanili, e
+# acquisti non ancora scesi in campo quando le rose sono state raccolte. Il
+# simulatore di stagione deve poterli schierare, quindi conia per loro un id in
+# una decade che nessun id vero occupa e lo registra come ``PlayerAlias``.
+#
+# CONIARE E RICONOSCERE QUELL'ID SONO LO STESSO FATTO, e stanno qui insieme per
+# questo. Per un anno non lo sono stati — il formato viveva solo dentro
+# ``season_simulator`` — e ogni lettore di ``PlayerAlias`` ha preso un id simulato
+# per uno vero: in silenzio, perche' ne ha esattamente la forma. Un id simulato
+# non fallisce, si aggancia a nulla. Chiunque porti un id FUORI dalla nostra banca
+# dati — un incrocio con un altro fornitore, un artefatto spedito — deve chiedere
+# prima ``is_synthetic_sofascore_id``.
+#
+# La forma e' 9 cifre che aprono con un 9 (``9`` + player_id su 8). Gli id veri di
+# SofaScore stanno oggi fra le 5 e le 7 cifre (Maignan 191210, Fini 1164381): la
+# decade e' libera con un ordine di grandezza di margine, ma non per sempre, e il
+# giorno che non lo fosse questa e' l'unica funzione da cambiare.
+_SYNTHETIC_SOFASCORE_DIGITS = 9
+
+
+def synthetic_sofascore_id(player_id: int) -> str:
+    """L'id di comodo per un giocatore che SofaScore non ha mai visto."""
+    return f"9{int(player_id):08d}"
+
+
+def is_synthetic_sofascore_id(value: str | int | None) -> bool:
+    """Questo id l'abbiamo coniato noi? Allora non nomina nulla fuori di qui."""
+    if value is None:
+        return False
+    text = str(value).strip()
+    return (len(text) == _SYNTHETIC_SOFASCORE_DIGITS
+            and text.isdigit() and text.startswith("9"))
