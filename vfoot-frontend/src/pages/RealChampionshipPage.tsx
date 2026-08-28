@@ -6,6 +6,7 @@ import { useChampionship } from '../league/ChampionshipContext';
 import ChampionshipPicker from '../components/ChampionshipPicker';
 import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { Badge, Card, SectionTitle } from '../components/ui';
+import ProbableLineups from '../components/match/ProbableLineups';
 import type { RealFixtureItem, RealFixturesResponse } from '../types/realChampionship';
 
 // Calendar + results of a REAL championship (e.g. Serie A): a matchday selector,
@@ -144,6 +145,11 @@ function fmtKickoff(iso: string | null, provisional: boolean): string {
 
 function RealFixtureRow({ f }: { f: RealFixtureItem }) {
   const played = f.status === 'finished' || f.status === 'live';
+  // Le probabili si aprono a richiesta, e solo su una partita che deve ancora
+  // cominciare: una richiesta per riga sarebbe dieci richieste per aprire una
+  // giornata che quasi nessuno espande.
+  const [openProbable, setOpenProbable] = useState(false);
+  const canProbable = f.status === 'scheduled';
   const hs = f.home_goals ?? 0;
   const as = f.away_goals ?? 0;
   const homeWin = played && hs > as;
@@ -181,6 +187,15 @@ function RealFixtureRow({ f }: { f: RealFixtureItem }) {
         body
       )}
       <div className="mt-1 flex items-center justify-center gap-2 text-[10px] uppercase tracking-wide text-ink-faint">
+        {canProbable ? (
+          <button
+            type="button"
+            onClick={() => setOpenProbable((v) => !v)}
+            className="rounded px-1.5 py-0.5 font-semibold uppercase tracking-wide text-ink-soft hover:bg-surface"
+          >
+            {openProbable ? 'Nascondi probabili' : 'Probabili'}
+          </button>
+        ) : null}
         {f.status === 'live' ? (
           <span className="inline-flex items-center gap-1 font-bold text-bad">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-bad" />
@@ -196,6 +211,7 @@ function RealFixtureRow({ f }: { f: RealFixtureItem }) {
           <span>{fmtKickoff(f.kickoff, f.kickoff_provisional)}</span>
         )}
       </div>
+      {canProbable && openProbable ? <ProbableLineups matchId={f.id} /> : null}
     </div>
   );
 }

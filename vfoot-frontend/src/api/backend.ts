@@ -61,6 +61,7 @@ import type { SimFixtureDetail } from '../types/simulation';
 import type { ClassicFixtureDetail, VoteLedger } from '../types/classic';
 import type {
   ChampionshipPlayersResponse,
+  ProbableLineups,
   RealFixturesResponse,
   RealScope,
 } from '../types/realChampionship';
@@ -1341,6 +1342,19 @@ export async function getRealFixtures(
 }
 
 // Vote-relevant detail of a real match (pagella), shaped as a classic fixture.
+export async function getProbableLineups(
+  matchId: number | string,
+): Promise<ProbableLineups | null> {
+  const res = await fetch(`${baseUrl()}/real-matches/${matchId}/probable-lineups`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  // Il 404 qui non e' un errore: e' «non ancora». Finche' il nostro motore non ha
+  // storia e SofaScore non ha scritto, la cosa onesta e' non mostrare niente —
+  // e chi chiama deve poterlo distinguere da una rete caduta.
+  if (res.status === 404) return null;
+  return parseJsonOrThrow(res);
+}
+
 export async function getRealMatchDetail(
   scope: RealScope,
   matchId: number | string,

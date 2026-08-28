@@ -79,3 +79,42 @@ export interface ChampionshipPlayersResponse {
   value_fit: { intercept: number; slope: number; r: number; n: number } | null;
   players: ChampionshipPlayer[];
 }
+
+// --- probabili formazioni ---------------------------------------------------
+// GET /real-matches/<id>/probable-lineups. TRE STRATI, e `sources` dice quale
+// sta parlando: 'vfoot' è la nostra stima dalle presenze (c'è sempre, non sa
+// nulla di notizie), 'sofascore' è la loro previsione (arriva ~80 ore prima e
+// le notizie le sa). Una previsione con una sola fonte non è la stessa cosa di
+// una con due, e la pagina lo deve dire.
+
+export type ProbableStatus = 'starter' | 'bench' | 'doubt' | 'out';
+
+export interface ProbablePlayer {
+  player_id: number;
+  name: string;
+  /** 0..100. Zero significa indisponibile, non "molto improbabile". */
+  probability: number;
+  /** Il valore del giro precedente, per la freccia. */
+  previous: number | null;
+  status: ProbableStatus;
+  /** Perché è fuori, quando lo sappiamo: «squalificato (5a ammonizione)». */
+  reason: string;
+  sources: string[];
+}
+
+export interface ProbableSide {
+  formation: string;
+  players: ProbablePlayer[];
+}
+
+export interface ProbableLineups {
+  match_id: number;
+  kickoff: string | null;
+  refreshed_at: string;
+  sources: string[];
+  official: boolean;
+  home_team: string;
+  away_team: string;
+  home: ProbableSide;
+  away: ProbableSide;
+}

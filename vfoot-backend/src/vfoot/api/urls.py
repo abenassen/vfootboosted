@@ -71,6 +71,7 @@ from vfoot.api.league_views import (
     LeagueReferenceSeasonView,
     RealSeasonListView,
     SeasonChampionshipPlayersView,
+    RealMatchProbableLineupsView,
     SeasonRealFixturesView,
     SeasonRealMatchDetailView,
     SeasonVoteLedgerView,
@@ -240,6 +241,8 @@ urlpatterns = [
     # il calendario, il listone e la pagella di un campionato vero non sono di
     # nessuna lega. Servono a chi si è appena iscritto e non ne ha ancora una.
     path("real-seasons/<int:season_id>/fixtures", SeasonRealFixturesView.as_view(), name="season-real-fixtures"),
+    path("real-matches/<int:match_id>/probable-lineups",
+         RealMatchProbableLineupsView.as_view(), name="real-match-probable-lineups"),
     path("real-seasons/<int:season_id>/matches/<int:match_id>", SeasonRealMatchDetailView.as_view(), name="season-real-match-detail"),
     path("real-seasons/<int:season_id>/vote-ledger/<int:matchday>/<int:player_id>",
          SeasonVoteLedgerView.as_view(), name="season-vote-ledger"),

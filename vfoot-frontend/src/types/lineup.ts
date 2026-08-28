@@ -46,6 +46,16 @@ export interface TeamLineupPlayer {
     kickoff_provisional: boolean;
     status: string;
   } | null;
+  /** Quanto è probabile che parta titolare in QUESTA giornata reale.
+   *  Assente finché non c'è niente da dire: né la nostra stima né SofaScore.
+   *  `sources` dice chi sta parlando, e conta — v. ProbableLineups.tsx. */
+  starting?: {
+    probability: number;       // 0..100; zero = indisponibile, non "improbabile"
+    previous: number | null;
+    status: 'starter' | 'bench' | 'doubt' | 'out';
+    reason: string;            // «squalificato (5a ammonizione)»
+    sources: string[];
+  } | null;
   // Frozen where he stands: his club is already playing, and the league locks
   // player by player. Always false under the matchday-wide deadline.
   locked?: boolean;

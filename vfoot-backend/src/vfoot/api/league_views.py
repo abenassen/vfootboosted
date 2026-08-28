@@ -21,6 +21,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from realdata.services import probable_lineups
 from realdata.models import (
     CompetitionSeason,
     Match,
@@ -5778,6 +5779,14 @@ class LeagueTeamLineupView(APIView):
                     "status": m.status,
                 }
 
+        # La probabilita' di titolarita' per ciascun giocatore della rosa, dalla
+        # stessa giornata reale su cui si sta compilando. Una passata sola per
+        # tutta la giornata, non una per giocatore.
+        starting_by_player: dict[int, dict] = {}
+        if ref_cs is not None and as_of is not None:
+            starting_by_player = probable_lineups.probabilities_for(
+                ref_cs, as_of, player_ids)
+
         # In CLASSIC mode the role that governs the formation is the FROZEN listone
         # role (LeaguePlayerRole), not the spatially-inferred one — classic fantacalcio
         # pins roles at season start. Fall back to the player's global seed, then to
@@ -5883,6 +5892,12 @@ class LeagueTeamLineupView(APIView):
                     "form": p.get("form", 0.0),
                     "stats_season": str(stats_cs) if stats_cs is not None else None,
                     "next_match": next_match_by_player.get(s.player_id),
+                    # Quanto e' probabile che parta titolare: il dato che decide
+                    # una panchina, e che finora l'allenatore doveva andare a
+                    # cercare altrove. Assente (None) finche' non c'e' NIENTE —
+                    # ne' la nostra stima ne' quella di SofaScore — perche' un
+                    # numero inventato qui e' peggio di nessun numero.
+                    "starting": starting_by_player.get(s.player_id),
                     "value": (values_by_player.get(s.player_id) or {}).get("estimated_value"),
                     "value_basis": (values_by_player.get(s.player_id) or {}).get("basis"),
                     # Frozen where he stands: his club is already playing. Always
@@ -6307,6 +6322,19 @@ class LeagueTeamLineupSaveView(APIView):
         # da sfruttare, e la regola non ha il suo motivo. E l'orologio e' il PRIMO
         # GIOCATORE DELLA SQUADRA, non il primo calcio d'inizio della giornata: e'
         # da li' che l'allenatore sa qualcosa di suo.
+        #
+        # E' LO STESSO OROLOGIO DELLA SCADENZA `own` (``team_first_kickoff``, che
+        # ``team_deadline`` non fa che riesportare), e deve restarlo: cosi' R1
+        # comincia esattamente dove la modalita' 2 avrebbe chiuso tutto, e la 3 non
+        # e' mai piu' stretta della 2 — durante un anticipo in cui non gioca nessuno
+        # dei propri venticinque non si sa niente, quindi non si perde niente.
+        # V. ``ModeThreeIsNeverStricterThanModeTwoTests``.
+        #
+        # E RESTA SUI VENTICINQUE, non sui soli portieri e difensori — che pure
+        # basterebbero a chiudere la falla del modificatore. Il numero di difensori
+        # non e' una scommessa isolata sul modificatore, e' una scelta di MODULO: un
+        # attaccante che ha gia' giocato dice eccome se convenga il 3-4-3 o il 4-4-2
+        # (deciso da Andrea il 28/08/2026, dopo averlo proposto piu' stretto).
         round_started = False
         if per_player and league.reference_season_id is not None:
             own_first, _ = matchday_state.team_first_kickoff(league, team, md_int)
@@ -6449,6 +6477,29 @@ def _matchday_param(request):
     except ValueError:
         return None, Response({"detail": "matchday must be an integer"},
                               status=status.HTTP_400_BAD_REQUEST)
+
+
+class RealMatchProbableLineupsView(APIView):
+    """Le formazioni previste di UNA partita reale, per la pagina del campionato.
+
+    404 quando non c'e' ancora niente da mostrare, che e' una risposta e non un
+    errore: fino a che il nostro motore non ha storia e SofaScore non ha scritto,
+    la cosa onesta e' dire "non ancora".
+    """
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, match_id: int):
+        match = get_object_or_404(
+            Match.objects.select_related("competition_season",
+                                         "home_team__team", "away_team__team"),
+            id=match_id)
+        payload = probable_lineups.match_payload(match)
+        if payload is None:
+            return Response({"detail": "Nessuna probabile formazione disponibile."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response(payload)
 
 
 class LeagueRealFixturesView(APIView):

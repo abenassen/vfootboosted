@@ -998,6 +998,15 @@ export async function getRealMatchDetail(
   throw new Error('Dettaglio partita disponibile solo con il backend reale.');
 }
 
+// Torna null, non un errore: null e' «non ci sono probabili», che nel mock e'
+// esattamente la verita' e che la pagina sa gia' disegnare.
+export async function getProbableLineups(
+  _matchId: number | string,
+): Promise<null> {
+  await sleep(40);
+  return null;
+}
+
 export async function getVoteLedger(
   _scope: RealScope,
   _matchday: number,

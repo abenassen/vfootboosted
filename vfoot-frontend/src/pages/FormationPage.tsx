@@ -230,6 +230,97 @@ function fmtKickoff(nm: { kickoff: string | null; kickoff_provisional: boolean }
 
 // "Inter - Monza": the real fixture in home-away order, so the player's own club is
 // visible too, not just the opponent.
+// LA TITOLARITÀ, in tre caratteri. Sta accanto al nome perché è il dato che
+// decide una panchina, e finora l'allenatore doveva andarlo a cercare altrove.
+//
+// La banda porta il significato, non il numero: le fonti sbagliano un titolare
+// su sette, quindi un «74%» in grande prometterebbe una precisione che non c'è.
+// Lo zero è un caso a parte e non è un numero basso — è un fatto, e si scrive
+// OUT.
+/** IL NUMERO SI VEDE SEMPRE, IL COLORE AVVISA.
+ *
+ *  Due regole separate, e tenerle separate è il punto. Il numero compare per
+ *  chiunque ne abbia uno, qualunque esso sia: nasconderlo o spegnerlo sotto una
+ *  soglia vorrebbe dire decidere al posto di chi legge quale valore merita di
+ *  essere letto. Il colore invece dice una cosa sola — quanto questo numero è un
+ *  problema TUO — e la dice sempre nello stesso verso.
+ *
+ *  La prima versione sbagliava proprio questo: codificava l'INCERTEZZA (giallo
+ *  acceso sul 40-59, grigio spento sotto) e si smentiva da sola, perché un 40%
+ *  gridava più di un 26% in una pagina dove 26 è peggio di 40 senza discussione.
+ *
+ *  E il colore sta sul TESTO e sul BORDO, mai nel fondo. Il fondo è sempre lo
+ *  stesso, pieno e neutro, perché questo distintivo vive anche sopra un campo
+ *  verde: là un fondo `good/20` con testo verde sparisce, e sparirebbe proprio
+ *  nel caso che va letto a colpo d'occhio. */
+type StartingTone = 'bad' | 'warn' | 'good' | 'muted';
+
+function startingTone(
+  s: NonNullable<TeamLineupPlayer['starting']>,
+  inXI: boolean,
+): StartingTone {
+  if (s.status === 'out') return 'bad';
+  // Il rosso e il giallo non stanno in fondo a una scala: dicono «c'è qualcosa da
+  // fare», e c'è qualcosa da fare solo se quel giocatore lo stai schierando tu.
+  if (inXI && s.probability < 40) return 'bad';
+  if (inXI && s.probability < 60) return 'warn';
+  if (s.probability >= 60) return 'good';
+  return 'muted';
+}
+
+const TONE_INK: Record<StartingTone, string> = {
+  bad: 'text-bad ring-bad/70',
+  warn: 'text-warn ring-warn/70',
+  good: 'text-good ring-good/50',
+  muted: 'text-ink-soft ring-line',
+};
+
+function startingTitle(s: NonNullable<TeamLineupPlayer['starting']>): string {
+  if (s.status === 'out') return s.reason || 'Indisponibile';
+  return (
+    `Probabilità di partire titolare: ${s.probability}%` +
+    (s.sources.includes('sofascore') ? ' (nostra stima + SofaScore)' : ' (solo nostra stima)')
+  );
+}
+
+/** IL SILENZIO VA DETTO. Un giocatore senza previsione non aveva nessun segno, e
+ *  l'assenza di un segno non si distingue da un guasto: è la prima cosa che
+ *  chiunque guardi la pagina chiede, «perché per lui non appare niente?».
+ *
+ *  Succede più spesso di quanto sembri e per una ragione legittima: il motore si
+ *  astiene quando nessuna delle due squadre ha ancora giocato PRIMA di quel
+ *  calcio d'inizio — a inizio stagione, o quando un anticipo precede la prima
+ *  partita delle squadre coinvolte. Un trattino spento lo dice; il vuoto no. */
+const NO_FORECAST_TITLE =
+  'Titolarità non disponibile: nessuna delle due squadre ha ancora giocato prima di questa partita, e nessuna fonte ha pubblicato una probabile formazione.';
+
+function StartingChip({
+  s,
+  inXI = false,
+}: {
+  s: TeamLineupPlayer['starting'];
+  inXI?: boolean;
+}) {
+  if (!s) {
+    return (
+      <span
+        className="shrink-0 rounded bg-surface px-1 py-0.5 font-mono text-[9px] font-bold tabular-nums text-ink-faint ring-1 ring-line"
+        title={NO_FORECAST_TITLE}
+      >
+        n.d.
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`shrink-0 rounded bg-surface px-1 py-0.5 font-mono text-[9px] font-bold tabular-nums ring-1 ${TONE_INK[startingTone(s, inXI)]}`}
+      title={startingTitle(s)}
+    >
+      {s.status === 'out' ? 'OUT' : `${s.probability}%`}
+    </span>
+  );
+}
+
 function fixtureLabel(nm: { team: string; opponent: string; home: boolean }): string {
   return nm.home ? `${nm.team} - ${nm.opponent}` : `${nm.opponent} - ${nm.team}`;
 }
@@ -1755,7 +1846,10 @@ function RolePicker({
                   )}
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold">{p.name}</span>
+                    <span className="flex min-w-0 items-baseline gap-1.5">
+                      <span className="truncate text-sm font-semibold">{p.name}</span>
+                      <StartingChip s={p.starting} />
+                    </span>
                     {blocked ? (
                       <span className="block text-[11px] leading-snug text-bad">{blocked}</span>
                     ) : p.next_match ? (
@@ -1925,6 +2019,7 @@ function RosterRow({
             <span className={`truncate text-sm font-semibold ${selected ? 'text-ink underline' : 'text-ink'}`}>
               {p.name}
             </span>
+            <StartingChip s={p.starting} inXI={isStarter} />
             {locked ? (
               <span
                 className="shrink-0 rounded bg-surface-2 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-ink-soft"
@@ -2440,6 +2535,31 @@ function PitchCanvas({
                 ⏱
               </span>
             ) : null}
+            {/* LA TITOLARITÀ, sulla maglia. In basso a sinistra perché l'angolo
+                opposto è già del pallino live e del lucchetto, e perché è lì che
+                non copre né il numero né il nome sotto. Fondo scuro e non
+                colorato: su un campo verde un distintivo verde non si vede. */}
+            <span
+              className={clsx(
+                // Fondo nero pieno e SEMPRE lo stesso: sotto c'è un campo verde,
+                // e un fondo colorato traslucido si mangerebbe proprio il verde e
+                // il giallo. Colore su testo e bordo — v. TONE_INK.
+                //
+                // 9px e non 7: a sette era un numero che si sapeva esserci ma non
+                // si leggeva, che è il modo peggiore di mostrare un dato — occupa
+                // spazio, attira l'occhio e non risponde.
+                // In alto a SINISTRA: sotto c'è l'etichetta col nome, e a nove
+                // pixel il distintivo se la mangiava; a destra ci sono già il
+                // pallino live e il lucchetto. Resta questo, ed è libero.
+                'absolute -left-2 -top-1.5 rounded bg-black/85 px-1 text-[9px] font-bold leading-[1.5] tabular-nums ring-1',
+                p.starting
+                  ? TONE_INK[startingTone(p.starting, true)]
+                  : 'text-ink-faint ring-white/25',
+              )}
+              title={p.starting ? startingTitle(p.starting) : NO_FORECAST_TITLE}
+            >
+              {!p.starting ? 'n.d.' : p.starting.status === 'out' ? 'OUT' : `${p.starting.probability}%`}
+            </span>
           </span>
           <span className="mt-0.5 flex max-w-full items-center gap-0.5 rounded bg-black/55 px-1 text-[10px] font-bold leading-tight text-white">
             {showRole ? <span className="shrink-0 opacity-80">{ROLE_LABEL_SHORT[p.role]}</span> : null}
