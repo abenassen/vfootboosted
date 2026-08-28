@@ -377,3 +377,203 @@ class MarketApiTests(MarketBase):
             {"credit_recovery_mode": "fixed"}, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("gia' una sessione", r.json()["detail"])
+
+
+class DiscardRebidTests(MarketBase):
+    """Annullare (o rifiutare) un'offerta che era un RILANCIO.
+
+    Sotto c'e' un'offerta superata che il codice non rimette in piedi da sola. La
+    decisione non e' del server: l'admin la vede raccontata e sceglie. Qui si
+    verifica che il racconto sia vero e che la scelta abbia l'effetto promesso.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Mario stretto ai vfooties: 1000 - 40 - 4 - 946 = 10 residui.
+        self.d2 = self._player("MarioDef", "DIF", fieldable=False)
+        self.d2b = self._player("MarioDefB", "DIF", fieldable=False)
+        self.filler = self._player("MarioFiller", "ATT", fieldable=False)
+        self._own(self.t2, self.d2, 40)
+        self._own(self.t2, self.d2b, 4)
+        self._own(self.t2, self.filler, 946)
+        # Luigi comodo.
+        self.d3 = self._player("LuigiDef", "DIF", fieldable=False)
+        self._own(self.t3, self.d3, 5)
+
+        self.fa = self._player("FreeDef", "DIF")
+        self.fa2 = self._player("FreeDefB", "DIF")
+        self.s = self._session(MarketSession.RECOVERY_FRAC50)
+
+    def _chain(self, first_ago=timedelta(hours=2), rebid_ago=timedelta(hours=1)):
+        """Mario offre 30, Luigi rilancia a 31. Torna (offerta di Mario, di Luigi)."""
+        now = timezone.now()
+        a = me.place_offer(self.s, self.t2, self.fa.id, self.d2.id, 30,
+                           actor=self.u2, now=now - first_ago)
+        b = me.place_offer(self.s, self.t3, self.fa.id, self.d3.id, 31,
+                           actor=self.u3, now=now - rebid_ago)
+        a.refresh_from_db()
+        return a, b
+
+    def _preview(self, offer_id, action="cancel"):
+        r = self._as(self.admin).get(
+            f"/api/v1/leagues/{self.league.id}/market/offers/{offer_id}/{action}")
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()
+
+    def _discard(self, offer_id, action="cancel", **body):
+        return self._as(self.admin).post(
+            f"/api/v1/leagues/{self.league.id}/market/offers/{offer_id}/{action}",
+            body, format="json")
+
+    # --- chi c'e' sotto -----------------------------------------------------
+
+    def test_previous_is_the_one_just_below(self):
+        """Catena A -> B -> C: togliendo C si guarda B, mai A."""
+        now = timezone.now()
+        a = me.place_offer(self.s, self.t2, self.fa.id, self.d2.id, 10,
+                           actor=self.u2, now=now - timedelta(hours=3))
+        b = me.place_offer(self.s, self.t3, self.fa.id, self.d3.id, 20,
+                           actor=self.u3, now=now - timedelta(hours=2))
+        c = me.place_offer(self.s, self.t_admin, self.fa.id,
+                           self._own(self.t_admin,
+                                     self._player("AdminDef", "DIF", fieldable=False),
+                                     5).player_id,
+                           30, actor=self.admin, now=now - timedelta(hours=1))
+        self.assertEqual(me.previous_offer_for(c).id, b.id)
+        self.assertEqual(me.previous_offer_for(b).id, a.id)
+
+    def test_lone_offer_is_not_a_rebid(self):
+        offer = me.place_offer(self.s, self.t2, self.fa.id, self.d2.id, 30, actor=self.u2)
+        pv = self._preview(offer.id)
+        self.assertFalse(pv["is_rebid"])
+        self.assertIsNone(pv["previous"])
+        # Nessuna decisione da prendere: passa liscia com'e' sempre stato.
+        r = self._discard(offer.id)
+        self.assertEqual(r.status_code, 200, r.content)
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, MarketOffer.STATUS_CANCELLED)
+
+    # --- il racconto all'admin ---------------------------------------------
+
+    def test_preview_describes_a_live_previous_offer(self):
+        a, b = self._chain()
+        pv = self._preview(b.id)
+        self.assertTrue(pv["is_rebid"])
+        prev = pv["previous"]
+        self.assertEqual(prev["offer_id"], a.id)
+        self.assertEqual(prev["team_name"], "MarioFC")
+        self.assertEqual(prev["amount"], 30)
+        self.assertEqual(prev["release_name"], "MarioDef")
+        self.assertTrue(prev["restorable"])
+        self.assertFalse(prev["expired"])
+        self.assertFalse(prev["would_queue"])
+
+    def test_preview_flags_an_expired_previous_offer(self):
+        """Scaduta mentre il rilancio la teneva coperta: ripristinarla vuol dire
+        mandarla dritta in coda di validazione."""
+        a, b = self._chain(first_ago=timedelta(hours=30), rebid_ago=timedelta(hours=7))
+        prev = self._preview(b.id)["previous"]
+        self.assertTrue(prev["expired"])
+        self.assertTrue(prev["would_queue"])
+        self.assertTrue(prev["restorable"])
+
+    def test_preview_flags_credits_spent_elsewhere(self):
+        a, b = self._chain()
+        # Mario impegna altrove quel che gli restava: 10 disponibili + 2 di
+        # recupero = 12 al massimo, e il netto prenotato lo lascia a secco.
+        me.place_offer(self.s, self.t2, self.fa2.id, self.d2b.id, 12, actor=self.u2)
+        prev = self._preview(b.id)["previous"]
+        self.assertFalse(prev["restorable"])
+        self.assertIn("vfooties", prev["blocker"])
+
+    def test_preview_flags_a_released_pledge(self):
+        a, b = self._chain()
+        # Il giocatore che Mario prometteva in svincolo ha gia' lasciato la rosa.
+        FantasyRosterSlot.objects.filter(team=self.t2, player=self.d2).update(
+            released_at=timezone.now())
+        prev = self._preview(b.id)["previous"]
+        self.assertFalse(prev["restorable"])
+        self.assertIn("svincolo", prev["blocker"])
+
+    # --- la decisione -------------------------------------------------------
+
+    def test_discarding_a_rebid_without_a_decision_changes_nothing(self):
+        a, b = self._chain()
+        r = self._discard(b.id)
+        self.assertEqual(r.status_code, 409, r.content)
+        self.assertTrue(r.json()["requires_decision"])
+        self.assertEqual(r.json()["previous"]["offer_id"], a.id)
+        b.refresh_from_db()
+        self.assertEqual(b.status, MarketOffer.STATUS_LEADING)
+
+    def test_cancel_without_restore_leaves_the_player_free(self):
+        """La scelta di non fare niente resta possibile: e' lo stato attuale."""
+        a, b = self._chain()
+        r = self._discard(b.id, restore_previous=False)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIsNone(r.json()["restored"])
+        a.refresh_from_db()
+        b.refresh_from_db()
+        self.assertEqual(b.status, MarketOffer.STATUS_CANCELLED)
+        self.assertEqual(a.status, MarketOffer.STATUS_OUTBID)
+        self.assertIsNone(me.leading_offer_for(self.s, self.fa.id))
+
+    def test_restore_puts_the_previous_offer_back_on_its_own_clock(self):
+        a, b = self._chain()
+        deadline = a.deadline_at
+        r = self._discard(b.id, restore_previous=True)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["restored"]["offer_id"], a.id)
+        a.refresh_from_db()
+        self.assertEqual(a.status, MarketOffer.STATUS_LEADING)
+        self.assertIsNone(a.resolved_at)
+        # L'orologio NON riparte: il tempo consumato l'ha consumato davvero.
+        self.assertEqual(a.deadline_at, deadline)
+        self.assertEqual(me.leading_offer_for(self.s, self.fa.id).id, a.id)
+
+    def test_restoring_an_expired_offer_queues_it_for_validation(self):
+        a, b = self._chain(first_ago=timedelta(hours=30), rebid_ago=timedelta(hours=7))
+        self._discard(b.id, restore_previous=True)
+        a.refresh_from_db()
+        self.assertEqual(a.status, MarketOffer.STATUS_ACCEPTED)
+        queue = self._as(self.admin).get(
+            f"/api/v1/leagues/{self.league.id}/market/active").json()["admin_queue"]
+        self.assertEqual([q["offer_id"] for q in queue], [a.id])
+
+    def test_impossible_restore_leaves_everything_untouched(self):
+        a, b = self._chain()
+        me.place_offer(self.s, self.t2, self.fa2.id, self.d2b.id, 12, actor=self.u2)
+        r = self._discard(b.id, restore_previous=True)
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("non e' piu' ripristinabile", r.json()["detail"])
+        # O tutt'e due le cose, o nessuna: il rilancio e' ancora in testa.
+        a.refresh_from_db()
+        b.refresh_from_db()
+        self.assertEqual(b.status, MarketOffer.STATUS_LEADING)
+        self.assertEqual(a.status, MarketOffer.STATUS_OUTBID)
+
+    def test_reject_from_the_queue_takes_the_same_road(self):
+        """Rifiutare un'offerta vinta lascia sotto lo stesso vuoto di un
+        annullamento, e si decide allo stesso modo."""
+        a, b = self._chain(first_ago=timedelta(hours=30), rebid_ago=timedelta(hours=26))
+        me.promote_expired(self.s)
+        b.refresh_from_db()
+        self.assertEqual(b.status, MarketOffer.STATUS_ACCEPTED)
+
+        self.assertEqual(self._discard(b.id, action="reject").status_code, 409)
+        r = self._discard(b.id, action="reject", restore_previous=True)
+        self.assertEqual(r.status_code, 200, r.content)
+        b.refresh_from_db()
+        a.refresh_from_db()
+        self.assertEqual(b.status, MarketOffer.STATUS_REJECTED)
+        self.assertEqual(a.status, MarketOffer.STATUS_ACCEPTED)
+
+    def test_restore_into_a_closed_session_queues_instead_of_leading(self):
+        """A sessione chiusa non esiste piu' un "in testa": la chiusura fa da
+        scadenza per tutte, e l'offerta ripristinata va decisa dall'admin."""
+        a, b = self._chain()
+        me.close_session(self.s, actor=self.admin)
+        b.refresh_from_db()
+        self._discard(b.id, restore_previous=True)
+        a.refresh_from_db()
+        self.assertEqual(a.status, MarketOffer.STATUS_ACCEPTED)

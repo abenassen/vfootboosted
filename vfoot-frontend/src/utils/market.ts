@@ -30,12 +30,7 @@ export function recoveryText(mode: MarketRecoveryMode, fixed: number): string {
 // cosi' la stringa non cambia larghezza a ogni tick.
 const pad = (n: number) => String(n).padStart(2, '0');
 
-export function countdown(
-  deadlineIso: string | null, nowMs: number, elapsed = 'in validazione',
-): string {
-  if (!deadlineIso) return '—';
-  const ms = new Date(deadlineIso).getTime() - nowMs;
-  if (ms <= 0) return elapsed;
+function spread(ms: number): string {
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   const s = Math.floor((ms % 60_000) / 1000);
@@ -46,6 +41,25 @@ export function countdown(
   if (h > 0) return `${h}h ${pad(m)}m ${pad(s)}s`;
   if (m > 0) return `${m}m ${pad(s)}s`;
   return `${s}s`;
+}
+
+export function countdown(
+  deadlineIso: string | null, nowMs: number, elapsed = 'in validazione',
+): string {
+  if (!deadlineIso) return '—';
+  const ms = new Date(deadlineIso).getTime() - nowMs;
+  if (ms <= 0) return elapsed;
+  return spread(ms);
+}
+
+/** Da quanto e' passato un momento gia' passato — «6h 12m 03s».
+ *
+ *  Serve a raccontare un'offerta scaduta mentre un rilancio la teneva coperta:
+ *  la sua scadenza da sola («ieri alle 14:20») non dice quanto sia vecchia, e
+ *  quanto sia vecchia e' il punto. */
+export function elapsedSince(iso: string | null, nowMs: number): string {
+  if (!iso) return '—';
+  return spread(Math.max(0, nowMs - new Date(iso).getTime()));
 }
 
 /** Quando si decide davvero il destino di un'offerta in testa: il suo timer di

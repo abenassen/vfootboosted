@@ -118,3 +118,37 @@ export interface MarketSessionHistory extends MarketSessionInfo {
   closed_at: string | null;
   offers: MarketOfferRow[];
 }
+
+/** Cosa comporta togliere di mezzo un'offerta (annullarla o rifiutarla).
+ *
+ *  Il server lo racconta PRIMA che l'admin decida, perche' un'offerta che era un
+ *  rilancio ne copre un'altra, e quella non torna in testa da sola: senza dirlo,
+ *  l'admin libera il giocatore credendo di aver annullato una cosa sola. */
+export interface MarketDiscardPreview {
+  offer_id: number;
+  action: 'cancel' | 'reject';
+  status: MarketOfferStatus;
+  target_name: string | null;
+  team_name: string | null;
+  amount: number;
+  is_rebid: boolean;
+  previous: MarketPreviousOffer | null;
+}
+
+export interface MarketPreviousOffer {
+  offer_id: number;
+  team_id: number;
+  team_name: string | null;
+  amount: number;
+  release_player_id: number;
+  release_name: string | null;
+  created_at: string;
+  deadline_at: string | null;
+  /** Se no, `blocker` dice cosa e' cambiato da quando fu fatta. */
+  restorable: boolean;
+  blocker: string;
+  /** Il suo tempo era gia' finito mentre il rilancio la teneva coperta. */
+  expired: boolean;
+  /** Ripristinata, va dritta in validazione invece di tornare in testa. */
+  would_queue: boolean;
+}

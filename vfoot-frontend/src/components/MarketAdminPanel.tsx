@@ -5,6 +5,7 @@ import {
   controlMarketSession,
   createMarketSession,
   getMarketActive,
+  getMarketDiscardPreview,
   serverNow,
 } from '../api/backend';
 import { Badge, Button, Card, SectionTitle } from './ui';
@@ -14,11 +15,18 @@ import {
   SESSION_LABEL,
   SESSION_TONE,
   countdown,
+  elapsedSince,
   recoveryText,
   sessionPhase,
   stamp,
 } from '../utils/market';
-import type { MarketActive, MarketFreeAgent, MarketOfferRow, MarketRecoveryMode } from '../types/market';
+import type {
+  MarketActive, MarketDiscardPreview, MarketFreeAgent, MarketOfferRow, MarketRecoveryMode,
+} from '../types/market';
+
+/** Che fare dell'offerta che quella tolta di mezzo aveva superato. `undefined`
+ *  quando non c'era nessun rilancio e non c'e' niente da decidere. */
+type Discard = { offerId: number; action: 'cancel' | 'reject'; restore?: boolean };
 
 /** Admin-side management of the repair market: open/suspend/close a session and
  *  validate the offers that reach it. Self-contained (own data + polling) so it
@@ -61,6 +69,13 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
       setBusy(false);
     }
   }, [load]);
+
+  // Togliere di mezzo un'offerta (annullarla o rifiutarla) passa sempre di qui,
+  // con la decisione gia' presa sull'offerta che c'era sotto: senza, il server
+  // risponde 409 e non tocca niente.
+  const discard = useCallback(({ offerId, action, restore }: Discard) => act(
+    () => adminMarketOffer(leagueId, offerId, action, restore),
+  ), [act, leagueId]);
 
   const session = data?.session ?? null;
   // "aperta" con l'ora di apertura ancora da venire vuol dire programmata: e'
@@ -150,8 +165,9 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
           c'e' nessuna coda da questa sessione, e se ne arriva una da quella
           precedente e' `queue` a tenerla in piedi. */}
       <QueueCard queue={queue} sessionLive={!!session && phase !== 'scheduled'} busy={busy}
+        leagueId={leagueId} nowMs={nowMs}
         onAccept={(id) => act(() => adminMarketOffer(leagueId, id, 'accept'))}
-        onReject={(id) => act(() => adminMarketOffer(leagueId, id, 'reject'))} />
+        onDiscard={discard} />
 
       {/* Prima dell'apertura non ci sono offerte da guardare: la card direbbe
           soltanto "nessuna", ogni volta. */}
@@ -165,7 +181,7 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
               <div className="mt-2 divide-y divide-line">
                 {leadingOffers.map((f) => (
                   <LeadingRow key={f.player_id} f={f} nowMs={nowMs} busy={busy} closesAt={data?.session?.closes_at}
-                    onCancel={() => { if (window.confirm('Annullare l’offerta in testa?')) void act(() => adminMarketOffer(leagueId, f.leading!.offer_id, 'cancel')); }} />
+                    leagueId={leagueId} onDiscard={discard} />
                 ))}
               </div>
             )}
@@ -187,12 +203,14 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
  *  spariva anche la coda — le offerte restavano accettate e non concluse, senza
  *  nessuna schermata da cui deciderle. Le rose non cambiano finche' non si
  *  accetta, quindi non e' un dettaglio estetico: era lavoro bloccato. */
-function QueueCard({ queue, sessionLive, busy, onAccept, onReject }: {
+function QueueCard({ queue, sessionLive, busy, leagueId, nowMs, onAccept, onDiscard }: {
   queue: MarketOfferRow[];
   sessionLive: boolean;
   busy: boolean;
+  leagueId: number;
+  nowMs: number;
   onAccept: (offerId: number) => void;
-  onReject: (offerId: number) => void;
+  onDiscard: (d: Discard) => void;
 }) {
   // Senza sessione e senza coda non c'e' niente da dire: la card sparisce e
   // resta solo l'invito ad aprire una sessione.
@@ -213,8 +231,8 @@ function QueueCard({ queue, sessionLive, busy, onAccept, onReject }: {
           )}
           <div className="mt-2 divide-y divide-line">
             {queue.map((o) => (
-              <QueueRow key={o.offer_id} o={o} busy={busy}
-                onAccept={() => onAccept(o.offer_id)} onReject={() => onReject(o.offer_id)} />
+              <QueueRow key={o.offer_id} o={o} busy={busy} leagueId={leagueId} nowMs={nowMs}
+                onAccept={() => onAccept(o.offer_id)} onDiscard={onDiscard} />
             ))}
           </div>
         </>
@@ -223,35 +241,173 @@ function QueueCard({ queue, sessionLive, busy, onAccept, onReject }: {
   );
 }
 
-function QueueRow({ o, busy, onAccept, onReject }: { o: MarketOfferRow; busy: boolean; onAccept: () => void; onReject: () => void }) {
+function QueueRow({ o, busy, leagueId, nowMs, onAccept, onDiscard }: {
+  o: MarketOfferRow; busy: boolean; leagueId: number; nowMs: number;
+  onAccept: () => void; onDiscard: (d: Discard) => void;
+}) {
+  const [asking, setAsking] = useState(false);
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-      <div>
-        <Badge tone="blue">{o.role}</Badge>{' '}
-        <b>{o.target_name}</b> <span className="text-ink-faint">← {o.team_name} svincola {o.release_name}</span>
-        {' · '}<b>{price(o.amount)}</b> <span className="text-ink-faint">(recupero {o.recovery})</span>
+    <div className="py-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <Badge tone="blue">{o.role}</Badge>{' '}
+          <b>{o.target_name}</b> <span className="text-ink-faint">← {o.team_name} svincola {o.release_name}</span>
+          {' · '}<b>{price(o.amount)}</b> <span className="text-ink-faint">(recupero {o.recovery})</span>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" disabled={busy || asking} onClick={onAccept}>Accetta (applica rose)</Button>
+          <Button size="sm" variant="danger" disabled={busy || asking} onClick={() => setAsking(true)}>Rifiuta</Button>
+        </div>
       </div>
-      <div className="flex gap-2">
-        <Button size="sm" disabled={busy} onClick={onAccept}>Accetta (applica rose)</Button>
-        <Button size="sm" variant="danger" disabled={busy} onClick={onReject}>Rifiuta</Button>
-      </div>
+      {asking && (
+        <DiscardBox leagueId={leagueId} offerId={o.offer_id} action="reject" nowMs={nowMs} busy={busy}
+          onClose={() => setAsking(false)}
+          onConfirm={(restore) => { setAsking(false); onDiscard({ offerId: o.offer_id, action: 'reject', restore }); }} />
+      )}
     </div>
   );
 }
 
-function LeadingRow({ f, nowMs, closesAt, busy, onCancel }: {
-  f: MarketFreeAgent; nowMs: number; closesAt: string | null | undefined; busy: boolean; onCancel: () => void;
+function LeadingRow({ f, nowMs, closesAt, busy, leagueId, onDiscard }: {
+  f: MarketFreeAgent; nowMs: number; closesAt: string | null | undefined; busy: boolean;
+  leagueId: number; onDiscard: (d: Discard) => void;
 }) {
   const l = f.leading!;
+  const [asking, setAsking] = useState(false);
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-      <div>
-        <Badge tone="blue">{f.role}</Badge>{' '}
-        <b>{f.name}</b> <span className="text-ink-faint">· {l.team_name} a <b>{price(l.amount)}</b>
-          {l.release_name && <> svincolando <b>{l.release_name}</b></>} ·{' '}
-          <OfferDeadline deadlineAt={l.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} /></span>
+    <div className="py-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <Badge tone="blue">{f.role}</Badge>{' '}
+          <b>{f.name}</b> <span className="text-ink-faint">· {l.team_name} a <b>{price(l.amount)}</b>
+            {l.release_name && <> svincolando <b>{l.release_name}</b></>} ·{' '}
+            <OfferDeadline deadlineAt={l.deadline_at} sessionClosesAt={closesAt} nowMs={nowMs} /></span>
+        </div>
+        <Button size="sm" variant="ghost" disabled={busy || asking} onClick={() => setAsking(true)}>Annulla</Button>
       </div>
-      <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Annulla</Button>
+      {asking && (
+        <DiscardBox leagueId={leagueId} offerId={l.offer_id} action="cancel" nowMs={nowMs} busy={busy}
+          onClose={() => setAsking(false)}
+          onConfirm={(restore) => { setAsking(false); onDiscard({ offerId: l.offer_id, action: 'cancel', restore }); }} />
+      )}
+    </div>
+  );
+}
+
+/** Il riquadro che si apre quando l'admin sta per togliere di mezzo un'offerta.
+ *
+ *  Era una riga di `window.confirm` («Annullare l'offerta in testa?»), e per
+ *  un'offerta sola bastava. Ma un'offerta puo' essere un RILANCIO, e allora
+ *  sotto c'e' qualcuno che era in testa prima: quella NON torna in piedi da sola
+ *  — resta superata per sempre, il giocatore torna offribile dal minimo (il
+ *  rilancio minimo si legge dall'offerta in testa, e non ce n'e' piu' una) e
+ *  nessuno avvisa chi era stato scavalcato. Il server sa dire cosa c'e' sotto e
+ *  se regge ancora ai conti di oggi; qui lo si legge PRIMA di decidere.
+ *
+ *  Non sceglie la pagina e non sceglie il server: la scelta e' dell'admin, ed e'
+ *  fra due cose entrambe legittime — ripristinare, o lasciare il giocatore
+ *  libero, che e' come si e' sempre comportato il mercato. */
+function DiscardBox({ leagueId, offerId, action, nowMs, busy, onClose, onConfirm }: {
+  leagueId: number;
+  offerId: number;
+  action: 'cancel' | 'reject';
+  nowMs: number;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (restore?: boolean) => void;
+}) {
+  const [pv, setPv] = useState<MarketDiscardPreview | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    getMarketDiscardPreview(leagueId, offerId, action)
+      .then((p) => { if (alive) setPv(p); })
+      .catch((e) => {
+        if (alive) setErr(e instanceof ApiError ? e.message : 'Non riesco a leggere la situazione.');
+      });
+    return () => { alive = false; };
+  }, [leagueId, offerId, action]);
+
+  const verb = action === 'cancel' ? 'Annulla' : 'Rifiuta';
+  const verbing = action === 'cancel' ? 'Annullando' : 'Rifiutando';
+
+  if (err) {
+    return (
+      <div className="mt-2 rounded-xl border border-bad/40 bg-bad-bg p-3 text-sm text-bad">
+        {err} <Button size="sm" variant="ghost" onClick={onClose}>Chiudi</Button>
+      </div>
+    );
+  }
+  if (!pv) {
+    return (
+      <div className="mt-2 rounded-xl border border-line bg-surface-2 p-3 text-sm text-ink-faint">
+        Controllo cosa c’è sotto…
+      </div>
+    );
+  }
+
+  const prev = pv.previous;
+  return (
+    <div className="mt-2 rounded-xl border border-warn/40 bg-warn-bg p-3 text-sm">
+      {!prev ? (
+        <div>
+          Nessun’altra offerta sotto: <b>{pv.target_name}</b> torna offribile da tutti,
+          dal minimo.
+        </div>
+      ) : (
+        <>
+          <div>
+            Questa offerta era un <b>rilancio</b>. Sotto c’è quella di <b>{prev.team_name}</b> a{' '}
+            <b>{price(prev.amount)}</b>
+            {prev.release_name && <> svincolando <b>{prev.release_name}</b></>}, e{' '}
+            <b>non torna in testa da sola</b>.
+          </div>
+          <div className="mt-2 text-ink-soft">
+            {!prev.restorable ? (
+              <>Non è più ripristinabile: {prev.blocker}.</>
+            ) : prev.would_queue ? (
+              <>
+                Ripristinandola non torna in testa: {prev.expired ? (
+                  <>il suo tempo era già finito da{' '}
+                    <span className="tabular-nums">{elapsedSince(prev.deadline_at, nowMs)}</span></>
+                ) : (
+                  <>la sessione è chiusa</>
+                )}, quindi va <b>subito in validazione</b>, qui sopra.
+              </>
+            ) : (
+              <>
+                Ripristinandola torna in testa <b>col suo orologio di allora</b>, non con
+                24 ore nuove: le restano{' '}
+                <span className="tabular-nums">{countdown(prev.deadline_at, nowMs)}</span>.
+              </>
+            )}
+          </div>
+          <div className="mt-2 text-ink-soft">
+            {verbing} e basta, <b>{pv.target_name}</b> torna offribile dal minimo e{' '}
+            {prev.team_name} non riceve alcun avviso.
+          </div>
+        </>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onClose}>Torna indietro</Button>
+        {!prev ? (
+          <Button size="sm" variant="danger" disabled={busy} onClick={() => onConfirm()}>
+            {verb} l’offerta
+          </Button>
+        ) : (
+          <>
+            <Button size="sm" variant="danger" disabled={busy} onClick={() => onConfirm(false)}>
+              {verb} soltanto
+            </Button>
+            {prev.restorable && (
+              <Button size="sm" disabled={busy} onClick={() => onConfirm(true)}>
+                {verb} e ripristina {prev.team_name}
+              </Button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -34,6 +34,8 @@ from vfoot.services.market_engine import (
     OfferApplyError,
     OfferError,
     apply_offer,
+    cancel_offer,
+    check_restore,
     close_session,
     free_agent_ids,
     market_states,
@@ -41,6 +43,7 @@ from vfoot.services.market_engine import (
     recovery_for,
     reject_offer,
     record_event,
+    restore_previous_offer,
     sync_session,
 )
 
@@ -248,10 +251,27 @@ class MarketOfferCreateView(APIView):
 
 
 class MarketOfferAdminView(APIView):
-    """Admin validation of a single offer: accept (apply the swap) / reject / cancel."""
+    """Admin validation of a single offer: accept (apply the swap) / reject / cancel.
+
+    Il GET sulla stessa rotta non decide niente: racconta cosa succederebbe. Serve
+    a "reject" e "cancel", le due azioni che tolgono di mezzo un'offerta — se
+    quella era un RILANCIO, sotto c'e' un'offerta superata, e cosa farne non e'
+    una scelta che il server puo' prendere per conto dell'admin."""
 
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
+
+    DISCARDING = ("reject", "cancel")
+
+    def get(self, request, league_id: int, offer_id: int, action: str):
+        league = get_object_or_404(FantasyLeague, id=league_id)
+        _ensure_admin(league, request.user.id)
+        _live_session(league)
+        offer = get_object_or_404(MarketOffer, id=offer_id, session__league=league)
+        if action not in self.DISCARDING:
+            return Response({"detail": "Azione sconosciuta."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response(_discard_preview(league, offer, action))
 
     @transaction.atomic
     def post(self, request, league_id: int, offer_id: int, action: str):
@@ -265,26 +285,93 @@ class MarketOfferAdminView(APIView):
                 apply_offer(offer, actor=request.user)
             except OfferApplyError as exc:
                 return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        elif action == "reject":
-            try:
-                reject_offer(offer, actor=request.user)
-            except OfferApplyError as exc:
-                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        elif action == "cancel":
-            # Admin discards an undecided (leading/accepted) offer without a swap.
-            if offer.status not in MarketOffer.LIVE_STATUSES:
-                return Response({"detail": "Offerta gia' risolta."},
-                                status=status.HTTP_400_BAD_REQUEST)
-            offer.status = MarketOffer.STATUS_CANCELLED
-            offer.resolved_at = timezone.now()
-            offer.resolved_by = request.user
-            offer.save(update_fields=["status", "resolved_at", "resolved_by"])
-            record_event(offer.session, MarketEvent.TYPE_OFFER_CANCELLED, request.user,
-                         {"offer_id": offer.id}, offer=offer)
-        else:
+            return Response({"offer_id": offer.id, "status": offer.status})
+
+        if action not in self.DISCARDING:
             return Response({"detail": "Azione sconosciuta."},
                             status=status.HTTP_400_BAD_REQUEST)
-        return Response({"offer_id": offer.id, "status": offer.status})
+
+        # Cosa c'e' sotto si guarda PRIMA di togliere l'offerta: dopo, `outbid` e
+        # l'offerta annullata si confonderebbero fra loro.
+        restore = check_restore(offer)
+        choice = request.data.get("restore_previous", None)
+        if restore.is_rebid and choice is None:
+            # Un client che non sa dell'offerta sotto non deve poterla seppellire
+            # per distrazione: qui si torna indietro senza aver toccato niente.
+            return Response(
+                {"detail": "Questa offerta era un rilancio: decidi cosa fare "
+                           "dell'offerta che aveva superato.",
+                 "requires_decision": True,
+                 **_discard_preview(league, offer, action, restore=restore)},
+                status=status.HTTP_409_CONFLICT)
+
+        try:
+            # Savepoint suo: un `atomic` esterno non torna indietro da solo se
+            # l'eccezione la intercettiamo noi per rispondere 400, e l'offerta
+            # resterebbe annullata con l'altra ancora sepolta. O tutt'e due le
+            # cose, o nessuna.
+            with transaction.atomic():
+                if action == "reject":
+                    reject_offer(offer, actor=request.user)
+                else:
+                    cancel_offer(offer, actor=request.user)
+                restored = (restore_previous_offer(offer, actor=request.user)
+                            if (restore.is_rebid and choice) else None)
+        except OfferApplyError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "offer_id": offer.id, "status": offer.status,
+            "restored": None if restored is None else {
+                "offer_id": restored.id, "status": restored.status,
+                "team_id": restored.team_id, "amount": restored.amount,
+            },
+        })
+
+
+def _discard_preview(league: FantasyLeague, offer: MarketOffer, action: str,
+                     restore=None) -> dict:
+    """Cosa comporta togliere di mezzo questa offerta.
+
+    Senza un'offerta sotto e' una domanda oziosa (il giocatore torna libero e
+    basta); con un'offerta sotto e' la sola cosa che l'admin deve sapere prima di
+    cliccare, perche' quella superata NON torna in testa da sola e il giocatore
+    tornerebbe offribile dal minimo, come se nessuno l'avesse mai voluto."""
+    restore = check_restore(offer) if restore is None else restore
+    names = {p.id: _label(p) for p in Player.objects.filter(
+        id__in={offer.target_player_id, offer.release_player_id}
+        | ({restore.previous.release_player_id} if restore.previous else set()))}
+    team_names = dict(FantasyTeam.objects.filter(league=league)
+                      .values_list("id", "name"))
+    out = {
+        "offer_id": offer.id,
+        "action": action,
+        "status": offer.status,
+        "target_name": names.get(offer.target_player_id),
+        "team_name": team_names.get(offer.team_id),
+        "amount": offer.amount,
+        "is_rebid": restore.is_rebid,
+        "previous": None,
+    }
+    prev = restore.previous
+    if prev is not None:
+        out["previous"] = {
+            "offer_id": prev.id,
+            "team_id": prev.team_id,
+            "team_name": team_names.get(prev.team_id),
+            "amount": prev.amount,
+            "release_player_id": prev.release_player_id,
+            "release_name": names.get(prev.release_player_id),
+            "created_at": prev.created_at.isoformat(),
+            "deadline_at": prev.deadline_at.isoformat() if prev.deadline_at else None,
+            "restorable": restore.ok,
+            "blocker": restore.blocker,
+            "expired": restore.expired,
+            # Ripristinata, va dritta in coda di validazione invece di tornare
+            # in testa: il suo tempo era gia' finito (o la sessione e' chiusa).
+            "would_queue": restore.would_queue,
+        }
+    return out
 
 
 class MarketActiveView(APIView):

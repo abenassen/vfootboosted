@@ -1122,6 +1122,9 @@ class MarketEvent(models.Model):
     TYPE_OFFER_SETTLED = "offer_settled"        # roster swap applied
     TYPE_OFFER_REJECTED = "offer_rejected"
     TYPE_OFFER_CANCELLED = "offer_cancelled"
+    # L'offerta di sotto rimessa in testa dopo che l'admin ha tolto il rilancio
+    # che l'aveva superata (v. market_engine.restore_previous_offer).
+    TYPE_OFFER_RESTORED = "offer_restored"
 
     session = models.ForeignKey(
         MarketSession, on_delete=models.CASCADE, related_name="events")

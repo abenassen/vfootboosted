@@ -546,6 +546,170 @@ def reject_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
     return offer
 
 
+def cancel_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
+    """L'admin scarta un'offerta ancora indecisa, senza scambio di rosa."""
+    from vfoot.models import MarketEvent
+
+    if offer.status not in MarketOffer.LIVE_STATUSES:
+        raise OfferApplyError("Offerta gia' risolta.")
+    offer.status = MarketOffer.STATUS_CANCELLED
+    offer.resolved_at = now or timezone.now()
+    offer.resolved_by = actor
+    offer.save(update_fields=["status", "resolved_at", "resolved_by"])
+    record_event(offer.session, MarketEvent.TYPE_OFFER_CANCELLED, actor,
+                 offer_payload(offer), offer=offer)
+    return offer
+
+
+# --- Togliere di mezzo un rilancio: cosa resta sotto ------------------------
+#
+# Annullare o rifiutare un'offerta che era un RILANCIO non e' come togliere
+# un'offerta sola: sotto c'e' qualcuno che era in testa e che il rilancio ha
+# spodestato. Il codice non la rimetteva in piedi (resta `outbid` per sempre) e
+# nemmeno lo diceva: il giocatore tornava nel pool senza nessuno in testa, cioe'
+# — visto che il rilancio minimo si legge dall'offerta in testa — offribile da 1
+# credito, mentre chi era stato superato non riceveva alcun avviso.
+#
+# La decisione (con l'utente): non si sceglie al posto dell'admin. Si guarda se
+# sotto c'e' un'offerta, si valuta se e' ancora in piedi, e gli si racconta la
+# situazione perche' decida lui — ripristinare o lasciare il giocatore libero.
+
+
+def previous_offer_for(offer: MarketOffer) -> MarketOffer | None:
+    """L'offerta che questa ha superato, se questa era un rilancio.
+
+    E' la piu' recente delle `outbid` sullo stesso giocatore nella stessa
+    sessione: con una catena A -> B -> C, togliendo C si guarda B, mai A."""
+    return (
+        MarketOffer.objects.filter(
+            session_id=offer.session_id,
+            target_player_id=offer.target_player_id,
+            status=MarketOffer.STATUS_OUTBID,
+            created_at__lt=offer.created_at,
+        ).order_by("-created_at", "-id").first()
+    )
+
+
+@dataclass
+class RestoreCheck:
+    """Cosa c'e' sotto l'offerta che l'admin sta per togliere di mezzo."""
+
+    previous: MarketOffer | None = None
+    ok: bool = False           # ripristinabile cosi' com'e'
+    blocker: str = ""          # se no, perche'
+    expired: bool = False      # il suo tempo era gia' finito
+    would_queue: bool = False  # ripristinandola finisce subito in validazione
+    recovery: int = 0
+
+    @property
+    def is_rebid(self) -> bool:
+        return self.previous is not None
+
+
+def check_restore(offer: MarketOffer, now=None) -> RestoreCheck:
+    """L'offerta precedente regge ancora? Si valuta sullo stato di ADESSO, non su
+    quello del giorno in cui fu fatta: nel frattempo l'allenatore puo' aver speso
+    quei crediti altrove, o essersi giocato il giocatore che prometteva in
+    svincolo."""
+    now = now or timezone.now()
+    prev = previous_offer_for(offer)
+    if prev is None:
+        return RestoreCheck()
+
+    session = offer.session
+    league = session.league
+    expired = prev.deadline_at is not None and prev.deadline_at <= now
+    if session.status == MarketSession.STATUS_CLOSED:
+        # La chiusura fa da scadenza per tutte (v. close_session).
+        would_queue = True
+    elif session.status == MarketSession.STATUS_OPEN:
+        would_queue = expired
+    else:
+        # Sospesa: i timer sono fermi per scelta, e nemmeno questa si muove.
+        would_queue = False
+
+    def no(blocker: str, recovery: int = 0) -> RestoreCheck:
+        return RestoreCheck(previous=prev, ok=False, blocker=blocker,
+                            expired=expired, would_queue=would_queue,
+                            recovery=recovery)
+
+    release_slot = FantasyRosterSlot.objects.filter(
+        team_id=prev.team_id, player_id=prev.release_player_id,
+        released_at__isnull=True,
+    ).first()
+    if release_slot is None:
+        return no("il giocatore che prometteva in svincolo non e' piu' nella sua rosa")
+
+    taken = FantasyRosterSlot.objects.filter(
+        team__league=league, player_id=prev.target_player_id, released_at__isnull=True,
+    ).exists()
+    if taken:
+        return no("il giocatore offerto e' gia' passato a una squadra")
+
+    # Un'altra offerta viva sullo stesso giocatore (tipicamente rimasta in coda da
+    # una sessione precedente) se lo tiene impegnato: due pretendenti vivi sullo
+    # stesso svincolato non possono stare in piedi insieme.
+    if MarketOffer.objects.filter(
+        Q(session=session,
+          status__in=(MarketOffer.STATUS_ACCEPTED, MarketOffer.STATUS_SETTLED))
+        | Q(session__league_id=session.league_id, status=MarketOffer.STATUS_ACCEPTED),
+        target_player_id=prev.target_player_id,
+    ).exclude(pk=offer.pk).exists():
+        return no("c'e' gia' un'altra offerta in via di definizione su questo giocatore")
+
+    # I conti si rifanno da capo, senza contare l'offerta che sta per sparire.
+    states = market_states(league, session, exclude_offer_id=offer.id)
+    st = states.get(prev.team_id)
+    recovery = recovery_for(session, release_slot.purchase_price)
+    if st is None:
+        return no("la squadra non e' piu' nella lega", recovery)
+    if prev.release_player_id in st.pledged_release_ids:
+        return no("sta gia' promettendo lo stesso svincolo su un'altra offerta viva",
+                  recovery)
+    max_amount = st.max_amount_releasing(recovery)
+    if prev.amount > max_amount:
+        return no(
+            f"non ha piu' i {currency.NAME_PLURAL} per sostenerla: "
+            f"servono {currency.price(prev.amount)}, ne puo' impegnare "
+            f"al massimo {currency.price(max_amount)}",
+            recovery)
+
+    return RestoreCheck(previous=prev, ok=True, expired=expired,
+                        would_queue=would_queue, recovery=recovery)
+
+
+def restore_previous_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
+    """Rimette in piedi l'offerta superata da `offer`, col suo orologio di allora.
+
+    L'orologio NON riparte: il rilancio non doveva esistere, quindi il tempo che
+    l'offerta di sotto aveva gia' consumato l'ha consumato davvero. Se nel
+    frattempo era scaduta finisce dritta in coda di validazione — che e' poi cio'
+    che sarebbe successo se il rilancio non fosse mai arrivato."""
+    from vfoot.models import MarketEvent
+
+    now = now or timezone.now()
+    chk = check_restore(offer, now=now)
+    if chk.previous is None:
+        raise OfferApplyError("Non c'e' un'offerta precedente da ripristinare.")
+    if not chk.ok:
+        raise OfferApplyError(
+            f"L'offerta precedente non e' piu' ripristinabile: {chk.blocker}.")
+
+    prev = chk.previous
+    prev.status = (MarketOffer.STATUS_ACCEPTED if chk.would_queue
+                   else MarketOffer.STATUS_LEADING)
+    prev.resolved_at = now if chk.would_queue else None
+    prev.save(update_fields=["status", "resolved_at"])
+    record_event(prev.session, MarketEvent.TYPE_OFFER_RESTORED, actor,
+                 {**offer_payload(prev), "after_offer_id": offer.id,
+                  "status": prev.status, "expired": chk.expired},
+                 offer=prev)
+    if chk.would_queue:
+        record_event(prev.session, MarketEvent.TYPE_OFFER_ACCEPTED, actor,
+                     offer_payload(prev), offer=prev)
+    return prev
+
+
 def close_session(session: MarketSession, actor=None, now=None) -> MarketSession:
     """Close a session. Every offer still leading is promoted to `accepted` and
     finisce in coda di validazione, esattamente come se avesse compiuto le sue

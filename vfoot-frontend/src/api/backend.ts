@@ -67,6 +67,7 @@ import type {
 import type { SaveTeamLineupRequest, TeamLineupContext } from '../types/lineup';
 import type {
   MarketActive,
+  MarketDiscardPreview,
   MarketRecoveryMode,
   MarketSessionHistory,
 } from '../types/market';
@@ -1224,12 +1225,33 @@ export async function placeMarketOffer(
   });
 }
 
+/** Cosa succede se l'admin toglie di mezzo questa offerta: non decide niente,
+ *  guarda soltanto se sotto ne resta un'altra e in che stato. */
+export async function getMarketDiscardPreview(
+  leagueId: number,
+  offerId: number,
+  action: 'reject' | 'cancel',
+): Promise<MarketDiscardPreview> {
+  const res = await fetch(
+    `${baseUrl()}/leagues/${leagueId}/market/offers/${offerId}/${action}`,
+    { headers: { Accept: 'application/json', ...authHeaders() } },
+  );
+  return parseJsonOrThrow(res);
+}
+
 export async function adminMarketOffer(
   leagueId: number,
   offerId: number,
   action: 'accept' | 'reject' | 'cancel',
+  /** Che fare dell'offerta che questa aveva superato. Obbligatoria (il server
+   *  risponde 409 senza) quando l'offerta era un rilancio: e' una decisione
+   *  dell'admin, non un default. */
+  restorePrevious?: boolean,
 ) {
-  return auctionPost(`/leagues/${leagueId}/market/offers/${offerId}/${action}`);
+  return auctionPost(
+    `/leagues/${leagueId}/market/offers/${offerId}/${action}`,
+    restorePrevious === undefined ? {} : { restore_previous: restorePrevious },
+  );
 }
 
 /** ws(s):// base for this deployment, with the DRF token appended as a query param. */
