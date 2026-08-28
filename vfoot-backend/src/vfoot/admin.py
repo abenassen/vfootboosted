@@ -13,7 +13,18 @@ import base64
 from django.contrib import admin
 from django.utils.html import format_html
 
-from vfoot.models import CrestImage, CrestReport, Feedback
+from vfoot.models import CrestImage, CrestReport, Feedback, ProductNews
+
+
+@admin.register(ProductNews)
+class ProductNewsAdmin(admin.ModelAdmin):
+    """Da qui si scrivono gli annunci. Il titolo e' il messaggio: deve reggere da
+    solo, perche' su un telefono e' spesso l'unica riga che si legge."""
+
+    list_display = ("published_at", "title", "active")
+    list_filter = ("active",)
+    search_fields = ("title", "body")
+    ordering = ("-published_at",)
 
 
 @admin.register(Feedback)

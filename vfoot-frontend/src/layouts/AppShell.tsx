@@ -25,6 +25,7 @@ import { compColor } from '../league/competitionColors';
 import { useDecisionAlerts } from '../league/useDecisionAlerts';
 import { PageErrorBoundary } from '../components/PageErrorBoundary';
 import UpdateBanner from '../components/UpdateBanner';
+import NewsBanner from '../components/NewsBanner';
 
 // League-scoped navigation (left sidebar + mobile bar): everything here is about
 // the CURRENTLY selected league. User-level actions (Le mie leghe) and switching
@@ -736,6 +737,12 @@ export default function AppShell() {
               <Avatar descriptor={user?.avatar} username={user?.username} size={34} />
             </Link>
           </div>
+
+          {/* SOPRA IL CONTENUTO, SOTTO L'INTESTAZIONE. Non fissa in fondo, dove
+              c'è già `UpdateBanner` e due strisce sovrapposte sono una striscia
+              sola illeggibile; e non in cima a tutto, dove scavalcava logo e
+              lega e sembrava parte della cornice invece che una notizia. */}
+          <NewsBanner />
 
           {/* Keyed on the route: a boundary that has caught STAYS caught, so
               without this the card would follow you onto pages that work. */}

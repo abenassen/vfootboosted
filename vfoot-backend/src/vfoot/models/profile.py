@@ -22,6 +22,13 @@ class UserProfile(models.Model):
     # deterministic default from the username).
     avatar = models.TextField(blank=True, default="")
 
+    # Fin dove ha gia' letto le novita' del prodotto. Una data e non un elenco di
+    # righe viste: le novita' si leggono in ordine e non si torna indietro, quindi
+    # un solo istante dice tutto e non cresce con gli annunci. Nullo = non ha mai
+    # chiuso una striscia, e allora vede l'ultima pubblicata (non tutta la storia:
+    # chi si iscrive oggi non deve ricevere gli annunci di marzo).
+    news_seen_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

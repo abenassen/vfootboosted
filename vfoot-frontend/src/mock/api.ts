@@ -1000,6 +1000,17 @@ export async function getRealMatchDetail(
 
 // Torna null, non un errore: null e' «non ci sono probabili», che nel mock e'
 // esattamente la verita' e che la pagina sa gia' disegnare.
+// Senza backend non c'e' niente da annunciare, e va bene cosi': la striscia
+// sparisce da sola su una lista vuota.
+export async function getNews(): Promise<{ items: [] }> {
+  await sleep(30);
+  return { items: [] };
+}
+
+export async function markNewsSeen(_newsId: number): Promise<void> {
+  await sleep(20);
+}
+
 export async function getProbableLineups(
   _matchId: number | string,
 ): Promise<null> {

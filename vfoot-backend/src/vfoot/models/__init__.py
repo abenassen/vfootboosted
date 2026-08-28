@@ -1,4 +1,5 @@
 from vfoot.models.identity import SocialAccount
+from vfoot.models.news import ProductNews
 from vfoot.models.profile import UserProfile
 from vfoot.models.fantasy import (
     AuctionBid,
@@ -41,6 +42,7 @@ from vfoot.models.zones import Zone, ZoneSet
 
 __all__ = [
     "SocialAccount",
+    "ProductNews",
     "UserProfile",
     "AuctionBid",
     "AwardedPrize",

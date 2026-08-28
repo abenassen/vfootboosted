@@ -4,6 +4,7 @@ import type {
   ProposalDetail,
 } from '../types/maintenance';
 import type { LeagueDecision, LeagueDecisionsResponse } from '../types/decisions';
+import type { NewsResponse } from '../types/news';
 import type {
   LineupContextResponse,
   MatchDetailResponse,
@@ -1342,6 +1343,28 @@ export async function getRealFixtures(
 }
 
 // Vote-relevant detail of a real match (pagella), shaped as a classic fixture.
+export async function getNews(): Promise<NewsResponse> {
+  const res = await fetch(`${baseUrl()}/news`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** «Ho letto fino a questa». L'id è quello della novità più recente CHE ABBIAMO
+ *  MOSTRATO, non «adesso»: fra il caricamento della pagina e il click può uscirne
+ *  un'altra, e il server non ha modo di sapere cosa c'era davanti a chi legge. */
+export async function markNewsSeen(newsId: number): Promise<void> {
+  await fetch(`${baseUrl()}/news/seen`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...authHeaders(),
+    },
+    body: JSON.stringify({ id: newsId }),
+  });
+}
+
 export async function getProbableLineups(
   matchId: number | string,
 ): Promise<ProbableLineups | null> {
