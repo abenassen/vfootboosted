@@ -95,8 +95,23 @@ def lineup_roles(league, player_ids: list[int], profiles: dict) -> dict[int, str
     return out
 
 
+def starting_odds(league, player_ids, as_of: int | None) -> dict[int, dict]:
+    """{player_id: {"probability": 0..100, "status": ...}} per la giornata reale.
+
+    Vuoto quando non c'e' niente da dire — prima che una fonte abbia pubblicato,
+    o fuori da una lega con un campionato di riferimento. Chi legge deve trattare
+    l'assenza come "non lo so", non come zero.
+    """
+    cs = getattr(league, "reference_season", None)
+    if cs is None or as_of is None:
+        return {}
+    from realdata.services import probable_lineups
+
+    return probable_lineups.probabilities_for(cs, as_of, list(player_ids))
+
+
 def roster_for_suggestion(league, team, as_of: int | None) -> list[dict]:
-    """[{player_id, role, form}] for the team's current roster."""
+    """[{player_id, role, form, starting}] for the team's current roster."""
     from vfoot.models import FantasyRosterSlot
 
     player_ids = list(
@@ -107,25 +122,76 @@ def roster_for_suggestion(league, team, as_of: int | None) -> list[dict]:
         return []
     profiles, _ = roster_profiles(league, player_ids, as_of)
     roles = lineup_roles(league, player_ids, profiles)
+    odds = starting_odds(league, player_ids, as_of)
     return [{"player_id": pid, "role": roles.get(pid, "MID"),
-             "form": float((profiles.get(pid) or {}).get("form", 0.0) or 0.0)}
+             "form": float((profiles.get(pid) or {}).get("form", 0.0) or 0.0),
+             "starting": odds.get(pid)}
             for pid in player_ids]
+
+
+# Le tre fasce della titolarita'. Sopra la prima soglia si gioca e basta: fra un
+# ottanta e un novantacinque la differenza la fa il rumore delle fonti, non il
+# calcio, e lasciargliela decidere vorrebbe dire far ribaltare il giudizio sul
+# rendimento a un punto percentuale.
+STARTING_SURE = 75      # gioca
+STARTING_DOUBT = 40     # ballottaggio
+
+
+def starting_band(row: dict) -> int:
+    """2 = gioca, 1 = ballottaggio, 0 = difficilmente in campo.
+
+    Nessuna previsione vale 2 e non 0: assenza di notizia non e' notizia di
+    assenza, e il suggeritore gira anche prima che una fonte abbia pubblicato —
+    la formazione di scorta si scrive quando la rosa si completa, che puo' essere
+    ad agosto.
+    """
+    s = row.get("starting")
+    if not s:
+        return 2
+    if s.get("status") == "out":
+        return 0
+    p = int(s.get("probability", 0) or 0)
+    return 2 if p >= STARTING_SURE else (1 if p >= STARTING_DOUBT else 0)
 
 
 def suggest_xi(roster: list[dict], constraints: dict | None,
                pinned=(), locked=()) -> dict:
     """``{"gk_player_id", "starter_player_ids"}`` — the goalkeeper and the ten
-    outfielders, from ``roster`` rows of ``{player_id, role, form}``.
+    outfielders, from ``roster`` rows of ``{player_id, role, form, starting}``.
 
     ``constraints`` is ``CLASSIC_CONSTRAINTS`` (or None in aura, where any shape is
     legal). ``pinned`` are frozen players to keep in the XI; ``locked`` are frozen
     players outside it, never to be reached for.
+
+PRIMA SE GIOCA, POI QUANTO BENE. Ordinare per sola forma faceva proporre gente
+    che la pagina accanto segnava OUT, e la stessa schermata si contraddiceva: il
+    distintivo rosso sul portiere al 2% e il suggeritore che ce lo metteva.
+
+    L'ordine e' quindi (fascia di titolarita', forma), e le due cose stanno in
+    quest'ordine e non moltiplicate. Moltiplicare sembrava piu' elegante e non
+    funziona, per una ragione che si vede solo sui dati: la forma NON e' un valore
+    assoluto in cui zero significa "non contribuisce". Puo' essere negativa, e per
+    i portieri e' praticamente sempre nulla. Su una rosa vera i tre portieri
+    facevano 0.0 (2%), -0.072 (92%), 0.0 (4%): moltiplicando, l'unico che gioca
+    perdeva contro due che non giocano, perche' un numero negativo per uno resta
+    peggiore di uno zero per niente. Nessun peso puo' rimediare a questo — la
+    forma li' non porta segnale, e moltiplicarla non lo crea.
+
+    Le fasce sono tre e non un continuo per non buttare via il giudizio sul
+    rendimento dove la titolarita' e' comoda: fra due che giocano entrambi decide
+    la forma, come ha sempre fatto.
+
+    Gli indisponibili non si ordinano: si tolgono. Non sono un'opzione peggiore,
+    non sono un'opzione. Restano solo se sono ``pinned``, cioe' se la loro partita
+    e' gia' cominciata e non si possono piu' muovere.
     """
     pinned = [int(p) for p in pinned]
     unavailable = {int(p) for p in locked}
     pool = [p for p in roster if p["player_id"] in pinned or p["player_id"] not in unavailable]
+    pool = [p for p in pool
+            if p["player_id"] in pinned or (p.get("starting") or {}).get("status") != "out"]
     by_id = {p["player_id"]: p for p in pool}
-    by_form = lambda p: -p["form"]  # noqa: E731
+    by_form = lambda p: (-starting_band(p), -p["form"])  # noqa: E731
 
     pinned_rows = [by_id[p] for p in pinned if p in by_id]
     gk = next((p for p in pinned_rows if p["role"] == "GK"), None)

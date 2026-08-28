@@ -6001,7 +6001,11 @@ class LeagueTeamLineupView(APIView):
 
         suggested = None
         if is_own:
-            sugg_roster = [{"player_id": r["player_id"], "role": r["role"], "form": r["form"]}
+            # La titolarita' viaggia col rendimento: senza, il suggeritore
+            # proporrebbe chi la riga accanto segna OUT. V. suggest_xi.
+            sugg_roster = [{"player_id": r["player_id"], "role": r["role"],
+                            "form": r["form"],
+                            "starting": starting_by_player.get(r["player_id"])}
                            for r in roster]
             pinned_xi = []
             if saved_lineup:

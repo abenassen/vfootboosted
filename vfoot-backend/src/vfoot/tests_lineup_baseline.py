@@ -62,6 +62,85 @@ class SuggesterTests(SimpleTestCase):
         # I migliori per forma di ogni reparto.
         self.assertEqual(xi["starter_player_ids"][:4], [4, 5, 6, 7])
 
+    # --- la titolarita' ------------------------------------------------------
+    #
+    # Il suggeritore proponeva gente che la pagina accanto segnava OUT, e la
+    # stessa schermata si contraddiceva. Questi test tengono chiuse le due meta'
+    # della correzione: la titolarita' decide per prima, ma solo dove dice
+    # qualcosa — dove non dice niente, decide la forma come ha sempre fatto.
+
+    def _odds(self, **by_id):
+        """{player_id: probabilita'} -> righe con `starting` addosso."""
+        rows = self._roster()
+        for r in rows:
+            p = by_id.get(str(r["player_id"]))
+            r["starting"] = None if p is None else {"probability": p, "status": "bench"}
+        return rows
+
+    def test_un_indisponibile_non_si_propone(self):
+        rows = self._roster()
+        for r in rows:
+            r["starting"] = {"probability": 90, "status": "bench"}
+        # Il miglior difensore per forma e' squalificato.
+        best = next(r for r in rows if r["role"] == "DEF")
+        best["starting"] = {"probability": 0, "status": "out"}
+        xi = suggest_xi(rows, CLASSIC_CONSTRAINTS)
+        self.assertNotIn(best["player_id"], xi["starter_player_ids"])
+
+    def test_un_indisponibile_gia_in_campo_resta(self):
+        """Se la sua partita e' cominciata non si puo' piu' muovere: `pinned`
+        batte tutto, altrimenti la proposta sarebbe irrealizzabile."""
+        rows = self._roster()
+        fermo = next(r for r in rows if r["role"] == "DEF")
+        fermo["starting"] = {"probability": 0, "status": "out"}
+        xi = suggest_xi(rows, CLASSIC_CONSTRAINTS, pinned=[fermo["player_id"]])
+        self.assertIn(fermo["player_id"], xi["starter_player_ids"])
+
+    def test_chi_gioca_batte_chi_ha_la_forma_migliore(self):
+        """IL CASO CHE HA FATTO NASCERE LA CORREZIONE, coi numeri veri di una
+        rosa: tre portieri a 0.0 (2%), -0.072 (92%) e 0.0 (4%). Moltiplicare la
+        forma per la probabilita' non basta — un negativo per uno resta peggiore
+        di uno zero per niente — e l'unico che gioca perdeva."""
+        rows = [
+            {"player_id": 1, "role": "GK", "form": 0.0,
+             "starting": {"probability": 2, "status": "bench"}},
+            {"player_id": 2, "role": "GK", "form": -0.072,
+             "starting": {"probability": 92, "status": "bench"}},
+            {"player_id": 3, "role": "GK", "form": 0.0,
+             "starting": {"probability": 4, "status": "bench"}},
+        ]
+        rows += [{"player_id": 10 + i, "role": r, "form": 1.0,
+                  "starting": {"probability": 90, "status": "bench"}}
+                 for i, r in enumerate(["DEF"] * 4 + ["MID"] * 4 + ["ATT"] * 2)]
+        xi = suggest_xi(rows, CLASSIC_CONSTRAINTS)
+        self.assertEqual(xi["gk_player_id"], 2)
+
+    def test_dentro_la_stessa_fascia_decide_la_forma(self):
+        """La correzione non deve buttare via il giudizio sul rendimento: fra due
+        che giocano entrambi, un punto percentuale non ribalta niente."""
+        rows = self._roster()
+        for i, r in enumerate(rows):
+            # Il peggiore per forma ha la probabilita' piu' alta: non basta.
+            r["starting"] = {"probability": 80 + (i % 15), "status": "bench"}
+        xi = suggest_xi(rows, CLASSIC_CONSTRAINTS)
+        self.assertEqual(xi["starter_player_ids"][:4], [4, 5, 6, 7])
+
+    def test_un_ballottaggio_perde_contro_un_titolare(self):
+        rows = self._roster()
+        for r in rows:
+            r["starting"] = {"probability": 90, "status": "bench"}
+        dubbio = next(r for r in rows if r["role"] == "DEF")   # il migliore per forma
+        dubbio["starting"] = {"probability": 55, "status": "bench"}
+        xi = suggest_xi(rows, CLASSIC_CONSTRAINTS)
+        self.assertNotIn(dubbio["player_id"], xi["starter_player_ids"])
+
+    def test_senza_previsioni_niente_cambia(self):
+        """Il suggeritore gira anche ad agosto, prima che una fonte abbia
+        pubblicato: assenza di notizia non e' notizia di assenza."""
+        senza = suggest_xi(self._roster(), CLASSIC_CONSTRAINTS)
+        vuote = suggest_xi(self._odds(), CLASSIC_CONSTRAINTS)
+        self.assertEqual(senza, vuote)
+
     def test_the_top_up_never_passes_a_ceiling(self):
         """Una linea corta veniva riempita con un sesto centrocampista, e la
         proposta stessa era una formazione che il salvataggio rifiutava."""
