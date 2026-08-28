@@ -297,12 +297,33 @@ def import_predicted(match, *, now=None) -> bool:
 
 def _import_missing(match, payload: dict, known: dict[int, int], *,
                     now=None) -> int:
-    """``missingPlayers`` -> indizi. Sostituisce in blocco cio' che questa fonte
-    aveva scritto per questa giornata: una lista di assenti e' una fotografia, e
-    due fotografie non si sommano."""
+    """``missingPlayers`` -> indizi, PER QUESTA PARTITA e non per la giornata.
+
+    Una lista di assenti e' una fotografia e due fotografie non si sommano: chi e'
+    guarito deve sparire, quindi si cancella prima di riscrivere. Ma si cancella
+    solo la fotografia di QUESTE DUE SQUADRE.
+
+    La prima versione ripuliva l'intera giornata e riscriveva solo la partita che
+    stava importando, cosi' ognuna delle dieci cancellava le altre nove: in
+    produzione, dopo un giro completo, gli unici assenti registrati per la seconda
+    giornata erano i sette della Lazio — l'ultima importata. Gli infortunati della
+    Juventus erano stati scritti e spazzati via nello stesso minuto, e McKennie e
+    Yildiz risultavano disponibili.
+
+    L'insieme da ripulire e' la rosa delle due squadre PIU' i giocatori nominati
+    dal payload: il secondo pezzo serve per chi e' stato ceduto o non ha ancora una
+    stint, che altrimenti lascerebbe una riga orfana e resterebbe indisponibile per
+    sempre.
+    """
     cs = match.competition_season
+    squad = set(PlayerTeamStint.objects
+                .filter(team_season_id__in=[match.home_team_id, match.away_team_id],
+                        end_date__isnull=True)
+                .values_list("player_id", flat=True))
+    squad |= {pid for pid in known.values()}
     LineupEvidence.objects.filter(competition_season=cs, source="sofascore",
-                                  matchday=match.matchday).delete()
+                                  matchday=match.matchday,
+                                  player_id__in=squad).delete()
     rows = []
     for side in ("home", "away"):
         for m in ((payload.get(side) or {}).get("missingPlayers") or []):
@@ -469,6 +490,13 @@ def _merge_one(*, ours, theirs, official: bool, keepers,
     # cambiato l'undici della Juventus in novanta minuti, e senza questa data la
     # nostra pagina avrebbe detto 97% senza modo di spiegare perche'.
     as_of = source_as_of.isoformat() if source_as_of else None
+    # DI QUALI SQUADRE SofaScore HA DETTO QUALCOSA. Serve perche' la sua
+    # previsione contiene SOLO gli undici titolari: chi non c'e' non e' assente
+    # dal parere, e' il parere. Senza questo insieme lo spostamento era
+    # asimmetrico — la spinta ai suoi undici e niente a tutti gli altri — e ogni
+    # panchinaro restava al numero del nostro motore. McKennie, tolto dall'undici
+    # e messo fra gli assenti, continuava a leggersi 86%.
+    sofa_teams = {e.team_season_id for e in theirs.values()}
     out: dict[int, dict] = {}
     for pid, e in ours.items():
         base = {"team_season_id": e.team_season_id, "reason": e.reason,
@@ -498,6 +526,12 @@ def _merge_one(*, ours, theirs, official: bool, keepers,
             base["sources"].append("sofascore")
             base["as_of"] = as_of
             p = 0.0
+        elif e.team_season_id in sofa_teams:
+            # SofaScore ha detto chi gioca in questa squadra, e lui non c'e':
+            # e' un parere contrario, e pesa quanto peserebbe quello favorevole.
+            base["sources"].append("sofascore")
+            base["as_of"] = as_of
+            p = engine._sigmoid(engine._logit(p) - delta)
         out[pid] = {**base, "probability": int(round(p * 100)), "status": ""}
     # Un titolare previsto da SofaScore che il nostro motore non ha in rosa (un
     # acquisto che le nostre stint non conoscono ancora) non va perso: e' proprio

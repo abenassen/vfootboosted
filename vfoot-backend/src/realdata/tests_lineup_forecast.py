@@ -663,3 +663,125 @@ class QueryShapeTests(_Pitch):
     def test_senza_partite_non_si_interroga_niente(self):
         with self.assertNumQueries(0):
             self.assertEqual(probable.merged_for_matches([]), {})
+
+
+class MissingPlayersScopeTests(_Pitch):
+    """Gli assenti di una partita non devono cancellare quelli delle altre.
+
+    In produzione, dopo un giro completo sulla 2a giornata, gli unici assenti
+    registrati erano i sette della Lazio — l'ultima partita importata. Ognuna
+    delle dieci ripuliva l'intera giornata e riscriveva solo la propria: gli
+    infortunati della Juventus venivano scritti e spazzati via nello stesso
+    minuto, e McKennie e Yildiz risultavano disponibili.
+    """
+
+    def _payload(self, missing_ids):
+        players = [{"player": {"id": 900000 + i}, "substitute": False}
+                   for i in range(11)]
+        return {"confirmed": False,
+                "home": {"formation": "4-3-3", "players": players,
+                         "missingPlayers": [{"player": {"id": i}, "reason": 1,
+                                             "description": "Thigh Injury"}
+                                            for i in missing_ids]},
+                "away": {"formation": "4-3-3", "players": list(players),
+                         "missingPlayers": []}}
+
+    def test_una_partita_non_cancella_gli_assenti_dellaltra(self):
+        # Due partite della STESSA giornata, con squadre diverse.
+        team_c = Team.objects.create(name="Squadra C")
+        ts_c = TeamSeason.objects.create(team=team_c, competition_season=self.cs)
+        altro = Player.objects.create(full_name="C00 Giocatore",
+                                      external_source="sofascore",
+                                      external_id="C00")
+        PlayerTeamStint.objects.create(player=altro, team_season=ts_c)
+
+        m1 = self._match(3, 5, status=Match.STATUS_SCHEDULED)
+        m2 = Match.objects.create(
+            competition_season=self.cs, matchday=3,
+            kickoff=datetime(2026, 9, 5, 20, 45, tzinfo=UTC),
+            home_team=ts_c, away_team=self.ts["B"],
+            status=Match.STATUS_SCHEDULED,
+            external_source="sofascore", external_id="16280999")
+
+        infortunato = self.squad["A"][4]
+        LineupEvidence.objects.create(
+            competition_season=self.cs, player=infortunato, matchday=3,
+            kind=LineupEvidence.KIND_INJURY,
+            availability=LineupEvidence.AVAIL_OUT, source="sofascore")
+
+        # L'import della SECONDA partita non deve toccare la prima.
+        probable._import_missing(m2, self._payload([]),
+                                 {int(altro.external_id[1:]): altro.id})
+        self.assertTrue(
+            LineupEvidence.objects.filter(player=infortunato, matchday=3).exists(),
+            "l'import di un'altra partita ha cancellato gli assenti di questa")
+
+    def test_chi_e_guarito_sparisce(self):
+        """L'altra meta': la fotografia si sostituisce, non si somma."""
+        m = self._match(3, 5, status=Match.STATUS_SCHEDULED)
+        guarito = self.squad["A"][4]
+        LineupEvidence.objects.create(
+            competition_season=self.cs, player=guarito, matchday=3,
+            kind=LineupEvidence.KIND_INJURY,
+            availability=LineupEvidence.AVAIL_OUT, source="sofascore")
+        probable._import_missing(m, self._payload([]), {})
+        self.assertFalse(
+            LineupEvidence.objects.filter(player=guarito, matchday=3).exists())
+
+
+class AbsentFromXITests(_Pitch):
+    """Chi manca dall'undici previsto e' un parere contrario, non un silenzio.
+
+    La previsione di SofaScore contiene SOLO gli undici titolari. Applicando la
+    spinta a chi c'e' e niente a chi non c'e', ogni escluso restava al numero del
+    nostro motore: McKennie, tolto dall'undici e messo fra gli assenti, si leggeva
+    ancora 86% mentre Locatelli — che c'era — saliva da 89 a 98.
+    """
+
+    def _prepare(self):
+        for md in range(1, 4):
+            played = self._match(md, md)
+            self._played(played, "A", self.squad["A"][:11])
+            self._played(played, "B", self.squad["B"][:11])
+        nxt = self._match(5, 10, status=Match.STATUS_SCHEDULED)
+        engine.build_forecast(nxt)
+        return nxt
+
+    def test_escluso_dallundici_scende(self):
+        nxt = self._prepare()
+        fc = LineupForecast.objects.create(
+            match=nxt, source=LineupForecast.SOURCE_SOFASCORE)
+        dentro, fuori = self.squad["A"][2], self.squad["A"][3]
+        # Solo gli undici titolari, come fa davvero una previsione.
+        for p in [self.squad["A"][0]] + self.squad["A"][2:12]:
+            if p.id == fuori.id:
+                continue
+            LineupForecastEntry.objects.create(
+                forecast=fc, player=p, team_season=self.ts["A"],
+                probability=100, status=LineupForecastEntry.STATUS_STARTER)
+        nostro = {e.player_id: e.probability for e in LineupForecastEntry.objects
+                  .filter(forecast__match=nxt,
+                          forecast__source=LineupForecast.SOURCE_VFOOT)}
+        got = probable.merged(nxt)
+        self.assertGreater(got[dentro.id]["probability"], nostro[dentro.id])
+        self.assertLess(got[fuori.id]["probability"], nostro[fuori.id],
+                        "chi non e' nell'undici previsto non e' stato penalizzato")
+        self.assertIn("sofascore", got[fuori.id]["sources"])
+
+    def test_una_squadra_di_cui_sofascore_non_ha_parlato_resta_com_e(self):
+        """La penalita' vale solo dove una previsione c'e': l'altra squadra non
+        deve scendere solo perche' la prima e' stata pubblicata."""
+        nxt = self._prepare()
+        fc = LineupForecast.objects.create(
+            match=nxt, source=LineupForecast.SOURCE_SOFASCORE)
+        for p in [self.squad["A"][0]] + self.squad["A"][2:12]:
+            LineupForecastEntry.objects.create(
+                forecast=fc, player=p, team_season=self.ts["A"],
+                probability=100, status=LineupForecastEntry.STATUS_STARTER)
+        nostro = {e.player_id: e.probability for e in LineupForecastEntry.objects
+                  .filter(forecast__match=nxt,
+                          forecast__source=LineupForecast.SOURCE_VFOOT)}
+        got = probable.merged(nxt)
+        altro = self.squad["B"][3]
+        self.assertEqual(got[altro.id]["probability"], nostro[altro.id])
+        self.assertEqual(got[altro.id]["sources"], ["vfoot"])
