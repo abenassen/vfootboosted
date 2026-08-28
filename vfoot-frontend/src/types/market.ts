@@ -60,6 +60,10 @@ export interface MarketFreeAgent {
   name: string | null;
   /** Unabbreviated, so a search for the first name can match. */
   full_name?: string | null;
+  /** Il club VERO (Serie A), non la squadra fantacalcio: si cerca anche per
+   *  quello, e in una lista di centinaia di svincolati e' meta' di cio' che
+   *  serve per riconoscere un nome. */
+  real_team?: string | null;
   role: string | null;
   locked: boolean;
   leading: MarketLeading | null;

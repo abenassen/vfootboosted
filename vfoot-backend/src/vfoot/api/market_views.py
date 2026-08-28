@@ -19,7 +19,7 @@ from vfoot.api.league_serializers import (
     CreateMarketSessionSerializer,
     PlaceOfferSerializer,
 )
-from vfoot.api.league_views import _ensure_admin, _membership_or_404
+from vfoot.api.league_views import _club_by_player, _ensure_admin, _membership_or_404
 from vfoot.models import (
     FantasyLeague,
     FantasyTeam,
@@ -405,6 +405,10 @@ class MarketActiveView(APIView):
 
         pool = free_agent_ids(league)
         role_map = league_role_map(league, list(pool))
+        # Il club vero, dalla stessa funzione del listone e dell'asta: si cerca
+        # per squadra ("chi e' libero del Lecce?") tanto quanto per nome, e i tre
+        # schermi non possono dire tre maglie diverse per lo stesso giocatore.
+        clubs = _club_by_player(league.reference_season_id, list(pool))
 
         # Leading offer per target (for the pool listing) and outbid history omitted.
         leading = {
@@ -456,6 +460,7 @@ class MarketActiveView(APIView):
                 "player_id": pid,
                 "name": names.get(pid),
                 "full_name": full_names.get(pid),
+                "real_team": clubs.get(pid),
                 "role": role_map.get(pid),
                 "locked": pid in locked,
                 "leading": None if not lead else {

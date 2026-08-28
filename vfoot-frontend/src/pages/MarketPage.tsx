@@ -524,6 +524,9 @@ function FreeAgentRow({
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0">
         <Badge tone="blue">{f.role}</Badge> <b>{f.name}</b>
+        {/* Dopo il nome, non prima: i nomi restano incolonnati e una lista lunga
+            si scorre ancora con l'occhio su una riga sola. */}
+        {f.real_team && <span className="ml-2"><Badge>{f.real_team}</Badge></span>}
         {f.leading && (
           <span className="ml-2 text-ink-faint">
             in testa {f.leading.mine ? <b className="text-good">tu</b> : f.leading.team_name} a <b>{price(f.leading.amount)}</b>
@@ -695,7 +698,11 @@ function FreeAgentSearch({
     // Nome corto E nome esteso, senza accenti: la lista mostra "L. Martínez",
     // molti si cercano per nome di battesimo, e nessuno digita "Leão".
     return freeAgents.filter(
-      (f) => (!roleFilter || f.role === roleFilter) && foldedMatch(q, [f.name, f.full_name]),
+      // Il club entra nella ricerca insieme al nome: "lecce" elenca gli
+      // svincolati del Lecce, che e' il filtro per squadra senza un filtro per
+      // squadra — e senza un secondo menu accanto a quello dei ruoli.
+      (f) => (!roleFilter || f.role === roleFilter)
+        && foldedMatch(q, [f.name, f.full_name, f.real_team]),
     );
   }, [freeAgents, q, roleFilter, searching]);
 
