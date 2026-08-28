@@ -840,3 +840,134 @@ class PlayerOnPitchInterval(models.Model):
             models.Index(fields=["match", "end_elapsed_seconds"]),
             models.Index(fields=["start_reason", "end_reason"]),
         ]
+
+
+# --- probabili formazioni ----------------------------------------------------
+#
+# TRE STRATI, e si sostituiscono in quest'ordine: il nostro motore (sempre
+# presente, gratuito, grossolano), la previsione di SofaScore (che porta notizie
+# che noi non possiamo dedurre, ma solo da ~80 ore prima), e infine la distinta
+# UFFICIALE, che non e' una previsione e non passa di qui — quella la scrive
+# l'importatore in ``MatchAppearance`` e spegne tutto il resto.
+
+class LineupEvidence(models.Model):
+    """Un indizio sulla titolarita' che NON sappiamo dedurre dai nostri dati.
+
+    Le squalifiche non stanno qui: quelle si derivano dai cartellini a ogni
+    lettura (v. ``services.lineup_forecast.suspensions_for``, misurato all'89%
+    sulla 25-26), e un dato derivabile che si salva e' un dato che prima o poi
+    diverge dalla sua fonte. Qui sta solo cio' che qualcuno deve DIRCI: un
+    infortunio letto da SofaScore, e la riga scritta a mano il giorno che si sa
+    che un giocatore e' fuori squadra per litigio.
+
+    ``log_odds`` e' il modo in cui l'indizio entra nel modello: si somma in scala
+    logit alla probabilita' a priori, quindi due indizi deboli valgono un indizio
+    forte e nessuno di loro puo' da solo portare a 0 o a 1. Le certezze non si
+    esprimono con un numero grande — si esprimono con ``availability=out``, che e'
+    un fatto e non un peso.
+    """
+    AVAIL_OUT = "out"          # non e' disponibile: probabilita' zero, punto
+    AVAIL_DOUBT = "doubt"      # in dubbio: sposta, non decide
+    AVAIL_BOOST = "boost"      # notizia che lo da' in campo
+    AVAIL_CHOICES = [(AVAIL_OUT, "Out"), (AVAIL_DOUBT, "In dubbio"),
+                     (AVAIL_BOOST, "Dato in campo")]
+
+    KIND_INJURY = "injury"
+    KIND_SUSPENSION = "suspension"
+    KIND_TRANSFER = "transfer"
+    KIND_INTERNATIONAL = "international"
+    KIND_INTERNAL = "internal"        # fuori squadra, scelta tecnica, litigio
+    KIND_NOTE = "note"
+    KIND_CHOICES = [(KIND_INJURY, "Infortunio"), (KIND_SUSPENSION, "Squalifica"),
+                    (KIND_TRANSFER, "Mercato"), (KIND_INTERNATIONAL, "Nazionale"),
+                    (KIND_INTERNAL, "Fuori squadra"), (KIND_NOTE, "Nota")]
+
+    competition_season = models.ForeignKey(CompetitionSeason, on_delete=models.CASCADE,
+                                           related_name="lineup_evidence")
+    player = models.ForeignKey(Player, on_delete=models.CASCADE,
+                               related_name="lineup_evidence")
+    # None = vale per ogni giornata finche' non scade. Un infortunio con data di
+    # rientro si esprime cosi'; una notizia per la sola giornata di domenica no.
+    matchday = models.IntegerField(null=True, blank=True)
+    valid_until = models.DateTimeField(null=True, blank=True)
+
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default=KIND_NOTE)
+    availability = models.CharField(max_length=8, choices=AVAIL_CHOICES, default=AVAIL_DOUBT)
+    log_odds = models.FloatField(default=0.0)
+    # 'sofascore', 'admin', o il nome di una fonte futura. Serve a poter togliere
+    # in blocco cio' che una fonte ha scritto, senza toccare le righe a mano.
+    source = models.CharField(max_length=24, default="admin")
+    note = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [models.Index(fields=["competition_season", "matchday"]),
+                   models.Index(fields=["player", "matchday"]),
+                   models.Index(fields=["source"])]
+
+    def __str__(self):
+        return f"{self.player_id} {self.kind} ({self.source})"
+
+
+class LineupForecast(models.Model):
+    """La formazione prevista per una partita, secondo UNA fonte."""
+    SOURCE_VFOOT = "vfoot"
+    SOURCE_SOFASCORE = "sofascore"
+    SOURCE_CHOICES = [(SOURCE_VFOOT, "Motore vfoot"), (SOURCE_SOFASCORE, "SofaScore")]
+
+    match = models.ForeignKey(Match, on_delete=models.CASCADE,
+                              related_name="lineup_forecasts")
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES)
+    # Quando l'abbiamo presa/calcolata noi. Per SofaScore non e' quando LORO
+    # l'hanno scritta, che non ci dicono: e' l'unico orologio che possediamo, e
+    # la pagina deve dire "letta due ore fa", non "aggiornata due ore fa".
+    refreshed_at = models.DateTimeField(default=timezone.now)
+    home_formation = models.CharField(max_length=16, blank=True, default="")
+    away_formation = models.CharField(max_length=16, blank=True, default="")
+    # La distinta UFFICIALE, non una previsione. SofaScore la pubblica circa un'ora
+    # prima del calcio d'inizio (``confirmed: true``), e per un giorno l'abbiamo
+    # scaricata e buttata via: la finestra live si apre al fischio d'inizio, e il
+    # giro delle probabili la rifiutava perche' "confermata". Pagavamo la richiesta
+    # e perdevamo il dato piu' prezioso dell'ultima ora — che con la scadenza per
+    # giocatore e' esattamente quando un allenatore sta ancora decidendo.
+    official = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = [("match", "source")]
+        indexes = [models.Index(fields=["match", "source"])]
+
+    def __str__(self):
+        return f"{self.match_id} <- {self.source}"
+
+
+class LineupForecastEntry(models.Model):
+    """Un giocatore dentro una previsione, con quanto ci crediamo."""
+    STATUS_STARTER = "starter"
+    STATUS_BENCH = "bench"
+    STATUS_DOUBT = "doubt"
+    STATUS_OUT = "out"
+    STATUS_CHOICES = [(STATUS_STARTER, "Titolare"), (STATUS_BENCH, "Panchina"),
+                      (STATUS_DOUBT, "Ballottaggio"), (STATUS_OUT, "Indisponibile")]
+
+    forecast = models.ForeignKey(LineupForecast, on_delete=models.CASCADE,
+                                 related_name="entries")
+    player = models.ForeignKey(Player, on_delete=models.CASCADE,
+                               related_name="lineup_forecast_entries")
+    team_season = models.ForeignKey(TeamSeason, on_delete=models.CASCADE,
+                                    related_name="lineup_forecast_entries")
+    probability = models.IntegerField(default=0)          # 0..100
+    # Il valore del giro precedente, per la freccia «e' salito». Una colonna, non
+    # una tabella di storico: quello che serve a chi guarda e' il movimento, non
+    # la serie.
+    previous_probability = models.IntegerField(null=True, blank=True)
+    status = models.CharField(max_length=8, choices=STATUS_CHOICES, default=STATUS_BENCH)
+    # Perche', quando c'e' un perche': 'squalifica (5a ammonizione)'.
+    reason = models.CharField(max_length=120, blank=True, default="")
+
+    class Meta:
+        unique_together = [("forecast", "player")]
+        indexes = [models.Index(fields=["forecast", "team_season"]),
+                   models.Index(fields=["player"])]
+
+    def __str__(self):
+        return f"{self.player_id} {self.probability}%"
