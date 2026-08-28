@@ -41,6 +41,10 @@ import type {
 } from '../types/market';
 import type { ActiveAuctionInfo } from '../types/league';
 
+/** Per giocatore, tutte le offerte ricevute nella sessione viva: la piu' recente
+ *  per prima. Vuota per chi non ne ha ancora nessuna. */
+type Chains = Map<number, MarketOfferRow[]>;
+
 export default function MarketPage() {
   const { selectedLeagueId } = useLeagueContext();
   const [data, setData] = useState<MarketActive | null>(null);
@@ -112,6 +116,26 @@ export default function MarketPage() {
       .filter((o) => o.status === 'settled' || o.status === 'rejected' || o.status === 'cancelled'),
     [history, sessionId],
   );
+  // La storia di ogni trattativa viva: tutte le offerte fatte su quel giocatore
+  // in QUESTA sessione, la piu' recente per prima.
+  //
+  // Non serve una chiamata nuova: `/market/active` porta solo chi e' in testa —
+  // di chi ha rilanciato e di chi e' stato superato non restava traccia a
+  // schermo, e una riga che dice "in testa a 15" non fa capire se sono partiti
+  // da 14 o da 1 — ma lo storico, che questa pagina gia' scarica a ogni giro,
+  // le ha tutte.
+  const chainsByTarget = useMemo(() => {
+    const rows = (sessionId == null ? [] : history.find((h) => h.id === sessionId)?.offers ?? []);
+    const by = new Map<number, MarketOfferRow[]>();
+    for (const o of rows) {
+      const list = by.get(o.target_player_id);
+      if (list) list.push(o);
+      else by.set(o.target_player_id, [o]);
+    }
+    for (const list of by.values()) list.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return by;
+  }, [history, sessionId]);
+
   // La sessione viva e' gia' tutta sopra: nello storico solo le precedenti.
   const pastSessions = useMemo(
     () => history.filter((h) => h.id !== sessionId),
@@ -157,13 +181,13 @@ export default function MarketPage() {
           <SessionHeader data={data!} isAdmin={isAdmin} nowMs={nowMs} />
 
           {canOffer ? (
-            <OfferPanel data={data!} nowMs={nowMs} busy={busy}
+            <OfferPanel data={data!} nowMs={nowMs} busy={busy} chains={chainsByTarget}
               targetId={targetId} onPick={pickTarget} onClearTarget={() => setTargetId(null)}
               onOffer={(t, r, a) => act(async () => { await placeMarketOffer(selectedLeagueId, t, r, a); setTargetId(null); })} />
           ) : (
             // Senza squadra, o a sessione sospesa, la ricerca resta ma da sola:
             // dentro "Fai un'offerta" non avrebbe nessuna offerta da fare.
-            <FreeAgentSearchCard data={data!} nowMs={nowMs} onPick={pickTarget} />
+            <FreeAgentSearchCard data={data!} nowMs={nowMs} onPick={pickTarget} chains={chainsByTarget} />
           )}
 
           <MyOffersCard offers={data?.my_offers ?? []} nowMs={nowMs} closesAt={session.closes_at} />
@@ -171,7 +195,8 @@ export default function MarketPage() {
           {/* Prima dell'apertura non puo' esistere nessuna offerta: la card
               direbbe solo "nessuna", e inviterebbe ad aprirne una che il server
               rifiuterebbe. */}
-          {phase !== 'scheduled' && <LiveContestsCard data={data!} nowMs={nowMs} onPick={pickTarget} />}
+          {phase !== 'scheduled'
+            && <LiveContestsCard data={data!} nowMs={nowMs} onPick={pickTarget} chains={chainsByTarget} />}
 
           <ClosedOffersCard offers={closedThisSession} />
         </>
@@ -312,11 +337,12 @@ function OpeningCountdown({ opensAt, nowMs }: { opensAt: string | null; nowMs: n
 }
 
 function OfferPanel({
-  data, nowMs, busy, targetId, onPick, onClearTarget, onOffer,
+  data, nowMs, busy, chains, targetId, onPick, onClearTarget, onOffer,
 }: {
   data: MarketActive;
   nowMs: number;
   busy: boolean;
+  chains: Chains;
   targetId: number | null;
   onPick: (playerId: number) => void;
   onClearTarget: () => void;
@@ -359,7 +385,7 @@ function OfferPanel({
         // gesto, e mandare l'utente a caccia del nome in un elenco a parte per
         // poi riportarlo su era un giro inutile.
         <div className="mt-3">
-          <FreeAgentSearch data={data} nowMs={nowMs} onPick={onPick}
+          <FreeAgentSearch data={data} nowMs={nowMs} onPick={onPick} chains={chains}
             emptyHint="Scrivi il nome di uno svincolato (o scegli un ruolo) per offrire su di lui." />
         </div>
       ) : (
@@ -479,16 +505,23 @@ function MyOffersCard({ offers, nowMs, closesAt }: {
 
 /** Una riga di svincolato: nome, ruolo, chi e' in testa, e il bottone per offrire. */
 function FreeAgentRow({
-  f, nowMs, closesAt, canOffer, onPick,
+  f, nowMs, closesAt, canOffer, onPick, chain, myTeamId,
 }: {
   f: MarketFreeAgent;
   nowMs: number;
   closesAt: string | null | undefined;
   canOffer: boolean;
   onPick: (playerId: number) => void;
+  /** Tutte le offerte ricevute finora da questo giocatore, la piu' recente per
+   *  prima. Con una sola non c'e' niente da aprire: la riga la mostra gia'. */
+  chain: MarketOfferRow[];
+  myTeamId: number | null;
 }) {
+  const [open, setOpen] = useState(false);
+  const hasChain = chain.length > 1;
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+    <div className="py-2 text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0">
         <Badge tone="blue">{f.role}</Badge> <b>{f.name}</b>
         {f.leading && (
@@ -509,6 +542,12 @@ function FreeAgentRow({
         )}
       </div>
       <div className="flex items-center gap-2">
+        {hasChain && (
+          <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}
+            className="shrink-0 rounded-lg px-2 py-1 text-xs text-ink-faint hover:bg-surface-2">
+            {chain.length} offerte <span aria-hidden>{open ? '▾' : '▸'}</span>
+          </button>
+        )}
         {canOffer && !f.locked && !f.leading?.mine && (
           <Button size="sm" variant={f.leading ? 'secondary' : 'primary'} onClick={() => onPick(f.player_id)}>
             {f.leading ? 'Rilancia' : 'Offri'}
@@ -517,17 +556,47 @@ function FreeAgentRow({
         {canOffer && f.leading?.mine && <Badge tone="green">tua</Badge>}
       </div>
     </div>
+    {open && <OfferChain chain={chain} myTeamId={myTeamId} />}
+    </div>
+  );
+}
+
+/** Come ci si e' arrivati: la scala dei rilanci su un giocatore, dall'ultimo al
+ *  primo.
+ *
+ *  Serve a decidere se rilanciare, che e' l'unica cosa che si fa da questa
+ *  pagina. "In testa a 15" da solo non dice se si e' partiti da 14 — e allora
+ *  quel prezzo e' contesto — o da 1, e allora c'e' qualcuno che ci tiene. Le
+ *  offerte superate non sono un segreto: erano in testa, pubbliche, un momento
+ *  prima. Ci sono anche quelle tolte di mano dall'admin, altrimenti la scala
+ *  avrebbe buchi inspiegabili. */
+function OfferChain({ chain, myTeamId }: { chain: MarketOfferRow[]; myTeamId: number | null }) {
+  return (
+    <ol className="mt-2 space-y-1 border-l-2 border-line pl-3 text-xs">
+      {chain.map((o) => (
+        <li key={o.offer_id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <b className="tabular-nums">{price(o.amount)}</b>
+          <span>{o.team_id === myTeamId ? <b className="text-good">tu</b> : o.team_name}</span>
+          {o.release_name && (
+            <span className="text-ink-faint">svincolando {o.release_name}</span>
+          )}
+          <Badge tone={OFFER_TONE[o.status]}>{OFFER_LABEL[o.status]}</Badge>
+          <span className="text-ink-faint">{stamp(o.created_at)}</span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
 /** Cio' su cui si sta giocando adesso: le uniche righe che vale la pena guardare
  *  senza cercare nulla. In cima chi sta per scadere. */
 function LiveContestsCard({
-  data, nowMs, onPick,
+  data, nowMs, onPick, chains,
 }: {
   data: MarketActive;
   nowMs: number;
   onPick: (playerId: number) => void;
+  chains: Chains;
 }) {
   const canOffer = !!data.session
     && sessionPhase(data.session, nowMs) === 'open' && data.my_team_id != null;
@@ -557,7 +626,8 @@ function LiveContestsCard({
         <div className="mt-2 divide-y divide-line">
           {contests.map((f) => (
             <FreeAgentRow key={f.player_id} f={f} nowMs={nowMs} closesAt={data.session?.closes_at}
-                    canOffer={canOffer} onPick={onPick} />
+                    canOffer={canOffer} onPick={onPick}
+                    chain={chains.get(f.player_id) ?? []} myTeamId={data.my_team_id} />
           ))}
         </div>
       )}
@@ -605,11 +675,12 @@ function ClosedOffersCard({ offers }: { offers: MarketOfferRow[] }) {
  *  e la lista compare solo dopo. Senza cornice: sta dentro "Fai un'offerta"
  *  quando si puo' offrire, e in una card sua quando si puo' solo guardare. */
 function FreeAgentSearch({
-  data, nowMs, onPick, emptyHint,
+  data, nowMs, onPick, chains, emptyHint,
 }: {
   data: MarketActive;
   nowMs: number;
   onPick: (playerId: number) => void;
+  chains: Chains;
   emptyHint: string;
 }) {
   const [q, setQ] = useState('');
@@ -671,7 +742,8 @@ function FreeAgentSearch({
               <div className="mt-1 divide-y divide-line">
                 {byRole.get(r)!.slice(0, 30).map((f) => (
                   <FreeAgentRow key={f.player_id} f={f} nowMs={nowMs} closesAt={data.session?.closes_at}
-                    canOffer={canOffer} onPick={onPick} />
+                    canOffer={canOffer} onPick={onPick}
+                    chain={chains.get(f.player_id) ?? []} myTeamId={data.my_team_id} />
                 ))}
                 {byRole.get(r)!.length > 30 && (
                   <div className="py-2 text-xs text-ink-faint">…e altri {byRole.get(r)!.length - 30}. Affina la ricerca.</div>
@@ -688,17 +760,18 @@ function FreeAgentSearch({
 /** La stessa ricerca per chi non puo' offrire (nessuna squadra, o sessione
  *  sospesa): guardare chi e' libero resta possibile. */
 function FreeAgentSearchCard({
-  data, nowMs, onPick,
+  data, nowMs, onPick, chains,
 }: {
   data: MarketActive;
   nowMs: number;
   onPick: (playerId: number) => void;
+  chains: Chains;
 }) {
   return (
     <Card className="p-4">
       <SectionTitle>Cerca uno svincolato</SectionTitle>
       <div className="mt-2">
-        <FreeAgentSearch data={data} nowMs={nowMs} onPick={onPick}
+        <FreeAgentSearch data={data} nowMs={nowMs} onPick={onPick} chains={chains}
           emptyHint="Scrivi un nome (o scegli un ruolo) per trovarli." />
       </div>
     </Card>
