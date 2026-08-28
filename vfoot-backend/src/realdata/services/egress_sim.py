@@ -151,6 +151,15 @@ def _matches(cache_dir: Path, external_ids: list[str], kind: str) -> bool:
         if state is None:
             continue
         status, clock, teams, pool = state
+        # Il giro delle probabili e' un giro a se': una richiesta, nessuna partita
+        # giocata, e vale SOLO prima del calcio d'inizio. Dopo, la distinta vera
+        # ce l'ha gia' il giro live e sovrascriverla con una previsione sarebbe
+        # tornare indietro.
+        if kind == "probable":
+            if status == "notstarted":
+                _write_probable(cache_dir, match, teams)
+                written += 1
+            continue
         # Played ONCE per warm, even though two payloads come out of it: the light
         # event needs the score at this minute, which is not knowable without
         # playing the match, so the expensive part would be paid twice for nothing.
@@ -208,6 +217,42 @@ def _write_match_data(cache_dir: Path, mid: str, played) -> None:
     sim._write(cache_dir, f"/api/v1/event/{mid}/shotmap", {"shotmap": played.shotmap})
     sim._write(cache_dir, f"/api/v1/event/{mid}/incidents",
                {"incidents": played.incidents})
+
+
+# Quanti ne schiera per reparto: un 4-4-2, che nel simulatore e' una convenzione
+# e non una scelta tattica — serve solo che siano undici e uno sia il portiere.
+_PROBABLE_SHAPE = (("POR", 1), ("DIF", 4), ("CEN", 4), ("ATT", 2))
+
+
+def _write_probable(cache_dir: Path, match: Match, teams: dict) -> None:
+    """La formazione PREVISTA di una partita che non e' ancora cominciata.
+
+    Senza questo il banco di prova non puo' mostrare le probabili: il simulatore
+    scrive la distinta solo per una partita in corso o finita, quindi una partita
+    di domenica non ne ha nessuna, e il giro 'probable' del tick riporterebbe
+    "zero importate" per sempre — un feature che in locale non si vede mai.
+
+    Si pesca da ``SimTeam.depth``, che e' gia' la nozione di "chi gioca di
+    solito", quindi la previsione e' coerente con la formazione che il simulatore
+    schierera' davvero, meno le rotazioni. ``confirmed: false``, come la vera.
+    """
+    payload: dict = {"confirmed": False}
+    for side, ts_id in (("home", match.home_team_id), ("away", match.away_team_id)):
+        team = teams.get(ts_id)
+        if team is None:
+            return
+        entries, used = [], set()
+        for role, count in _PROBABLE_SHAPE:
+            for p in (team.depth.get(role) or [])[:count]:
+                entries.append({"player": sim._player_dict(p), "substitute": False})
+                used.add(p.player_id)
+        for p in team.players:
+            if p.player_id in used or len(entries) >= 22:
+                continue
+            entries.append({"player": sim._player_dict(p), "substitute": True})
+        payload[side] = {"formation": "4-4-2", "players": entries,
+                         "missingPlayers": []}
+    sim._write(cache_dir, f"/api/v1/event/{match.external_id}/lineups", payload)
 
 
 def _write_heatmaps(cache_dir: Path, mid: str, played) -> None:

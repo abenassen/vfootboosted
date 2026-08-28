@@ -44,6 +44,17 @@ def _minutes(row: dict) -> int:
         return 0
 
 
+def fetch_probable(client: SofaScoreClient, mid: int) -> None:
+    """UNA richiesta: la distinta, che prima del calcio d'inizio e' la formazione
+    PREVISTA (``confirmed: false``).
+
+    E' il giro piu' economico che esista qui dentro, ed e' voluto: le probabili
+    valgono meno dei voti e non devono poter costare quanto loro. Nessun evento,
+    nessun tabellino, nessuna heatmap — solo il foglio squadra.
+    """
+    client.get(f"/api/v1/event/{mid}/lineups")
+
+
 def fetch_match(client: SofaScoreClient, mid: int, kind: str) -> None:
     # Four requests, and they are everything a vote needs: the event (status, score
     # and the fixture the importer resolves from), the squad sheet, the incidents,
@@ -113,6 +124,12 @@ def match_entries(cache_dir: Path, match_ids: list[int]):
         yield from cache_dir.glob(f"api_v1_event_{mid}_*.json")
 
 
+def probable_entries(cache_dir: Path, match_ids: list[int]):
+    """La sola distinta di ogni partita — quello che il giro 'probable' riscrive."""
+    for mid in match_ids:
+        yield from cache_dir.glob(f"api_v1_event_{mid}_lineups.json")
+
+
 def purge(paths) -> int:
     """Drop those entries, so the fetch that follows is a fetch. Returns how many."""
     dropped = 0
@@ -128,7 +145,7 @@ def main() -> int:
     ap.add_argument("--schedule-year", help="season year e.g. 26/27 (schedule mode)")
     ap.add_argument("--rounds", help="comma-separated rounds to warm (schedule "
                                      "mode); default = the whole season")
-    ap.add_argument("--kind", choices=["live", "final"], default="final")
+    ap.add_argument("--kind", choices=["live", "final", "probable"], default="final")
     ap.add_argument("--cache-dir", required=True)
     ap.add_argument("--delay", type=float, default=1.5)
     ap.add_argument("--resume", action="store_true",
@@ -153,9 +170,18 @@ def main() -> int:
                   + (f" rounds={rounds}" if rounds else " (whole season)"))
         elif ids:
             if not args.resume:
-                print(f"purged {purge(match_entries(cache_dir, ids))} stale entries")
+                # Il giro 'probable' butta SOLO la distinta. Buttare anche il resto
+                # sarebbe scorretto due volte: getterebbe dati che nessuno sta per
+                # riscrivere (l'evento, il tabellino), e li getterebbe a favore del
+                # giro meno importante che c'e' qui dentro.
+                stale = (probable_entries(cache_dir, ids) if args.kind == "probable"
+                         else match_entries(cache_dir, ids))
+                print(f"purged {purge(stale)} stale entries")
             for mid in ids:
-                fetch_match(client, mid, args.kind)
+                if args.kind == "probable":
+                    fetch_probable(client, mid)
+                else:
+                    fetch_match(client, mid, args.kind)
                 print(f"fetched {mid} ({args.kind})")
         else:
             print("ERROR: need --match-ids or --schedule-year")

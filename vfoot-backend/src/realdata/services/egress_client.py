@@ -55,6 +55,25 @@ def warm_matches(event_ids: Iterable[int], kind: str) -> bool:
                        "--cache-dir", str(settings.VFOOT_SOFASCORE_CACHE)])
 
 
+def warm_probable(event_ids: Iterable[int]) -> bool:
+    """Warm ONLY the squad sheets of these matches — the predicted lineups.
+
+    Separato da ``warm_matches`` perche' e' un lavoro di altra natura e di altra
+    priorita': una richiesta a partita invece di quattro (o ventisei), e chi lo
+    chiama deve poter rinunciare. V. ``services.probable_lineups``.
+    """
+    ids = ",".join(str(i) for i in event_ids)
+    if not ids:
+        return True
+    # --max-rotations 1: UN tentativo, e su un blocco si rinuncia. Il valore di
+    # serie e' 6, cioe' "consuma fino a sei IP buoni pur di finire": giusto per i
+    # voti di domenica, sbagliato qui. Un IP provato-buono speso il giovedi' per
+    # una formazione prevista e' un IP che puo' non esserci quando serve.
+    return run_egress(["fetch", "--match-ids", ids, "--kind", "probable",
+                       "--max-rotations", "1",
+                       "--cache-dir", str(settings.VFOOT_SOFASCORE_CACHE)])
+
+
 def scrape_tm_squads(cache_dir, competition: str, season: int, *,
                      delay: float, attempts: int, timeout: float) -> bool:
     """Scrape Transfermarkt squads into `cache_dir`, through the egress.

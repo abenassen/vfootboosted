@@ -625,7 +625,10 @@ def main() -> None:
     p.add_argument("ip"); p.add_argument("pubkey")
     f = sub.add_parser("fetch", help="fetch match ids through a good pooled IP, rotating on block")
     f.add_argument("--match-ids", required=True, help="comma-separated match ids")
-    f.add_argument("--kind", choices=["live", "final"], default="final")
+    # 'probable' e' il giro delle formazioni previste: UNA richiesta a partita, e
+    # chi lo lancia gli passa --max-rotations 1, perche' su un blocco deve
+    # rinunciare invece di consumare altri IP buoni del pool.
+    f.add_argument("--kind", choices=["live", "final", "probable"], default="final")
     f.add_argument("--cache-dir", default=str(CACHE_DIR))
     f.add_argument("--max-rotations", type=int, default=6)
     f.add_argument("--wait", type=float, default=0.0,

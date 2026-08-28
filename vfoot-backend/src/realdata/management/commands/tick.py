@@ -30,6 +30,7 @@ from django.utils import timezone as djtz
 
 from realdata.models import Match
 from realdata.services import job_log, live_ingest
+from realdata.services import probable_lineups as forecasts
 from realdata.services.match_scheduler import (
     candidate_matches, clock_drift, human_gap, plan_tick,
 )
@@ -99,8 +100,31 @@ class Command(BaseCommand):
                 f"l'orologio non li avra' raggiunti nessun round sara' dovuto. "
                 f"Se e' una simulazione: ./vfoot-sim reset|build <scenario>."))
 
+        # 0) LE PROBABILI, e stanno qui per una ragione precisa: girano SOLO se il
+        #    piano e' vuoto, cioe' se non c'e' una partita in corso ne' una da
+        #    finalizzare. E' cosi' che si esprime "ultima priorita'" senza inventare
+        #    una coda: il namespace di uscita e' uno solo (v. egress_lock), e una
+        #    formazione prevista non deve poter far aspettare un voto.
+        #
+        #    Il nostro motore non chiede niente alla rete e potrebbe girare sempre;
+        #    gira qui lo stesso, perche' la sua previsione e quella di SofaScore
+        #    vanno lette insieme e non ha senso averne una fresca e una vecchia.
         if plan.is_empty():
-            self.stdout.write("  nothing due")
+            if dry:
+                self.stdout.write("  nothing due (le probabili non girano in dry-run)")
+                return
+            report = forecasts.refresh_all(now)
+            run.did(**{f"forecast_{k}": v for k, v in report.items()
+                       if isinstance(v, int)})
+            if report.get("due") or report.get("built"):
+                self.stdout.write(
+                    f"  [probabili] nostre={report.get('built', 0)} "
+                    f"sofascore: dovute={report.get('due', 0)} "
+                    f"importate={report.get('imported', 0)} "
+                    f"vuote={report.get('empty', 0)}"
+                    + (" — EGRESS OCCUPATO, si riprova" if report.get("blocked") else ""))
+            else:
+                self.stdout.write("  nothing due")
             return
 
         # Imported here and not at module scope: the tick belongs to realdata, the
