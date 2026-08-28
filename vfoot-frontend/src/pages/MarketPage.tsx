@@ -386,7 +386,7 @@ function OfferPanel({
         // poi riportarlo su era un giro inutile.
         <div className="mt-3">
           <FreeAgentSearch data={data} nowMs={nowMs} onPick={onPick} chains={chains}
-            emptyHint="Scrivi il nome di uno svincolato (o scegli un ruolo) per offrire su di lui." />
+            emptyHint="Scrivi il nome di uno svincolato, o della sua squadra, per offrire su di lui — oppure scegli un ruolo." />
         </div>
       ) : (
         <div className="mt-3 space-y-3">
@@ -719,7 +719,10 @@ function FreeAgentSearch({
   return (
     <>
       <div className="flex flex-wrap gap-2">
-        <input autoComplete="off" placeholder="Nome del giocatore…"
+        {/* Dice le DUE cose che si possono scrivere: la ricerca guarda anche il
+            club, ma un campo che si annuncia «Nome del giocatore» non lo lascia
+            nemmeno sospettare, e la funzione resta di chi indovina. */}
+        <input autoComplete="off" placeholder="Giocatore o squadra…"
           className="min-w-0 flex-1 rounded-xl border border-line px-3 py-2 text-sm"
           value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="rounded-xl border border-line px-2 py-2 text-sm"
@@ -779,7 +782,7 @@ function FreeAgentSearchCard({
       <SectionTitle>Cerca uno svincolato</SectionTitle>
       <div className="mt-2">
         <FreeAgentSearch data={data} nowMs={nowMs} onPick={onPick} chains={chains}
-          emptyHint="Scrivi un nome (o scegli un ruolo) per trovarli." />
+          emptyHint="Scrivi un nome o una squadra, oppure scegli un ruolo, per trovarli." />
       </div>
     </Card>
   );
