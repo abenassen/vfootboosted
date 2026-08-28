@@ -275,12 +275,22 @@ const TONE_INK: Record<StartingTone, string> = {
   muted: 'text-ink-soft ring-line',
 };
 
+/** Da quanto è ferma la lettura, in parole. Serve solo per la fonte esterna: la
+ *  nostra stima si ricalcola da sé e non invecchia mai da sola. */
+function readAge(iso: string | null): string {
+  if (!iso) return '';
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 60) return `, letta ${mins} min fa`;
+  const h = Math.round(mins / 60);
+  return h < 24 ? `, letta ${h}h fa` : `, letta ${Math.round(h / 24)} giorni fa`;
+}
+
 function startingTitle(s: NonNullable<TeamLineupPlayer['starting']>): string {
   if (s.status === 'out') return s.reason || 'Indisponibile';
-  return (
-    `Probabilità di partire titolare: ${s.probability}%` +
-    (s.sources.includes('sofascore') ? ' (nostra stima + SofaScore)' : ' (solo nostra stima)')
-  );
+  const fonte = s.sources.includes('sofascore')
+    ? `nostra stima + SofaScore${readAge(s.as_of)}`
+    : 'solo nostra stima';
+  return `Probabilità di partire titolare: ${s.probability}% (${fonte})`;
 }
 
 /** IL SILENZIO VA DETTO. Un giocatore senza previsione non aveva nessun segno, e

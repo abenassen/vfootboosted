@@ -44,22 +44,54 @@ log = logging.getLogger(__name__)
 # niente (misurato: la 3a giornata a 175 ore rispondeva vuota), quindi chiedere
 # di piu' e' spendere richieste per un 200 vuoto.
 HORIZON = timedelta(hours=84)
-# Due cadenze, e la soglia fra loro. Lontano dal fischio d'inizio la previsione si
-# muove poco; nelle ultime ore si muove tutta.
-FAR_EVERY = timedelta(hours=12)
-NEAR_EVERY = timedelta(hours=2)
-NEAR_WITHIN = timedelta(hours=12)
-# E una terza banda, stretta, che esiste per una cosa sola: LA DISTINTA UFFICIALE.
-# SofaScore la pubblica circa un'ora prima del calcio d'inizio, e con le sole due
-# bande sopra l'ultima lettura cadeva a T-2h — cioe' un'ora prima che uscisse, e
-# poi piu' niente. Si sarebbe scaricata la previsione per tre giorni e mancata la
-# certezza per sessanta minuti.
+
+# LE BANDE DELLA CADENZA. Tre, e ognuna ha un mestiere diverso — non sono un
+# raffinamento progressivo della stessa idea.
 #
-# Si paga poco e si smette da soli: appena la distinta e' ufficiale la partita
-# esce da ``due_matches`` e non si chiede piu' nulla. Cinque richieste in piu' nel
-# caso peggiore, zero dopo che e' arrivata.
+#   da 84h a 48h, ogni 12h   accorgersi che la previsione E' COMPARSA. SofaScore
+#                            la scrive piu' o meno quando finisce la giornata
+#                            precedente (misurato: c'era a 79 ore, non a 175), e
+#                            in questa finestra non si muove quasi nulla: bastano
+#                            tre letture. L'estremo superiore e' HORIZON, oltre il
+#                            quale non si guarda affatto perche' non c'e' niente.
+#
+#   da 48h a 105 min, ogni 3h    seguire le NOTIZIE, che e' l'unica cosa che
+#                            muove una probabile formazione. Qui la vecchia
+#                            soglia era a 12 ore ed era sbagliata: misurato il
+#                            28/08/2026 su Juventus-Parma, alle 15:58 SofaScore
+#                            dava McKennie titolare e alle 17:30 lo aveva messo
+#                            fra gli assenti — a 26 ore dal fischio, cioe' dentro
+#                            la banda lenta. Avremmo continuato a dirlo al 97%
+#                            fino alle 4 di notte. La domanda giusta non e'
+#                            «quanto manca al fischio» ma «quanto puo' essere
+#                            vecchio un numero che presentiamo come corrente».
+#
+#   ultimi 75 min, ogni 15 min    prendere LA DISTINTA UFFICIALE appena esce, e
+#                            poi smettere: appena e' ufficiale la partita esce da
+#                            ``due_matches`` e non si chiede piu' niente.
+#
+#                            Comincia a 75 e non a 105 minuti perche' prima non
+#                            c'e' niente da prendere. MISURATO su Milan-Venezia
+#                            del 28/08/2026, leggendo ogni due minuti: a T-54 la
+#                            distinta era ancora una previsione (22 giocatori,
+#                            zero panchina), a T-52 era ufficiale (50 giocatori,
+#                            28 in panchina). Partendo da 105 si leggevano quattro
+#                            volte le stesse ventidue righe prima che uscisse
+#                            qualcosa.
+#
+#                            Il margine resta: una distinta insolitamente
+#                            anticipata viene comunque presa alla prima lettura di
+#                            questa banda, solo un quarto d'ora piu' tardi. E' UNA
+#                            osservazione, non una distribuzione — ma ora
+#                            ``LineupForecast.official`` e ``refreshed_at`` la
+#                            registrano a ogni partita, quindi fra qualche
+#                            giornata questa soglia si potra' tarare sui nostri
+#                            dati invece che su una misura sola.
+FAR_EVERY = timedelta(hours=12)
+FAR_BEYOND = timedelta(hours=48)
+NEAR_EVERY = timedelta(hours=3)
 LAST_EVERY = timedelta(minutes=15)
-LAST_WITHIN = timedelta(minutes=105)
+LAST_WITHIN = timedelta(minutes=75)
 
 # Quanto pesa il parere di SofaScore quando lo fondiamo col nostro, in log-odds.
 #
@@ -320,7 +352,7 @@ def due_matches(now=None, *, horizon=HORIZON) -> list[Match]:
         to_kickoff = m.kickoff - now
         if to_kickoff <= LAST_WITHIN:
             every = LAST_EVERY
-        elif to_kickoff <= NEAR_WITHIN:
+        elif to_kickoff <= FAR_BEYOND:
             every = NEAR_EVERY
         else:
             every = FAR_EVERY
@@ -413,13 +445,15 @@ def merged_for_matches(matches) -> dict[int, dict[int, dict]]:
             theirs=entries.get((m.id, LineupForecast.SOURCE_SOFASCORE), {}),
             official=bool(sofa and sofa.official),
             keepers=keepers,
+            source_as_of=sofa.refreshed_at if sofa else None,
         )
         if merged_one:
             out[m.id] = merged_one
     return out
 
 
-def _merge_one(*, ours, theirs, official: bool, keepers) -> dict[int, dict]:
+def _merge_one(*, ours, theirs, official: bool, keepers,
+               source_as_of=None) -> dict[int, dict]:
     """La fusione di UNA partita, su dati gia' raccolti.
 
     Il nostro motore da' il livello, SofaScore lo corregge. E lo corregge nello
@@ -430,10 +464,16 @@ def _merge_one(*, ours, theirs, official: bool, keepers) -> dict[int, dict]:
     gioca di piu'.
     """
     delta = source_log_odds()
+    # QUANDO L'ABBIAMO LETTA. Un numero che viene da una fonte esterna e' vecchio
+    # quanto l'ultima lettura, e chi lo guarda deve poterlo sapere: SofaScore ha
+    # cambiato l'undici della Juventus in novanta minuti, e senza questa data la
+    # nostra pagina avrebbe detto 97% senza modo di spiegare perche'.
+    as_of = source_as_of.isoformat() if source_as_of else None
     out: dict[int, dict] = {}
     for pid, e in ours.items():
         base = {"team_season_id": e.team_season_id, "reason": e.reason,
-                "previous": e.previous_probability, "sources": ["vfoot"]}
+                "previous": e.previous_probability, "sources": ["vfoot"],
+                "as_of": None}
         if e.status == LineupForecastEntry.STATUS_OUT:
             out[pid] = {**base, "probability": 0,
                         "status": LineupForecastEntry.STATUS_OUT}
@@ -442,6 +482,7 @@ def _merge_one(*, ours, theirs, official: bool, keepers) -> dict[int, dict]:
         t = theirs.get(pid)
         if t is not None:
             base["sources"].append("sofascore")
+            base["as_of"] = as_of
             # Una distinta UFFICIALE non si fonde: si sostituisce. Spostare di
             # 1.73 in logit un fatto osservato darebbe 96% a chi e' in campo e 4%
             # a chi non c'e', cioe' un dubbio che non esiste — e la pagina direbbe
@@ -454,6 +495,8 @@ def _merge_one(*, ours, theirs, official: bool, keepers) -> dict[int, dict]:
         elif official:
             # Distinta ufficiale uscita e lui non c'e': non e' improbabile, e'
             # fuori. Il nostro numero non ha piu' niente da dire.
+            base["sources"].append("sofascore")
+            base["as_of"] = as_of
             p = 0.0
         out[pid] = {**base, "probability": int(round(p * 100)), "status": ""}
     # Un titolare previsto da SofaScore che il nostro motore non ha in rosa (un
@@ -465,6 +508,7 @@ def _merge_one(*, ours, theirs, official: bool, keepers) -> dict[int, dict]:
         starter = t.status == LineupForecastEntry.STATUS_STARTER
         out[pid] = {"team_season_id": t.team_season_id, "reason": "",
                     "previous": t.previous_probability, "sources": ["sofascore"],
+                    "as_of": as_of,
                     "probability": (100 if starter else (0 if official else 10)),
                     "status": ""}
 

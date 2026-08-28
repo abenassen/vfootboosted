@@ -328,18 +328,36 @@ class RefreshTests(_Pitch):
 
     def test_la_cadenza_stringe_avvicinandosi(self):
         now = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
-        far = self._match(5, 3, status=Match.STATUS_SCHEDULED)
-        far.kickoff = now + timedelta(hours=48); far.save()
-        near = self._match(6, 4, status=Match.STATUS_SCHEDULED, home="B", away="A")
-        near.kickoff = now + timedelta(hours=6); near.save()
+        lontana = self._match(5, 3, status=Match.STATUS_SCHEDULED)
+        lontana.kickoff = now + timedelta(hours=60); lontana.save()
+        vicina = self._match(6, 4, status=Match.STATUS_SCHEDULED, home="B", away="A")
+        vicina.kickoff = now + timedelta(hours=6); vicina.save()
         # Mai viste: entrambe dovute.
-        self.assertEqual({m.id for m in probable.due_matches(now)}, {far.id, near.id})
+        self.assertEqual({m.id for m in probable.due_matches(now)},
+                         {lontana.id, vicina.id})
         # Lette tre ore fa: la vicina e' di nuovo dovuta (2h), la lontana no (12h).
-        for m in (far, near):
+        for m in (lontana, vicina):
             LineupForecast.objects.create(
                 match=m, source=LineupForecast.SOURCE_SOFASCORE,
                 refreshed_at=now - timedelta(hours=3))
-        self.assertEqual([m.id for m in probable.due_matches(now)], [near.id])
+        self.assertEqual([m.id for m in probable.due_matches(now)], [vicina.id])
+
+    def test_a_venticinque_ore_si_rilegge_entro_tre(self):
+        """IL CASO McKENNIE. Il 28/08/2026 SofaScore lo dava titolare alle 15:58 e
+        lo aveva tolto — messo fra gli assenti — alle 17:30. Con la vecchia banda
+        da dodici ore, a venticinque ore dal fischio d'inizio, avremmo continuato
+        a dirlo al 97% fino alle quattro di notte."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+        m = self._match(5, 3, status=Match.STATUS_SCHEDULED)
+        m.kickoff = now + timedelta(hours=25); m.save()
+        LineupForecast.objects.create(
+            match=m, source=LineupForecast.SOURCE_SOFASCORE,
+            refreshed_at=now - timedelta(hours=3, minutes=1))
+        self.assertEqual([x.id for x in probable.due_matches(now)], [m.id])
+        # Ma non a ogni tick: un'ora fa e' ancora fresca.
+        LineupForecast.objects.filter(match=m).update(
+            refreshed_at=now - timedelta(hours=1))
+        self.assertEqual(probable.due_matches(now), [])
 
     def test_una_partita_gia_cominciata_non_e_affar_nostro(self):
         now = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
@@ -531,16 +549,29 @@ class OfficialLineupTests(_Pitch):
         self.assertEqual(probable.due_matches(now), [],
                          "continua a chiedere una distinta che e' gia' definitiva")
 
-    def test_sotto_le_due_ore_la_cadenza_si_stringe(self):
-        """Senza questa banda l'ultima lettura cadeva a T-2h, un'ora PRIMA che la
-        distinta ufficiale esistesse."""
+    def test_nellultima_ora_la_cadenza_si_stringe(self):
+        """La banda stretta esiste per prendere la distinta UFFICIALE, che e'
+        misurata uscire intorno a T-53 (Milan-Venezia, 28/08/2026: previsione a
+        T-54, ufficiale a T-52). Senza, l'ultima lettura cadrebbe a T-3h."""
         now = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
         m = self._match(5, 3, status=Match.STATUS_SCHEDULED)
-        m.kickoff = now + timedelta(minutes=80); m.save()
+        m.kickoff = now + timedelta(minutes=60); m.save()
         LineupForecast.objects.create(
             match=m, source=LineupForecast.SOURCE_SOFASCORE,
             refreshed_at=now - timedelta(minutes=20))
         self.assertEqual([x.id for x in probable.due_matches(now)], [m.id])
+
+    def test_prima_dei_settantacinque_minuti_non_si_stringe(self):
+        """Fra T-105 e T-75 non c'e' ancora niente da prendere: leggere ogni
+        quindici minuti la' dentro trovava quattro volte la stessa previsione."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+        m = self._match(5, 3, status=Match.STATUS_SCHEDULED)
+        m.kickoff = now + timedelta(minutes=100); m.save()
+        LineupForecast.objects.create(
+            match=m, source=LineupForecast.SOURCE_SOFASCORE,
+            refreshed_at=now - timedelta(minutes=20))
+        self.assertEqual(probable.due_matches(now), [],
+                         "sta ancora leggendo ogni quarto d'ora dove non serve")
 
 
 class RebuildGateTests(_Pitch):

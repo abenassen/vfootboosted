@@ -55,6 +55,10 @@ export interface TeamLineupPlayer {
     status: 'starter' | 'bench' | 'doubt' | 'out';
     reason: string;            // «squalificato (5a ammonizione)»
     sources: string[];
+    /** Quando abbiamo letto la fonte esterna. Un numero che viene da fuori è
+     *  vecchio quanto l'ultima lettura, e chi lo guarda deve poterlo sapere.
+     *  Null quando parla solo la nostra stima, che è sempre corrente. */
+    as_of: string | null;
   } | null;
   // Frozen where he stands: his club is already playing, and the league locks
   // player by player. Always false under the matchday-wide deadline.
