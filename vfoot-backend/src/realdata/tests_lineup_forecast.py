@@ -752,10 +752,12 @@ class AbsentFromXITests(_Pitch):
         fc = LineupForecast.objects.create(
             match=nxt, source=LineupForecast.SOURCE_SOFASCORE)
         dentro, fuori = self.squad["A"][2], self.squad["A"][3]
-        # Solo gli undici titolari, come fa davvero una previsione.
-        for p in [self.squad["A"][0]] + self.squad["A"][2:12]:
-            if p.id == fuori.id:
-                continue
+        # UNDICI, come fa davvero una previsione: con dieci, l'undicesimo posto
+        # andrebbe per forza al migliore fra gli esclusi e il test misurerebbe
+        # quello invece della penalita'.
+        xi = [self.squad["A"][0]] + [p for p in self.squad["A"][2:13]
+                                     if p.id != fuori.id][:10]
+        for p in xi:
             LineupForecastEntry.objects.create(
                 forecast=fc, player=p, team_season=self.ts["A"],
                 probability=100, status=LineupForecastEntry.STATUS_STARTER)
@@ -763,10 +765,16 @@ class AbsentFromXITests(_Pitch):
                   .filter(forecast__match=nxt,
                           forecast__source=LineupForecast.SOURCE_VFOOT)}
         got = probable.merged(nxt)
-        self.assertGreater(got[dentro.id]["probability"], nostro[dentro.id])
+        # L'invariante non e' «chi e' nominato sale» — chi sta gia' al 97% e viene
+        # confermato resta al 97%, ed e' giusto. E' che chi e' NOMINATO finisce
+        # sopra chi e' ESCLUSO, qualunque cosa ne pensasse il nostro motore: e' il
+        # caso Konate'/Fabbian, dove la nostra sicurezza scavalcava una notizia.
         self.assertLess(got[fuori.id]["probability"], nostro[fuori.id],
                         "chi non e' nell'undici previsto non e' stato penalizzato")
+        self.assertGreater(got[dentro.id]["probability"], got[fuori.id]["probability"])
         self.assertIn("sofascore", got[fuori.id]["sources"])
+        self.assertEqual(got[dentro.id]["status"], LineupForecastEntry.STATUS_STARTER)
+        self.assertEqual(got[fuori.id]["status"], LineupForecastEntry.STATUS_BENCH)
 
     def test_una_squadra_di_cui_sofascore_non_ha_parlato_resta_com_e(self):
         """La penalita' vale solo dove una previsione c'e': l'altra squadra non
@@ -785,3 +793,90 @@ class AbsentFromXITests(_Pitch):
         altro = self.squad["B"][3]
         self.assertEqual(got[altro.id]["probability"], nostro[altro.id])
         self.assertEqual(got[altro.id]["sources"], ["vfoot"])
+
+
+class KonateFabbianTests(_Pitch):
+    """La nostra sicurezza non deve scavalcare una notizia.
+
+    Misurato su Juventus-Parma il 28/08/2026: il nostro motore dava Konate' al 77%
+    e SofaScore non lo schierava; dopo la penalita' restava al 37%, davanti a
+    Fabbian che SofaScore nominava esplicitamente. Lo mostravamo in campo e la
+    fonte diceva il contrario. La causa: trattavamo il nostro numero come una
+    probabilita' calibrata, mentre viene da un modello accurato al 75%.
+    """
+
+    def _prepare(self):
+        for md in range(1, 4):
+            played = self._match(md, md)
+            self._played(played, "A", self.squad["A"][:11])
+            self._played(played, "B", self.squad["B"][:11])
+        nxt = self._match(5, 10, status=Match.STATUS_SCHEDULED)
+        engine.build_forecast(nxt)
+        return nxt
+
+    def test_un_nominato_scavalca_un_nostro_titolare_escluso(self):
+        nxt = self._prepare()
+        # Il nostro motore: uno alto (gioca sempre), uno bassissimo (mai giocato).
+        alto = LineupForecastEntry.objects.get(
+            forecast__match=nxt, forecast__source=LineupForecast.SOURCE_VFOOT,
+            player=self.squad["A"][2])
+        basso = LineupForecastEntry.objects.get(
+            forecast__match=nxt, forecast__source=LineupForecast.SOURCE_VFOOT,
+            player=self.squad["A"][16])
+        self.assertGreater(alto.probability, 60)
+        self.assertLess(basso.probability, 30)
+
+        # SofaScore schiera il basso e lascia fuori l'alto.
+        fc = LineupForecast.objects.create(
+            match=nxt, source=LineupForecast.SOURCE_SOFASCORE)
+        xi = [self.squad["A"][0]] + self.squad["A"][3:12] + [self.squad["A"][16]]
+        for p in xi:
+            LineupForecastEntry.objects.create(
+                forecast=fc, player=p, team_season=self.ts["A"],
+                probability=100, status=LineupForecastEntry.STATUS_STARTER)
+
+        got = probable.merged(nxt)
+        self.assertGreater(got[basso.player_id]["probability"],
+                           got[alto.player_id]["probability"],
+                           "il nostro titolare scavalca ancora chi la fonte schiera")
+        self.assertEqual(got[basso.player_id]["status"],
+                         LineupForecastEntry.STATUS_STARTER)
+        self.assertEqual(got[alto.player_id]["status"],
+                         LineupForecastEntry.STATUS_BENCH)
+
+
+class ShownHistoryTests(_Pitch):
+    """La freccia confronta il numero mostrato, non il grezzo di una fonte."""
+
+    def _prepare(self):
+        for md in range(1, 4):
+            played = self._match(md, md)
+            self._played(played, "A", self.squad["A"][:11])
+            self._played(played, "B", self.squad["B"][:11])
+        nxt = self._match(5, 10, status=Match.STATUS_SCHEDULED)
+        engine.build_forecast(nxt)
+        return nxt
+
+    def test_alla_prima_volta_non_c_e_un_precedente(self):
+        nxt = self._prepare()
+        got = probable.merged(nxt)
+        self.assertTrue(all(v["previous"] is None for v in got.values()))
+
+    def test_il_precedente_e_quello_che_si_vedeva(self):
+        nxt = self._prepare()
+        probable.store_shown([nxt])
+        primo = probable.merged(nxt)
+        pid = next(iter(primo))
+        prima = primo[pid]["probability"]
+
+        # Arriva SofaScore e il numero mostrato cambia.
+        fc = LineupForecast.objects.create(
+            match=nxt, source=LineupForecast.SOURCE_SOFASCORE)
+        for p in [self.squad["A"][0]] + self.squad["A"][2:12]:
+            LineupForecastEntry.objects.create(
+                forecast=fc, player=p, team_season=self.ts["A"],
+                probability=100, status=LineupForecastEntry.STATUS_STARTER)
+        probable.store_shown([nxt])
+        dopo = probable.merged(nxt)
+        # Il precedente e' il numero MOSTRATO al giro prima, non quello del motore.
+        self.assertEqual(dopo[pid]["previous"], prima)

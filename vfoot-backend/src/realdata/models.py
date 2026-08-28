@@ -913,7 +913,14 @@ class LineupForecast(models.Model):
     """La formazione prevista per una partita, secondo UNA fonte."""
     SOURCE_VFOOT = "vfoot"
     SOURCE_SOFASCORE = "sofascore"
-    SOURCE_CHOICES = [(SOURCE_VFOOT, "Motore vfoot"), (SOURCE_SOFASCORE, "SofaScore")]
+    # Non una fonte: il NUMERO CHE ABBIAMO MOSTRATO, tenuto perche' la freccia
+    # «e' salito» possa confrontare cio' che si vede oggi con cio' che si vedeva
+    # ieri. Senza, confrontava il fuso di adesso col grezzo del solo motore di
+    # prima — mele con arance: Koopmeiners appariva «+48» quando si era mosso di
+    # +21. La fusione resta calcolata in lettura; qui si conserva solo la storia.
+    SOURCE_MERGED = "merged"
+    SOURCE_CHOICES = [(SOURCE_VFOOT, "Motore vfoot"), (SOURCE_SOFASCORE, "SofaScore"),
+                      (SOURCE_MERGED, "Numero mostrato")]
 
     match = models.ForeignKey(Match, on_delete=models.CASCADE,
                               related_name="lineup_forecasts")

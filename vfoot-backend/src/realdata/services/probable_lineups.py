@@ -103,6 +103,22 @@ LAST_WITHIN = timedelta(minutes=75)
 # tutto il resto segue.
 SOURCE_ACCURACY = 0.85
 
+# Quanto vale il NOSTRO numero quando SofaScore ha detto la sua, in scala logit.
+#
+# Non e' una svalutazione arbitraria: il nostro motore indovina il ~75% dell'undici
+# e SofaScore l'85%, e un priore che viene da un modello accurato al 75% non puo'
+# parlare con la forza di un 90%. Trattandolo come una probabilita' calibrata, le
+# sue punte scavalcavano una notizia: misurato su Juventus-Parma, Konate' era dato
+# 77% dal nostro motore, SofaScore non lo schierava, e dopo la penalita' restava a
+# 37% — davanti a un giocatore che SofaScore nominava esplicitamente. Lo mostravamo
+# in campo, e la fonte diceva il contrario.
+#
+# 0.5 porta le nostre punte (logit ~2,3 fra il 10% e il 90%) alla forza di
+# log(0,75/0,25) = 1,1, che e' quella che la nostra accuratezza giustifica. Vale
+# SOLO quando c'e' un parere esterno con cui confrontarsi: da soli il nostro numero
+# resta quello che e', perche' non c'e' niente da pesare contro.
+OUR_PRIOR_WEIGHT = 0.5
+
 
 def source_log_odds(accuracy: float = SOURCE_ACCURACY) -> float:
     a = min(max(accuracy, 0.5001), 0.9999)
@@ -461,12 +477,14 @@ def merged_for_matches(matches) -> dict[int, dict[int, dict]]:
     out: dict[int, dict[int, dict]] = {}
     for m in matches:
         sofa = by_match_source.get((m.id, LineupForecast.SOURCE_SOFASCORE))
+        shown = entries.get((m.id, LineupForecast.SOURCE_MERGED), {})
         merged_one = _merge_one(
             ours=entries.get((m.id, LineupForecast.SOURCE_VFOOT), {}),
             theirs=entries.get((m.id, LineupForecast.SOURCE_SOFASCORE), {}),
             official=bool(sofa and sofa.official),
             keepers=keepers,
             source_as_of=sofa.refreshed_at if sofa else None,
+            shown=shown,
         )
         if merged_one:
             out[m.id] = merged_one
@@ -474,7 +492,7 @@ def merged_for_matches(matches) -> dict[int, dict[int, dict]]:
 
 
 def _merge_one(*, ours, theirs, official: bool, keepers,
-               source_as_of=None) -> dict[int, dict]:
+               source_as_of=None, shown=None) -> dict[int, dict]:
     """La fusione di UNA partita, su dati gia' raccolti.
 
     Il nostro motore da' il livello, SofaScore lo corregge. E lo corregge nello
@@ -497,17 +515,28 @@ def _merge_one(*, ours, theirs, official: bool, keepers,
     # panchinaro restava al numero del nostro motore. McKennie, tolto dall'undici
     # e messo fra gli assenti, continuava a leggersi 86%.
     sofa_teams = {e.team_season_id for e in theirs.values()}
+    # IL NUMERO CHE ABBIAMO MOSTRATO L'ULTIMA VOLTA, che e' l'unico con cui abbia
+    # senso confrontare quello di adesso. La freccia leggeva invece il precedente
+    # della riga del solo motore: Koopmeiners appariva «+48» (57 di oggi contro 9
+    # del grezzo di ieri) quando il numero mostrato si era mosso da 36 a 57, cioe'
+    # +21. Mele con arance.
+    shown = shown or {}
     out: dict[int, dict] = {}
     for pid, e in ours.items():
+        prev = shown.get(pid)
         base = {"team_season_id": e.team_season_id, "reason": e.reason,
-                "previous": e.previous_probability, "sources": ["vfoot"],
-                "as_of": None}
+                "previous": prev.probability if prev is not None else None,
+                "sources": ["vfoot"], "as_of": None}
         if e.status == LineupForecastEntry.STATUS_OUT:
             out[pid] = {**base, "probability": 0,
                         "status": LineupForecastEntry.STATUS_OUT}
             continue
         p = max(1, min(99, e.probability)) / 100.0
         t = theirs.get(pid)
+        # Il nostro numero si fa piu' prudente quando c'e' qualcuno con cui
+        # confrontarsi: v. OUR_PRIOR_WEIGHT.
+        if e.team_season_id in sofa_teams:
+            p = engine._sigmoid(engine._logit(p) * OUR_PRIOR_WEIGHT)
         if t is not None:
             base["sources"].append("sofascore")
             base["as_of"] = as_of
@@ -540,8 +569,10 @@ def _merge_one(*, ours, theirs, official: bool, keepers,
         if pid in out:
             continue
         starter = t.status == LineupForecastEntry.STATUS_STARTER
+        prev = shown.get(pid)
         out[pid] = {"team_season_id": t.team_season_id, "reason": "",
-                    "previous": t.previous_probability, "sources": ["sofascore"],
+                    "previous": prev.probability if prev is not None else None,
+                    "sources": ["sofascore"],
                     "as_of": as_of,
                     "probability": (100 if starter else (0 if official else 10)),
                     "status": ""}
@@ -702,4 +733,45 @@ def refresh_all(now=None, *, limit: int = 10, fetch=None) -> dict:
             built += 1
     report["built"] = built
     report["unchanged"] = skipped
+    # Per ultimo, quando entrambe le fonti sono ferme: il numero che uscira' e'
+    # quello che si registra come «mostrato».
+    report["shown"] = store_shown(upcoming, now)
     return report
+
+
+def store_shown(matches, now=None) -> int:
+    """Registra il numero MOSTRATO, perche' domani la freccia sappia da dove.
+
+    Non e' una terza fonte e non entra nella fusione: e' la sua memoria. La
+    fusione resta calcolata in lettura — quella e' la verita' — e qui si conserva
+    solo l'ultimo valore uscito, con il precedente accanto.
+
+    Va chiamata DOPO che entrambe le fonti sono state aggiornate, altrimenti
+    registra un numero che nessuno ha visto.
+    """
+    matches = list(matches)
+    if not matches:
+        return 0
+    now = now or timezone.now()
+    fused = merged_for_matches(matches)
+    written = 0
+    for m in matches:
+        rows = fused.get(m.id) or {}
+        if not rows:
+            continue
+        fc, _ = LineupForecast.objects.get_or_create(
+            match=m, source=LineupForecast.SOURCE_MERGED)
+        before = dict(LineupForecastEntry.objects.filter(forecast=fc)
+                      .values_list("player_id", "probability"))
+        LineupForecastEntry.objects.filter(forecast=fc).delete()
+        LineupForecastEntry.objects.bulk_create([
+            LineupForecastEntry(
+                forecast=fc, player_id=pid, team_season_id=info["team_season_id"],
+                probability=info["probability"],
+                previous_probability=before.get(pid),
+                status=info["status"], reason=info["reason"][:120])
+            for pid, info in rows.items()])
+        fc.refreshed_at = now
+        fc.save(update_fields=["refreshed_at"])
+        written += 1
+    return written
