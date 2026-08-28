@@ -499,15 +499,21 @@ def score_composed_fixture(
     away_lines: tuple[list[dict], list[dict]],
     ruleset: Ruleset,
     fixture_meta: dict,
+    round_open: bool = False,
 ) -> dict:
     """Score both composed teams and return the payload. Pure given the line lists.
 
     ``fixture_meta["home_advantage"]`` dice se in QUESTA partita giocare in casa
     conta: viaggia nel meta e non come argomento a parte perché è un dato della
     partita, come il turno e la fase, e ogni chiamante ce l'ha già in mano.
+
+    ``round_open`` invece non è un dato della partita ma dell'orologio, e riguarda
+    una decisione sola: il voto d'ufficio sui buchi, che aspetta l'ultimo fischio
+    del turno (v. ``classic_scoring._fill_unresolved``). Spento di default, cioè
+    com'è alla conclusione: chi la chiama sta dicendo che la giornata è finita.
     """
-    home = score_team(home_lines[0], home_lines[1], ruleset)
-    away = score_team(away_lines[0], away_lines[1], ruleset)
+    home = score_team(home_lines[0], home_lines[1], ruleset, round_open)
+    away = score_team(away_lines[0], away_lines[1], ruleset, round_open)
     resolve_fixture(home, away, ruleset, bool(fixture_meta.get("home_advantage")))
     return build_fixture_payload(fixture_meta, home, away, ruleset)
 
@@ -566,6 +572,25 @@ def _live_states(cs_id: int, real_matchday: int, player_ids) -> tuple[set, set, 
         else:
             not_started.add(pid)
     return not_started, unstable, in_progress
+
+
+def round_still_open(cs_id: int, real_matchday: int) -> bool:
+    """C'e' ancora una partita di questa giornata da giocare (o sul campo adesso)?
+
+    Serve a UNA decisione: il voto d'ufficio sui buchi, che non si impone finche' la
+    panchina puo' ancora coprirli (v. ``classic_scoring._fill_unresolved``). E' una
+    domanda sul CALENDARIO, non sui giocatori di una squadra: la risposta e' la
+    stessa per tutta la lega e cambia una volta sola, all'ultimo fischio del turno.
+
+    IL RINVIO RESTA FUORI (``postponed``, come in ``matchday_state.playing_matchday``):
+    quella non e' una partita ancora da giocare in giornata, e' un caso che la lega
+    risolve a parte — aspettando il recupero o deliberando. Tenere sospesi i buchi di
+    tutti per sei settimane sarebbe peggio del problema.
+    """
+    return Match.objects.filter(
+        competition_season_id=cs_id, matchday=real_matchday,
+        status__in=(Match.STATUS_SCHEDULED, Match.STATUS_LIVE),
+    ).exists()
 
 
 def _mark_unstable(team: dict, unstable: set, in_progress: set | None = None) -> bool:
@@ -704,8 +729,16 @@ def live_scorer(league, md, ruleset, projected: bool = False):
     unstable -= set(office)
     in_progress -= set(office)
     engine_in_progress = _engine_in_progress(in_progress, index, projected)
+    # C'e' ancora una partita del turno da giocare? Allora un titolare senza voto
+    # non e' ancora un buco da pagare: il panchinaro che lo coprira' deve solo
+    # scendere in campo (v. classic_scoring._fill_unresolved).
+    round_open = round_still_open(md.real_competition_season_id, md.real_matchday)
+    # Nella previsione no. «Se la giornata finisse adesso» e' la domanda di un turno
+    # gia' chiuso: li' i buchi sono definitivi e il voto d'ufficio li tappa — la
+    # stessa deroga, sulla stessa riga, che ``_engine_in_progress`` fa sui cambi.
+    engine_round_open = False if projected else round_open
 
-    def score_with(fx, frozen_by_kickoff: set) -> dict:
+    def score_with(fx, frozen_by_kickoff: set, open_round: bool) -> dict:
         """Il tabellino, dato l'insieme di «sta ancora giocando» che il motore deve
         rispettare. Chiamabile due volte sullo stesso fixture: ogni giro ricompone
         le righe da zero (``compose_team_lines`` copia quelle dell'indice), quindi
@@ -742,6 +775,7 @@ def live_scorer(league, md, ruleset, projected: bool = False):
              "competition_id": fx.competition_id,
              "home_advantage": fx.home_advantage,
              "home_team": fx.home_team.name, "away_team": fx.away_team.name},
+            round_open=open_round,
         )
         home_unstable = _mark_unstable(payload["home"], unstable, in_progress)
         away_unstable = _mark_unstable(payload["away"], unstable, in_progress)
@@ -753,12 +787,18 @@ def live_scorer(league, md, ruleset, projected: bool = False):
         payload["provisional"] = home_unstable or away_unstable
         payload["in_progress"] = bool(payload["home"].get("in_progress")
                                       or payload["away"].get("in_progress"))
+        # I buchi che aspettano l'ultimo fischio per essere tappati. La pagina lo
+        # dice in una riga di legenda: senza, un posto scoperto al sabato sera si
+        # legge come «questa lega il voto d'ufficio non ce l'ha».
+        payload["office_deferred"] = bool(
+            open_round and ruleset.sv_office_vote
+            and (payload["home"]["unresolved_sv"] or payload["away"]["unresolved_sv"]))
         payload["lineup_source"] = {"home": lines["home"][2].get("source"),
                                     "away": lines["away"][2].get("source")}
         return payload
 
     def score(fx) -> dict:
-        payload = score_with(fx, engine_in_progress)
+        payload = score_with(fx, engine_in_progress, engine_round_open)
         # Il payload si dichiara. Senza, la pagina puo' finire per mostrare un
         # totale previsto sotto la pastiglia «in corso» — cioe' un numero che non
         # e' il punteggio della sfida presentato come se lo fosse. Chi lo riceve
@@ -779,7 +819,7 @@ def live_scorer(league, md, ruleset, projected: bool = False):
             # Costa un secondo passaggio di aritmetica su una trentina di righe: le
             # dieci pagelle del turno — la mezza secondo — sono gia' fatte e
             # condivise fra i due giri.
-            actual = score_with(fx, in_progress)
+            actual = score_with(fx, in_progress, round_open)
             payload["actual"] = {
                 "home_total": actual["home_total"], "away_total": actual["away_total"],
                 "home_goals": actual["home_goals"], "away_goals": actual["away_goals"],

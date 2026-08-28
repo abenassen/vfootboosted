@@ -220,6 +220,78 @@ class LiveDetailTests(TestCase):
         # due cose diverse e solo una delle due manca.
         self.assertTrue(row["has_detail"])
 
+    # -- il voto d'ufficio aspetta l'ultimo fischio -------------------------- #
+    #
+    # Al sabato sera nessun panchinaro ha ancora un voto, quindi nessuno e'
+    # utilizzabile e OGNI titolare senza voto risulta un buco che la panchina non
+    # copre. Tapparlo subito col voto d'ufficio significava scrivere per due giorni
+    # «questo non verra' sostituito» proprio mentre il sostituto doveva ancora
+    # scendere in campo — e alla domenica sera il cambio si faceva lo stesso.
+    def _played_on_saturday(self) -> TeamSeason:
+        """La partita del sabato pomeriggio: finita e confermata, con tutte le
+        altre del turno ancora da giocare."""
+        home, away = self._club("Milan"), self._club("Venezia")
+        Match.objects.create(
+            competition_season=self.cs, matchday=22, kickoff=SAT - timedelta(hours=3),
+            kickoff_provisional=False, home_team=home, away_team=away,
+            status=Match.STATUS_FINISHED, data_ready=True, home_goals=2, away_goals=0,
+            external_source="sofascore", external_id="902")
+        return home
+
+    def _field_a_hole(self):
+        """Un titolare della partita gia' finita che non e' sceso in campo — nessuna
+        riga in pagella, cioe' un buco — e in panchina l'unico che potrebbe coprirlo,
+        che gioca stasera."""
+        self.league.sv_office_vote = 4.0
+        self.league.save(update_fields=["sv_office_vote"])
+        hole = self._player("Mai Sceso", self._played_on_saturday())
+        SavedLineupSnapshot.objects.create(
+            league_id=str(self.league.id), matchday_id="22",
+            lineup_id=f"team{self.mine.id}",
+            gk_player_id=str(hole.id), starter_player_ids=[],
+            bench_player_ids=[self._player("Stasera", self.later[0]).id])
+        return hole
+
+    def _hole_line(self, hole):
+        d = self.client.get(f"/api/v1/fixtures/{self.fixture.id}").data
+        return d, next(l for l in d["home"]["starters"] if l["player_id"] == hole.id)
+
+    def test_the_office_vote_waits_while_the_round_is_still_being_played(self):
+        hole = self._field_a_hole()
+        d, line = self._hole_line(hole)
+        self.assertFalse(line.get("office"))
+        self.assertIsNone(line["fantavoto"])
+        self.assertEqual(d["home"]["sv_filled"], [])
+        # Il posto e' scoperto adesso, e il referto continua a dirlo: quel che
+        # aspetta e' il conto, non la constatazione.
+        self.assertEqual(d["home"]["unresolved_sv"], [hole.id])
+        self.assertTrue(d["office_deferred"])
+
+    def test_and_it_arrives_when_the_last_match_of_the_round_is_over(self):
+        """Stesso buco, ultimo fischio del turno: adesso la frase e' vera e il voto
+        d'ufficio la paga."""
+        hole = self._field_a_hole()
+        Match.objects.filter(competition_season=self.cs).update(
+            status=Match.STATUS_FINISHED)
+        d, line = self._hole_line(hole)
+        self.assertTrue(line["office"])
+        self.assertEqual(line["fantavoto"], 4.0)
+        self.assertEqual(d["home"]["sv_filled"], [hole.id])
+        self.assertFalse(d["office_deferred"])
+
+    def test_a_postponement_does_not_hold_the_whole_round_hostage(self):
+        """Il rinvio non e' «una partita ancora da giocare in giornata»: e' un caso
+        che la lega risolve a parte, e tenere sospesi i buchi di tutti per sei
+        settimane sarebbe peggio del problema."""
+        hole = self._field_a_hole()
+        Match.objects.filter(competition_season=self.cs).update(
+            status=Match.STATUS_FINISHED)
+        Match.objects.filter(id=self.later_match.id).update(
+            status=Match.STATUS_POSTPONED)
+        d, line = self._hole_line(hole)
+        self.assertTrue(line["office"])
+        self.assertFalse(d["office_deferred"])
+
     def test_the_frozen_payload_wins_when_there_is_one(self):
         FantasyFixtureDetail.objects.create(
             fixture=self.fixture, vfoot_home=1.0, vfoot_away=2.0,

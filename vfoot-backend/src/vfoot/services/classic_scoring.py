@@ -191,16 +191,34 @@ def _fill_unresolved(s_by: dict, unresolved: list[int], vote: float) -> list[int
     because only another keeper will do) is the difference between a bad weekend and
     a lost one. A league may decide that a hole is worth 3 or 4 rather than nothing.
 
-    UN SOLO caso resta deliberatamente scoperto: la riga la cui partita si sta
-    ancora GIOCANDO (``in_progress``). Mid-round every player on the pitch is
-    momentarily voteless, and filling those would show a team "leading" on eleven
-    office votes at the fifth minute, then sliding as the real ones arrive. A hole is
-    only a hole once the match that made it is over.
+    DUE CASI restano deliberatamente scoperti, e sono la stessa frase a due scale.
+
+    IL PRIMO e' la riga la cui partita si sta ancora GIOCANDO (``in_progress``).
+    Mid-round every player on the pitch is momentarily voteless, and filling those
+    would show a team "leading" on eleven office votes at the fifth minute, then
+    sliding as the real ones arrive. A hole is only a hole once the match that made
+    it is over.
 
     ``in_progress`` e non ``provisional``, che e' la stessa frase detta bene: fra il
     fischio finale e la conferma del fornitore passa un'ora, e in quell'ora la
     partita che ha fatto il buco E' finita — il buco e' un buco e il voto d'ufficio
     deve coprirlo, invece di arrivare con un'ora di ritardo.
+
+    IL SECONDO e' LA GIORNATA ANCORA APERTA (``round_open`` in ``score_team``,
+    deciso il 28/08/2026): finche' c'e' una partita del turno da giocare, il
+    rimpiazzo puo' ancora arrivare. Al sabato sera, con una sola partita finita, un
+    titolare senza voto non ha una panchina che possa coprirlo — nessun panchinaro
+    ha ancora giocato, quindi nessuno e' utilizzabile — e il buco veniva tappato
+    subito col voto d'ufficio. Il numero era vero per un'ora e falso per due
+    giorni: diceva «questo giocatore non sara' sostituito» proprio mentre il
+    sostituto doveva ancora scendere in campo, e alla domenica sera il cambio si
+    faceva lo stesso e il voto d'ufficio spariva. Un buco lo si conta a giornata
+    finita, che e' anche quando quella frase diventa vera.
+
+    Chi chiama decide (v. ``score_team``): la conclusione del turno afferma per
+    definizione che la giornata e' finita, quindi li' il riempimento e' sempre
+    acceso — anche con un rinvio ancora in mezzo, che e' un caso che l'admin
+    risolve a parte e non un motivo per tenere in ostaggio i buchi di tutti.
 
     IL POSTO DEL CEDUTO INVECE SI COPRE, dal 23/08/2026, e prima no. Chi vende un
     giocatore e non rischiera se lo ritrova in una formazione ereditata col posto
@@ -236,13 +254,21 @@ def _fill_unresolved(s_by: dict, unresolved: list[int], vote: float) -> list[int
 # --------------------------------------------------------------------------- #
 # Per-team scoring.                                                            #
 # --------------------------------------------------------------------------- #
-def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
+def score_team(starters: list[dict], bench: list[dict], rs: Ruleset,
+               round_open: bool = False) -> dict:
     """Score one fantasy team for one matchday.
 
     ``starters``/``bench`` are ordered lists of line dicts (bench in the manager's
     priority order). Mutates the line dicts (sets entered/replaced_by) like the seed
     does, so pass fresh copies. Returns a per-team dict; cross-team modifier
     application (e.g. subtract-from-opponent) happens later in ``resolve_fixture``.
+
+    ``round_open`` — LA GIORNATA VERA NON E' ANCORA FINITA: c'e' una partita del
+    turno da giocare, quindi la panchina puo' ancora coprire un buco e il voto
+    d'ufficio non si impone (v. ``_fill_unresolved``). Cambia SOLO quello: i cambi
+    si fanno lo stesso, sulle partite gia' finite, perche' quelli non affermano
+    niente sul resto del turno. Spento di default: chi conclude sta dicendo
+    proprio che il turno e' finito.
     """
     roles = {l["player_id"]: l["lineup_role"] for l in starters + bench}
     s_by = {l["player_id"]: l for l in starters}
@@ -279,7 +305,10 @@ def score_team(starters: list[dict], bench: list[dict], rs: Ruleset) -> dict:
         subs.append({"out": {"player_id": out_pid, "name": name[out_pid]},
                      "in": {"player_id": in_pid, "name": name[in_pid]}})
 
-    filled = _fill_unresolved(s_by, res.unresolved, rs.sv_office_vote)
+    # A giornata aperta il buco non e' ancora un buco: il sostituto puo' non aver
+    # ancora giocato. Resta in ``unresolved_sv`` — il posto e' scoperto ADESSO, ed e'
+    # vero — ma nessuno lo paga con un voto che potrebbe non arrivare mai.
+    filled = [] if round_open else _fill_unresolved(s_by, res.unresolved, rs.sv_office_vote)
 
     # Effective XI. An UNRESOLVED s.v. (fantavoto None) contributes nothing — it is
     # excluded from the sum (DEC-1), so the team simply sums fewer than 11 voti.

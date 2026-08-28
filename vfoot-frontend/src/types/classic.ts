@@ -225,6 +225,11 @@ export interface ClassicFixtureDetail {
   provisional?: boolean;
   /** Almeno una delle partite vere dietro questo tabellino è sul campo adesso. */
   in_progress?: boolean;
+  /** C'è un buco in formazione che il voto d'ufficio tapperà, ma non ancora: la
+   *  giornata vera non è finita e un panchinaro può ancora coprirlo. Senza dirlo,
+   *  un posto scoperto al sabato sera si legge come «qui il voto d'ufficio non
+   *  c'è». */
+  office_deferred?: boolean;
   /** Questo tabellino risponde a «se la giornata finisse adesso?» invece che
    *  «quanto sto facendo?». Cambia una cosa sola: il titolare con zero minuti in
    *  una partita in corso viene trattato come un senza voto definitivo — la

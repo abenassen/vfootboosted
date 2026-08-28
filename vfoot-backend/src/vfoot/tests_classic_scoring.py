@@ -264,6 +264,45 @@ class ClassicScoringTest(SimpleTestCase):
         # E il voto d'ufficio resta fuori anche qui: non serve, il posto e' coperto.
         self.assertEqual(team["sv_filled"], [])
 
+    def test_a_hole_waits_for_the_last_whistle_of_the_round(self):
+        """IL SABATO SERA. Con una sola partita giocata nessun panchinaro ha un
+        voto, quindi nessuno e' utilizzabile e ogni titolare senza voto risulta
+        «scoperto»: il voto d'ufficio arrivava subito, dicendo per due giorni una
+        cosa — «questo non sara' sostituito» — che alla domenica sera era falsa,
+        perche' il cambio si faceva e il voto d'ufficio spariva."""
+        rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(6.0)
+        starters[5] = line(6, "MID", 0, sv=True)
+        team = score_team(starters, [], rs, round_open=True)
+        self.assertEqual(team["sv_filled"], [])
+        self.assertEqual(team["base_total"], 60.0)
+        # Il posto e' scoperto ADESSO, e il referto continua a dirlo: quel che
+        # aspetta e' il conto da pagare, non la constatazione.
+        self.assertEqual(team["unresolved_sv"], [6])
+
+    def test_at_the_end_of_the_round_the_same_hole_is_paid(self):
+        """La stessa formazione, un'ora dopo l'ultimo fischio."""
+        rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(6.0)
+        starters[5] = line(6, "MID", 0, sv=True)
+        team = score_team(starters, [], rs, round_open=False)
+        self.assertEqual(team["sv_filled"], [6])
+        self.assertEqual(team["base_total"], 64.0)
+
+    def test_an_open_round_still_makes_the_substitutions_it_can(self):
+        """Il rinvio riguarda il voto d'ufficio e nient'altro: un panchinaro che ha
+        gia' giocato entra subito, perche' quel cambio non afferma niente sulle
+        partite che restano — al massimo lo ridecide un panchinaro migliore, che e'
+        gia' come funziona a giornata chiusa."""
+        rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)
+        starters = legal_xi(6.0)
+        starters[5] = line(6, "MID", 0, sv=True)
+        team = score_team(starters, [line(90, "MID", 7.0)], rs, round_open=True)
+        self.assertEqual([(s["out"]["player_id"], s["in"]["player_id"])
+                          for s in team["substitutions"]], [(6, 90)])
+        self.assertEqual(team["base_total"], 67.0)
+        self.assertEqual(team["unresolved_sv"], [])
+
     def test_a_pending_starter_is_not_a_hole(self):
         """Partita non ancora giocata: si aspetta (o la lega decide), non si tappa."""
         rs = Ruleset(defense_enabled=False, max_substitutions=5, sv_office_vote=4.0)

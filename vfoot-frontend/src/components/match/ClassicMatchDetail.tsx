@@ -441,7 +441,9 @@ export function ClassicMatchDetail({
                   Un titolare <b>s.v.</b> è rimpiazzato dal primo panchinaro utile (in ordine di panchina)
                   che mantiene la formazione valida.
                   {d.sv_office_vote
-                    ? ` Se non ce n’è, il buco vale ${fmt(d.sv_office_vote)} d’ufficio.`
+                    ? d.office_deferred
+                      ? ` Se non ce n’è, il buco varrà ${fmt(d.sv_office_vote)} d’ufficio a giornata finita: finché ci sono partite da giocare, un panchinaro può ancora coprirlo.`
+                      : ` Se non ce n’è, il buco vale ${fmt(d.sv_office_vote)} d’ufficio.`
                     : ' Se non ce n’è, il suo posto non vale niente.'}
                   {d.defense_bonus_mode ? (
                     <>
