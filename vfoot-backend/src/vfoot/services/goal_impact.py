@@ -75,6 +75,11 @@ DEFAULT_P95 = 1.6036
 # un assist resta quello di prima (0.1551 per presenza, misurato sulle 546 presenze
 # con assist della 25-26), quindi la modifica ridistribuisce e non gonfia.
 DEFAULT_ASSIST_BAND = (0.085, 0.198)
+# L'importanza MEDIA di un gol della stagione. Serve alla RICADUTA: un assist che
+# non si riesce ad agganciare a un gol non deve valere zero -- varrebbe zero solo
+# perche' non sappiamo, e "non lo so" non e' "non e' successo". Gli si da' il
+# credito del gol medio, che e' l'unica risposta onesta senza il legame.
+DEFAULT_MEAN_IMPORTANCE = 0.779
 
 
 def state_key(minute: int, goal_difference: int) -> str:
@@ -158,6 +163,23 @@ def assists_by_player(match) -> dict[int, list[dict]]:
         rec = by_goal.get((s["minute"], s["player_id"]))
         if rec is not None:
             assisted[s["assist_player_id"]].append(rec)
+
+    # LA RICADUTA. ``MatchAppearance.assists`` e' il conteggio del fornitore ed e'
+    # l'autorita' su QUANTI: se un assist non si e' agganciato a un gol -- partita
+    # importata prima del campo, minuto con due gol dello stesso lato, passatore
+    # non riconosciuto -- riceve comunque il credito del gol medio. Senza questo,
+    # un dato mancante si presenterebbe come un assist che non e' stato fatto, che
+    # e' il modo peggiore di sbagliare: silenzioso e a danno del giocatore.
+    from realdata.models import MatchAppearance
+
+    mean = mean_importance()
+    for pid, n in (MatchAppearance.objects.filter(match=match, assists__gt=0)
+                   .values_list("player_id", "assists")):
+        missing = int(n) - len(assisted.get(pid, ()))
+        for _ in range(max(0, missing)):
+            assisted[pid].append({"minute": None, "own_after": None,
+                                  "opp_after": None, "importance": mean,
+                                  "unlinked": True})
     return dict(assisted)
 
 
@@ -173,6 +195,10 @@ def assist_phrase(records) -> str:
     if len(recs) > 1:
         return f"{len(recs)} assist"
     r = recs[0]
+    if r.get("unlinked"):
+        # Sappiamo che l'assist c'e', non quale gol ha servito: si dice cosi' e
+        # basta, invece di inventare uno stato di partita.
+        return "un assist"
     own, opp, minute = r["own_after"], r["opp_after"], r["minute"]
     if own == 1 and opp == 0:
         what = "l'assist del gol che sblocca lo 0-0"
@@ -300,6 +326,12 @@ def fixed_assist_band() -> tuple[tuple[float, float], float]:
     data = fixed_goal_impact() or {}
     band = data.get("assist_band") or DEFAULT_ASSIST_BAND
     return (float(band[0]), float(band[1])), float(data.get("p95") or DEFAULT_P95)
+
+
+def mean_importance() -> float:
+    from vfoot.services.vote_reference import fixed_goal_impact
+    return float((fixed_goal_impact() or {}).get("mean_importance")
+                 or DEFAULT_MEAN_IMPORTANCE)
 
 
 def role_mean_assist_credit() -> dict[str, float]:

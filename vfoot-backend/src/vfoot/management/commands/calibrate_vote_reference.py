@@ -101,10 +101,14 @@ class Command(BaseCommand):
         self.stdout.write(
             f"   assist agganciati a un gol: {len(a_imps)} presenze   "
             f"banda {a_band}   medie di ruolo {a_means}")
+        flat_imps = [i for v in imps.values() for i in v if i is not None]
+        mean_imp = round(sum(flat_imps) / len(flat_imps), 4) if flat_imps else 0.0
         goal_impact = {"xp": xp, "band": list(band), "p95": p95,
                        "role_mean_credit": means,
                        "assist_band": list(a_band),
-                       "role_mean_assist_credit": a_means}
+                       "role_mean_assist_credit": a_means,
+                       # per la ricaduta degli assist non agganciati
+                       "mean_importance": mean_imp}
 
         self.stdout.write(f"fingerprint pesi: {weights_fingerprint()}")
 

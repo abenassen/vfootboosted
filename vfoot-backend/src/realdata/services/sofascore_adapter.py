@@ -789,6 +789,28 @@ def _ingest_match(
     # /lineups statistics, so they must be ingested as part of every import.
     cards = _ingest_cards(incidents_rows, match, home_ts, away_ts, player_cache)
 
+    # CHI HA SERVITO IL GOL, dagli stessi incidenti gia' in mano. Serve a graduare
+    # l'assist per impatto come il gol (v. vfoot.services.goal_impact): il ΔxP e'
+    # una proprieta' del gol, quindi senza questo legame l'assist tornerebbe a una
+    # tariffa piatta. La chiave e' (minuto, lato), l'unica che la mappa dei tiri e
+    # gli incidenti condividono; un minuto con due gol dello stesso lato si salta
+    # invece di indovinare.
+    assist_at = {}
+    for inc in incidents_rows:
+        if inc.get("incidentType") != "goal":
+            continue
+        key = (inc.get("time"), "home" if inc.get("isHome") else "away")
+        a = (inc.get("assist1") or {}).get("id")
+        assist_at[key] = None if key in assist_at else a
+    for row in shot_rows:
+        if not row.is_goal:
+            continue
+        ext = assist_at.get((row.minute, row.team_side))
+        if ext:
+            p = player_cache.get(str(ext))
+            if p is not None:
+                row.assist_player = p
+
     # MatchShot stays delete-and-reinsert: its unique constraint is CONDITIONAL
     # (~Q(external_id="")), which update_conflicts cannot key on, and it is ~25 rows
     # a match — nothing worth the complication.

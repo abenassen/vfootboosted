@@ -333,6 +333,7 @@
       0.2719,
       0.6345
     ],
+    "mean_importance": 0.7794,
     "p95": 1.6036,
     "role_mean_assist_credit": {
       "ATT": 0.0123,
