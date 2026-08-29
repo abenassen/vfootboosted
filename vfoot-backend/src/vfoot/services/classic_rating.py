@@ -385,7 +385,10 @@ DEFENSIVE_VALUE_SOURCE = "defensiveValueNormalized"
 # correlates 0.069 with it for defenders), which is why it has not simply been
 # added: it needs its own calibration, not a weight guessed here.
 PER90_WEIGHTS = {
-    "dribbles_won": 0.0252,
+    # 0.0252 -> 0.0132 il 29/08/2026, insieme a ``dribbles_attempted`` che sale
+    # della stessa cifra: e' UNA modifica sola in due righe, e separarle non ha
+    # senso. Il motivo sta li' sotto.
+    "dribbles_won": 0.0132,
     "duels_won": 0.0632,
     "duels_lost": -0.0631,          # the losing side of the contests we reward
     "dribbled_past": -0.0341,       # subset of duels_lost: beaten one-on-one is worse
@@ -440,7 +443,29 @@ PER90_WEIGHTS = {
     # them, >=3 failed -> 1.28), i.e. about one in four. The 79% figure above is
     # about possessionLostCtrl, an aggregate we do NOT carry — it is not this.
     # The overlap justifies a nudge; the ratio is what justifies the size.
-    "dribbles_attempted": -0.012,
+    # -0.012 -> 0.0000 il 29/08/2026. ``dribbles_attempted`` CONTIENE i riusciti
+    # (verificato: >= dribbles_won in 5.247 casi su 5.247), quindi alzarlo da solo
+    # avrebbe premiato anche chi il dribbling lo completa — che e' gia' pagato da
+    # ``dribbles_won`` e dal duello vinto. Alzandolo di 0.012 e abbassando
+    # ``dribbles_won`` della stessa cifra il netto del RIUSCITO resta identico
+    # (+0.0764) e a guadagnare e' solo il FALLITO.
+    #
+    # E il fallito passa da -0.0751 a -0.0631, cioe' esattamente quanto un duello
+    # perso qualunque. E' la frase che questo numero adesso dice: tentare un
+    # dribbling non e' di per se' ne' un merito ne' una colpa, conta il duello che
+    # vince o perde. Prima costava PIU' di un duello perso generico, perche' lo
+    # stesso evento veniva addebitato due volte — i dribbling falliti sono il 15,2%
+    # dei duelli persi della stagione e stanno tutti dentro ``duels_lost``.
+    #
+    # PERCHE' NON PIU' IN LA'. Il netto del riuscito e' invariante alla
+    # compensazione, quindi si potrebbe salire fino a rendere il fallito positivo;
+    # ma da +0.045 in su ``dribbles_won`` diventa NEGATIVO, e una tabella dei pesi
+    # che dice "completare un dribbling vale -0.02" e' falsa letta da sola anche se
+    # il netto torna. E l'accordo coi giudici cala in modo monotono a ogni passo
+    # (Redazione 0.6347 -> 0.6303, Statistico 0.6597 -> 0.6507, SofaScore 0.7826 ->
+    # 0.7694 fra 0 e +0.077), quindi fra i valori ammessi il piu' piccolo che fa il
+    # lavoro e' il migliore: qui costa -0.0003, -0.0011 e -0.0016.
+    "dribbles_attempted": 0.0000,
 }
 
 WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / breakdowns
