@@ -294,32 +294,38 @@ function ProjectionBar({
   );
 }
 
-/** Vero quando lo schermo è quello di un telefono, e le due squadre stanno
- *  affiancate in mezza colonna ciascuna.
+/** La larghezza sotto la quale una colonna del tabellino non tiene più una riga
+ *  su un piano solo: pastiglia del ruolo, nome, voto puro, bonus e fantavoto.
+ *  Misurata, non scelta — sotto i 260px il nome si riduce a tre lettere. */
+const NARROW_COLUMN = 260;
+
+/** Vero quando le due colonne affiancate sono strette, e la riga di ogni
+ *  giocatore va disposta su due piani invece che su uno.
  *
- *  640px è la soglia `sm` di Tailwind, la stessa che il resto dell'app usa per
- *  decidere che cosa è un telefono (v. la formazione verticale in FormationPage):
- *  due soglie diverse sarebbero due idee diverse di piccolo, e si vedrebbe nel
- *  punto in cui una scatta e l'altra no.
+ *  Si misura LA GRIGLIA, non la finestra. La stessa finestra dà colonne di
+ *  larghezza diversa a seconda di quello che le sta intorno: a 768px compare il
+ *  menu laterale da 240px e ogni colonna scende a 205px — più stretta che su un
+ *  telefono da 430 — quindi una soglia sulla finestra avrebbe dato la riga larga
+ *  proprio dove lo spazio era meno. E la stessa misura vale dentro l'iframe da
+ *  390px con cui si prova il telefono da un computer.
  *
- *  Si misura in JavaScript e non solo in CSS perché sotto quella soglia non
- *  cambia soltanto l'aspetto della riga: il dettaglio del voto smette di aprirsi
- *  sotto di essa e sale in un foglio ancorato in fondo allo schermo, e quello è
- *  un albero diverso, non una classe diversa. */
-function useCompactColumns(): boolean {
-  const query = '(max-width: 639px)';
-  const [compact, setCompact] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(query).matches,
+ *  Il valore iniziale è una supposizione (la finestra, prima che ci sia qualcosa
+ *  da misurare) corretta dall'osservatore al primo layout, prima che si veda. */
+function useNarrowColumns(): [boolean, (el: HTMLDivElement | null) => void] {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 640,
   );
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia(query);
-    const onChange = (e: MediaQueryListEvent) => setCompact(e.matches);
-    setCompact(mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-  return compact;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setNarrow(w < NARROW_COLUMN * 2 + 20);
+    });
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [node]);
+  return [narrow, setNode];
 }
 
 export function ClassicMatchDetail({
@@ -358,7 +364,7 @@ export function ClassicMatchDetail({
 }) {
   const d = fixture;
   const realMatch = variant === 'real';
-  const compact = useCompactColumns();
+  const [compact, gridRef] = useNarrowColumns();
   // Il turno non è ancora cominciato: quella che si sta guardando è l'ANTEPRIMA
   // delle formazioni, non un tabellino. Tutto ciò che qui sotto è condizionato da
   // `preview` sono numeri che esistono solo perché la somma di zero giocate fa
@@ -515,7 +521,7 @@ export function ClassicMatchDetail({
           — dal fornitore arriva già «V. Milinković-Savić» — ma togliere dalla riga
           le pastiglie lunghe e mandare i numeri d'appoggio sul piano di sotto
           (v. `PlayerRow` compatta). */}
-      <div className="grid grid-cols-2 items-start gap-1.5 sm:gap-4">
+      <div ref={gridRef} className={`grid grid-cols-2 items-start ${compact ? 'gap-1.5' : 'gap-4'}`}>
         <TeamColumn
           name={d.home_team}
           team={d.home}
@@ -587,14 +593,20 @@ function TeamColumn({
   const homeBonus =
     team.modifiers?.find((m) => m.key === 'home_advantage' && m.eligible)?.value ?? 0;
   return (
-    <Card className="p-2 sm:p-4">
-      {/* In mezza colonna il nome della squadra e il suo punteggio non stanno
+    <Card className={compact ? 'p-2' : 'p-4'}>
+      {/* In colonna stretta il nome della squadra e il suo punteggio non stanno
           sulla stessa riga: «Anomalia statistica F.C.» da solo la riempie. Si
           incolonnano, e il punteggio resta il primo numero che si incontra
           scendendo. */}
-      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
+      <div
+        className={
+          compact
+            ? 'flex flex-col gap-0.5'
+            : 'flex items-baseline justify-between gap-2'
+        }
+      >
         <SectionTitle className="truncate">{name}</SectionTitle>
-        <div className="flex items-center gap-1.5 text-[11px] text-ink-soft sm:text-sm">
+        <div className={`flex items-center gap-1.5 text-ink-soft ${compact ? 'text-[11px]' : 'text-sm'}`}>
           {preview ? (
             submitted ? (
               <span className="text-xs font-semibold text-good">✓ formazione inviata</span>
@@ -625,24 +637,22 @@ function TeamColumn({
         <div className="mt-0.5 text-[11px]">
           {team.defense.eligible ? (
             <span className="text-ink-soft">
-              🛡 <span className="hidden sm:inline">Modificatore difesa: </span>media{' '}
-              <b>{fmt(team.defense.avg ?? 0)}</b> →{' '}
+              🛡 {compact ? null : 'Modificatore difesa: '}media <b>{fmt(team.defense.avg ?? 0)}</b> →{' '}
               <b className="text-good">+{fmt(team.defense.bonus)}</b>
             </span>
           ) : (
-            /* In mezza colonna la regola che non è scattata occupa tre righe e
+            /* In colonna stretta la regola che non è scattata occupa tre righe e
                nessuno la sta leggendo adesso: resta il fatto (non attivo), e il
                perché lo dice il tocco prolungato — per esteso, dove c'è spazio. */
             <span className="text-ink-faint" title={defenseReason(team.defense)}>
-              🛡 <span className="hidden sm:inline">Modificatore difesa </span>non attivo
-              <span className="hidden sm:inline"> ({defenseReason(team.defense)})</span>
+              🛡 {compact ? 'non attivo' : `Modificatore difesa non attivo (${defenseReason(team.defense)})`}
             </span>
           )}
-          {team.defense.applied !== 0 ? (
+          {team.defense.applied !== 0 && !compact ? (
             /* Il conto per esteso è la verifica di un numero che sta già scritto
-               due righe sopra: in mezza colonna occupava una riga in più a
+               due righe sopra: in colonna stretta occupava una riga in più a
                squadra per non dire niente di nuovo. */
-            <span className="hidden text-ink-faint sm:inline">
+            <span className="text-ink-faint">
               {' '}
               · totale {fmt(team.base_total)} {team.defense.applied >= 0 ? '+' : '−'}
               {fmt(Math.abs(team.defense.applied))} = {fmt(team.total)}
@@ -675,7 +685,7 @@ function TeamColumn({
         </div>
       ) : (
         <>
-          <div className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-ink-faint sm:text-[11px]">
+          <div className={`mt-3 font-semibold uppercase tracking-wide text-ink-faint ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
             Titolari
           </div>
           <div className="divide-y">
@@ -684,7 +694,7 @@ function TeamColumn({
             ))}
           </div>
 
-          <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-ink-faint sm:text-[11px]">
+          <div className={`mt-4 font-semibold uppercase tracking-wide text-ink-faint ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
             Panchina{!realMatch && !compact ? ' · ordine = priorità' : ''}
           </div>
           <div className="divide-y">
@@ -935,6 +945,7 @@ function PlayerRow({
                   ) : null}
                   {verdict.long === verdict.short ? null : (
                     <span className="truncate" title={verdict.title}>
+                      {p.replaced_by || p.entered ? '· ' : null}
                       {verdict.long}
                     </span>
                   )}
