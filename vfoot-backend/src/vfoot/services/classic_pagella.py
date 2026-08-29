@@ -592,6 +592,8 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           # il numero la spiegazione non tornerebbe col voto.
                           goal_adjustment=row.get("goal_adjustment", 0.0),
                           goal_detail=row.get("goal_detail"),
+                          assist_adjustment=row.get("assist_adjustment", 0.0),
+                          assist_detail=row.get("assist_detail"),
                           # taken from the row that produced the vote, never
                           # recomputed here: the two must not be able to disagree
                           evidence_weight=row.get("evidence_weight", 1.0),

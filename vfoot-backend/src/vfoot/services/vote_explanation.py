@@ -743,6 +743,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             result_nudge: float = 0.0, red_adjustment: float = 0.0,
             own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
             goal_adjustment: float = 0.0, goal_detail: list | None = None,
+            assist_adjustment: float = 0.0, assist_detail: list | None = None,
             evidence_weight: float = 1.0, full: bool = False,
             ledger: bool = False,
             red_detail: dict | None = None, own_goal_detail: dict | None = None,
@@ -848,7 +849,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # result nudge, the red-card drop and the own-goal drop, then clamp back.
     # Stesso ordine dello scorer: il credito dei GOL entra nel voto grezzo (e' merito,
     # quindi la mitigazione del risultato deve poterlo temperare), poi il resto.
-    raw = max(VOTE_MIN, min(VOTE_MAX, raw + goal_adjustment))
+    raw = max(VOTE_MIN, min(VOTE_MAX, raw + goal_adjustment + assist_adjustment))
     subtotal = max(VOTE_MIN, min(VOTE_MAX,
                    raw + result_nudge + red_adjustment + own_goal_adjustment
                    + penalty_adjustment))
@@ -912,6 +913,13 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         contributions.insert(0, entry(goal_adjustment,
                                       goal_impact.goal_phrase(goal_detail),
                                       kind="goal"))
+    # L'ASSIST subito dopo il gol, e con la stessa forma: e' lo stesso evento visto
+    # dall'altro lato del passaggio, e dal 29/08/2026 vale quanto quel gol pesava.
+    if abs(assist_adjustment) >= 0.005 and assist_detail:
+        contributions.insert(1 if any(c.get("kind") == "goal" for c in contributions) else 0,
+                             entry(assist_adjustment,
+                                   goal_impact.assist_phrase(assist_detail),
+                                   kind="assist"))
     if abs(result_nudge) >= 0.005:
         contributions.append(entry(result_nudge,
                                    "adeguamento al risultato di squadra",

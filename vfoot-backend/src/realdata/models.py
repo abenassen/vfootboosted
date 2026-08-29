@@ -696,6 +696,19 @@ class MatchShot(models.Model):
     # penalty (situation=penalty, not is_goal) carries the -3 fantavoto malus and a
     # result-scaled voto-puro drop, neither of which shot_type (the outcome) can tell.
     situation = models.CharField(max_length=24, blank=True, default="")
+    # CHI L'HA SERVITO, per i gol assistiti. Serve a graduare l'assist come il gol
+    # (v. vfoot.services.goal_impact): il ΔxP e' una proprieta' del GOL, quindi
+    # senza sapere quale gol un giocatore ha servito l'assist resta un conteggio
+    # piatto. ``MatchAppearance.assists`` dice quanti ne ha fatti e basta: su una
+    # partita con piu' gol non si puo' risalire a quale, e sulla 25-26 solo il
+    # 28,6% degli assist sarebbe deducibile senza ambiguita'.
+    #
+    # Il fornitore ce l'ha (``assist1`` sull'incidente del gol) e i file sono gia'
+    # nella cache locale: 995 gol su 1490 lo portano, il resto sono gol non
+    # assistiti. Null = gol non assistito, oppure riga importata prima di questo
+    # campo — le due si distinguono solo ripassando il backfill.
+    assist_player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True,
+                                      blank=True, related_name="assisted_shots")
     provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES,
                                 default=PROVIDER_SOFASCORE)
     external_id = models.CharField(max_length=64, blank=True, default="")

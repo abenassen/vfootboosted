@@ -64,6 +64,18 @@ MIN_SAMPLES = 25
 DEFAULT_BAND = (0.2562, 0.5979)
 DEFAULT_P95 = 1.6036
 
+# La banda dell'ASSIST, sulla stessa importanza. Il ΔxP e' una proprieta' del GOL,
+# non di chi lo segna: il passaggio che manda in porta sullo 0-0 al 90' ha cambiato
+# la partita quanto la conclusione. Fino al 29/08/2026 il gol era graduato per
+# impatto e il passaggio che lo aveva reso possibile no — una asimmetria che si
+# vedeva a occhio nudo in Frosinone-Juventus, dove Bremer prendeva il credito del
+# gol vittoria e Conceicao, che gliel'aveva servito, un forfait di 0.153.
+#
+# Calibrata come quella del gol e contro lo stesso principio: il credito MEDIO di
+# un assist resta quello di prima (0.1551 per presenza, misurato sulle 546 presenze
+# con assist della 25-26), quindi la modifica ridistribuisce e non gonfia.
+DEFAULT_ASSIST_BAND = (0.085, 0.198)
+
 
 def state_key(minute: int, goal_difference: int) -> str:
     """La chiave dello stato. Stringa e non tupla perche' questa tabella viaggia
@@ -123,6 +135,59 @@ def goal_credit(importances, band=DEFAULT_BAND, p95: float = DEFAULT_P95) -> flo
         u = max(0.0, min(1.0, (imp or 0.0) / p95)) if p95 else 0.0
         total += lo + (hi - lo) * (u ** 0.5)
     return total
+
+
+def assists_by_player(match) -> dict[int, list[dict]]:
+    """{player_id: [un record per assist]} — gli stessi record dei gol serviti.
+
+    L'importanza e' quella del GOL: chi ha fatto il passaggio ha contribuito a
+    creare quello stato, e il numero e' gia' li'. Richiede ``assist_player`` sul
+    tiro (v. backfill_shot_assists): senza, un assist non si puo' legare al gol
+    che ha prodotto e questa funzione non restituisce niente per quella partita.
+    """
+    from realdata.models import MatchShot
+
+    by_goal = {}
+    for pid, recs in goals_by_player(match).items():
+        for r in recs:
+            by_goal[(r["minute"], pid)] = r
+    assisted = defaultdict(list)
+    for s in (MatchShot.objects.filter(match=match, is_goal=True)
+              .exclude(assist_player=None)
+              .values("player_id", "minute", "assist_player_id")):
+        rec = by_goal.get((s["minute"], s["player_id"]))
+        if rec is not None:
+            assisted[s["assist_player_id"]].append(rec)
+    return dict(assisted)
+
+
+def assist_credit(records, band=DEFAULT_ASSIST_BAND, p95: float = DEFAULT_P95) -> float:
+    """Come ``goal_credit``, sulla banda dell'assist."""
+    return goal_credit(importances_of(records), band, p95)
+
+
+def assist_phrase(records) -> str:
+    recs = list(records or [])
+    if not recs:
+        return ""
+    if len(recs) > 1:
+        return f"{len(recs)} assist"
+    r = recs[0]
+    own, opp, minute = r["own_after"], r["opp_after"], r["minute"]
+    if own == 1 and opp == 0:
+        what = "l'assist del gol che sblocca lo 0-0"
+    elif own == opp:
+        what = f"l'assist del pareggio ({own}-{opp})"
+    elif own < opp:
+        what = f"l'assist del gol che accorcia ({opp}-{own})"
+    else:
+        what = f"l'assist del {own}-{opp}"
+    if minute is not None:
+        what += f", al {int(minute)}'"
+    imp = r.get("importance")
+    if imp is not None and imp < DEAD_RUBBER:
+        what += " a partita ormai decisa"
+    return what
 
 
 def goals_by_player(match) -> dict[int, list[dict]]:
@@ -228,6 +293,18 @@ def fixed_band() -> tuple[tuple[float, float], float]:
     data = fixed_goal_impact() or {}
     band = data.get("band") or DEFAULT_BAND
     return (float(band[0]), float(band[1])), float(data.get("p95") or DEFAULT_P95)
+
+
+def fixed_assist_band() -> tuple[tuple[float, float], float]:
+    from vfoot.services.vote_reference import fixed_goal_impact
+    data = fixed_goal_impact() or {}
+    band = data.get("assist_band") or DEFAULT_ASSIST_BAND
+    return (float(band[0]), float(band[1])), float(data.get("p95") or DEFAULT_P95)
+
+
+def role_mean_assist_credit() -> dict[str, float]:
+    from vfoot.services.vote_reference import fixed_goal_impact
+    return (fixed_goal_impact() or {}).get("role_mean_assist_credit") or {}
 
 
 def role_mean_credit() -> dict[str, float]:

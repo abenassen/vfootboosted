@@ -185,7 +185,11 @@ TOTAL_WEIGHTS = {
     # 19% del credito di Dybala e il 28% di quello di Diouf: il merito resta padrone.
     # Sotto (0.02) si perde su ENTRAMBI i giudici — un assist e' pur sempre un
     # indizio, debole, che il passaggio era buono, e buttarlo via non compra purezza.
-    "assists": 0.03,
+    # USCITO DALL'INDICE il 29/08/2026, come ``shots_goal`` e per la stessa ragione:
+    # il suo valore dipende da quanto pesava il gol che ha servito, e quel numero
+    # non passa per lo shrinkage sui minuti (v. services/goal_impact). Tenuto a zero
+    # e non cancellato: la feature si legge ancora nel registro e nel tuner.
+    "assists": 0.0,
     # IL GOL NON E' PIU' UNA FEATURE DELL'INDICE. Il suo credito dipende ora da
     # QUANTO E' PESATO — lo stato di partita che ha cambiato — e non dai minuti
     # giocati, quindi non puo' passare per l'indice, che i minuti li scala tutti
@@ -394,6 +398,21 @@ PER90_WEIGHTS = {
     "dribbled_past": -0.0341,       # subset of duels_lost: beaten one-on-one is worse
                                     # ...ma SOLO per un difensore: v. ROLE_WEIGHTS
     "passes_opp_half": 0.0548,      # progression: a pass in the opponent half is worth more
+    # APPUNTO APERTO (29/08/2026), rimandato di proposito. ``duels_lost`` CONTIENE
+    # i duelli aerei persi: verificato su 10.950 presenze della 25-26 con zero
+    # violazioni su entrambi i lati (duels_lost >= aerials_lost, duels_won >=
+    # aerials_won + dribbles_won), residuo mai negativo, ed esattamente uguale in
+    # 950 casi su 5.829 — che con conteggi separati sarebbe una coincidenza assurda.
+    # Sono il 30,4% dei duelli persi della stagione.
+    #
+    # NON e' pero' lo stesso caso dei dribbling, e la differenza e' il motivo per
+    # cui qui non si e' toccato niente. Li' un tentativo fallito costava PIU' di un
+    # duello perso qualunque, il che era assurdo di suo; qui il peso e' gia' la
+    # parametrizzazione giusta — ``aerials_lost`` E' il sovrapprezzo dell'aereo
+    # rispetto a uno a terra, e -0.0314 potrebbe benissimo essere corretto: un
+    # pallone alto perso e' spesso in area, su un cross. Si sposta un peso solo e
+    # si misura l'accordo coi giudici, come per i dribbling. Finche' non lo si fa,
+    # non c'e' un difetto accertato: c'e' una domanda senza risposta.
     "aerials_won": 0.0318,
     "aerials_lost": -0.0314,
     "tackles_won": 0.0214,          # a committed, deliberate intervention
@@ -2463,6 +2482,9 @@ def voto_puro_for_match(match, reference: dict,
     # grezzo e non all'indice; ``goal_mean`` e' la media di ruolo da sottrarre,
     # senza la quale questo termine — che e' solo positivo — alzerebbe la media di
     # ogni ruolo che segna invece di ridistribuire.
+    assist_detail = goal_impact.assists_by_player(match)
+    assist_band, _ = goal_impact.fixed_assist_band()
+    assist_mean = goal_impact.role_mean_assist_credit()
     goal_credit_detail = goal_impact.goals_by_player(match)
     goal_band, goal_p95 = goal_impact.fixed_band()
     goal_credit = {
@@ -2470,6 +2492,8 @@ def voto_puro_for_match(match, reference: dict,
                                      goal_band, goal_p95)
         for pid, recs in goal_credit_detail.items()}
     goal_mean = goal_impact.role_mean_credit()
+    assist_credit = {pid: goal_impact.assist_credit(recs, assist_band, goal_p95)
+                     for pid, recs in assist_detail.items()}
     # the DETAILS, not just the magnitudes: the explanation has to be able to say
     # which sending-off and which kind of own goal produced the drop it reports
     red_info = red_card_details(match.id)
@@ -2509,7 +2533,8 @@ def voto_puro_for_match(match, reference: dict,
         # perche' il loro valore non passa per lo shrinkage sui minuti, che e' il
         # motivo per cui sono usciti dall'indice.
         gadj = goal_credit.get(pid, 0.0) - goal_mean.get(ref_key, 0.0)
-        raw = max(VOTE_MIN, min(VOTE_MAX, raw + gadj))
+        aadj = assist_credit.get(pid, 0.0) - assist_mean.get(ref_key, 0.0)
+        raw = max(VOTE_MIN, min(VOTE_MAX, raw + gadj + aadj))
         # Result mitigation: divergence-only, outfield only (the GK channel already
         # reflects the result). Recorded so the vote explanation can reconcile.
         nudge = (result_mitigation(raw, gd_on[(mid, pid)],
@@ -2545,6 +2570,8 @@ def voto_puro_for_match(match, reference: dict,
             # I gol con lo stato che hanno cambiato: la spiegazione ne ricava la
             # frase, e il dettaglio tiro per tiro li ritrova per nome.
             "goal_detail": goal_credit_detail.get(pid, []),
+            "assist_detail": assist_detail.get(pid, []),
+            "assist_adjustment": round(aadj, 3),
             "result_nudge": round(nudge, 3),
             "red_adjustment": round(radj, 3),
             "own_goal_adjustment": round(oadj, 3),

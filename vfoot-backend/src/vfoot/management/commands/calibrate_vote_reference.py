@@ -92,8 +92,19 @@ class Command(BaseCommand):
             f"residuo sga+volume {residual:+.4f}   bersaglio "
             f"{gic.TARGET_TOTAL_25_26:+.4f}")
         self.stdout.write(f"   banda {band}  p95 {p95}  medie di ruolo {means}")
+        # L'ASSIST, sulla stessa importanza e con la stessa disciplina: banda
+        # risolta contro il credito medio di prima, media di ruolo da sottrarre.
+        a_imps = gic.season_assist_importances(cs.id, xp)
+        a_scoring = {k: v for k, v in a_imps.items() if k in pop_keys}
+        a_band = gic.solve_assist_band(a_imps, a_scoring)
+        a_means = gic.role_mean_credit(population, a_imps, a_band, p95)
+        self.stdout.write(
+            f"   assist agganciati a un gol: {len(a_imps)} presenze   "
+            f"banda {a_band}   medie di ruolo {a_means}")
         goal_impact = {"xp": xp, "band": list(band), "p95": p95,
-                       "role_mean_credit": means}
+                       "role_mean_credit": means,
+                       "assist_band": list(a_band),
+                       "role_mean_assist_credit": a_means}
 
         self.stdout.write(f"fingerprint pesi: {weights_fingerprint()}")
 

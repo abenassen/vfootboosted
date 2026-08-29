@@ -29,6 +29,10 @@ from vfoot.services import goal_impact as gi
 TARGET_TOTAL_25_26 = 1.0160
 # La forbice voluta dall'analista, in punti di voto, PRIMA del riscalamento.
 BAND_SHAPE = (0.30, 0.70)
+# Il credito medio di una PRESENZA con assist col modello che aveva ``assists``
+# nell'indice: 546 presenze della 25-26. Stesso ruolo del bersaglio del gol —
+# l'assist si ridistribuisce per impatto, non si gonfia.
+TARGET_ASSIST = 0.1551
 
 
 def season_timelines(competition_season_id: int):
@@ -124,6 +128,60 @@ def solve_band(all_importances, scoring_appearances, residual_mean: float,
                      for imps in scoring_appearances.values()])
     scale = (target_total - residual_mean) / unit if unit else 1.0
     return (round(BAND_SHAPE[0] * scale, 4), round(BAND_SHAPE[1] * scale, 4)), round(p95, 4)
+
+
+def season_assist_importances(competition_season_id: int, xp: dict):
+    """{(match_id, player_id): [ΔxP dei gol che ha servito]}.
+
+    L'importanza e' quella del GOL servito: richiede ``MatchShot.assist_player``
+    (v. backfill_shot_assists). Senza quel campo il dizionario esce vuoto e la
+    banda ricade sul valore di fallback, che e' meglio di una banda tarata su tre
+    assist.
+    """
+    from realdata.models import Match, MatchAppearance, MatchShot
+    from collections import defaultdict as dd
+
+    sides = {(a["match_id"], a["player_id"]): a["side"] for a in
+             MatchAppearance.objects
+             .filter(match__competition_season_id=competition_season_id)
+             .values("match_id", "player_id", "side")}
+    finished = set(Match.objects
+                   .filter(competition_season_id=competition_season_id,
+                           status=Match.STATUS_FINISHED)
+                   .values_list("id", flat=True))
+    per_match = dd(list)
+    for s in (MatchShot.objects
+              .filter(match__competition_season_id=competition_season_id, is_goal=True)
+              .values("match_id", "player_id", "minute", "team_side",
+                      "assist_player_id")):
+        if s["match_id"] in finished and s["minute"] is not None:
+            per_match[s["match_id"]].append(s)
+    out = dd(list)
+    for mid, shots in per_match.items():
+        shots.sort(key=lambda s: s["minute"])
+        for i, shot in enumerate(shots):
+            pid, apid = shot["player_id"], shot["assist_player_id"]
+            if not pid or not apid or sides.get((mid, pid)) != shot["team_side"]:
+                continue
+            own = sum(1 for e in shots[:i] if e["team_side"] == shot["team_side"])
+            opp = sum(1 for e in shots[:i] if e["team_side"] != shot["team_side"])
+            out[(mid, apid)].append(gi.importance(xp, shot["minute"], own - opp))
+    return dict(out)
+
+
+def solve_assist_band(all_importances, assisting_appearances,
+                      target: float = TARGET_ASSIST):
+    """La banda dell'assist. Stessa forma di ``solve_band``, senza residuo: il
+    passaggio non porta con se' un blocco di feature come il tiro del gol, quindi
+    il bersaglio e' direttamente il credito medio."""
+    flat = sorted(i for imps in all_importances.values() for i in imps if i is not None)
+    if not flat or not assisting_appearances:
+        return gi.DEFAULT_ASSIST_BAND
+    p95 = flat[int(0.95 * len(flat))]
+    unit = st.fmean([gi.goal_credit(imps, BAND_SHAPE, p95)
+                     for imps in assisting_appearances.values()])
+    scale = target / unit if unit else 1.0
+    return (round(BAND_SHAPE[0] * scale, 4), round(BAND_SHAPE[1] * scale, 4))
 
 
 def role_mean_credit(population, importances_by_appearance, band, p95) -> dict:
