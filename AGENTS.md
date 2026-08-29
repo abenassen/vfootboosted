@@ -257,6 +257,39 @@ Agents must NEVER:
 
 ------------------------------------------------------------------------
 
+## Telling users what changed (ProductNews)
+
+Quando un cambiamento tocca quello che gli utenti VEDONO — i voti, come si
+leggono, una regola di gioco, una pagina nuova — l'agente **propone la notizia
+insieme alla modifica**, senza aspettare che gliela si chieda. Il canale è
+`ProductNews`: una striscia in cima alla pagina che si scrive dall'admin di
+Django, e che ogni utente si toglie da solo una volta letta (il segnalibro lo
+manda il client, mai il server).
+
+Non ogni commit merita una striscia. Merita una striscia il cambiamento che, se
+non annunciato, fa credere a qualcuno che il sito si sia rotto: un voto che si
+muove, un bottone che sparisce, un conto che torna diverso da ieri. Una
+correzione interna che nessuno può notare non ne ha bisogno — e una striscia di
+troppo insegna a ignorare la prossima, che è il modo di rendere inutile il canale.
+
+Come si scrive, e perché è più difficile di come sembra:
+
+-   **il titolo È il messaggio** (80 caratteri), perché su un telefono spesso è
+    l'unica riga che qualcuno legge davvero. «Voti aggiornati: un gol vale quanto
+    ha cambiato la partita», non «Aggiornamento del 29 agosto»;
+-   **il corpo sono una o due frasi** (280 caratteri). Se ne servono di più, la
+    novità è troppo grande per una striscia e vuole una pagina;
+-   **si scrive da chi legge, non da chi ha fatto la modifica**: «non conta più da
+    quanti minuti eri in campo», non «rimosso lo shrinkage da `shots_goal`». Il
+    nome di una feature non è mai una notizia;
+-   **si accende dopo il deploy** (`active`), non prima: il testo si prepara con
+    calma e si annuncia quando la cosa annunciata esiste davvero.
+
+E la si propone all'utente PRIMA di scriverla in produzione: è l'unica cosa in
+tutto il progetto che parla a tutti insieme, e va letta da lui prima che parta.
+
+------------------------------------------------------------------------
+
 ## Priorities
 
 1.  Mathematical coherence.
