@@ -57,6 +57,7 @@ from realdata.models import (
     MatchShot,
     Player,
     PlayerAlias,
+    PlayerTeamStint,
     PlayerZoneFeature,
     PROVIDER_SOFASCORE,
     SIDE_AWAY,
@@ -356,31 +357,95 @@ def _should_set_dob(existing, new) -> bool:
     return existing is None or is_placeholder_dob(existing)
 
 
-def _adopt_by_identity(name: str, dob) -> Player | None:
+def _same_name(player: Player, nm: str) -> bool:
+    return norm_name(player.full_name) == nm or norm_name(player.short_name) == nm
+
+
+def _already_sofascore(players: list[Player]) -> set[int]:
+    """Chi, fra questi, ha GIA' un'identita' SofaScore sua.
+
+    La propria (arrivato da qui) o un alias VERO. L'alias SINTETICO del simulatore
+    non conta: ha la forma di un id vero, non nomina nessuno fuori di qui, e
+    contarlo era quello che impediva le adozioni proprio dei giocatori arrivati da
+    Transfermarkt — cioe' tutti quelli per cui l'adozione esiste.
+    """
+    taken = {p.id for p in players
+             if p.external_source == PROVIDER and p.external_id}
+    for pid, alias in (PlayerAlias.objects
+                       .filter(source=PROVIDER, player_id__in=[p.id for p in players])
+                       .values_list("player_id", "alias")):
+        if not is_synthetic_sofascore_id(alias):
+            taken.add(pid)
+    return taken
+
+
+def _adopt_by_identity(name: str, dob, team_season: TeamSeason | None = None) -> Player | None:
     """Find an EXISTING canonical player (from another provider) for this human.
 
     Enforces "one Player across providers": before minting a new SofaScore row,
     check whether this person already exists — e.g. a Transfermarkt-sourced squad
-    member who just made their debut. Matched on (exact normalised name + DOB);
-    DOB is required (precise, and StatsBomb rows carry none so they're untouched),
-    and the match must be unique. The SofaScore id is then attached as an alias so
-    future imports resolve straight to the same entity.
+    member who just made their debut. The SofaScore id is then attached as an alias
+    so future imports resolve straight to the same entity.
+
+    Due prove, e la seconda esiste perche' la prima da sola lasciava passare i
+    doppioni. La prima e' GLOBALE e chiede tutto: nome normalizzato uguale E data
+    di nascita uguale. La seconda si restringe alla ROSA della squadra per cui il
+    giocatore e' appena sceso in campo, e li' ne basta UNA delle due:
+
+    * il nome, perche' dentro venticinque persone un nome completo identico e' gia'
+      un'identificazione — e le due date sono spesso diverse: un giorno di scarto,
+      il 1 gennaio segnaposto, o giorno e mese scambiati (Giacomo Calo': 5 febbraio
+      su Transfermarkt, 2 maggio su SofaScore);
+    * la data, perche' lo stesso nome i due fornitori lo scrivono in modi diversi
+      ('Manga Foe Ondoa' contro 'Foe Ondoa', 'Alvin Obinna Okoro' contro
+      'Alvin Okoro').
+
+    In entrambi i casi la corrispondenza dev'essere UNICA dentro la rosa: due
+    omonimi, o due nati lo stesso giorno, e non si adotta nessuno. L'asimmetria e'
+    voluta — un aggancio sbagliato fonde due persone per sempre, un doppione lo si
+    fonde dopo (``merge_duplicate_players``).
     """
-    if not dob:
-        return None
     nm = norm_name(name)
-    if not nm:
+    if dob and nm:
+        cands = [c for c in Player.objects.filter(date_of_birth=dob)
+                                          .exclude(external_source=PROVIDER)
+                 if _same_name(c, nm)]
+        taken = _already_sofascore(cands) if cands else set()
+        cands = [c for c in cands if c.id not in taken]
+        if len(cands) == 1:
+            return cands[0]
+    if team_season is None:
         return None
-    cands = [
-        c for c in Player.objects.filter(date_of_birth=dob).exclude(external_source=PROVIDER)
-        if (norm_name(c.full_name) == nm or norm_name(c.short_name) == nm)
-        and not PlayerAlias.objects.filter(player=c, source=PROVIDER).exists()
-    ]
-    return cands[0] if len(cands) == 1 else None
+    # La rosa: chi risulta tesserato in questa squadra in questa stagione, anche chi
+    # se n'e' andato — lo stint si chiude quando Transfermarkt non lo elenca piu',
+    # e chi ha giocato la prima giornata e poi e' partito quella partita l'ha
+    # giocata davvero. A proteggere e' l'unicita', non la freschezza.
+    squad = [st.player for st in
+             PlayerTeamStint.objects.filter(team_season=team_season)
+             .select_related("player")
+             if st.player.external_source != PROVIDER]
+    if not squad:
+        return None
+    taken = _already_sofascore(squad)
+    squad = [p for p in squad if p.id not in taken]
+    if nm:
+        by_name = [p for p in squad if _same_name(p, nm)]
+        if by_name:
+            # Omonimi nella stessa rosa: nessuno dei due e' identificato, e
+            # sceglierne uno a caso e' il danno che questa funzione deve evitare.
+            return by_name[0] if len(by_name) == 1 else None
+    # Il 1 gennaio e' il segnaposto di SofaScore: fa combaciare fra loro tutti
+    # quelli di cui non si sa la data, che e' il contrario di identificarli.
+    if dob and not is_placeholder_dob(dob):
+        by_dob = [p for p in squad if p.date_of_birth == dob]
+        if len(by_dob) == 1:
+            return by_dob[0]
+    return None
 
 
 def _player(player_id: Any, name: str, short_name: str,
-            cache: dict[str, Player], dob_ts: Any = None) -> Player:
+            cache: dict[str, Player], dob_ts: Any = None,
+            team_season: TeamSeason | None = None) -> Player:
     ext_id = str(player_id)
     dob = _dob_from_ts(dob_ts)
     if ext_id in cache:
@@ -395,7 +460,7 @@ def _player(player_id: Any, name: str, short_name: str,
     player = (Player.objects.filter(external_source=PROVIDER, external_id=ext_id).first()
               or _player_by_alias(ext_id))
     if player is None:
-        adopted = _adopt_by_identity(name, dob)
+        adopted = _adopt_by_identity(name, dob, team_season)
         if adopted is not None:
             PlayerAlias.objects.get_or_create(
                 player=adopted, source=PROVIDER, alias=ext_id)
@@ -536,11 +601,12 @@ def _ingest_cards(incidents_rows, match, home_ts, away_ts, player_cache) -> int:
         pid = pdata.get("id")
         if pid is None:
             continue
+        side = SIDE_HOME if inc.get("isHome") else SIDE_AWAY
         player = _player(pid, pdata.get("name", ""), pdata.get("shortName", ""),
-                         player_cache, dob_ts=pdata.get("dateOfBirthTimestamp"))
+                         player_cache, dob_ts=pdata.get("dateOfBirthTimestamp"),
+                         team_season=home_ts if side == SIDE_HOME else away_ts)
         minute = int(inc.get("time") or 0)
         cls = inc.get("incidentClass")
-        side = SIDE_HOME if inc.get("isHome") else SIDE_AWAY
         rows.append(MatchDisciplinaryEvent(
             match=match, player=player,
             team_season=home_ts if side == SIDE_HOME else away_ts,
@@ -647,13 +713,14 @@ def _ingest_match(
         side = SIDE_HOME if row.get("side") == "home" else SIDE_AWAY
         name = _first(row, "name", "shortName") or ""
         short_name = _first(row, "shortName") or ""
+        team_ts = home_ts if side == SIDE_HOME else away_ts
         player = _player(pid_raw, name, short_name, player_cache,
-                         dob_ts=_first(row, "dateOfBirthTimestamp"))
+                         dob_ts=_first(row, "dateOfBirthTimestamp"),
+                         team_season=team_ts)
 
         minutes = int(_stat(row, "minutesPlayed"))
         substitute = _first(row, "substitute")
         is_starter = (not bool(substitute)) if substitute is not None else False
-        team_ts = home_ts if side == SIDE_HOME else away_ts
         raw_stats = {k: v for k, v in row.items()
                      if isinstance(v, (int, float, bool))}
         # Keep the coarse lineup position (F/M/D/G, a string) too: it disambiguates
@@ -765,7 +832,8 @@ def _ingest_match(
             continue
         zone = _zone_key(norm[0], norm[1], zone_cols, zone_rows)
         player = _player(pdata["id"], pdata.get("name", ""), pdata.get("shortName", ""),
-                         player_cache, dob_ts=pdata.get("dateOfBirthTimestamp"))
+                         player_cache, dob_ts=pdata.get("dateOfBirthTimestamp"),
+                         team_season=home_ts if side == SIDE_HOME else away_ts)
         inc(player.id, side, zone, "shots", 1.0)
         inc(player.id, side, zone, "xg_shots", _num(shot.get("xg")))
         # The event itself: the zone aggregate loses the minute, and anything that

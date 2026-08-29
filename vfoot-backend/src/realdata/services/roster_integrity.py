@@ -141,3 +141,110 @@ def overlapping_stints(competition_season_id: int, *,
     found.sort(key=lambda o: (o.first[1] or date.min, o.second[1] or date.min),
                reverse=True)
     return found[:limit] if limit else found
+
+
+# -- identita' spezzata in due righe -------------------------------------------
+#
+# L'ALTRA contraddizione che il modello permette e che nessun vincolo puo'
+# vietare: la stessa persona scritta due volte, una per fornitore.
+#
+# Come nasce. L'import rose di Transfermarkt crea la riga di chi in Serie A non
+# ha ancora giocato — e quella riga e' quella VERA per l'applicazione: ha il
+# tesseramento, il valore, il ruolo congelato, e se qualcuno l'ha comprato lo
+# slot in rosa. Poi il giocatore esordisce, SofaScore lo manda dentro col suo id,
+# e l'adozione per identita' deve riconoscerlo. Quando non ci riesce conia una
+# SECONDA riga, e da quell'istante le due meta' non si parlano piu': la meta'
+# comprata non ha nessuna presenza e resta senza voto per sempre, la meta' che
+# gioca non e' in nessun listone e non e' di nessuno.
+#
+# Perche' serve un GUARDIANO e non basta l'adozione. L'adozione e' un'euristica
+# su dati di due fornitori che non concordano — Giacomo Calo' e' nato il 5
+# febbraio su Transfermarkt e il 2 maggio su SofaScore, giorno e mese scambiati —
+# e un'euristica prudente sbaglia per difetto: preferisce lasciare un doppione
+# piuttosto che fondere due persone diverse, che e' irreversibile. Il doppione
+# che ne resta non fallisce in modo rumoroso: nessuna eccezione, nessuna riga
+# rossa, solo un giocatore che non prende mai voto. Questo e' l'unico posto da
+# cui qualcuno puo' venirlo a sapere.
+
+
+@dataclass(frozen=True)
+class SplitIdentity:
+    """Due righe ``Player`` che sono, con ogni evidenza, la stessa persona."""
+
+    keeper_id: int          # la riga del listone: tesserata, comprabile, comprata
+    stray_id: int           # la riga del fornitore delle partite: gioca, non esiste
+    name: str
+    evidence: str           # su che cosa combaciano
+    club: str
+    appearances: int        # quante partite sono finite sulla riga sbagliata
+
+    def describe(self) -> str:
+        return (f"{self.name} ({self.club}): id {self.keeper_id} e' nel listone, "
+                f"id {self.stray_id} ha giocato {self.appearances} partite "
+                f"[{self.evidence}]")
+
+
+def _norm_names(player) -> set[str]:
+    from realdata.services.identity import norm_name
+    return {norm_name(player.full_name), norm_name(player.short_name)} - {""}
+
+
+def split_identities(provider: str = "sofascore") -> list[SplitIdentity]:
+    """Le identita' spezzate: una riga che gioca, una riga che e' tesserata.
+
+    Si cerca DENTRO la rosa del club per cui la riga del fornitore e' scesa in
+    campo, e li' basta una delle due prove — il nome (i due fornitori scrivono
+    date diverse) o la data di nascita (i due fornitori scrivono nomi diversi:
+    'Manga Foe Ondoa' contro 'Foe Ondoa'). E' la stessa regola dell'adozione in
+    ``sofascore_adapter._adopt_by_identity``, di proposito: cosi' questo elenco e'
+    esattamente cio' che l'adozione ha mancato, e non un secondo criterio che
+    contraddice il primo.
+
+    La corrispondenza dev'essere UNICA nella rosa. Due omonimi, o due nati lo
+    stesso giorno, e la coppia non si riporta: qui si guarda, ma chi legge fonde,
+    e una fusione sbagliata non si disfa.
+    """
+    from realdata.models import MatchAppearance, Player, PlayerAlias
+    from realdata.services.identity import is_placeholder_dob, is_synthetic_sofascore_id
+
+    played: dict[int, set[int]] = {}
+    counts: dict[int, int] = {}
+    for pid, ts_id in (MatchAppearance.objects
+                       .values_list("player_id", "team_season_id")):
+        played.setdefault(pid, set()).add(ts_id)
+        counts[pid] = counts.get(pid, 0) + 1
+
+    squads: dict[int, list] = {}
+    clubs: dict[int, str] = {}
+    for st in PlayerTeamStint.objects.select_related("player", "team_season__team"):
+        squads.setdefault(st.team_season_id, []).append(st.player)
+        clubs[st.team_season_id] = str(st.team_season.team)
+
+    # Chi ha gia' un id del fornitore suo non e' una meta' di niente.
+    settled = {pid for pid, alias in
+               PlayerAlias.objects.filter(source=provider)
+               .values_list("player_id", "alias")
+               if not is_synthetic_sofascore_id(alias)}
+
+    found: list[SplitIdentity] = []
+    for stray in Player.objects.filter(external_source=provider):
+        if stray.id not in played:
+            continue
+        names = _norm_names(stray)
+        for ts_id in played[stray.id]:
+            squad = [p for p in squads.get(ts_id, [])
+                     if p.external_source != provider and p.id not in settled]
+            cands = [p for p in squad if _norm_names(p) & names]
+            evidence = "stesso nome nella stessa rosa"
+            if not cands and stray.date_of_birth and not is_placeholder_dob(stray.date_of_birth):
+                cands = [p for p in squad if p.date_of_birth == stray.date_of_birth]
+                evidence = "stessa data di nascita nella stessa rosa"
+            if len(cands) == 1:
+                found.append(SplitIdentity(
+                    keeper_id=cands[0].id, stray_id=stray.id,
+                    name=cands[0].full_name, evidence=evidence,
+                    club=clubs.get(ts_id, "?"),
+                    appearances=counts.get(stray.id, 0)))
+                break
+    found.sort(key=lambda s: (-s.appearances, s.name))
+    return found

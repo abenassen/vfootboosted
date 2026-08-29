@@ -391,6 +391,32 @@ def _check_roster_overlap(health: Health, now) -> None:
                    players=[o.player_name for o in overlaps])
 
 
+def _check_split_identities(health: Health, now) -> None:
+    """La stessa persona scritta due volte, una per fornitore.
+
+    Il guardiano di una cosa che, senza di lui, non si scopre: la meta' comprata
+    all'asta non prende voto e la meta' che gioca non e' di nessuno, e nessuna
+    delle due solleva un errore. Se ne accorge un utente, settimane dopo,
+    guardando una pagella in cui il suo giocatore manca.
+
+    ``warn`` e non ``alarm`` per due ragioni. La prima e' che serve una mano: la
+    fusione (``manage.py merge_duplicate_players``) e' irreversibile, quindi la
+    decide una persona che ha guardato la coppia, non un timer. La seconda e' che
+    il rilevatore e' prudente per costruzione — chiede l'unicita' dentro la rosa —
+    e quindi puo' anche tacere: il rosso lo si tiene per cio' che e' certo.
+    """
+    splits = roster_integrity.split_identities()
+    if not splits:
+        return
+    health.add("warn", "player:split-identity",
+               f"{len(splits)} giocatori risultano spezzati in due righe: una nel "
+               f"listone (comprabile, senza mai una presenza) e una che gioca "
+               f"davvero. Finche' dura, chi li ha in rosa non ne prende il voto. "
+               f"Si riuniscono con `manage.py merge_duplicate_players` dopo aver "
+               f"guardato le coppie. Il primo: {splits[0].describe()}.",
+               players=[s.describe() for s in splits[:10]])
+
+
 def _check_shape(health: Health, now) -> None:
     report = shape_canary.run(now=now)
     for finding in report.findings:
@@ -418,6 +444,7 @@ def report(*, now=None, skip_shape: bool = False) -> Health:
     _check_calendar_freshness(health, now)
     _check_pending_digests(health, now)
     _check_roster_overlap(health, now)
+    _check_split_identities(health, now)
     if not skip_shape:
         _check_shape(health, now)
     return health
