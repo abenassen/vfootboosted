@@ -236,6 +236,9 @@ def goals_by_player(match) -> dict[int, list[dict]]:
     v. own_goal_adjustments).
     """
     from realdata.models import MatchAppearance, MatchShot
+    # Locale: ``classic_rating`` importa questo modulo in cima, quindi la
+    # dipendenza puo' andare in un verso solo senza chiudere il cerchio.
+    from vfoot.services.classic_rating import is_own_goal
 
     xp = fixed_xp_table()
     if not xp:
@@ -244,12 +247,17 @@ def goals_by_player(match) -> dict[int, list[dict]]:
                    .values_list("player_id", "side"))
     timeline = sorted(
         (s for s in MatchShot.objects.filter(match=match, is_goal=True)
-         .values("player_id", "minute", "team_side") if s["minute"] is not None),
+         .values("player_id", "minute", "team_side", "shot_type")
+         if s["minute"] is not None),
         key=lambda s: s["minute"])
     out: dict[int, list[float | None]] = defaultdict(list)
     for i, shot in enumerate(timeline):
         pid = shot["player_id"]
-        if not pid or side_of.get(pid) != shot["team_side"]:
+        # ``is_own_goal``, non il confronto scritto a mano: la stessa domanda si
+        # pone in cinque posti di questo codice e fino al 30/08/2026 ognuno se la
+        # rispondeva da solo — due su cinque sbagliando.
+        if not pid or is_own_goal(shot["shot_type"], shot["team_side"],
+                                  side_of.get(pid)):
             continue
         own = sum(1 for e in timeline[:i] if e["team_side"] == shot["team_side"])
         opp = sum(1 for e in timeline[:i] if e["team_side"] != shot["team_side"])

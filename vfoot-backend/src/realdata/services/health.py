@@ -86,6 +86,10 @@ EGRESS_POOLS = {
 }
 BLIND_STREAK = 5          # consecutive ticks owed work that imported nothing
 SETTLE_AFTER = timedelta(hours=4)   # from kickoff, by when a match should be ready
+# Quanto indietro guardare per il campo xGOT mancante. Due settimane: abbastanza da
+# vedere un ritmo (una giornata sono dieci partite), abbastanza poco da non
+# rileggere mezza stagione a ogni report.
+MISSING_XGOT_WINDOW = timedelta(days=14)
 
 
 @dataclass(frozen=True)
@@ -417,6 +421,41 @@ def _check_split_identities(health: Health, now) -> None:
                players=[s.describe() for s in splits[:10]])
 
 
+def _check_missing_xgot(health: Health, now) -> None:
+    """Il fornitore ha smesso di mandare ``expectedGoalsOnTarget`` per qualcuno.
+
+    Il buco e' gia' tappato d'ufficio con l'xGOT della mappa dei tiri (v.
+    ``_fill_missing_xgot``), quindi nessun voto e' sbagliato mentre questo avviso
+    e' acceso: la riparazione c'e' proprio perche' il caso e' raro e silenzioso —
+    UNA riga su 11903 in tutta la 25-26 — e senza di lei il modello leggeva un gol
+    come un'occasione fallita.
+
+    Quello che il canarino sorveglia e' il RITMO. Una riga ogni tanto e' il
+    fornitore che salta un campo; venti in una giornata sono un cambio di payload,
+    e allora la riparazione sta reggendo da sola una cosa che va guardata alla
+    fonte. ``warn`` e non ``alarm``: non c'e' niente di rotto da rimettere a posto
+    di corsa, c'e' da sapere che sta succedendo.
+    """
+    from vfoot.services.classic_rating import missing_xgot_rows   # realdata non dipende da vfoot
+
+    recent = list(Match.objects.filter(
+        data_ready=True,
+        kickoff__gt=now - MISSING_XGOT_WINDOW).values_list("id", flat=True))
+    if not recent:
+        return
+    rows = missing_xgot_rows(recent)
+    if not rows:
+        return
+    health.add("warn", "provider:missing-xgot",
+               f"{len(rows)} presenze delle ultime {_human(MISSING_XGOT_WINDOW)} "
+               f"senza expectedGoalsOnTarget dal fornitore: l'xGOT e' stato messo "
+               f"d'ufficio dalla mappa dei tiri (il piu' grosso "
+               f"{max(rows.values()):.2f}), quindi i voti sono giusti. Se il numero "
+               f"cresce, il campo va guardato alla fonte e non tappato qui.",
+               rows=[f"partita {m}, giocatore {p}: {v:.3f}"
+                     for (m, p), v in sorted(rows.items(), key=lambda kv: -kv[1])[:10]])
+
+
 def _check_shape(health: Health, now) -> None:
     report = shape_canary.run(now=now)
     for finding in report.findings:
@@ -445,6 +484,7 @@ def report(*, now=None, skip_shape: bool = False) -> Health:
     _check_pending_digests(health, now)
     _check_roster_overlap(health, now)
     _check_split_identities(health, now)
+    _check_missing_xgot(health, now)
     if not skip_shape:
         _check_shape(health, now)
     return health

@@ -1511,14 +1511,12 @@ def own_goal_details(match_id: int) -> dict:
     cannot measure). The vote drop differs by a factor of 2.5 between the first two,
     so an explanation that only said "autogol" would be hiding the reason for most of
     the number it reports."""
-    sides = {(match_id, a["player_id"]): a["side"]
-             for a in MatchAppearance.objects.filter(match_id=match_id)
-             .values("player_id", "side")}
+    sides = appearance_sides([match_id])
     shots = list(MatchShot.objects.filter(match_id=match_id)
                  .values_list("player_id", "team_side", "is_goal", "shot_type",
                               "elapsed_seconds"))
     own_goals = [(pid, sec) for pid, ts, isg, st, sec in shots
-                 if isg and st == "goal" and sides.get((match_id, pid), ts) != ts]
+                 if is_own_goal(st, ts, sides.get((match_id, pid)))]
     out = {}
     for pid, og_sec in own_goals:
         if og_sec is None:
@@ -1753,10 +1751,45 @@ def _per_match_player_totals(match_ids):
     if not covered:
         return {}
     _merge_shot_detail(out, sorted(covered))
+    _drop_own_goal_shots(out, sorted(covered))
+    _fill_missing_xgot(out, sorted(covered))
     _merge_defensive_value(out, sorted(covered))
     _merge_own_goal_relief(out, sorted(covered))
     _merge_assists(out, sorted(covered))
     return out
+
+
+def appearance_sides(match_ids) -> dict:
+    """{(match_id, player_id): side} — da che parte del campo stava chi ha giocato.
+
+    Serve solo a riconoscere un autogol (v. ``is_own_goal``), ed e' una query sola
+    perche' i posti che quella domanda se la pongono sono cinque."""
+    return {(a["match_id"], a["player_id"]): a["side"]
+            for a in MatchAppearance.objects.filter(match_id__in=match_ids)
+            .values("match_id", "player_id", "side")}
+
+
+def is_own_goal(shot_type: str, team_side: str, player_side: str | None) -> bool:
+    """Questo tiro e' un autogol?
+
+    UNA FUNZIONE SOLA, e non e' pedanteria: la stessa domanda si pone in CINQUE
+    posti — il conteggio dei gol, il malus graduato, il credito al portiere, il
+    credito d'impatto e la mappa dei tiri del pannello — piu' il conteggio dei
+    TIRI, che fino al 30/08/2026 non se la poneva affatto. Ognuno se la rispondeva
+    per conto proprio, ripetendo lo stesso confronto (una docstring prometteva
+    perfino di identificarlo "exactly as ``_merge_shot_detail`` does", *ricopiando*
+    il test): due letture su sei sbagliavano. L'autogol contava come conclusione
+    tentata — un CREDITO di +0.048 di voto in media, 22 casi su 22 della 25-26 — e
+    nel pannello si leggeva "gol", con un valore fabbricato fino a +0.95.
+
+    SofaScore archivia l'autogol come un tiro 'goal' di chi l'ha segnato, ma
+    taggato con la squadra PER CUI conta — l'avversaria. Il tiro il cui
+    ``team_side`` non e' quello del giocatore e' quindi un autogol. Senza la sua
+    presenza a referto (``player_side`` assente) non si afferma niente: meglio
+    trattarlo come un tiro normale che inventare un autogol.
+    """
+    return (shot_type == "goal" and player_side is not None
+            and player_side != team_side)
 
 
 def _merge_shot_detail(out: dict, match_ids) -> None:
@@ -1765,14 +1798,10 @@ def _merge_shot_detail(out: dict, match_ids) -> None:
     features, so they are counted from ``MatchShot.shot_type`` and added in place.
     Only the mapped types are counted; unmapped ones are ignored.
 
-    OWN GOALS are dropped: SofaScore files an own goal as a 'goal' shot by the
-    own-scorer but tags it with the side it counts FOR (the opponent's), so a
-    goal-shot whose team_side differs from the player's own side is an own goal and
-    must not count as a goal for him — it would otherwise pollute shots_goal (used as
-    a goals-scored proxy when tuning)."""
-    sides = {(a["match_id"], a["player_id"]): a["side"]
-             for a in MatchAppearance.objects.filter(match_id__in=match_ids)
-             .values("match_id", "player_id", "side")}
+    OWN GOALS are dropped (v. ``is_own_goal``): they must not count as a goal for
+    him — it would otherwise pollute shots_goal (used as a goals-scored proxy when
+    tuning)."""
+    sides = appearance_sides(match_ids)
     counts = defaultdict(lambda: defaultdict(float))
     for mid, pid, st, ts in (MatchShot.objects
                              .filter(match_id__in=match_ids)
@@ -1781,13 +1810,119 @@ def _merge_shot_detail(out: dict, match_ids) -> None:
         feat = SHOT_TYPE_TO_FEATURE.get(st)
         if not feat:
             continue
-        if st == "goal" and sides.get((mid, pid), ts) != ts:
-            continue  # own goal: counts for the opponent, not a goal for him
+        if is_own_goal(st, ts, sides.get((mid, pid))):
+            continue
         counts[(mid, pid)][feat] += 1.0
     for key, feats in counts.items():
         row = out[key]  # defaultdict(dict): materialises a shots-only player too
         for feat, n in feats.items():
             row[feat] = row.get(feat, 0.0) + n
+
+
+def _drop_own_goal_shots(out: dict, match_ids) -> None:
+    """Un autogol non e' una conclusione tentata: toglilo dal conteggio dei tiri.
+
+    ``_merge_shot_detail`` lo tiene fuori da ``shots_goal``, ma ``shots`` e
+    ``xg_shots`` non passano di li' — arrivano dalle zone del fornitore, che
+    l'autogol lo conta come un tiro qualunque. Misurato sulla 25-26: 22 autogol su
+    22 dentro ``shots``, e siccome il volume di tiro e' creditato, ognuno valeva al
+    suo autore un REGALO di +0.048 di voto in media (max +0.054). Il segno e'
+    quello che rende la cosa grave, non la taglia: chi vede un contributo positivo
+    accanto a un autogol smette di credere al resto del pannello.
+
+    Solo ``shots`` e ``xg_shots``, e non per prudenza generica: sugli stessi 22
+    casi il canale dello SPECCHIO non lo conta mai — 0 su 22 in
+    ``shots_on_target``, 0 su 22 dentro ``xg_on_target``, anche per i due autogol a
+    cui il fornitore allega un xGOT. Sottrarre li' porterebbe i totali sotto zero.
+    Il pavimento a zero e' comunque tenuto: se un giorno il fornitore cambiasse
+    idea, il conto sbaglia per difetto invece di diventare negativo.
+
+    Il MALUS dell'autogol non c'entra e resta dov'e': e' una voce a livello di
+    voto, graduata (deviazione o errore in prima persona), non una feature.
+    """
+    sides = appearance_sides(match_ids)
+    for mid, pid, st, ts, xg in (MatchShot.objects
+                                 .filter(match_id__in=match_ids)
+                                 .values_list("match_id", "player_id", "shot_type",
+                                              "team_side", "xg")):
+        if not is_own_goal(st, ts, sides.get((mid, pid))):
+            continue
+        row = out.get((mid, pid))
+        if row is None:
+            continue
+        row["shots"] = max(0.0, (row.get("shots") or 0.0) - 1.0)
+        row["xg_shots"] = max(0.0, (row.get("xg_shots") or 0.0) - (xg or 0.0))
+
+
+def missing_xgot_rows(match_ids) -> dict:
+    """{(match_id, player_id): xGOT dalla mappa dei tiri} per le righe a cui il
+    campo del fornitore MANCA del tutto, e che ne avrebbero uno.
+
+    Separata dalla riparazione perche' la stessa domanda serve al canarino, che
+    deve poterla porre senza calcolare nessun voto (v. ``health._check_missing_xgot``).
+
+    «Manca» vuol dire ASSENTE, non zero: uno zero misurato su un giocatore che ha
+    tirato solo fuori e' il dato giusto — sono 2929 righe della 25-26, ed e' la
+    lettura corretta. Qui si cerca il caso opposto, la riga senza nemmeno una voce
+    ``xg_on_target`` mentre i tiri dicono che un valore c'era.
+    """
+    sides = appearance_sides(match_ids)
+    got: dict[tuple, float] = defaultdict(float)
+    for mid, pid, st, ts, xgot in (MatchShot.objects
+                                   .filter(match_id__in=match_ids,
+                                           player_id__isnull=False)
+                                   .values_list("match_id", "player_id", "shot_type",
+                                                "team_side", "xgot")):
+        if is_own_goal(st, ts, sides.get((mid, pid))):
+            continue
+        got[(mid, pid)] += xgot or 0.0
+    have = set(PlayerZoneFeature.objects
+               .filter(match_id__in=match_ids, provider=PROVIDER_SOFASCORE,
+                       feature_key="xg_on_target")
+               .values_list("match_id", "player_id").distinct())
+    return {k: v for k, v in got.items() if v > 0.0 and k not in have}
+
+
+def _fill_missing_xgot(out: dict, match_ids) -> None:
+    """L'xGOT D'UFFICIO: dove il fornitore non lo manda, lo si legge dai tiri.
+
+    ``sga_post`` sottrae due grandezze che NON vengono dallo stesso posto (lo dice
+    l'adapter in cima a se stesso): ``xg_shots`` e' ``shotmap_exact``, somma esatta
+    dei tiri, mentre ``xg_on_target`` e' ``heatmap_interpolated``, cioe' l'aggregato
+    ``expectedGoalsOnTarget`` del fornitore spalmato sulla heatmap. Quando
+    l'aggregato non arriva, la sua assenza si legge come uno ZERO, e la sottrazione
+    racconta una partita di conclusioni buttate via.
+
+    IL CASO CHE L'HA MOTIVATA. Moro, Torino-Bologna g25: i totali dicevano
+    ``shots_goal`` 1 e ``xg_on_target`` 0 nella stessa riga — un pallone che e'
+    entrato senza valore dopo il tiro, che non e' un giudizio severo ma una
+    contraddizione. ``sga_post`` veniva −0.880 e il pannello scriveva «una o piu'
+    occasioni fallite −0.57» a chi aveva segnato da 0.74 di xG calciando a 0.995.
+    Una riga su 11903 in tutta la 25-26: raro, e proprio per questo mai scoperto.
+
+    NON E' UN NUMERO INVENTATO. E' lo stesso evento letto dall'altro archivio, che
+    e' gia' la fonte dell'altra meta' della sottrazione: si toglie una discordanza,
+    non si aggiunge una stima. Ed e' la stessa logica del voto d'ufficio — un buco
+    si tappa dichiarandolo, non si finge misurato.
+
+    SOLO DOVE IL CAMPO E' ASSENTE. Le 204 righe della 25-26 in cui c'e' ma non
+    coincide con la somma dei tiri (mediana 0.081) restano intatte: li' le due
+    fonti non sono d'accordo e non ho stabilito quale abbia ragione, quindi
+    sceglierne una sarebbe una taratura mascherata da riparazione. Quelle le
+    segnala ``shot_detail`` a chi apre il pannello, e la fonte unica per tutti e'
+    una decisione da prendere col benchmark.
+    """
+    filled = missing_xgot_rows(match_ids)
+    for key, xgot in filled.items():
+        row = out.get(key)
+        if row is None:
+            continue
+        row["xg_on_target"] = _round_sum(xgot)
+    if filled:
+        log.warning("expectedGoalsOnTarget missing for %d player-matches: filled "
+                    "from the shot map (worst %.3f). The provider dropped the "
+                    "field; without this the vote reads their shooting as wasted.",
+                    len(filled), max(filled.values()))
 
 
 def _merge_defensive_value(out: dict, match_ids) -> None:
@@ -1873,21 +2008,21 @@ def match_lineup_keepers(match_ids) -> dict:
 def own_goal_shots(match_ids) -> dict:
     """{(match_id, conceding_side): [(minute, xgot)]} for the own goals of a match.
 
-    Identified exactly as ``_merge_shot_detail`` does — a goal-shot whose
-    ``team_side`` is not the scorer's own side — so the two readings of the same
-    event cannot drift apart. The side returned is the one that CONCEDED it (the
-    scorer's own), which is the side whose keeper the relief belongs to.
+    Identified by ``is_own_goal``, like every other reading of the same event: the
+    docstring used to say "exactly as ``_merge_shot_detail`` does" while repeating
+    the test inline, and a promise of agreement kept by copy-paste is the reason
+    two other places did NOT agree. The side returned is the one that CONCEDED it
+    (the scorer's own), which is the side whose keeper the relief belongs to.
     """
-    sides = {(a["match_id"], a["player_id"]): a["side"]
-             for a in MatchAppearance.objects.filter(match_id__in=match_ids)
-             .values("match_id", "player_id", "side")}
+    sides = appearance_sides(match_ids)
     out: dict[tuple, list] = defaultdict(list)
-    for mid, pid, ts, minute, xgot in (MatchShot.objects
-                                       .filter(match_id__in=match_ids, is_goal=True)
-                                       .values_list("match_id", "player_id", "team_side",
-                                                    "minute", "xgot")):
+    for mid, pid, st, ts, minute, xgot in (MatchShot.objects
+                                           .filter(match_id__in=match_ids, is_goal=True)
+                                           .values_list("match_id", "player_id",
+                                                        "shot_type", "team_side",
+                                                        "minute", "xgot")):
         own = sides.get((mid, pid))
-        if own is None or own == ts:
+        if not is_own_goal(st, ts, own):
             continue                     # a real goal for the side it counts for
         out[(mid, own)].append((minute, xgot or 0.0))
     return out

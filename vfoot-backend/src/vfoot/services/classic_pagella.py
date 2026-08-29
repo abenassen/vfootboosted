@@ -18,6 +18,7 @@ default to 0. Goals, assists (MatchAppearance) and cards (MatchDisciplinaryEvent
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections import defaultdict
 
 from django.core.cache import cache
@@ -42,6 +43,8 @@ from vfoot.services.vote_explanation import explain, role_average_terms, to_sent
 from vfoot.services.vote_reference import (
     fixed_reference, fixed_role_averages, scoring_fingerprint,
 )
+
+log = logging.getLogger(__name__)
 
 CARD_MALUS = {CARD_YELLOW: 0.5, CARD_SECOND_YELLOW: 1.0, CARD_RED: 1.0}
 OWN_GOAL_MALUS = 2.0  # classic fantacalcio: -2 per own goal (from raw_stats.ownGoals)
@@ -630,9 +633,12 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
     }
 
 
-# Come si chiama, a schermo, l'esito di un tiro.
+# Come si chiama, a schermo, l'esito di un tiro. L'AUTOGOL non e' fra le chiavi
+# del fornitore (per lui e' un 'goal' come gli altri, v. ``is_own_goal``) e sta qui
+# sotto una chiave nostra: chiamarlo "gol" nel pannello di chi l'ha subito era il
+# modo piu' rapido di far perdere fiducia a tutto il resto.
 SHOT_OUTCOME_IT = {"goal": "gol", "save": "parato", "post": "legno",
-                   "block": "murato", "miss": "fuori"}
+                   "block": "murato", "miss": "fuori", "own": "autogol"}
 # E da dove veniva.
 SHOT_SITUATION_IT = {
     "regular": "azione", "assisted": "su assist", "fast-break": "in contropiede",
@@ -644,81 +650,227 @@ SHOT_SITUATION_IT = {
 _SHOT_TYPE_FEATURE = {"post": "shots_post", "goal": "shots_goal",
                       "save": "shots_saved", "miss": "shots_off",
                       "block": "shots_blocked"}
+# Le sei voci che COMPONGONO la riga «conclusioni» del riassunto. Sono le stesse
+# di ``MERGES`` in vote_explanation e devono restarlo: questa e' la quantita' a cui
+# i tiri devono sommare, e se le due liste divergessero la sezione tornerebbe a non
+# quadrare senza che niente lo dica.
+_SHOT_FAMILY = ("sga_post", "xg_shots", "shots_on_target", "shots",
+                "shots_blocked", "shots_off")
+# Oltre questo numero di tiri si rinuncia allo Shapley esatto. Costa 2^n
+# valutazioni del solo sotto-indice: a 12 sono 4096, una quarantina di ms; il
+# massimo di un'intera stagione e' 10 (1024, 11 ms misurati), quindi il ripiego non
+# si e' mai presentato. Esiste perche' un endpoint non deve poter esplodere su un
+# dato che non abbiamo ancora visto.
+_SHAPLEY_MAX_SHOTS = 12
 
 
-def shot_detail(match, player_id: int) -> list[dict]:
+def shot_detail(match, player_id: int) -> dict:
     """I tiri di un giocatore in una partita, con quanto vale CIASCUNO.
 
-    La riga «conclusioni» del riassunto e' il netto di sei feature su otto tiri, e
-    da quel numero solo non si capisce ne' che cosa abbia fatto ne' perche'. I dati
-    per aprirla ci sono tutti (``MatchShot``: minuto, xG, xGOT, esito, situazione),
-    e questa e' la loro forma leggibile.
+    La riga «conclusioni» del riassunto e' il netto di sei feature su tutti i suoi
+    tiri, e da quel numero solo non si capisce ne' che cosa abbia fatto ne' perche'.
+    I dati per aprirla ci sono tutti (``MatchShot``: minuto, xG, xGOT, esito,
+    situazione), e questa e' la loro forma leggibile.
 
-    IL VALORE DI UN TIRO E' UN LEAVE-ONE-OUT, non una quota di una somma: le
-    feature passano per una compressione non lineare, quindi il contributo del
-    singolo tiro NON e' additivo e ripartire il totale sarebbe inventare una
-    scomposizione che il modello non fa. «Quanto varrebbe il voto senza questo
-    tiro» e' invece una domanda a cui il modello risponde esattamente, ed e' la
-    stessa misura usata in tutta l'analisi che ha prodotto questa taratura.
+    RITORNA LA SEZIONE INTERA, non il solo elenco: ``shots``, il ``baseline`` e il
+    ``total``, che sommano. Perche' una tabella che non torna col numero sopra di
+    se' non e' un dettaglio, e' una contraddizione — e con la mappa appesa sotto la
+    riga del riassunto era esattamente cosi': su Conceicao in Juventus-Parma la riga
+    diceva +0.24 e i due tiri sotto +0.49 e +0.04.
 
-    Costa N+1 valutazioni per giocatore, quindi si calcola solo quando qualcuno
-    apre il dettaglio — mai dentro la pagella, che viaggia per ventidue giocatori
-    a ogni spinta del punteggio in diretta.
+    IL VALORE DI UN TIRO E' UNO SHAPLEY. La domanda «quanto vale questo tiro» non
+    ha una risposta sola: le feature passano per una compressione concava, quindi il
+    contributo di un tiro dipende da quali altri tiri gli stanno accanto. Il
+    leave-one-out — che stava qui fino al 30/08/2026 — ne sceglie UNA, sempre la
+    stessa: il margine dell'ultimo tolto da un insieme pieno, cioe' il punto piu'
+    piatto della curva. Nessun tiro paga mai il tratto ripido, e la somma non fa il
+    totale: su Esposito in Fiorentina-Inter, +1.02 contro un effetto congiunto di
+    +1.31. Lo Shapley media il margine del tiro su TUTTI gli ordini in cui i tiri
+    potevano arrivare, ed e' l'unica ripartizione che tenga insieme quattro cose —
+    somma esatta, simmetria fra tiri identici, zero a un tiro che non cambia niente,
+    linearita' nelle feature. Il tiro fuori da 0.15 di xG di Esposito passa cosi'
+    da +0.004 a −0.031: cambia SEGNO, ed e' il segno giusto (sopra il pareggio del
+    modello un tiro fuori toglie).
+
+    RISCALARE il leave-one-out fino a farlo tornare — la via breve — e' stato
+    misurato e scartato: conserva le proporzioni del LOO, che sono gia' l'artefatto,
+    e il fattore va da −10.7 a +9.2 perche' riga e tiri hanno segno opposto nel 35%
+    dei casi (chi ha tirato POCO ha la riga negativa e i suoi tiri positivi). Su
+    Thuram in Fiorentina-Inter avrebbe stampato «tiro −0.25» su un tiro che al voto
+    aveva aggiunto.
+
+    IL BASELINE e' la meta' mancante, e non e' un residuo: e' il valore della riga
+    per chi non tira affatto, cioe' quanto costa a un attaccante, contro i pari
+    ruolo, non aver concluso. Vale −0.28 per un ATT a novanta minuti, ed e' il 96%
+    dello scarto che faceva sembrare sbagliata la tabella. Scritto come riga
+    propria si legge e si controlla; spalmato sui tiri avrebbe addebitato a un
+    gesto reale il prezzo di un'assenza.
+
+    IL CREDITO DEL GOL NON E' QUI. Vive fuori dall'indice (v. ``goal_impact``) e ha
+    gia' una riga sua nel riassunto: sommarlo anche al tiro-gol lo faceva leggere
+    DUE VOLTE — su Kone' +0.57 nel riassunto e +1.44 sulla mappa, mediana +0.47 di
+    troppo sui 112 marcatori misurati.
+
+    Costa 2^n valutazioni del solo sotto-indice delle conclusioni, tutte in memoria:
+    sul caso peggiore di un'intera stagione (10 tiri) sono ~8 ms, dentro una
+    chiamata che ne pesa una sessantina di database — gli stessi che pagava il
+    leave-one-out di prima, che di suo ricalcolava l'indice INTERO una volta per
+    tiro. La combinatoria spaventa, l'aritmetica no. Si chiama comunque solo
+    quando qualcuno apre il dettaglio di un voto, mai dentro la pagella, che
+    viaggia per ventidue giocatori a ogni spinta del punteggio in diretta.
     """
-    from vfoot.services import goal_impact
+    from math import factorial
+
     from vfoot.services.classic_rating import (
-        _raw_vote_from_index, feature_scales, index_for_role,
+        SHRINKAGE_MINUTES, appearance_sides, derived_features, feature_scales,
+        is_own_goal, scored_z, spread_k_for, weights_for_role,
     )
 
+    empty = {"shots": [], "baseline": 0.0, "total": 0.0}
     key = (match.id, player_id)
     feats = _per_match_player_totals([match.id]).get(key)
     if not feats:
-        return []
+        return empty
     shots = list(MatchShot.objects.filter(match=match, player_id=player_id)
                  .order_by("minute", "id")
-                 .values("minute", "xg", "xgot", "is_goal", "shot_type", "situation"))
+                 .values("minute", "xg", "xgot", "is_goal", "shot_type", "situation",
+                         "team_side"))
     if not shots:
-        return []
+        return empty
+    # L'AUTOGOL non e' una conclusione del giocatore, e i totali non lo contano
+    # (v. ``_drop_own_goal_shots``): togliergli il tiro sottrarrebbe da ``feats``
+    # una riga che li' dentro non c'e' — che e' esattamente come nasceva il +0.95
+    # sull'autogol di Edmundsson, un xGOT sottratto da un totale che non l'aveva
+    # mai contenuto. Si mostra lo stesso, col suo nome e a zero: chi l'ha visto in
+    # campo deve ritrovarlo qui, e leggere che nel voto delle conclusioni non pesa.
+    # Il malus ce l'ha, ed e' una riga sua nel riassunto.
+    own_side = appearance_sides([match.id]).get(key)
+    for s in shots:
+        s["own_goal"] = is_own_goal(s["shot_type"], s["team_side"], own_side)
 
-    mins = _minutes_map([match.id]).get(key, 0)
-    exposure = defensive_exposure([match.id], _minutes_map([match.id])).get(key, 0.0)
-    role = (voto_puro_row(match, player_id) or {}).get("role") or ""
+    mins_map = _minutes_map([match.id])
+    mins = mins_map.get(key, 0)
+    exposure = defensive_exposure([match.id], mins_map).get(key, 0.0)
+    row = voto_puro_row(match, player_id) or {}
+    role = row.get("role") or ""
     reference = get_reference(match.competition_season_id)
-    if not role or role not in reference or mins <= 0:
-        return []
+    if not role or role not in reference or mins <= 0 or not reference[role].get("std"):
+        return empty
     scales = feature_scales(gk=role == Player.ROLE_GK)
-    band, p95 = goal_impact.fixed_band()
-    goals = goal_impact.goals_by_player(match).get(player_id, [])
+    weights = weights_for_role(role)
 
-    def merit(totals, goal_records):
-        """Il voto di MERITO — l'indice piu' il credito dei gol, prima delle
-        correzioni. Le correzioni (mitigazione, rosso, autogol) non dipendono dai
-        tiri, quindi si semplificano nella differenza e ometterle tiene il numero
-        pulito invece di farlo passare due volte per gli stessi arrotondamenti."""
-        idx = index_for_role(role, totals, mins, exposure, scales)
-        raw = _raw_vote_from_index(idx, role, mins, reference)
-        return raw + goal_impact.goal_credit(
-            goal_impact.importances_of(goal_records), band, p95)
+    # La stessa conversione indice -> punti di voto che usa la spiegazione, e per la
+    # stessa ragione per cui quella la prende da ``classic_rating``: due formule
+    # copiate divergono, e qui il conto DEVE tornare con la riga scritta sopra.
+    weight = mins / (mins + SHRINKAGE_MINUTES) * (row.get("evidence_weight") or 1.0)
+    per_unit = spread_k_for(role) * weight / reference[role]["std"]
 
-    base = merit(feats, goals)
+    counted = [i for i, s in enumerate(shots) if not s["own_goal"]]
+    n = len(counted)
+
+    def _removed(mask):
+        """Quanto tolgono, in totale, i tiri SPENTI in ``mask``."""
+        gone = defaultdict(float)
+        for bit, i in enumerate(counted):
+            if mask >> bit & 1:
+                continue
+            s = shots[i]
+            gone["shots"] += 1
+            gone["xg_shots"] += s["xg"] or 0.0
+            gone["xg_on_target"] += s["xgot"] or 0.0
+            if s["is_goal"] or (s["xgot"] or 0.0) > 0:
+                gone["shots_on_target"] += 1
+            feat = _SHOT_TYPE_FEATURE.get(s["shot_type"])
+            if feat:
+                gone[feat] += 1
+        return gone
+
+    def totals_for(mask):
+        """I totali del giocatore coi soli tiri accesi in ``mask``.
+
+        Si SOTTRAE dai totali veri invece di ricostruirli dalla mappa: a maschera
+        piena si riottiene esattamente l'indice che ha prodotto il voto, che e' la
+        condizione perche' le righe tornino con la riga del riassunto.
+
+        CON IL PAVIMENTO A ZERO, e non per prudenza: i due archivi non sempre
+        parlano della stessa partita (v. il controllo qui sotto), e su Moro in
+        Torino-Bologna sottrarre l'xGOT del suo gol da un totale che non lo conteneva
+        portava ``xg_on_target`` a −0.995 — un giocatore che non tira con
+        l'esecuzione peggiore della stagione, e un metro a −1.03 invece di −0.17.
+        Un totale negativo non e' uno stato del mondo."""
+        gone = _removed(mask)
+        if not gone:
+            return feats
+        t = dict(feats)
+        for k, v in gone.items():
+            t[k] = max(0.0, (t.get(k) or 0.0) - v)
+        return t
+
+    # I DUE ARCHIVI PARLANO DELLA STESSA PARTITA? I totali dell'indice vengono
+    # dalle zone del fornitore, la mappa da ``MatchShot``, e nel 3.9% delle righe
+    # della 25-26 il canale xGOT non coincide (mediana 0.081, massimo 0.995). Il
+    # pavimento qui sopra impedisce l'assurdo, ma non rende vero il numero: la
+    # differenza finisce nel metro, che si legge storto (su Esposito il metro di
+    # chi NON tira viene positivo). Detto ad alta voce perche' e' un difetto DEI
+    # DATI e va corretto li', non compensato qui.
+    gap = {k: round((feats.get(k) or 0.0) - v, 3)
+           for k, v in _removed(0).items()
+           if abs((feats.get(k) or 0.0) - v) > 0.02}
+    if gap:
+        log.warning("shot map and zone totals disagree for player %s in match %s: "
+                    "%s left over after removing every shot — the shooting baseline "
+                    "absorbs it", player_id, match.id, gap)
+
+    def value(mask):
+        """Il SOLO sotto-indice delle conclusioni. E' l'unica parte che i tiri
+        muovono, e restringersi a lei e' quello che rende 2^n accessibile.
+
+        I valori si leggono dai totali senza passare per ``raw_feature_values``:
+        le sei voci sono tutte TOTALI (o derivate da totali), e li' quella
+        funzione e' l'identita'. La scorciatoia vale finche' vale l'affermazione,
+        che e' fissata da un test."""
+        t = totals_for(mask)
+        t = {**t, **derived_features(t)}
+        return sum(weights.get(k, 0.0) * scored_z(k, t.get(k, 0.0), scales)
+                   for k in _SHOT_FAMILY)
+
+    full = (1 << n) - 1
+    if n <= _SHAPLEY_MAX_SHOTS:
+        # I 2^n valori PRIMA e in una lista, non dietro una funzione memoizzata: il
+        # doppio ciclo li rilegge n·2^(n-1) volte — diecimila accessi con dieci
+        # tiri — e li' il costo non era piu' il calcolo ma la chiamata (30 ms su 66
+        # nel profilo). Ora la parte Shapley e' ~8 ms; il resto della funzione e'
+        # lavoro di database che pagava anche il leave-one-out di prima
+        # (``voto_puro_row`` da solo ne vale 37).
+        vals = [value(mask) for mask in range(full + 1)]
+        coef = [factorial(r) * factorial(n - r - 1) / factorial(n) for r in range(n)]
+        share = [0.0] * n
+        for bit in range(n):
+            b = 1 << bit
+            for sub in range(full + 1):
+                if not sub & b:
+                    share[bit] += coef[sub.bit_count()] * (vals[sub | b] - vals[sub])
+        joint = vals[full] - vals[0]
+        empty_value = vals[0]
+    else:
+        # Ripiego mai osservato in una stagione: il leave-one-out riportato al
+        # totale. Non e' lo Shapley e non lo finge — e' l'approssimazione che
+        # almeno fa quadrare la sezione, dove l'esatto costerebbe troppo.
+        empty_value = value(0)
+        vfull = value(full)
+        joint = vfull - empty_value
+        loo = [vfull - value(full & ~(1 << bit)) for bit in range(n)]
+        tot = sum(loo)
+        share = [x * (joint / tot) if tot else joint / n for x in loo]
+
+    points = dict(zip(counted, (x * per_unit for x in share)))
     out = []
     for i, s in enumerate(shots):
-        without = dict(feats)
-        without["shots"] = (without.get("shots") or 0) - 1
-        without["xg_shots"] = (without.get("xg_shots") or 0.0) - (s["xg"] or 0.0)
-        without["xg_on_target"] = (without.get("xg_on_target") or 0.0) - (s["xgot"] or 0.0)
-        if s["is_goal"] or (s["xgot"] or 0.0) > 0:
-            without["shots_on_target"] = (without.get("shots_on_target") or 0) - 1
-        feature = _SHOT_TYPE_FEATURE.get(s["shot_type"])
-        if feature:
-            without[feature] = (without.get(feature) or 0) - 1
-        # Il gol si porta via anche il suo credito d'impatto, che e' la meta' del
-        # suo valore: lasciarlo dentro mostrerebbe un gol che vale quanto un tiro.
-        goals_left = ([g for g in goals if g["minute"] != s["minute"]]
-                      if s["is_goal"] else goals)
+        own = s["own_goal"]
         out.append({
             "minute": s["minute"],
-            "outcome": SHOT_OUTCOME_IT.get(s["shot_type"], s["shot_type"] or "tiro"),
+            "outcome": (SHOT_OUTCOME_IT["own"] if own else
+                        SHOT_OUTCOME_IT.get(s["shot_type"], s["shot_type"] or "tiro")),
             "situation": SHOT_SITUATION_IT.get(s["situation"] or "", ""),
             "xg": round(s["xg"] or 0.0, 3),
             "xgot": round(s["xgot"] or 0.0, 3),
@@ -726,9 +878,14 @@ def shot_detail(match, player_id: int) -> list[dict]:
             # aveva. E' la grandezza su cui il modello giudica il tiro, quindi si
             # mostra invece di lasciarla ricavare a chi legge.
             "added": round((s["xgot"] or 0.0) - (s["xg"] or 0.0), 3),
-            "points": round(base - merit(without, goals_left), 3),
+            "points": 0.0 if own else round(points.get(i, 0.0), 3),
         })
-    return out
+
+    # Il metro: dove sta la riga di chi non ha concluso, rispetto ai pari ruolo.
+    mean_terms = get_role_averages(match.competition_season_id).get(role, {})
+    baseline = (empty_value - sum(mean_terms.get(k, 0.0) for k in _SHOT_FAMILY)) * per_unit
+    return {"shots": out, "baseline": round(baseline, 3),
+            "total": round(baseline + joint * per_unit, 3)}
 
 
 def voto_puro_row(match, player_id: int) -> dict | None:

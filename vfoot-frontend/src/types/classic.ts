@@ -121,10 +121,17 @@ export interface VoteLedger {
    *  ciascuno si leggono, e chi vuole scende di un livello. ``terms`` resta come
    *  dettaglio dentro il gruppo. */
   groups?: VoteLedgerGroup[];
-  /** I tiri, uno per uno. Arriva solo qui e non nel tabellino: costa una
-   *  valutazione per tiro, e il tabellino si rifà a ogni spinta del punteggio in
-   *  diretta per ventidue giocatori. */
+  /** I tiri, uno per uno. Arriva solo qui e non nel tabellino: è un calcolo a
+   *  parte, e il tabellino si rifà a ogni spinta del punteggio in diretta per
+   *  ventidue giocatori. */
   shots?: ShotDetail[];
+  /** Il METRO: quanto vale la riga delle conclusioni per chi non tira affatto,
+   *  rispetto ai pari ruolo (−0,28 per un attaccante a novanta minuti). Senza,
+   *  la tabella non somma alla riga che la intesta e sembra sbagliata: è il 96%
+   *  dello scarto, e non appartiene ai tiri fatti ma a quelli mancati. */
+  shots_baseline?: number;
+  /** somma dei tiri + metro, cioè la riga «conclusioni» del riassunto. */
+  shots_total?: number;
   /** Le voci sotto il centesimo, contate e sommate insieme (e con loro gli
    *  arrotondamenti di tutte le altre): trenta righe di «+0,00» non si leggono. */
   tiny: { count: number; points: number };

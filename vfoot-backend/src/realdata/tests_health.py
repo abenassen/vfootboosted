@@ -189,6 +189,57 @@ class ControlliDiSalute(TestCase):
 
         self.assertIn("matches:stuck", self._codes("alarm"))
 
+    def _match_with_a_shot(self, *, xgot_zone: bool, days_ago=2):
+        """Una partita definitiva in cui un giocatore ha calciato in porta.
+
+        ``xgot_zone`` dice se il fornitore ha mandato ``expectedGoalsOnTarget``:
+        senza, il modello leggerebbe quel tiro come buttato via, e la riparazione
+        d'ufficio scatta (v. ``_fill_missing_xgot``)."""
+        from realdata.models import MatchAppearance, MatchShot, Player, PlayerZoneFeature
+        comp = Competition.objects.create(external_id=f"x{days_ago}{xgot_zone}",
+                                          name="Serie A")
+        cs = CompetitionSeason.objects.create(
+            competition=comp, season=Season.objects.create(code=f"20{days_ago}6-2027"),
+            external_source="sofascore", external_id=f"9{days_ago}{int(xgot_zone)}")
+        home = TeamSeason.objects.create(
+            competition_season=cs, team=Team.objects.create(name="Bologna"))
+        away = TeamSeason.objects.create(
+            competition_season=cs, team=Team.objects.create(name="Torino"))
+        match = Match.objects.create(
+            external_source="sofascore", external_id=f"m{days_ago}{int(xgot_zone)}",
+            competition_season=cs, home_team=home, away_team=away, matchday=1,
+            kickoff=NOW - timedelta(days=days_ago), status=Match.STATUS_FINISHED,
+            data_ready=True)
+        p = Player.objects.create(full_name="Tiratore", short_name="Tiratore")
+        MatchAppearance.objects.create(match=match, player=p, side="home",
+                                       minutes_played=90, is_starter=True,
+                                       team_season=home)
+        MatchShot.objects.create(match=match, player=p, team_side="home", minute=49,
+                                 zone_key="Z_4_2", xg=0.74, xgot=0.99, is_goal=True,
+                                 shot_type="goal", provider="sofascore",
+                                 external_id=f"s{days_ago}{int(xgot_zone)}")
+        if xgot_zone:
+            PlayerZoneFeature.objects.create(
+                match=match, player=p, provider="sofascore",
+                feature_key="xg_on_target", zone_key="Z_4_2", value=0.99,
+                team_side="home")
+        return match
+
+    def test_lxgot_mancante_e_un_avviso_non_un_allarme(self):
+        """Il buco è già tappato, quindi nessun voto è sbagliato: quello che il
+        canarino sorveglia è il ritmo con cui il fornitore lo lascia."""
+        self._match_with_a_shot(xgot_zone=False)
+        self.assertIn("provider:missing-xgot", self._codes("warn"))
+        self.assertNotIn("provider:missing-xgot", self._codes("alarm"))
+
+    def test_lxgot_che_arriva_non_fa_rumore(self):
+        self._match_with_a_shot(xgot_zone=True)
+        self.assertNotIn("provider:missing-xgot", self._codes())
+
+    def test_una_partita_vecchia_esce_dalla_finestra(self):
+        self._match_with_a_shot(xgot_zone=False, days_ago=30)
+        self.assertNotIn("provider:missing-xgot", self._codes())
+
     def _pending_consultation(self, *, hours_ago):
         """Una consultazione aperta e mai spedita, vecchia di N ore."""
         from django.contrib.auth.models import User

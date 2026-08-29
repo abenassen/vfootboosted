@@ -122,7 +122,21 @@ def weights_fingerprint() -> str:
 #           cache su file dei voti e sopravvive al riavvio. Senza questo giro la
 #           produzione avrebbe continuato a servire il pannello sbagliato fino al
 #           primo dato nuovo di quella giornata.
-SCORING_CODE_VERSION = 7
+#   7 -> 8: l'autogol contava come CONCLUSIONE TENTATA. ``_merge_shot_detail`` lo
+#           teneva gia' fuori da ``shots_goal``, ma ``shots`` arriva dalle zone del
+#           fornitore e li' l'autogol c'era: 22 su 22 sulla 25-26, e siccome il
+#           volume di tiro e' creditato, ognuno regalava al suo autore +0.048 di
+#           voto in media. Qui i VOTI si muovono davvero (solo per quei giocatori),
+#           quindi senza questo giro la cache su file avrebbe continuato a servire
+#           il voto col regalo dentro. Insieme, la mappa dei tiri smette di
+#           chiamarlo "gol" e di stampargli accanto un numero fabbricato.
+#           Nella stessa versione: l'xGOT D'UFFICIO. Dove il fornitore non manda
+#           ``expectedGoalsOnTarget``, la sua assenza si leggeva come uno zero e
+#           ``sga_post`` raccontava conclusioni buttate via — su Moro, che aveva
+#           segnato, −0.880 e un punto pieno di voto (6.0 invece di 7.0). Ora il
+#           buco si tappa con l'xGOT della mappa dei tiri, che e' gia' la fonte
+#           dell'altra meta' della sottrazione. Due righe in tutta la 25-26.
+SCORING_CODE_VERSION = 8
 
 
 def scoring_fingerprint() -> str:

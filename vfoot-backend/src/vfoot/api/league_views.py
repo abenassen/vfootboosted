@@ -6679,11 +6679,15 @@ class VoteLedgerView(APIView):
         if led is None:
             return Response({"detail": "Nessun voto da spiegare per questo giocatore."},
                             status=status.HTTP_404_NOT_FOUND)
-        # I TIRI, uno per uno. Viaggia qui e non nella pagella perche' costa una
-        # valutazione per tiro (v. shot_detail) e la pagella la si rifa' a ogni
-        # spinta del punteggio in diretta, per ventidue giocatori; questa la chiede
-        # solo chi ha aperto il dettaglio di un voto.
-        return Response({**led, "shots": shot_detail(match, player_id)})
+        # I TIRI, uno per uno, col METRO che li accompagna: ``shots``, ``baseline``
+        # e ``total`` sono una sezione che somma, non un elenco (v. shot_detail).
+        # Viaggia qui e non nella pagella perche' e' un calcolo a parte e la pagella
+        # la si rifa' a ogni spinta del punteggio in diretta, per ventidue
+        # giocatori; questa la chiede solo chi ha aperto il dettaglio di un voto.
+        detail = shot_detail(match, player_id)
+        return Response({**led, "shots": detail["shots"],
+                         "shots_baseline": detail["baseline"],
+                         "shots_total": detail["total"]})
 
 
 class LeagueVoteLedgerView(VoteLedgerView):

@@ -861,6 +861,9 @@ function ShootingLine({
 }) {
   const load = useContext(LedgerContext);
   const [shots, setShots] = useState<ShotDetail[] | null>(null);
+  // Il METRO viaggia con i tiri perché senza di lui la tabella non somma alla
+  // riga che sta aprendo, ed è il 96% dello scarto (v. shot_detail).
+  const [baseline, setBaseline] = useState<number>(0);
   const [state, setState] = useState<'closed' | 'loading' | 'open' | 'error'>('closed');
 
   const value = (
@@ -888,6 +891,7 @@ function ShootingLine({
     load(playerId)
       .then((l) => {
         setShots(l.shots ?? []);
+        setBaseline(l.shots_baseline ?? 0);
         setState('open');
       })
       .catch(() => setState('error'));
@@ -916,7 +920,7 @@ function ShootingLine({
       {state === 'open' ? (
         shots && shots.length ? (
           <div className="border-l border-line pl-3">
-            <ShotMap shots={shots} fmtPts={fmtPts} />
+            <ShotMap shots={shots} baseline={baseline} total={points} fmtPts={fmtPts} />
           </div>
         ) : (
           <div className="pl-3 text-[11px] text-ink-faint">Nessun tiro da mostrare.</div>
@@ -962,10 +966,15 @@ function LedgerGroup({
   group,
   fmtPts,
   shots,
+  baseline,
 }: {
   group: VoteLedgerGroup;
   fmtPts: (n: number) => string;
   shots?: ShotDetail[];
+  /** Il metro dei tiri (v. ShotMap). Le due voci del gruppo che la mappa non
+   *  copre — il gol e il legno — pesano zero, quindi il subtotale del gruppo è
+   *  esattamente il totale a cui la tabella deve sommare. */
+  baseline?: number;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -994,7 +1003,14 @@ function LedgerGroup({
           {group.terms.map((t) => (
             <LedgerTerm key={t.key} term={t} fmtPts={fmtPts} />
           ))}
-          {shots?.length ? <ShotMap shots={shots} fmtPts={fmtPts} /> : null}
+          {shots?.length ? (
+            <ShotMap
+              shots={shots}
+              baseline={baseline ?? 0}
+              total={group.points}
+              fmtPts={fmtPts}
+            />
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -1002,8 +1018,27 @@ function LedgerGroup({
 }
 
 /** I tiri uno per uno: minuto, esito, quanto valeva la palla (xG), come l'ha
- *  calciata (xGOT), e quanto vale quel tiro nel voto. */
-function ShotMap({ shots, fmtPts }: { shots: ShotDetail[]; fmtPts: (n: number) => string }) {
+ *  calciata (xGOT), e quanto vale quel tiro nel voto.
+ *
+ *  LA TABELLA SOMMA ALLA RIGA CHE LA APRE, e ci vogliono due righe in più perché
+ *  lo faccia. Senza, diceva «+0,24» sopra e «+0,49 / +0,04» sotto: chi legge non
+ *  ha modo di sapere che i due numeri rispondono a domande diverse — la riga
+ *  misura contro il pari ruolo, i tiri contro «se non l'avesse tirato». Il METRO
+ *  è quella differenza, e ha un nome perché è una cosa vera: quanto costa a un
+ *  attaccante non aver concluso. */
+function ShotMap({
+  shots,
+  baseline,
+  total,
+  fmtPts,
+}: {
+  shots: ShotDetail[];
+  baseline: number;
+  total: number;
+  fmtPts: (n: number) => string;
+}) {
+  const cell = (n: number) =>
+    `py-0.5 text-right font-mono ${n > 0 ? 'text-good' : n < 0 ? 'text-bad' : 'text-ink-faint'}`;
   return (
     <div className="mt-1.5 overflow-x-auto">
       <table className="w-full text-[11px] tabular-nums">
@@ -1025,15 +1060,25 @@ function ShotMap({ shots, fmtPts }: { shots: ShotDetail[]; fmtPts: (n: number) =
               </td>
               <td className="py-0.5 pr-2 text-right text-ink-faint">{s.xg.toFixed(2)}</td>
               <td className="py-0.5 pr-2 text-right text-ink-faint">{s.xgot.toFixed(2)}</td>
-              <td
-                className={`py-0.5 text-right font-mono ${
-                  s.points >= 0 ? 'text-good' : 'text-bad'
-                }`}
-              >
-                {fmtPts(s.points)}
-              </td>
+              {/* Lo ZERO non è verde. Un autogol vale esattamente 0 nelle
+                  conclusioni (v. shot_detail) e dipingerlo del colore del merito
+                  rimetterebbe a schermo, in un'altra forma, il difetto appena
+                  tolto: chi guarda legge il COLORE prima del numero. */}
+              <td className={cell(s.points)}>{fmtPts(s.points)}</td>
             </tr>
           ))}
+          <tr className="border-t border-line/60">
+            <td className="py-0.5 pr-2 text-ink-faint" colSpan={3}>
+              per un pari ruolo che non conclude
+            </td>
+            <td className={cell(baseline)}>{fmtPts(baseline)}</td>
+          </tr>
+          <tr className="border-t border-line">
+            <td className="py-0.5 pr-2 font-semibold text-ink-soft" colSpan={3}>
+              totale
+            </td>
+            <td className={`${cell(total)} font-semibold`}>{fmtPts(total)}</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -1124,6 +1169,7 @@ function OtherVoices({
                 group={g}
                 fmtPts={fmtPts}
                 shots={g.key === 'conclusioni' ? ledger.shots : undefined}
+                baseline={g.key === 'conclusioni' ? ledger.shots_baseline : undefined}
               />
             ))
           ) : (
