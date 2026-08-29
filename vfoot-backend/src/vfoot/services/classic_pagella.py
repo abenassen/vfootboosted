@@ -460,6 +460,12 @@ def vote_ledger(match, player_id: int) -> dict | None:
                         "other_points": why["other_points"],
                         "other_count": why["other_count"],
                         "terms": why["other_terms"],
+                        # Le stesse voci raccolte per senso, col subtotale di ogni
+                        # famiglia: e' la forma in cui l'elenco si legge invece di
+                        # scorrere. ``terms`` resta perche' e' il dettaglio dentro
+                        # ogni gruppo, e perche' un client vecchio continua a
+                        # funzionare senza sapere niente dei gruppi.
+                        "groups": why["other_groups"],
                         "tiny": why["other_tiny"],
                     }
         cache.set(key, rows, 3600)

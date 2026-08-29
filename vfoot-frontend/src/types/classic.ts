@@ -105,9 +105,42 @@ export interface VoteLedger {
   other_points: number;
   other_count: number;
   terms: VoteLedgerTerm[];
+  /** Le stesse voci raccolte per SENSO, col subtotale di ogni famiglia. Trenta
+   *  righe da 0,01 sono un elenco, non una spiegazione: sei gruppi con un totale
+   *  ciascuno si leggono, e chi vuole scende di un livello. ``terms`` resta come
+   *  dettaglio dentro il gruppo. */
+  groups?: VoteLedgerGroup[];
+  /** I tiri, uno per uno. Arriva solo qui e non nel tabellino: costa una
+   *  valutazione per tiro, e il tabellino si rifà a ogni spinta del punteggio in
+   *  diretta per ventidue giocatori. */
+  shots?: ShotDetail[];
   /** Le voci sotto il centesimo, contate e sommate insieme (e con loro gli
    *  arrotondamenti di tutte le altre): trenta righe di «+0,00» non si leggono. */
   tiny: { count: number; points: number };
+}
+
+export interface VoteLedgerGroup {
+  key: string;
+  title: string;
+  points: number;
+  terms: VoteLedgerTerm[];
+}
+
+export interface ShotDetail {
+  minute: number | null;
+  /** gol / parato / legno / murato / fuori */
+  outcome: string;
+  /** da dove veniva: su assist, in contropiede, su corner… vuoto se non si sa. */
+  situation: string;
+  xg: number;
+  xgot: number;
+  /** xGOT − xG: quanto la conclusione ha aggiunto alla palla che aveva. È la
+   *  grandezza su cui il modello giudica il tiro, quindi si mostra invece di
+   *  lasciarla ricavare. */
+  added: number;
+  /** Quanto vale QUESTO tiro, in punti di voto: il voto con lui meno il voto
+   *  senza. Non è una quota di una somma — la compressione non è additiva. */
+  points: number;
 }
 
 export interface VoteLedgerTerm {

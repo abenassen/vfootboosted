@@ -10,7 +10,10 @@ import type {
   ClassicPlayerLine,
   ClassicRole,
   ClassicTeamDetail,
+  ShotDetail,
   VoteLedger,
+  VoteLedgerGroup,
+  VoteLedgerTerm,
 } from '../../types/classic';
 
 // Classic-mode match detail: voto puro + bonus/malus = fantavoto per player, the
@@ -840,6 +843,120 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
  *  L'elenco NON viaggia nel tabellino: ventidue giocatori per trenta righe, e a
  *  partita in corso il tabellino si ricarica a ogni spinta. Si chiede al momento,
  *  una volta sola per giocatore, e resta lì per la riapertura. */
+function LedgerTerm({
+  term,
+  fmtPts,
+}: {
+  term: VoteLedgerTerm;
+  fmtPts: (n: number) => string;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-ink-soft">
+        {term.label}
+        {/* Quante volte l'ha fatto, come lo conta il tabellino: è il numero che chi
+            legge può andare a verificare da un'altra parte. */}
+        {term.value != null ? <span className="ml-1 text-ink-faint">· {term.value}</span> : null}
+        {term.family_size ? (
+          <span className="ml-1 text-ink-faint">· {term.family_size} voci</span>
+        ) : null}
+      </span>
+      <span
+        className={`shrink-0 font-mono text-[11px] ${term.points >= 0 ? 'text-good' : 'text-bad'}`}
+      >
+        {fmtPts(term.points)}
+      </span>
+    </div>
+  );
+}
+
+/** Un gruppo del registro: il subtotale sempre, il dettaglio a richiesta.
+ *
+ *  Sotto le conclusioni si apre anche la mappa dei tiri, che è l'unico posto in
+ *  cui quel numero si può verificare: la riga dice «una o più conclusioni
+ *  pericolose +0,99» e da sola non racconta né che cosa ha fatto né perché. */
+function LedgerGroup({
+  group,
+  fmtPts,
+  shots,
+}: {
+  group: VoteLedgerGroup;
+  fmtPts: (n: number) => string;
+  shots?: ShotDetail[];
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-baseline justify-between gap-3 text-left"
+      >
+        <span className="text-ink-soft">
+          <span className="mr-1 inline-block text-ink-faint">{open ? '▾' : '▸'}</span>
+          {group.title}
+          <span className="ml-1 text-ink-faint">· {group.terms.length}</span>
+        </span>
+        <span
+          className={`shrink-0 font-mono text-[11px] ${
+            group.points >= 0 ? 'text-good' : 'text-bad'
+          }`}
+        >
+          {fmtPts(group.points)}
+        </span>
+      </button>
+      {open ? (
+        <div className="mt-0.5 space-y-0.5 border-l border-line pl-3">
+          {group.terms.map((t) => (
+            <LedgerTerm key={t.key} term={t} fmtPts={fmtPts} />
+          ))}
+          {shots?.length ? <ShotMap shots={shots} fmtPts={fmtPts} /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** I tiri uno per uno: minuto, esito, quanto valeva la palla (xG), come l'ha
+ *  calciata (xGOT), e quanto vale quel tiro nel voto. */
+function ShotMap({ shots, fmtPts }: { shots: ShotDetail[]; fmtPts: (n: number) => string }) {
+  return (
+    <div className="mt-1.5 overflow-x-auto">
+      <table className="w-full text-[11px] tabular-nums">
+        <thead>
+          <tr className="text-ink-faint">
+            <th className="py-0.5 pr-2 text-left font-semibold">Tiro</th>
+            <th className="py-0.5 pr-2 text-right font-semibold">xG</th>
+            <th className="py-0.5 pr-2 text-right font-semibold">xGOT</th>
+            <th className="py-0.5 text-right font-semibold">Voto</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shots.map((s, i) => (
+            <tr key={`${s.minute}-${i}`} className="border-t border-line/60">
+              <td className="py-0.5 pr-2 text-ink-soft">
+                {s.minute != null ? <span className="text-ink-faint">{s.minute}′ </span> : null}
+                {s.outcome}
+                {s.situation ? <span className="text-ink-faint"> {s.situation}</span> : null}
+              </td>
+              <td className="py-0.5 pr-2 text-right text-ink-faint">{s.xg.toFixed(2)}</td>
+              <td className="py-0.5 pr-2 text-right text-ink-faint">{s.xgot.toFixed(2)}</td>
+              <td
+                className={`py-0.5 text-right font-mono ${
+                  s.points >= 0 ? 'text-good' : 'text-bad'
+                }`}
+              >
+                {fmtPts(s.points)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function OtherVoices({
   why,
   playerId,
@@ -913,26 +1030,22 @@ function OtherVoices({
       ) : null}
       {state === 'open' && ledger ? (
         <div className="mt-1 space-y-0.5 border-l border-line pl-3">
-          {ledger.terms.map((t) => (
-            <div key={t.key} className="flex items-baseline justify-between gap-3">
-              <span className="text-ink-soft">
-                {t.label}
-                {/* Quante volte l'ha fatto, come lo conta il tabellino: è il numero
-                    che chi legge può andare a verificare da un'altra parte. */}
-                {t.value != null ? <span className="ml-1 text-ink-faint">· {t.value}</span> : null}
-                {t.family_size ? (
-                  <span className="ml-1 text-ink-faint">· {t.family_size} voci</span>
-                ) : null}
-              </span>
-              <span
-                className={`shrink-0 font-mono text-[11px] ${
-                  t.points >= 0 ? 'text-good' : 'text-bad'
-                }`}
-              >
-                {fmtPts(t.points)}
-              </span>
-            </div>
-          ))}
+          {/* Raccolte per SENSO quando il server le manda così. Trenta righe da
+              0,01 sono un elenco: chi legge vuole sapere «come ha difeso» e
+              «quanti palloni ha perso», e il dettaglio lo apre solo dove serve.
+              Senza i gruppi (server vecchio) si torna all'elenco piatto. */}
+          {ledger.groups?.length ? (
+            ledger.groups.map((g) => (
+              <LedgerGroup
+                key={g.key}
+                group={g}
+                fmtPts={fmtPts}
+                shots={g.key === 'conclusioni' ? ledger.shots : undefined}
+              />
+            ))
+          ) : (
+            ledger.terms.map((t) => <LedgerTerm key={t.key} term={t} fmtPts={fmtPts} />)
+          )}
           {ledger.tiny.count > 0 || Math.abs(ledger.tiny.points) >= 0.005 ? (
             <div className="flex items-baseline justify-between gap-3 text-ink-faint">
               <span>
