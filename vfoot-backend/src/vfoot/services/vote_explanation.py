@@ -28,6 +28,7 @@ from vfoot.services.classic_rating import (
     weights_for_role,
 )
 from realdata.models import Player
+from vfoot.services import goal_impact
 
 # What each feature is called out loud, and how to quantify it. THREE kinds, chosen
 # by how much the number "1" already means for that feature:
@@ -677,6 +678,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             averages: dict, exposure: float = 0.0, *, top: int = 3,
             result_nudge: float = 0.0, red_adjustment: float = 0.0,
             own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
+            goal_adjustment: float = 0.0, goal_detail: list | None = None,
             evidence_weight: float = 1.0, full: bool = False,
             ledger: bool = False,
             red_detail: dict | None = None, own_goal_detail: dict | None = None,
@@ -780,6 +782,9 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     raw = max(VOTE_MIN, min(VOTE_MAX, centre + VOTE_SPREAD_K * weight * z))
     # Same order as the scorer: clamp the merit vote, add the (divergence-only)
     # result nudge, the red-card drop and the own-goal drop, then clamp back.
+    # Stesso ordine dello scorer: il credito dei GOL entra nel voto grezzo (e' merito,
+    # quindi la mitigazione del risultato deve poterlo temperare), poi il resto.
+    raw = max(VOTE_MIN, min(VOTE_MAX, raw + goal_adjustment))
     subtotal = max(VOTE_MIN, min(VOTE_MAX,
                    raw + result_nudge + red_adjustment + own_goal_adjustment
                    + penalty_adjustment))
@@ -835,6 +840,14 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # ``kind`` rides along so ``to_sentence`` (and any caller) can recognise these
     # lines without matching on their text — the labels now carry minute, reason and
     # man-down time, and string-matching them was a trap waiting to spring.
+    # IL GOL PER PRIMO, e con la sua storia. Dal 29/08/2026 non e' piu' una feature
+    # dell'indice ma una voce a livello di voto, graduata da quanto il gol ha
+    # cambiato la partita: e' quasi sempre la voce piu' grande del tabellino di chi
+    # segna, quindi apre l'elenco invece di accodarsi alle correzioni.
+    if abs(goal_adjustment) >= 0.005 and goal_detail:
+        contributions.insert(0, entry(goal_adjustment,
+                                      goal_impact.goal_phrase(goal_detail),
+                                      kind="goal"))
     if abs(result_nudge) >= 0.005:
         contributions.append(entry(result_nudge,
                                    "adeguamento al risultato di squadra",

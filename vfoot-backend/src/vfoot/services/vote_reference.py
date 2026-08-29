@@ -58,6 +58,9 @@ def weights_fingerprint() -> str:
         # stored per-feature spreads mean, so a change to either must invalidate the
         # calibration exactly as a weight change does.
         "compress_k": cr.COMPRESS_K, "sga_post_woodwork": cr.SGA_POST_WOODWORK,
+        # Stessa ragione del legno: e' un addendo della ricetta di sga_post, quindi
+        # cambia i valori grezzi della feature e le sigma calibrate su di essi.
+        "sga_post_blocked": cr.SGA_POST_BLOCKED,
         # which features skip the compression changes their stored spreads and the
         # index built from them — a reference computed under a different exemption
         # set scores every vote on the wrong scale
@@ -152,7 +155,7 @@ def scoring_fingerprint() -> str:
 
 
 def save(reference: dict, role_averages: dict, *, season_id: int,
-         feature_scales: dict | None = None) -> None:
+         feature_scales: dict | None = None, goal_impact: dict | None = None) -> None:
     REFERENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     REFERENCE_PATH.write_text(json.dumps({
         "calibrated_on_season": season_id,
@@ -162,6 +165,13 @@ def save(reference: dict, role_averages: dict, *, season_id: int,
         # Per-feature spreads: without them a weight has nothing to standardise
         # against, so they are as much a part of the calibration as the role mean.
         "feature_scales": feature_scales or {},
+        # La tabella dei punti attesi, la banda del gol e la media di ruolo del
+        # credito (v. services/goal_impact). Stanno QUI e non fra le costanti del
+        # codice per due ragioni: sono misurate su una stagione come tutto il resto
+        # della calibrazione, e ``scoring_fingerprint`` fa l'hash dell'intero file —
+        # quindi ritararle invalida da sola ogni cache di voti, senza che nessuno
+        # debba ricordarsi di aggiungerle a una lista.
+        "goal_impact": goal_impact or {},
     }, indent=2, sort_keys=True))
 
 
@@ -205,3 +215,9 @@ def fixed_role_averages() -> dict | None:
 def fixed_feature_scales() -> dict | None:
     data = _load()
     return data.get("feature_scales") if data else None
+
+
+def fixed_goal_impact() -> dict | None:
+    """{"xp": {...}, "band": [lo, hi], "p95": x, "role_mean_credit": {...}}."""
+    data = _load()
+    return data.get("goal_impact") if data else None

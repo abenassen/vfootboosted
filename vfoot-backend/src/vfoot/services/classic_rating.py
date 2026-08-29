@@ -46,6 +46,7 @@ from realdata.models import (
     PlayerOnPitchInterval, PlayerZoneFeature, PROVIDER_SOFASCORE,
 )
 from realdata.services.sofascore_adapter import METHOD_UNPLACED
+from vfoot.services import goal_impact
 
 log = logging.getLogger(__name__)
 
@@ -185,9 +186,26 @@ TOTAL_WEIGHTS = {
     # Sotto (0.02) si perde su ENTRAMBI i giudici — un assist e' pur sempre un
     # indizio, debole, che il passaggio era buono, e buttarlo via non compra purezza.
     "assists": 0.03,
-    "shots_goal": 0.1386,         # the GOAL itself (own goals excluded), on top of +3 bonus
-    "sga_post": 0.0905,           # = S: EXECUTION merit, derived (xGOT − xG + woodwork)
-    "xg_shots": 0.0323,           # = β: the mass of chances occupied, β/S = 1/3
+    # IL GOL NON E' PIU' UNA FEATURE DELL'INDICE. Il suo credito dipende ora da
+    # QUANTO E' PESATO — lo stato di partita che ha cambiato — e non dai minuti
+    # giocati, quindi non puo' passare per l'indice, che i minuti li scala tutti
+    # insieme (v. goal_impact e ``goal_credit_for_match``). Lasciato a zero e non
+    # cancellato perche' la feature si legge ancora nel registro e nel tuner, e lo
+    # zero e' una decisione visibile. 29/08/2026.
+    "shots_goal": 0.0,
+    # = S: EXECUTION merit, derived (xGOT − xG + legno + murati).
+    # x1.6 il 29/08/2026, insieme a x0.7 sul blocco del VOLUME qui sotto: sbagliare
+    # un'occasione costava troppo poco. Il pareggio — l'xG oltre il quale un tiro
+    # fuori toglie invece di aggiungere — scende da 0.137 a 0.053, e un'occasione
+    # da 0.40 di xG passa da -0.117 a -0.381 punti di voto.
+    "sga_post": 0.1448,
+    # = β: the mass of chances occupied. NON rialzato insieme a S, quindi β/S passa
+    # da 1/3 a 1/4.5. E' una deroga consapevole al rapporto scritto sopra: β/S
+    # esiste per l'ORDINAMENTO dei gol (un gol difficile deve battere un tap-in) e
+    # quella proprieta' regge anche qui (gran gol +1.042 contro tap-in +0.870).
+    # Tenendolo a 1/3 avremmo restituito un terzo della severita' appena comprata,
+    # perche' questo peso paga l'essersi PROCURATI la posizione comunque sia finita.
+    "xg_shots": 0.0323,
     # RIACCESO il 25/08/2026 (era 0.0 dal commit dei pesi a mano, senza motivazione
     # scritta; prima ancora 0.181). Porta segnale che la xA non ha, e lo conferma
     # anche il giudice non contaminato dal bonus: a parita' di xA, gol e assist vale
@@ -196,9 +214,14 @@ TOTAL_WEIGHTS = {
     # degli assist non porta nessuna big chance riconosciuta e li' la creazione
     # restava appesa alla sola xA. v. docs/voto_questioni_aperte.md §2quater.
     "key_passes": 0.100,
-    "shots_on_target": 0.0494,
-    "shots": 0.0558,              # shot ACTIVITY now rewarded (analyst v2.2), not penalised
-    "shots_off": 0.0196,          # even an off-target attempt: small credit for shooting
+    # IL BLOCCO DEL VOLUME, x0.7 il 29/08/2026 (v. la nota su sga_post). Tirare
+    # tanto restava creditato quanto l'esecuzione, e le due cose si compensavano
+    # quasi tiro per tiro: sprecare era gratis sotto 0.137 di xG, cioe' sulla
+    # maggioranza dei tiri. Continuano a pesare — provarci vale — ma meno di come
+    # si e' calciato.
+    "shots_on_target": 0.0346,
+    "shots": 0.0391,              # shot ACTIVITY still rewarded, not penalised
+    "shots_off": 0.0137,          # even an off-target attempt: small credit for shooting
     "errors_led_to_goal": -0.0354,   # decisive error (heavy)
     # Conceding a penalty hands over roughly 0.78 expected goals through a clear
     # individual foul, and — unlike a missed penalty — carries NO fantacalcio
@@ -264,7 +287,7 @@ TOTAL_WEIGHTS = {
     "last_man_tackle": 0.0,
     # An error that let the opponent SHOOT, without a goal following.
     "errors_led_to_shot": -0.0189,
-    "shots_blocked": 0.0278,      # the defence intervened
+    "shots_blocked": 0.0195,      # the defence intervened (x0.7 col blocco volume)
     # PROVIDER PROXY, and the only one in the model — read the note below before
     # touching it.
     "defensive_value": 0.085,
@@ -479,8 +502,10 @@ def weights_for_role(role: str) -> dict:
 
 # Shot-outcome detail lives in the event-level shot map (``MatchShot.shot_type``),
 # not the per-zone features, so it is fetched and merged separately (see
-# ``_merge_shot_detail``). shots_goal / shots_post / shots_blocked carry weight; the
-# rest (shots_saved / shots_off) are mapped for completeness and inspection.
+# ``_merge_shot_detail``). Solo ``shots_blocked`` e ``shots_off`` hanno un peso
+# proprio; ``shots_post`` e ``shots_goal`` non ne hanno (il primo entra solo dentro
+# sga_post, il secondo e' uscito dall'indice) e ``shots_saved`` e' mappato per
+# completezza e ispezione. Il commento diceva il contrario fino al 29/08/2026.
 SHOT_TYPE_TO_FEATURE = {"post": "shots_post", "goal": "shots_goal",
                         "save": "shots_saved", "miss": "shots_off",
                         "block": "shots_blocked"}
@@ -492,7 +517,24 @@ SHOT_DETAIL_FEATURES = frozenset(SHOT_TYPE_TO_FEATURE.values())
 # recombined. A woodwork strike gets no xGOT from the provider, so its execution
 # merit — a shot that beat the keeper and hit the frame — would read as zero; it is
 # credited here at the rate our own weights gave it relative to an xGOT unit.
-SGA_POST_WOODWORK = 0.73
+# RICALATO da 0.73 a 0.40 il 29/08/2026, e il numero adesso ha un significato che
+# si puo' controllare: e' la SOGLIA DI xGOT sopra la quale una parata vale piu' di
+# un palo. A parita' di occasione l'xG si semplifica — SGA(parata) = xGOT − xG,
+# SGA(palo) = W − xG — quindi W e' letteralmente "quanto vale, in xGOT, aver preso
+# il legno". A 0.73 batteva il 97,4% dei tiri parati della 25-26: piu' della
+# MEDIANA DI UN GOL (0.626), e in punti di voto il palo prendeva +0.592 di SGA
+# medio contro i +0.274 di un gol vero. A 0.40 sta all'85° percentile delle parate:
+# lo batte una buona parata, non gli arriva un tiro debole e centrale — che e' il
+# giudizio che si voleva.
+SGA_POST_WOODWORK = 0.40
+# L'xGOT che un tiro MURATO avrebbe avuto, in valore atteso. Stessa domanda del
+# legno, posta ai dati: P(in porta | non murato) x E[xGOT | in porta] = 0.439 x
+# 0.314 sulla 25-26. Esiste perche' un tiro murato non ha MAI avuto la possibilita'
+# di essere misurato, e imputargli xGOT = 0 lo trattava come uno sbagliato: il
+# tasso di tiri murati non e' nemmeno una qualita' ripetibile del tiratore
+# (correlazione meta'-meta' della stagione -0.006 su 143 giocatori, contro +0.174
+# dei tiri fuori), quindi addebitarglielo per intero era addebitare del rumore.
+SGA_POST_BLOCKED = 0.1378
 DERIVED_FEATURES = ("sga_post",)
 # Weighted features that are neither zone features nor computed: folded in from
 # elsewhere in the DB (see ``_merge_defensive_value``). Kept apart from
@@ -506,13 +548,20 @@ DERIVED_INPUTS = frozenset({"xg_on_target", "shots_post"})
 def derived_features(totals: dict) -> dict:
     """{feature: value} for features computed FROM the provider totals, not stored.
 
-    ``sga_post`` = xGOT − xG + woodwork: the shot's post-strike value over its
+    ``sga_post`` = xGOT − xG + legno + murati: the shot's post-strike value over its
     pre-strike value, i.e. what the player added by hitting it the way he did. It is
     legitimately NEGATIVE for a wasteful shooter (five shots off target: xGOT 0, xG
-    0.4) and the compression preserves that sign."""
+    0.4) and the compression preserves that sign.
+
+    I due addendi sono la STESSA correzione applicata due volte: il fornitore da'
+    xGOT solo ai tiri in porta, quindi a un tiro sul legno e a uno murato ne
+    assegna zero — non perche' valessero zero, ma perche' non sono misurabili. Le
+    due costanti sono l'xGOT che avrebbero avuto (v. SGA_POST_WOODWORK e
+    SGA_POST_BLOCKED); senza, il modello li tratta come tiri sbagliati."""
     return {
         "sga_post": (totals.get("xg_on_target", 0.0) - totals.get("xg_shots", 0.0)
-                     + SGA_POST_WOODWORK * totals.get("shots_post", 0.0)),
+                     + SGA_POST_WOODWORK * (totals.get("shots_post") or 0.0)
+                     + SGA_POST_BLOCKED * (totals.get("shots_blocked") or 0.0)),
     }
 
 # --- Goalkeeper channel ------------------------------------------------------
@@ -2086,7 +2135,19 @@ def _minutes_map(match_ids):
             .values("match_id", "player_id", "minutes_played")}
 
 
-def _reference_population(competition_season_id: int):
+def reference_population_keyed(competition_season_id: int):
+    """Come ``_reference_population``, ma con la CHIAVE (match, player) davanti.
+
+    Serve a chi deve agganciare alla riga qualcosa che nei totali non c'e' — i gol
+    e la loro importanza, che vivono nella mappa dei tiri. Stessa popolazione,
+    perche' una media presa su un insieme diverso da quello che definisce la
+    reference sposta il centro del ruolo di quanto i due differiscono."""
+    for key, role, feats, mins, exp in _reference_population(
+            competition_season_id, with_key=True):
+        yield key, role, feats, mins, exp
+
+
+def _reference_population(competition_season_id: int, with_key: bool = False):
     """[(role, totals, minutes, exposure)] — the games that define every calibration.
 
     One definition, used by the feature scales, the role reference and the
@@ -2106,7 +2167,8 @@ def _reference_population(competition_season_id: int):
         mins = minutes.get((mid, pid), 0)
         if mins < MIN_MINUTES_REFERENCE or not is_rated(mins, feats):
             continue
-        yield role, feats, mins, exposure.get((mid, pid), 0.0)
+        row = (role, feats, mins, exposure.get((mid, pid), 0.0))
+        yield ((mid, pid), *row) if with_key else row
 
 
 def build_feature_scales(competition_season_id: int) -> dict:
@@ -2345,6 +2407,19 @@ def voto_puro_for_match(match, reference: dict,
     # player is rated even below the minutes/touches gate. A booking alone is not
     # such an event — the pagelle leave those cameos unrated too.
     forcing = rating_forcing_event_players(match.id)
+    # Il credito per i GOL, che dal 29/08/2026 non e' piu' una feature dell'indice:
+    # dipende da che cosa il gol ha cambiato, non dai minuti giocati (v.
+    # services/goal_impact). Arriva gia' in punti di voto, quindi si somma al voto
+    # grezzo e non all'indice; ``goal_mean`` e' la media di ruolo da sottrarre,
+    # senza la quale questo termine — che e' solo positivo — alzerebbe la media di
+    # ogni ruolo che segna invece di ridistribuire.
+    goal_credit_detail = goal_impact.goals_by_player(match)
+    goal_band, goal_p95 = goal_impact.fixed_band()
+    goal_credit = {
+        pid: goal_impact.goal_credit(goal_impact.importances_of(recs),
+                                     goal_band, goal_p95)
+        for pid, recs in goal_credit_detail.items()}
+    goal_mean = goal_impact.role_mean_credit()
     # the DETAILS, not just the magnitudes: the explanation has to be able to say
     # which sending-off and which kind of own goal produced the drop it reports
     red_info = red_card_details(match.id)
@@ -2378,6 +2453,13 @@ def voto_puro_for_match(match, reference: dict,
         ev_w = (gk_evidence_weight(gk_evidence(feats, ga_on.get((mid, pid), 0)))
                 if role == Player.ROLE_GK else 1.0)
         raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k, ev_w)
+        # I GOL, in punti di voto e PRIMA della mitigazione: sono merito, quindi
+        # devono essere temperati dal risultato come tutto il resto — un gol in una
+        # goleada subita non fa eccezione. Sommati al voto grezzo e non all'indice
+        # perche' il loro valore non passa per lo shrinkage sui minuti, che e' il
+        # motivo per cui sono usciti dall'indice.
+        gadj = goal_credit.get(pid, 0.0) - goal_mean.get(ref_key, 0.0)
+        raw = max(VOTE_MIN, min(VOTE_MAX, raw + gadj))
         # Result mitigation: divergence-only, outfield only (the GK channel already
         # reflects the result). Recorded so the vote explanation can reconcile.
         nudge = (result_mitigation(raw, gd_on[(mid, pid)],
@@ -2405,6 +2487,14 @@ def voto_puro_for_match(match, reference: dict,
             # factor the vote did — otherwise a damped keeper's breakdown would add
             # up to a vote he did not get.
             "evidence_weight": round(ev_w, 4),
+            # Il credito dei gol, gia' centrato sulla media di ruolo. Esposto come
+            # le altre correzioni post-indice perche' la SPIEGAZIONE deve poterlo
+            # nominare: e' una voce che puo' valere mezzo voto e non compare in
+            # nessuna feature dell'indice.
+            "goal_adjustment": round(gadj, 3),
+            # I gol con lo stato che hanno cambiato: la spiegazione ne ricava la
+            # frase, e il dettaglio tiro per tiro li ritrova per nome.
+            "goal_detail": goal_credit_detail.get(pid, []),
             "result_nudge": round(nudge, 3),
             "red_adjustment": round(radj, 3),
             "own_goal_adjustment": round(oadj, 3),

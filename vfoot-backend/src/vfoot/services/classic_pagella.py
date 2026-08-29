@@ -579,6 +579,11 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           red_adjustment=row.get("red_adjustment", 0.0),
                           own_goal_adjustment=row.get("own_goal_adjustment", 0.0),
                           penalty_adjustment=row.get("penalty_adjustment", 0.0),
+                          # Il credito dei gol e i gol che lo producono: senza il
+                          # dettaglio la riga non saprebbe come chiamarsi, e senza
+                          # il numero la spiegazione non tornerebbe col voto.
+                          goal_adjustment=row.get("goal_adjustment", 0.0),
+                          goal_detail=row.get("goal_detail"),
                           # taken from the row that produced the vote, never
                           # recomputed here: the two must not be able to disagree
                           evidence_weight=row.get("evidence_weight", 1.0),

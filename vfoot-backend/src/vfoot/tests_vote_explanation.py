@@ -449,13 +449,19 @@ class VoteExplanationTests(SimpleTestCase):
         # 6.730 — sotto la soglia dell'arrotondamento. La lezione, la stessa della
         # prima volta: questo fixture deve avere MARGINE, non appoggiarsi al
         # confine. Ora sta a 6.920, +0.17 sopra.
+        # Il gol arriva dal 29/08/2026 come voce A LIVELLO DI VOTO e non piu' come
+        # feature dell'indice (v. services/goal_impact): senza passarlo qui il
+        # fixture non e' piu' "un difensore che segna dominando", e' un difensore
+        # che domina — che sul confine del 6.5 non ci arriva.
         average = self._averages("DIF", {"clearances": 8.0, "duels_won": 6.0,
                                          "touches": 60.0})
         feats = {"clearances": 12.0, "duels_won": 18.0, "touches": 95.0,
                  "interceptions": 4.0, "tackles_won": 5.0,
-                 "shots_goal": 1.0, "xg_on_target": 0.6,
-                 "dribbled_past": 3.0}
-        e = explain("DIF", feats, 90, self.REFERENCE, average)
+                 "xg_on_target": 0.6, "dribbled_past": 3.0}
+        e = explain("DIF", feats, 90, self.REFERENCE, average,
+                    goal_adjustment=0.52,
+                    goal_detail=[{"minute": 70, "own_after": 1, "opp_after": 0,
+                                  "importance": 1.34}])
         self.assertGreater(e["voto"], 6.5)
         self.assertEqual(e["negatives"], [])
         self.assertNotIn("Male", to_sentence(e))
@@ -563,10 +569,14 @@ class VoteExplanationTests(SimpleTestCase):
         insignificante mentre il voto lo muoveva un'altra.
 
         Da quando ``defensive_value`` parla, il caso resta solo per gli EVENT che
-        non sono accaduti — un attaccante che non segna perde il credito che
-        l'attaccante medio prende dai gol, e "nessun gol" nella frase parlata non
-        si dice per scelta di sempre."""
-        average = self._averages("ATT", {"shots_goal": 1.0, "touches": 60.0})
+        non sono accaduti — chi non conquista un rigore perde il credito che il
+        pari ruolo medio prende dai rigori conquistati, e "nessun rigore
+        conquistato" nella frase parlata non si dice per scelta di sempre.
+
+        L'esempio era ``shots_goal`` fino al 29/08/2026; da quando il gol e' uscito
+        dall'indice quella feature non muove piu' niente, e il caso si mostra con
+        un altro EVENT raro dello stesso tipo."""
+        average = self._averages("ATT", {"penalties_won": 1.0, "touches": 60.0})
         e = explain("ATT", {"touches": 60.0}, 90, self.REFERENCE, average)
         self.assertFalse(e["flat"])
         self.assertEqual(to_sentence(e),
