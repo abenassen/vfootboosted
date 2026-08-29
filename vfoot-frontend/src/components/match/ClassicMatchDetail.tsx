@@ -843,6 +843,89 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
  *  L'elenco NON viaggia nel tabellino: ventidue giocatori per trenta righe, e a
  *  partita in corso il tabellino si ricarica a ogni spinta. Si chiede al momento,
  *  una volta sola per giocatore, e resta lì per la riapertura. */
+/** La riga delle conclusioni del riassunto, apribile sulla mappa dei tiri.
+ *
+ *  «una o piu' conclusioni pericolose +1,04» e' il netto di sei voci su otto tiri:
+ *  da sola non dice ne' che cosa abbia fatto ne' perche'. I tiri arrivano con la
+ *  stessa chiamata del registro, e solo quando qualcuno chiede. */
+function ShootingLine({
+  label,
+  points,
+  playerId,
+  fmtPts,
+}: {
+  label: string;
+  points: number;
+  playerId: number;
+  fmtPts: (n: number) => string;
+}) {
+  const load = useContext(LedgerContext);
+  const [shots, setShots] = useState<ShotDetail[] | null>(null);
+  const [state, setState] = useState<'closed' | 'loading' | 'open' | 'error'>('closed');
+
+  const value = (
+    <span
+      className={`shrink-0 font-mono text-[11px] font-semibold ${
+        points >= 0 ? 'text-good' : 'text-bad'
+      }`}
+    >
+      {fmtPts(points)}
+    </span>
+  );
+  if (!load) {
+    return (
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-ink-soft">{label}</span>
+        {value}
+      </div>
+    );
+  }
+
+  const toggle = () => {
+    if (state === 'open') return setState('closed');
+    if (shots) return setState('open');
+    setState('loading');
+    load(playerId)
+      .then((l) => {
+        setShots(l.shots ?? []);
+        setState('open');
+      })
+      .catch(() => setState('error'));
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={state === 'open'}
+        className="flex w-full items-baseline justify-between gap-3 text-left"
+      >
+        <span className="text-ink-soft underline decoration-dotted underline-offset-2">
+          <span className="mr-1 inline-block text-ink-faint">{state === 'open' ? '▾' : '▸'}</span>
+          {label}
+        </span>
+        {value}
+      </button>
+      {state === 'loading' ? (
+        <div className="pl-3 text-[11px] text-ink-faint">Apro i tiri…</div>
+      ) : null}
+      {state === 'error' ? (
+        <div className="pl-3 text-[11px] text-bad">Non sono riuscito a caricare i tiri.</div>
+      ) : null}
+      {state === 'open' ? (
+        shots && shots.length ? (
+          <div className="border-l border-line pl-3">
+            <ShotMap shots={shots} fmtPts={fmtPts} />
+          </div>
+        ) : (
+          <div className="pl-3 text-[11px] text-ink-faint">Nessun tiro da mostrare.</div>
+        )
+      ) : null}
+    </>
+  );
+}
+
 function LedgerTerm({
   term,
   fmtPts,
@@ -1099,7 +1182,24 @@ function WhyThisVote({
           <span>Media del ruolo</span>
           <span className="shrink-0 font-mono text-[11px] font-semibold">{why.base.toFixed(1)}</span>
         </div>
-        {why.contributions.map((c) => line(c.label, c.points))}
+        {/* La riga delle CONCLUSIONI si apre sui tiri. Va appesa qui e non al
+            gruppo omonimo del registro: quel gruppo raccoglie le voci che il
+            riassunto NON ha mostrato, quindi per chi ha tirato abbastanza da
+            meritarsi la riga in cima -- cioe' esattamente chi ha una mappa dei
+            tiri da leggere -- non esiste. */}
+        {why.contributions.map((c) =>
+          c.family === 'conclusioni' ? (
+            <ShootingLine
+              key={c.label}
+              label={c.label}
+              points={c.points}
+              playerId={playerId}
+              fmtPts={fmtPts}
+            />
+          ) : (
+            line(c.label, c.points)
+          ),
+        )}
         {/* «altre 30 voci MINORI» era falso, ed è il motivo per cui questa riga si
             apre: su una prestazione buona dappertutto quelle voci sono la maggior
             parte del voto (Rrahmani in Genoa-Napoli: +0,56 mostrato, +0,81 lì

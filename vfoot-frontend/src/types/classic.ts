@@ -71,7 +71,18 @@ export interface ClassicPlayerLine {
    *  exist would mean inventing one. */
   explanation?: {
     /** The named slices, largest first, in vote points. */
-    contributions: { label: string; points: number }[];
+    contributions: {
+      label: string;
+      points: number;
+      /** La riga è il NETTO di più voci sovrapposte (le conclusioni, il dribbling,
+       *  la creazione). Serve al pannello per sapere quale riga si può aprire sul
+       *  dettaglio — le conclusioni sulla mappa dei tiri. */
+      family?: string;
+      family_size?: number;
+      /** Le correzioni a livello di voto, che non sono feature: gol, assist,
+       *  risultato, rosso, autogol, rigore sbagliato. */
+      kind?: string;
+    }[];
     base: number;            // where every vote starts: the role average (6)
     other_points: number;    // the long tail of small slices, folded into one
     other_count: number;
