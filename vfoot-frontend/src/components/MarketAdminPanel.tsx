@@ -83,6 +83,10 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
   const phase = session ? sessionPhase(session, nowMs) : null;
   const isClassic = data?.mode === 'classic';
   const queue = data?.admin_queue ?? [];
+  // La giornata vera, non il registro della lega: mentre si gioca, applicare
+  // un'offerta e' vietato dal server (muove due rose a partita in corso).
+  const frozen = !!data?.matchday_in_progress;
+  const playingMd = data?.playing_matchday ?? null;
   const leadingOffers = useMemo(
     () => (data?.free_agents ?? []).filter((f) => f.leading).sort((a, b) => (a.leading!.deadline_at ?? '').localeCompare(b.leading!.deadline_at ?? '')),
     [data?.free_agents],
@@ -165,7 +169,7 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
           c'e' nessuna coda da questa sessione, e se ne arriva una da quella
           precedente e' `queue` a tenerla in piedi. */}
       <QueueCard queue={queue} sessionLive={!!session && phase !== 'scheduled'} busy={busy}
-        leagueId={leagueId} nowMs={nowMs}
+        leagueId={leagueId} nowMs={nowMs} frozen={frozen} playingMd={playingMd}
         onAccept={(id) => act(() => adminMarketOffer(leagueId, id, 'accept'))}
         onDiscard={discard} />
 
@@ -203,12 +207,14 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
  *  spariva anche la coda — le offerte restavano accettate e non concluse, senza
  *  nessuna schermata da cui deciderle. Le rose non cambiano finche' non si
  *  accetta, quindi non e' un dettaglio estetico: era lavoro bloccato. */
-function QueueCard({ queue, sessionLive, busy, leagueId, nowMs, onAccept, onDiscard }: {
+function QueueCard({ queue, sessionLive, busy, leagueId, nowMs, frozen, playingMd, onAccept, onDiscard }: {
   queue: MarketOfferRow[];
   sessionLive: boolean;
   busy: boolean;
   leagueId: number;
   nowMs: number;
+  frozen: boolean;
+  playingMd: number | null;
   onAccept: (offerId: number) => void;
   onDiscard: (d: Discard) => void;
 }) {
@@ -229,10 +235,17 @@ function QueueCard({ queue, sessionLive, busy, leagueId, nowMs, onAccept, onDisc
               {' '}da una sessione già chiusa: restano da decidere, e finché non decidi le rose non cambiano.
             </div>
           )}
+          {frozen && (
+            <div className="mt-1 text-xs text-warn">
+              {playingMd ? <>Giornata <b>{playingMd}</b> in corso</> : <>Giornata in corso</>}: mentre
+              si gioca nessuna rosa cambia, quindi le validazioni riprendono a fine giornata.
+              Rifiutare si può — non muove nessuna rosa.
+            </div>
+          )}
           <div className="mt-2 divide-y divide-line">
             {queue.map((o) => (
               <QueueRow key={o.offer_id} o={o} busy={busy} leagueId={leagueId} nowMs={nowMs}
-                onAccept={() => onAccept(o.offer_id)} onDiscard={onDiscard} />
+                frozen={frozen} onAccept={() => onAccept(o.offer_id)} onDiscard={onDiscard} />
             ))}
           </div>
         </>
@@ -241,8 +254,8 @@ function QueueCard({ queue, sessionLive, busy, leagueId, nowMs, onAccept, onDisc
   );
 }
 
-function QueueRow({ o, busy, leagueId, nowMs, onAccept, onDiscard }: {
-  o: MarketOfferRow; busy: boolean; leagueId: number; nowMs: number;
+function QueueRow({ o, busy, leagueId, nowMs, frozen, onAccept, onDiscard }: {
+  o: MarketOfferRow; busy: boolean; leagueId: number; nowMs: number; frozen: boolean;
   onAccept: () => void; onDiscard: (d: Discard) => void;
 }) {
   const [asking, setAsking] = useState(false);
@@ -255,7 +268,12 @@ function QueueRow({ o, busy, leagueId, nowMs, onAccept, onDiscard }: {
           {' · '}<b>{price(o.amount)}</b> <span className="text-ink-faint">(recupero {o.recovery})</span>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" disabled={busy || asking} onClick={onAccept}>Accetta (applica rose)</Button>
+          {/* Il server lo rifiuta comunque (400), ma lo diceva DOPO il click e in
+              cima al pannello, spesso fuori schermo rispetto alla riga premuta. */}
+          <Button size="sm" disabled={busy || asking || frozen} onClick={onAccept}
+            title={frozen ? 'Giornata in corso: le validazioni riprendono a fine giornata.' : undefined}>
+            Accetta (applica rose)
+          </Button>
           <Button size="sm" variant="danger" disabled={busy || asking} onClick={() => setAsking(true)}>Rifiuta</Button>
         </div>
       </div>

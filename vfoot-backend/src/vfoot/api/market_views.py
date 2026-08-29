@@ -28,6 +28,7 @@ from vfoot.models import (
     MarketOffer,
     MarketSession,
 )
+from vfoot.services import matchday_state
 from vfoot.services.auction_engine import league_role_map
 from vfoot.services.listone import snapshot_league_listone
 from vfoot.services.market_engine import (
@@ -101,6 +102,19 @@ def _pending_queue(league: FantasyLeague) -> list[MarketOffer]:
     return list(MarketOffer.objects.filter(
         session__league=league, status=MarketOffer.STATUS_ACCEPTED,
     ).select_related("session").order_by("resolved_at"))
+
+
+def _freeze_row(league: FantasyLeague) -> dict:
+    """La giornata vera, per la coda di validazione.
+
+    Applicare un'offerta muove due rose, e ``apply_offer`` lo vieta mentre il
+    campionato e' in campo (R3). Senza dirlo qui, il pannello dell'admin non
+    aveva modo di saperlo: il bottone «Accetta» restava acceso, il rifiuto
+    arrivava come un 400 dopo il click, e il messaggio compariva in cima al
+    pannello — spesso fuori schermo rispetto alla riga su cui si era cliccato.
+    Il 400 resta: questa e' la stessa verita', detta prima."""
+    playing = matchday_state.playing_matchday(league)
+    return {"matchday_in_progress": playing is not None, "playing_matchday": playing}
 
 
 def _queue_rows(league: FantasyLeague, offers: list[MarketOffer]) -> list[dict]:
@@ -398,6 +412,7 @@ class MarketActiveView(APIView):
                 "session": None, "is_admin": is_admin, "mode": league.mode,
                 "my_team_id": team.id if team else None,
                 "admin_queue": _queue_rows(league, pending) if is_admin else [],
+                **_freeze_row(league),
             })
 
         states = market_states(league, session)
@@ -514,6 +529,7 @@ class MarketActiveView(APIView):
             "my_roster": my_roster,
             "my_offers": [_offer_row(o, names) for o in my_offers],
             "admin_queue": _queue_rows(league, pending),
+            **_freeze_row(league),
         }
         return Response(payload)
 

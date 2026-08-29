@@ -186,12 +186,14 @@ def team_deadline(league, team, real_matchday: int):
     his club kicked off. The second half is not a nicety — it is what makes the
     deadline a deadline:
 
-    * the market settles between one match of the round and the next (its freeze
-      is the three hours of a match, not the whole weekend). Counting only the
-      current roster, selling a man who took a 4.5 on Friday would move the
-      deadline to Saturday, reopen the lineup, and let the repair swap him for
+    * a roster can change between one round and the next — and it used to be able
+      to change WITHIN one, back when the market's freeze was the three hours of a
+      single match rather than the whole round (``playing_matchday``). Counting
+      only the current roster, selling a man who took a 4.5 on Friday would move
+      the deadline to Saturday, reopen the lineup, and let the repair swap him for
       somebody who plays on Sunday: a known vote erased. He was yours when his
-      match began, so he still binds you.
+      match began, so he still binds you — and this half of the rule is what makes
+      that true no matter how wide the freeze is drawn.
     * conversely, buying on Saturday a man who played on Friday closes the lineup
       at his Friday kickoff rather than letting his known vote into it. Harsh, and
       self-inflicted — and the alternative is a market in known votes.

@@ -116,6 +116,12 @@ export interface MarketActive {
   my_roster?: MarketRosterPlayer[];
   my_offers?: MarketOfferRow[];
   admin_queue?: MarketOfferRow[];
+  /** Il campionato vero e' in campo: applicare un'offerta muove due rose, e il
+   *  server lo rifiuta finche' la giornata non e' finita. Arriva anche senza
+   *  sessione viva, perche' la coda di validazione le sopravvive. */
+  matchday_in_progress?: boolean;
+  /** Quale giornata, per poterla nominare. */
+  playing_matchday?: number | null;
 }
 
 export interface MarketSessionHistory extends MarketSessionInfo {

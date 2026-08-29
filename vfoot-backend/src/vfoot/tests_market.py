@@ -14,7 +14,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from realdata.models import (
-    Competition, CompetitionSeason, Player, PlayerTeamStint, Season, Team,
+    Competition, CompetitionSeason, Match, Player, PlayerTeamStint, Season, Team,
     TeamSeason,
 )
 from vfoot.models import (
@@ -577,3 +577,83 @@ class DiscardRebidTests(MarketBase):
         self._discard(b.id, restore_previous=True)
         a.refresh_from_db()
         self.assertEqual(a.status, MarketOffer.STATUS_ACCEPTED)
+
+
+class MatchdayFreezeTests(MarketBase):
+    """R3: mentre il campionato e' in campo non cambia nessuna rosa.
+
+    Il divieto e' del motore, ma la coda dell'admin deve saperlo PRIMA del click:
+    finche' il payload non lo diceva, il bottone «Accetta» restava acceso e il
+    rifiuto arrivava come un 400 dopo il click, in cima al pannello — spesso
+    fuori schermo rispetto alla riga premuta.
+    """
+
+    def _kickoff_now(self):
+        """Una partita della stagione di riferimento appena cominciata."""
+        Match.objects.create(
+            competition_season=self.cs, matchday=5,
+            home_team=self.team_season, away_team=self.team_season,
+            kickoff=timezone.now() - timedelta(minutes=20), kickoff_provisional=False,
+            status=Match.STATUS_LIVE, data_ready=False,
+            external_source="sofascore", external_id="live1")
+
+    def _queued_offer(self):
+        d2 = self._player("MarioDef", "DIF", fieldable=False)
+        self._own(self.t2, d2, 40)
+        fa = self._player("FreeDef", "DIF")
+        s = self._session(MarketSession.RECOVERY_FRAC50)
+        offer = me.place_offer(s, self.t2, fa.id, d2.id, 30, actor=self.u2)
+        me.promote_expired(s, now=offer.deadline_at + timedelta(seconds=1))
+        offer.refresh_from_db()
+        return offer, fa
+
+    def test_applying_is_refused_while_the_round_is_on_the_pitch(self):
+        self._kickoff_now()
+        offer, fa = self._queued_offer()
+        with self.assertRaises(me.OfferApplyError):
+            me.apply_offer(offer, actor=self.admin)
+        # Niente a meta': l'offerta resta da decidere e le rose non si muovono.
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, MarketOffer.STATUS_ACCEPTED)
+        self.assertFalse(FantasyRosterSlot.objects.filter(
+            team=self.t2, player=fa, released_at__isnull=True).exists())
+
+    def test_the_queue_says_it_before_the_click(self):
+        self._kickoff_now()
+        offer, _ = self._queued_offer()
+        body = self._as(self.admin).get(
+            f"/api/v1/leagues/{self.league.id}/market/active").json()
+        self.assertTrue(body["matchday_in_progress"])
+        self.assertEqual(body["playing_matchday"], 5)
+        self.assertEqual(len(body["admin_queue"]), 1)
+        # E il server continua a difendersi da solo.
+        r = self._as(self.admin).post(
+            f"/api/v1/leagues/{self.league.id}/market/offers/{offer.id}/accept",
+            format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Giornata in corso", r.json()["detail"])
+
+    def test_between_rounds_nothing_is_frozen(self):
+        offer, fa = self._queued_offer()
+        body = self._as(self.admin).get(
+            f"/api/v1/leagues/{self.league.id}/market/active").json()
+        self.assertFalse(body["matchday_in_progress"])
+        self.assertIsNone(body["playing_matchday"])
+        r = self._as(self.admin).post(
+            f"/api/v1/leagues/{self.league.id}/market/offers/{offer.id}/accept",
+            format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(FantasyRosterSlot.objects.filter(
+            team=self.t2, player=fa, released_at__isnull=True).exists())
+
+    def test_rejecting_is_not_frozen(self):
+        """Rifiutare non muove nessuna rosa: la giornata non c'entra, ed e' la
+        sola cosa che l'admin puo' ancora fare mentre si gioca."""
+        self._kickoff_now()
+        offer, _ = self._queued_offer()
+        r = self._as(self.admin).post(
+            f"/api/v1/leagues/{self.league.id}/market/offers/{offer.id}/reject",
+            format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, MarketOffer.STATUS_REJECTED)
