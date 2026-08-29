@@ -740,11 +740,40 @@ OWN_GOAL_KEEPER_XGOT_DEFAULT = 0.834
 #
 # This is the second half of the same diagnosis. goals_prevented is a DIFFERENCE
 # against expectation, and a difference measured over one or two shots is mostly
-# noise: a keeper who faced a single shot and conceded it scores about -0.7 there and
-# used to come out at 5.0, while both external votes leave him at 6.0 — they are not
-# being generous, they are declining to judge a keeper who had nothing to do. Over
-# the season we sat 0.47 of a vote below fantacalcio on exactly those matches (<= 1
-# save, >= 1 goal conceded); with the damper, 0.23.
+# noise. Over the season we sat 0.47 of a vote below fantacalcio on exactly those
+# matches (<= 1 save, >= 1 goal conceded); with the damper, 0.23.
+#
+# L'ESEMPIO CHE STAVA QUI ERA SBAGLIATO, ed e' stato tolto il 30/08/2026. Diceva:
+# «un portiere che affronta un tiro solo e lo subisce esce a 5.0, mentre le pagelle
+# lo lasciano a 6.0 — non sono generose, si rifiutano di giudicare chi non ha avuto
+# niente da fare». Misurato sulla 25-26: quel caso e' 24 presenze su 765, l'xGOT
+# mediano del tiro incassato e' 0.685 (cioe' quasi imparabile) e il 5.0 capita DUE
+# volte in tutta la stagione — sui due tiri da 0.151 e 0.216, cioe' quando il gol
+# era davvero parabile. Li' il modello non stava facendo rumore, stava dicendo una
+# cosa precisa. E «non ha avuto niente da fare» descrive un caso diverso: lo ZERO
+# tiri, dove senza freno la media e' 5.70 contro il 6.02 della Redazione.
+#
+# QUELLO CHE IL FRENO VALE DAVVERO, per fascia, contro la Redazione (scarto medio e
+# deviazione standard dello scarto, che il livello non la vede):
+#
+#   tiri   n     col freno            senza freno
+#     0    31    -0.016 · 0.088       -0.468 · 0.177
+#     1    71    -0.049 · 0.280       -0.261 · 0.383
+#    2-3   252   -0.214 · 0.398       -0.246 · 0.442
+#    4+    411   nessuno e' frenato
+#
+# Si guadagna il posto a OGNI gradino, non solo allo zero, e il guadagno non e' un
+# artefatto del livello. Provate e scartate il 30/08/2026: il gradino secco (freno
+# solo a zero tiri) 85.6% contro 87.8% di accordo entro mezzo punto; l'evidenza
+# contata in xGOT invece che in tiri, che e' doppio conteggio (goals_prevented È
+# xGOT meno gol); l'evidenza contata come varianza binomiale Σp(1−p), che non lo e'
+# ma misura peggio (0.343 contro 0.333 di scarto assoluto).
+#
+# IL SUO COSTO, da tenere presente: fra 2 e 3 tiri il moltiplicatore cambia di un
+# terzo, e su un voto vicino al bordo della griglia dei mezzi punti quel terzo vale
+# mezzo voto. Il credito per l'assenza sulle voci di volume (v. CREDITED_FEATURES)
+# ne ha tolto una parte — non e' piu' il freno a portare da solo il peso del
+# portiere poco impegnato — ma il gradino resta.
 #
 # 4 is the MEDIAN shots-on-target faced in Serie A 2025-26 (mean 4.00), so the
 # typical keeper-match is judged at full strength and 47% of matches are damped, by
@@ -971,7 +1000,45 @@ def spread_k_for(ref_key: str, default: float = VOTE_SPREAD_K) -> float:
 # L'accordo non ci perde: una traslazione non muove una correlazione, ma
 # riallinea l'arrotondamento, e la Redazione GUADAGNA (0.6425 -> 0.6455) perche'
 # eravamo sistematicamente sopra di lei. Statistico -0.0006, SofaScore -0.0007.
-ROLE_VOTE_CENTER = {Player.ROLE_DEF: 5.91}
+#
+# IL PORTIERE, 6.15, dal 30/08/2026. Stessa diagnosi dei difensori letta al
+# contrario: sulla 25-26 (765 presenze POR, tutte con voto Redazione E Statistico)
+# stavamo sotto di 0.129 e 0.132. Non e' rumore ed e' la stessa cifra da mesi.
+#
+# Lo sweep del centro, contro i DUE fogli separatamente, cade sullo stesso punto a
+# un centesimo di distanza — che e' la ragione per cui ci si puo' credere: sono due
+# redazioni diverse.
+#
+#   centro   Redazione: scarto  |scarto|  entro 0.5      Statistico: idem
+#    6.00      -0.129    0.333    87.8%                   -0.132  0.346  86.9%
+#    6.10      -0.037    0.321    88.4%                   -0.041  0.324  88.4%
+#    6.15      +0.012    0.308    89.7%                   +0.009  0.316  89.7%
+#    6.20      +0.054    0.318    89.5%                   +0.051  0.320  89.7%
+#
+# LA CONSEGUENZA VA NELLA DIREZIONE OPPOSTA a quella dei difensori. La soglia del
+# modificatore difesa e' un 6.00 fisso, il portiere pesa per un quarto della media di
+# reparto, quindi alzarlo di 0.15 alza quella media di 0.0375 e il bonus scatta PIU'
+# spesso. Misurato sulle 760 difese della 25-26 (portiere + i tre difensori migliori,
+# coi nostri voti):
+#
+#   bonus medio  +0.976 -> +1.066     difese a zero bonus  43.2% -> 39.5%
+#   69 difese salgono di una banda, 3 scendono
+#
+# VA DETTO CHIARO: i due centri di ruolo quasi si annullano su questo modificatore.
+# Il 25/08 i difensori l'avevano portato da +1.071 a +0.920; questo lo rimette a
+# +1.066, cioe' praticamente al punto di partenza. Non e' una svista ed e' l'esito
+# giusto: ognuno dei due centri e' tarato sul suo ruolo contro le pagelle, e il
+# modificatore e' una CONSEGUENZA di quei due numeri, non un obiettivo. Chi volesse
+# governarlo lo faccia dalla sua tabella di bande, non spostando un centro.
+# Non si compensa, per la stessa ragione di allora: la soglia e' del regolamento e
+# non insegue i nostri centri.
+#
+# QUELLO CHE IL CENTRO NON RISOLVE, e non deve sembrare che risolva: lo scarto medio
+# e' la media di due errori opposti. A >=6 parate stiamo +0.31 SOPRA la Redazione, a
+# >=4 tiri con >=2 gol subiti -0.09 sotto, e sono le due popolazioni con la
+# dispersione piu' alta (0.54 contro 0.27-0.42 altrove). La scala e' troppo ripida
+# sulle partite piene. Una traslazione non tocca una pendenza: resta aperto.
+ROLE_VOTE_CENTER = {Player.ROLE_DEF: 5.91, Player.ROLE_GK: 6.15}
 
 
 def vote_center_for(role: str) -> float:
@@ -1266,12 +1333,53 @@ EXPOSURE_CREDIT = 0.0
 # * ``errors_led_to_goal``, ``penalties_conceded``, ``errors_led_to_shot``: eventi
 #   rari, mu_z ~0.1, il credito vale 0.006 di voto a testa. Toglierlo sarebbe
 #   coerente e impercettibile; resta fuori perché non è stato misurato a parte.
-# * il canale del portiere: nessuna delle sue voci negative è un conteggio di
-#   volume, e la sua esposizione è già il suo stesso canale.
+# * il canale del portiere: la frase che stava qui — «nessuna delle sue voci
+#   negative è un conteggio di volume» — era vera e guardava un lato solo. V. sotto.
+#
+# IL PORTIERE C'È DAL 30/08/2026. Il suo caso è SPECULARE a quelli qui sopra: non
+# sono le voci a peso negativo che valgono zero a regalare un credito, sono quelle a
+# peso POSITIVO che, valendo zero, PUNISCONO chi non è stato tirato. Stessa cura,
+# stesso ``_asymmetric_z``, verso opposto.
+#
+# Il difetto, misurato a evidenza piena sui sei portieri della 25-26 che hanno
+# affrontato UN tiro solo e l'hanno parato (xGOT >= 0.35):
+#
+#   gol evitati  +0.20 / +0.34      tutto il resto  -0.13 / -0.28
+#
+# e la voce più pesante del «resto» è gk_saves_inside_box a -0.186: diciannove
+# centesimi tolti per le parate ravvicinate che nessuno l'ha costretto a fare.
+#
+# COSA COMPRA (765 presenze POR della 25-26, contro la Redazione, al centro 6.15):
+# * la fascia «poco lavoro ma una parata vera» (<=2 tiri, imbattuto, almeno una da
+#   0.40 di xGOT, n=18): da 6.36 a 6.39 contro il loro 6.39, e 18 casi su 18 entro
+#   mezzo punto — il risultato migliore di ogni variante provata;
+# * la riga assurda sparisce dal pannello: a chi non è stato tirato la spiegazione
+#   non scrive più «nessuna parata su tiri ravvicinati -0.19».
+#
+# COSA COSTA, e non è gratis: il portiere bombardato e battuto (>=4 tiri, >=2 gol,
+# n=228) passa da -0.090 a -0.178. Viene dalla RICALIBRAZIONE, non dal freno:
+# schiacciando il fondo la media dell'indice sale (1.304 -> 1.737) e chi sta sotto
+# scivola. Nessun centro lo assorbe, perché è uno spostamento relativo dentro la
+# popolazione mentre un offset muove tutti insieme. Sul totale: |scarto| 0.308 ->
+# 0.313, entro mezzo punto 89.7% -> 89.3%.
+#
+# QUELLO CHE NON COMPRA: i sei casi a un tiro solo restano 6.0 (arrivano a
+# 6.19-6.25, e la soglia è 6.25) — lì il freno sull'evidenza si riprende i tre
+# quarti del credito. Toglierlo li porterebbe tutti a 6.5, azzeccandone 4 su 6
+# invece di 2, al prezzo di 1.1 punti di accordo su tutta la popolazione: misurato
+# (88.2%) e SCARTATO il 30/08/2026.
+#
+# Fuori restano, deliberatamente: ``gk_goals_prevented``, che è la misura del MERITO
+# e deve poter punire in pieno chi incassa un tiro parabile; e
+# ``gk_crosses_not_claimed``, a peso negativo, dove il credito è misurato identico a
+# non metterlo (0.341 in entrambi i casi) e non è il difetto in questione.
 ABSENCE_CREDIT = 0.0
 CREDITED_FEATURES = frozenset({
     "duels_lost", "aerials_lost", "dribbled_past", "errors_dispossessed",
     "errors_miscontrols", "errors_bad_passes", "errors_fouls_committed",
+    # Il canale del portiere: conteggi di volume a peso POSITIVO (v. sopra).
+    "gk_saves", "gk_saves_inside_box", "gk_high_claims", "gk_punches",
+    "gk_sweeper",
 })
 
 # 'A voto' vs 'senza voto' (s.v.): classic fantacalcio rates a player only if he

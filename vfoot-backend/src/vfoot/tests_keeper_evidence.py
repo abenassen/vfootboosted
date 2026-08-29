@@ -14,12 +14,17 @@ from __future__ import annotations
 from django.test import SimpleTestCase
 
 from vfoot.services.classic_rating import (
-    GK_EVIDENCE_FULL, GK_TOTAL_WEIGHTS, GK_WEIGHTS, VOTE_CENTER,
+    GK_EVIDENCE_FULL, GK_TOTAL_WEIGHTS, GK_WEIGHTS,
     _raw_vote_from_index, gk_evidence, gk_evidence_weight, index_for_role,
+    vote_center_for,
 )
 from vfoot.services.vote_explanation import explain, role_average_terms
 
 REFERENCE = {"POR": {"mean": 0.66, "std": 2.17, "n": 764}}
+# Il centro del PORTIERE, non il 6 di tutti: l'attenuazione fa regredire verso
+# il centro del RUOLO (6.15 dal 30/08/2026, v. ROLE_VOTE_CENTER), ed e' quello
+# il "par" rispetto a cui una partita magra si dice temperata.
+GK_CENTER = vote_center_for("POR")
 
 
 class KeeperEvidenceTests(SimpleTestCase):
@@ -51,8 +56,8 @@ class KeeperEvidenceTests(SimpleTestCase):
         full = _raw_vote_from_index(index, "POR", 90, REFERENCE, evidence_weight=1.0)
         thin = _raw_vote_from_index(index, "POR", 90, REFERENCE, evidence_weight=0.25)
         self.assertLess(full, thin)                 # thin is less harsh
-        self.assertLess(thin, VOTE_CENTER)          # but still below par
-        self.assertAlmostEqual(VOTE_CENTER - thin, (VOTE_CENTER - full) * 0.25,
+        self.assertLess(thin, GK_CENTER)            # but still below par
+        self.assertAlmostEqual(GK_CENTER - thin, (GK_CENTER - full) * 0.25,
                                places=6)
 
     def test_a_good_thin_match_is_damped_the_same_way(self):
@@ -62,7 +67,7 @@ class KeeperEvidenceTests(SimpleTestCase):
         full = _raw_vote_from_index(index, "POR", 90, REFERENCE, evidence_weight=1.0)
         thin = _raw_vote_from_index(index, "POR", 90, REFERENCE, evidence_weight=0.25)
         self.assertGreater(full, thin)
-        self.assertGreater(thin, VOTE_CENTER)
+        self.assertGreater(thin, GK_CENTER)
 
     def test_no_damping_leaves_the_vote_exactly_as_it_was(self):
         index = REFERENCE["POR"]["mean"] + REFERENCE["POR"]["std"]
