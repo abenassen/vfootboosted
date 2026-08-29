@@ -106,7 +106,15 @@ def weights_fingerprint() -> str:
 #           The post-index constants now key the scoring fingerprint below, so a
 #           future change to them invalidates caches on its own — this bump covers
 #           the one that introduced them.
-SCORING_CODE_VERSION = 5
+#   5 -> 6: il registro esteso porta due campi nuovi -- le voci raccolte per
+#           famiglia (``groups``) e la mappa dei tiri -- e i VOTI non cambiano.
+#           Proprio per questo serviva un giro qui: la chiave della cache si muove
+#           con le costanti del MODELLO, e una modifica che cambia la FORMA del
+#           payload senza toccarne i numeri non le sposta. La cache in produzione
+#           e' su FILE e sopravvive ai riavvii, quindi ha continuato a servire le
+#           righe vecchie -- senza i gruppi -- a un frontend che li aspettava, e il
+#           pannello si apriva vuoto. Chi aggiunge un campo al registro bumpa qui.
+SCORING_CODE_VERSION = 6
 
 
 def scoring_fingerprint() -> str:
