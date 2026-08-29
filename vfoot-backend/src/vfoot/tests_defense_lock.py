@@ -547,6 +547,103 @@ class DefenderCountOnSaveTests(_ClassicRound):
         self.assertEqual(r.status_code, 200, r.data)
 
 
+# --------------------------------------------------------------------------- #
+# L'INVARIANTE FRA LE MODALITA': la 3 non e' mai piu' stretta della 2.         #
+#                                                                             #
+# Le due modalita' guardano lo stesso orologio — il primo calcio d'inizio fra i #
+# club dei propri venticinque (``team_first_kickoff``) — e ne fanno due cose    #
+# diverse: la `own` CHIUDE tutto, la `player` si limita a fissare il numero dei #
+# difensori. Ne segue che ogni invio che la `own` accetterebbe la `player` deve #
+# accettarlo: un anticipo in cui non gioca nessuno dei miei non mi dice niente, #
+# e quindi non puo' togliermi niente — modulo e numero di difensori compresi.   #
+#                                                                             #
+# E' l'invariante, non un caso: se un domani l'orologio di R1 diventasse il     #
+# primo calcio d'inizio della GIORNATA, la 3 sarebbe piu' severa della 2 senza  #
+# nessuna ragione, e questi test lo direbbero.                                 #
+# --------------------------------------------------------------------------- #
+class ModeThreeIsNeverStricterThanModeTwoTests(_ClassicRound):
+    # Tre difensori invece dei quattro di OUTFIELD: l'invio che R1 rifiuta.
+    FEWER_DEFENDERS = ("d1", "d2", "d3", "m1", "m2", "m3", "m4", "abench", "a1", "a2")
+
+    def _mine_all_play_on_monday(self):
+        """L'anticipo si gioca, ma nessuno dei miei venticinque e' in campo."""
+        PlayerTeamStint.objects.filter(team_season=self.ts["sab"]).update(
+            team_season=self.ts["lun"])
+
+    def _in_mode(self, mode, outfield):
+        """L'invio, in una modalita' o nell'altra, sempre dalla stessa base."""
+        SavedLineupSnapshot.objects.filter(league_id=str(self.league.id)).delete()
+        self._save_snapshot()
+        self.league.lineup_lock_mode = mode
+        self.league.save(update_fields=["lineup_lock_mode"])
+        return self._post(outfield).status_code
+
+    def _both_modes(self, outfield):
+        return (self._in_mode(FantasyLeague.LOCK_OWN, outfield),
+                self._in_mode(FantasyLeague.LOCK_PLAYER, outfield))
+
+    def test_an_anticipo_without_my_players_leaves_the_module_free(self):
+        """Il caso: si e' giocato venerdi', io gioco lunedi'. In modalita' 2 sono
+        aperto, e in modalita' 3 devo esserlo altrettanto."""
+        self._mine_all_play_on_monday()
+        self._play_the_saturday()
+        own, player = self._both_modes(self.FEWER_DEFENDERS)
+        self.assertEqual(own, 200)
+        self.assertEqual(player, 200)
+
+    def test_before_any_kickoff_both_modes_are_open(self):
+        self._before_any_kickoff()
+        own, player = self._both_modes(self.FEWER_DEFENDERS)
+        self.assertEqual(own, 200)
+        self.assertEqual(player, 200)
+
+    def test_where_mode_two_closes_mode_three_may_bite_but_not_before(self):
+        """L'invariante su tutti gli istanti che contano: dove la 2 accetta, la 3
+        accetta. Dove la 2 chiude, la 3 puo' fare quello che vuole — e infatti
+        fissa il numero dei difensori, che e' il suo mestiere."""
+        where = dict(PlayerTeamStint.objects.filter(player_id__in=self.pid.values())
+                     .values_list("player_id", "team_season_id"))
+        for name, arrange in (
+            ("prima di tutto", self._before_any_kickoff),
+            ("anticipo senza i miei", lambda: (self._mine_all_play_on_monday(),
+                                               self._play_the_saturday())),
+            ("anticipo con i miei", self._play_the_saturday),
+        ):
+            with self.subTest(name):
+                for pid, ts_id in where.items():   # la rosa com'era, senza rifare il fixture
+                    PlayerTeamStint.objects.filter(player_id=pid).update(team_season_id=ts_id)
+                arrange()
+                own, player = self._both_modes(self.FEWER_DEFENDERS)
+                if own == 200:
+                    self.assertEqual(player, 200,
+                                     f"{name}: la 2 accetta e la 3 no")
+
+    def test_the_page_shows_nothing_frozen_during_a_foreign_anticipo(self):
+        """Lo specchio a schermo: la pagina spegne le pastiglie del modulo su
+        ``defence_locked`` e i chiodi su ``locked_player_ids``. Se qui e' tutto
+        libero, la formazione e' interamente modificabile anche a video."""
+        self._mine_all_play_on_monday()
+        self._play_the_saturday()
+        self._save_snapshot()
+        r = self._client().get(f"/api/v1/leagues/{self.league.id}/lineup?matchday=22")
+        self.assertEqual(r.status_code, 200)
+        lock = r.data["lineup_lock"]
+        self.assertFalse(lock["closed"])
+        self.assertFalse(lock["defence_locked"])
+        self.assertIsNone(lock["defence_count"])
+        self.assertEqual(lock["locked_player_ids"], [])
+
+    def test_with_my_own_player_on_the_pitch_the_page_says_so(self):
+        """Il contrario, perche' il test sopra non passi anche da rotto: appena
+        uno dei miei scende in campo, la pagina fissa il numero."""
+        self._play_the_saturday()
+        self._save_snapshot()
+        r = self._client().get(f"/api/v1/leagues/{self.league.id}/lineup?matchday=22")
+        lock = r.data["lineup_lock"]
+        self.assertTrue(lock["defence_locked"])
+        self.assertEqual(lock["defence_count"], 4)
+
+
 class ConclusionInheritsInsteadOfAskingTests(_ClassicRound):
     """Chi non schiera non blocca piu' la conclusione della giornata: vale
     l'ultima, e il forfait resta come scavalco esplicito dell'admin."""
