@@ -2558,26 +2558,35 @@ def voto_puro_for_match(match, reference: dict,
             "touches": round(feats.get("touches", 0.0), 1),
             "index": round(idx, 2),
             "rated": rated,
+            # DA QUI IN GIU', NIENTE ARROTONDAMENTI. Questi numeri non si mostrano
+            # a nessuno: la spiegazione del voto li RIsomma per ricostruire il voto
+            # che sta accanto al nome, nello stesso ordine in cui li ha sommati
+            # questo ciclo. Troncarli al millesimo per fare ordine nel payload
+            # spostava il grezzo di mezzo millesimo, e sul bordo della griglia dei
+            # mezzi punti mezzo millesimo vale MEZZO VOTO — il pannello diceva 6.0
+            # sotto un 6.5. Chi vuole vederli scritti corti li arrotondi dove li
+            # stampa.
+            #
             # Passed on so the vote EXPLANATION shrinks its slices by the same
             # factor the vote did — otherwise a damped keeper's breakdown would add
             # up to a vote he did not get.
-            "evidence_weight": round(ev_w, 4),
+            "evidence_weight": ev_w,
             # Il credito dei gol, gia' centrato sulla media di ruolo. Esposto come
             # le altre correzioni post-indice perche' la SPIEGAZIONE deve poterlo
             # nominare: e' una voce che puo' valere mezzo voto e non compare in
             # nessuna feature dell'indice.
-            "goal_adjustment": round(gadj, 3),
+            "goal_adjustment": gadj,
             # I gol con lo stato che hanno cambiato: la spiegazione ne ricava la
             # frase, e il dettaglio tiro per tiro li ritrova per nome.
             "goal_detail": goal_credit_detail.get(pid, []),
             "assist_detail": assist_detail.get(pid, []),
-            "assist_adjustment": round(aadj, 3),
-            "result_nudge": round(nudge, 3),
-            "red_adjustment": round(radj, 3),
-            "own_goal_adjustment": round(oadj, 3),
+            "assist_adjustment": aadj,
+            "result_nudge": nudge,
+            "red_adjustment": radj,
+            "own_goal_adjustment": oadj,
             "red_detail": red_info.get(pid),
             "own_goal_detail": og_info.get(pid),
-            "penalty_adjustment": round(padj, 3),
+            "penalty_adjustment": padj,
             "voto_puro": voto,
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))

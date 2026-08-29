@@ -1171,7 +1171,9 @@ def _foot_index(cov, sf, ss):
         f"in cui uno dei due dice s.v. (per noi meno di {cr.MIN_MINUTES_RATED}′ o "
         f"{cr.MIN_TOUCHES_RATED} palloni giocati; per loro il '6*'). "
         f"Il nostro voto base e' 6 + {cr.VOTE_SPREAD_K} · (min/(min+"
-        f"{cr.SHRINKAGE_MINUTES})) · z(indice) nel ruolo, poi mitigazione al "
+        f"{cr.SHRINKAGE_MINUTES})) · z(indice) nel ruolo — il portiere ha la sua "
+        f"scala, {cr.GK_SPREAD_K}, e in piu' lo smorzamento per quanta partita gli "
+        f"e' arrivata — poi mitigazione al "
         f"risultato e correzioni per espulsione/autogol/rigore sbagliato, "
         f"arrotondato a mezzo voto. MAE = scarto medio assoluto; bias positivo = "
         f"votiamo piu' alto di loro.")

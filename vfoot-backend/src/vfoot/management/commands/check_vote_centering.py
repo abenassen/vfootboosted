@@ -56,12 +56,16 @@ def centering_report(samples: dict, k: float) -> dict:
     """{role: [(z, w, vote), ...]} -> {role: {...}} with the mean and its two parts.
 
     Pure arithmetic, kept out of the command body so it can be tested without a
-    season behind it. ``k`` is VOTE_SPREAD_K.
+    season behind it. ``k`` is VOTE_SPREAD_K — ma il portiere ha la sua scala
+    (GK_SPREAD_K), e decomporre il suo scarto con quella di movimento sballava le
+    due colonne del 9%: la media e lo scarto vengono dai voti veri e sono giusti,
+    i due addendi che dovrebbero spiegarli no.
     """
     out = {}
     for role, rows in samples.items():
         if not rows:
             continue
+        k_role = cr.spread_k_for(role, k)
         z = [r[0] for r in rows]
         w = [r[1] for r in rows]
         v = [r[2] for r in rows]
@@ -70,8 +74,8 @@ def centering_report(samples: dict, k: float) -> dict:
             "n": len(rows),
             "mean": statistics.mean(v),
             "drift": statistics.mean(v) - VOTE_CENTER,
-            "centre_term": k * ew * ez,
-            "cov_term": k * c,
+            "centre_term": k_role * ew * ez,
+            "cov_term": k_role * c,
         }
     return out
 

@@ -114,7 +114,15 @@ def weights_fingerprint() -> str:
 #           e' su FILE e sopravvive ai riavvii, quindi ha continuato a servire le
 #           righe vecchie -- senza i gruppi -- a un frontend che li aspettava, e il
 #           pannello si apriva vuoto. Chi aggiunge un campo al registro bumpa qui.
-SCORING_CODE_VERSION = 6
+#   6 -> 7: la spiegazione del voto calcolava il numero con la scala di MOVIMENTO
+#           anche per il portiere (GK_SPREAD_K era arrivato senza di lei), e il
+#           pannello «come nasce il voto puro» smentiva il voto scritto accanto al
+#           nome in 91 pagelle di portiere su 1247. I voti non si muovono di un
+#           centesimo: si muove il payload della spiegazione, che vive nella stessa
+#           cache su file dei voti e sopravvive al riavvio. Senza questo giro la
+#           produzione avrebbe continuato a servire il pannello sbagliato fino al
+#           primo dato nuovo di quella giornata.
+SCORING_CODE_VERSION = 7
 
 
 def scoring_fingerprint() -> str:

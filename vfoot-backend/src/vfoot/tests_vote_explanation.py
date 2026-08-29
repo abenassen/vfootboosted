@@ -8,7 +8,9 @@ from vfoot.services.vote_explanation import (
     readable_label, role_average_terms, to_sentence,
 )
 from vfoot.services.classic_rating import (
-    VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, SHRINKAGE_MINUTES,
+    GK_SPREAD_K, VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K,
+    SHRINKAGE_MINUTES,
+    _raw_vote_from_index, _round_half,
     vote_center_for,
     index_for_role,
 )
@@ -123,6 +125,39 @@ class VoteExplanationTests(SimpleTestCase):
         raw = max(VOTE_MIN, min(VOTE_MAX,
                                 vote_center_for("DIF") + VOTE_SPREAD_K * w * z))
         self.assertAlmostEqual(e["voto"], round(raw * 2) / 2, places=2)
+
+    def test_the_panel_never_contradicts_the_row(self):
+        """Il numero in fondo al pannello e' il voto scritto accanto al nome.
+
+        Non «uno simile»: lo STESSO, per ogni ruolo e su tutta la griglia dei
+        mezzi punti. La spiegazione ricalcolava il voto con una copia della
+        formula, quella copia e' rimasta indietro quando il portiere ha avuto la
+        sua scala (GK_SPREAD_K), e il pannello ha detto 6.0 sotto un 6.5 in 91
+        pagelle di portiere su 1247. Il conto lo fa lo scorer, qui si controlla
+        solo che sia lui a farlo — cosi' la prossima costante che arriva per un
+        ruolo solo non puo' riaprire la stessa crepa.
+        """
+        cases = [
+            ("DIF", {"duels_won": 30.0, "clearances": 20.0, "touches": 90.0},
+             {"duels_won": 12.0, "clearances": 8.0, "touches": 60.0}, 1.0),
+            ("ATT", {"shots": 5.0, "touches": 60.0, "expected_assists": 0.6},
+             {"shots": 2.0, "touches": 40.0}, 1.0),
+            ("POR", {"gk_saves": 4.0, "gk_goals_prevented": 0.9, "touches": 30.0},
+             {"gk_saves": 2.0, "gk_goals_prevented": 0.1, "touches": 28.0}, 1.0),
+            # e lo stesso portiere con mezza prova: l'altro smorzamento del canale
+            ("POR", {"gk_saves": 1.0, "gk_goals_prevented": -0.8, "touches": 25.0},
+             {"gk_saves": 2.0, "gk_goals_prevented": 0.1, "touches": 28.0}, 0.4),
+        ]
+        for role, feats, mean_feats, ev in cases:
+            for minutes in (12, 45, 90):
+                with self.subTest(role=role, minutes=minutes, evidence=ev):
+                    e = explain(role, feats, minutes, self.REFERENCE,
+                                self._averages(role, mean_feats),
+                                evidence_weight=ev)
+                    row = _round_half(_raw_vote_from_index(
+                        index_for_role(role, feats, minutes), role, minutes,
+                        self.REFERENCE, evidence_weight=ev))
+                    self.assertEqual(e["voto"], row)
 
     def test_result_nudge_and_red_card_reconcile_and_are_named(self):
         average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0})
@@ -413,9 +448,11 @@ class VoteExplanationTests(SimpleTestCase):
         thin = explain("POR", {"gk_saves": 1.0, "touches": 25.0}, 90, self.REFERENCE,
                        self._averages("POR", {"gk_saves": 2.0, "touches": 25.0}),
                        evidence_weight=0.25, full=True)
+        # GK_SPREAD_K, non VOTE_SPREAD_K: il portiere ha la sua scala, e questa
+        # riga la fissa proprio perche' la spiegazione l'aveva persa.
         self.assertAlmostEqual(
             thin["per_unit"],
-            VOTE_SPREAD_K * (90 / (90 + SHRINKAGE_MINUTES)) * 0.25
+            GK_SPREAD_K * (90 / (90 + SHRINKAGE_MINUTES)) * 0.25
             / self.REFERENCE["POR"]["std"], places=5)
 
     def test_a_clearly_poor_vote_drops_the_faint_positives(self):

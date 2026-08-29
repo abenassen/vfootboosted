@@ -23,9 +23,9 @@ from __future__ import annotations
 from vfoot.services.classic_rating import (
     DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
     GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, SHRINKAGE_MINUTES, TOTAL_WEIGHTS,
-    VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K, WEIGHTS, vote_center_for,
-    _feature_z, exposure_z, scored_z, feature_scales, raw_feature_values,
-    weights_for_role,
+    VOTE_CENTER, VOTE_MAX, VOTE_MIN, WEIGHTS, vote_center_for,
+    _feature_z, _raw_vote_from_index, exposure_z, scored_z, feature_scales,
+    index_for_role, raw_feature_values, spread_k_for, weights_for_role,
 )
 from realdata.models import Player
 from vfoot.services import goal_impact
@@ -780,7 +780,11 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # GK_EVIDENCE_FULL). Both scale every slice, so the breakdown keeps adding up.
     weight = (minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0)
     weight *= evidence_weight
-    per_unit = VOTE_SPREAD_K * weight / ref["std"]
+    # spread_k_for, non VOTE_SPREAD_K: dal 29/08/2026 il portiere ha la sua scala
+    # (GK_SPREAD_K 0.8 contro 0.727), e una spiegazione costruita sulla scala di
+    # movimento comprimeva ogni fetta del 9,1% — cioe' raccontava a un portiere un
+    # voto piu' vicino al 6 di quello scritto accanto al suo nome.
+    per_unit = spread_k_for(role) * weight / ref["std"]
 
     points_by_key = {key: (terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * per_unit
                      for key in set(terms) | set(mean_terms)}
@@ -838,13 +842,20 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # the explanation show a different vote than the one on the row. The "other"
     # line then absorbs whatever the shown slices don't account for, so the visible
     # numbers still reconcile to this subtotal.
-    index = sum(terms.values())
-    z = (index - ref["mean"]) / ref["std"]
+    #
+    # E «esattamente come lo calcola lo scorer» vuol dire CHIAMANDO LO SCORER, non
+    # riscrivendone la formula qui: la copia era rimasta indietro di una scala (il
+    # portiere, GK_SPREAD_K) e le stesse operazioni in ordine diverso divergevano
+    # comunque sull'ultimo bit, che sulla griglia dei mezzi punti vale mezzo voto.
+    # Le fette qui sopra restano una scomposizione dell'indice; il NUMERO viene da
+    # una funzione sola, che e' quella che ha scritto il voto sulla riga.
     # vote_center_for, non VOTE_CENTER: il centro dipende dal ruolo (v.
     # ROLE_VOTE_CENTER), e una spiegazione che partisse dal 6 per tutti mostrerebbe
     # un "altre N voci" gonfio dell'offset invece del vero resto.
     centre = vote_center_for(role)
-    raw = max(VOTE_MIN, min(VOTE_MAX, centre + VOTE_SPREAD_K * weight * z))
+    raw = _raw_vote_from_index(
+        index_for_role(role, totals, minutes, exposure), role, minutes, reference,
+        evidence_weight=evidence_weight)
     # Same order as the scorer: clamp the merit vote, add the (divergence-only)
     # result nudge, the red-card drop and the own-goal drop, then clamp back.
     # Stesso ordine dello scorer: il credito dei GOL entra nel voto grezzo (e' merito,
