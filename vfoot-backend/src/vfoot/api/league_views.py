@@ -114,7 +114,7 @@ from vfoot.services.league_competitions import main_competition
 from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic_lineup
 from vfoot.services.classic_pagella import (
     elapsed_minutes, get_reference, match_in_progress, match_of_player,
-    pagella_for_match, vote_ledger,
+    pagella_for_match, shot_detail, vote_ledger,
 )
 from vfoot.services.classic_rating import current_role_map
 from vfoot.services import league_decisions
@@ -6679,7 +6679,11 @@ class VoteLedgerView(APIView):
         if led is None:
             return Response({"detail": "Nessun voto da spiegare per questo giocatore."},
                             status=status.HTTP_404_NOT_FOUND)
-        return Response(led)
+        # I TIRI, uno per uno. Viaggia qui e non nella pagella perche' costa una
+        # valutazione per tiro (v. shot_detail) e la pagella la si rifa' a ogni
+        # spinta del punteggio in diretta, per ventidue giocatori; questa la chiede
+        # solo chi ha aperto il dettaglio di un voto.
+        return Response({**led, "shots": shot_detail(match, player_id)})
 
 
 class LeagueVoteLedgerView(VoteLedgerView):

@@ -272,6 +272,70 @@ LEDGER_LABELS = {
 }
 
 
+# --- I GRUPPI DEL REGISTRO ----------------------------------------------------
+# Aprendo "altre N voci" si trovavano trenta righe, la meta' delle quali da 0.01,
+# e la loro somma non si leggeva: il lettore vedeva un elenco, non una spiegazione.
+# Qui le stesse righe stanno in sei famiglie con un subtotale ciascuna, e il
+# dettaglio si apre solo dove serve.
+#
+# I gruppi seguono il SENSO, non i pesi: chi legge cerca "come ha difeso" e "quanti
+# palloni ha perso", non "quali feature hanno peso negativo". Le famiglie gia'
+# unite nel riassunto (conclusioni, dribbling, creazione) restano una riga sola e
+# vanno nel loro gruppo per intero.
+LEDGER_GROUPS = (
+    ("conclusioni", "Conclusioni",
+     ("sga_post", "xg_shots", "shots_on_target", "shots", "shots_off",
+      "shots_blocked", "shots_goal", "shots_post")),
+    ("creazione", "Creazione",
+     ("expected_assists", "assists", "key_passes", "big_chance_created",
+      "big_chance_missed")),
+    ("duelli", "Duelli",
+     ("duels_won", "duels_lost", "aerials_won", "aerials_lost", "dribbles_won",
+      "dribbles_attempted", "was_fouled", "penalties_won")),
+    ("difesa", "Difesa",
+     ("defensive_value", "tackles_won", "interceptions", "ball_recoveries",
+      "blocks", "clearances", "clearances_off_line", "last_man_tackle",
+      "dribbled_past", EXPOSURE_KEY)),
+    ("possesso", "Possesso e passaggi",
+     ("passes_completed", "passes_opp_half", "long_balls_completed",
+      "crosses_completed", "touches", "touches_in_box")),
+    ("errori", "Errori",
+     ("errors_bad_passes", "errors_dispossessed", "errors_miscontrols",
+      "errors_fouls_committed", "errors_led_to_goal", "errors_led_to_shot",
+      "penalties_conceded")),
+    ("portiere", "Porta",
+     ("gk_goals_prevented", "gk_saves", "gk_saves_inside_box", "gk_high_claims",
+      "gk_punches", "gk_sweeper", "gk_crosses_not_claimed", "gk_penalty_saves")),
+)
+# {feature: (chiave del gruppo, titolo)} — la stessa tabella letta al contrario.
+GROUP_OF = {k: (key, title) for key, title, keys in LEDGER_GROUPS for k in keys}
+# Le famiglie unite portano il nome della famiglia, non quello della prima feature.
+GROUP_OF_FAMILY = {"conclusioni": ("conclusioni", "Conclusioni"),
+                   "dribbling": ("duelli", "Duelli"),
+                   "creazione": ("creazione", "Creazione")}
+
+
+def group_ledger(rows: list[dict]) -> list[dict]:
+    """Le righe del registro raccolte per senso, con il subtotale di ognuna.
+
+    Ordinati per PESO ASSOLUTO del gruppo, non per l'ordine della tabella: chi apre
+    il dettaglio vuole sapere prima che cosa ha mosso il voto. Dentro il gruppo
+    resta l'ordine per punti che le righe avevano gia'.
+    """
+    buckets: dict[str, dict] = {}
+    for row in rows:
+        key, title = (GROUP_OF_FAMILY.get(row.get("family"))
+                      or GROUP_OF.get(row.get("key"))
+                      or ("altro", "Altro"))
+        b = buckets.setdefault(key, {"key": key, "title": title,
+                                     "points": 0.0, "terms": []})
+        b["points"] += row.get("points", 0.0)
+        b["terms"].append(row)
+    for b in buckets.values():
+        b["points"] = round(b["points"], 2)
+    return sorted(buckets.values(), key=lambda b: -abs(b["points"]))
+
+
 def _weight_of(role: str, key: str) -> float:
     if key == EXPOSURE_KEY:
         return -EXPOSURE_WEIGHT
@@ -958,6 +1022,9 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         # voci" del pannello si apre su queste, e insieme a ``other_tiny`` fanno
         # esattamente ``other_points``.
         "other_terms": other_terms,
+        # Le stesse righe raccolte per senso, col subtotale di ogni gruppo: e' la
+        # forma in cui "altre N voci" si legge invece di elencarsi.
+        "other_groups": group_ledger(other_terms) if ledger else [],
         "other_tiny": {"count": tiny_count, "points": tiny_points},
         # vote points per index point for THIS appearance (it carries both
         # shrinkages): the scale that turns the index into the vote.

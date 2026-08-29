@@ -39,7 +39,9 @@ from vfoot.services.classic_rating import (
     _minutes_map, _per_match_player_totals,
 )
 from vfoot.services.vote_explanation import explain, role_average_terms, to_sentence
-from vfoot.services.vote_reference import fixed_reference, fixed_role_averages
+from vfoot.services.vote_reference import (
+    fixed_reference, fixed_role_averages, scoring_fingerprint,
+)
 
 CARD_MALUS = {CARD_YELLOW: 0.5, CARD_SECOND_YELLOW: 1.0, CARD_RED: 1.0}
 OWN_GOAL_MALUS = 2.0  # classic fantacalcio: -2 per own goal (from raw_stats.ownGoals)
@@ -422,8 +424,14 @@ def vote_ledger(match, player_id: int) -> dict | None:
     in corso i voti si muovono a ogni giro del tick, e ``data_version`` non se ne
     accorgerebbe (conta le partite finite).
     """
+    # L'IMPRONTA DEL MODELLO nella chiave, non solo quella dei dati. Senza, dopo
+    # una ritaratura questa cache serviva per un'ora la scomposizione VECCHIA
+    # accanto al voto NUOVO — e il campo ``voto`` qui dentro contraddiceva quello
+    # in cima al pannello. E' lo stesso difetto gia' corretto una volta per il
+    # listone (v. player_ratings) e per l'indice di giornata.
     key = (f"vfoot:vote_ledger:{match.id}:"
-           f"{matchday_data_version(match.competition_season_id, match.matchday)}")
+           f"{matchday_data_version(match.competition_season_id, match.matchday)}"
+           f":{scoring_fingerprint()}")
     rows = cache.get(key)
     if rows is None:
         pag = pagella_for_match(match, ledger=True)
@@ -612,3 +620,112 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
         "home": _team_detail(buckets["home"]["starters"], buckets["home"]["bench"]),
         "away": _team_detail(buckets["away"]["starters"], buckets["away"]["bench"]),
     }
+
+
+# Come si chiama, a schermo, l'esito di un tiro.
+SHOT_OUTCOME_IT = {"goal": "gol", "save": "parato", "post": "legno",
+                   "block": "murato", "miss": "fuori"}
+# E da dove veniva.
+SHOT_SITUATION_IT = {
+    "regular": "azione", "assisted": "su assist", "fast-break": "in contropiede",
+    "set-piece": "su palla inattiva", "corner": "su corner",
+    "free-kick": "su punizione", "penalty": "su rigore",
+    "throw-in-set-piece": "su rimessa",
+}
+# Le feature che UN TIRO muove. Toglierlo dai totali significa togliergli queste.
+_SHOT_TYPE_FEATURE = {"post": "shots_post", "goal": "shots_goal",
+                      "save": "shots_saved", "miss": "shots_off",
+                      "block": "shots_blocked"}
+
+
+def shot_detail(match, player_id: int) -> list[dict]:
+    """I tiri di un giocatore in una partita, con quanto vale CIASCUNO.
+
+    La riga «conclusioni» del riassunto e' il netto di sei feature su otto tiri, e
+    da quel numero solo non si capisce ne' che cosa abbia fatto ne' perche'. I dati
+    per aprirla ci sono tutti (``MatchShot``: minuto, xG, xGOT, esito, situazione),
+    e questa e' la loro forma leggibile.
+
+    IL VALORE DI UN TIRO E' UN LEAVE-ONE-OUT, non una quota di una somma: le
+    feature passano per una compressione non lineare, quindi il contributo del
+    singolo tiro NON e' additivo e ripartire il totale sarebbe inventare una
+    scomposizione che il modello non fa. «Quanto varrebbe il voto senza questo
+    tiro» e' invece una domanda a cui il modello risponde esattamente, ed e' la
+    stessa misura usata in tutta l'analisi che ha prodotto questa taratura.
+
+    Costa N+1 valutazioni per giocatore, quindi si calcola solo quando qualcuno
+    apre il dettaglio — mai dentro la pagella, che viaggia per ventidue giocatori
+    a ogni spinta del punteggio in diretta.
+    """
+    from vfoot.services import goal_impact
+    from vfoot.services.classic_rating import (
+        _raw_vote_from_index, feature_scales, index_for_role,
+    )
+
+    key = (match.id, player_id)
+    feats = _per_match_player_totals([match.id]).get(key)
+    if not feats:
+        return []
+    shots = list(MatchShot.objects.filter(match=match, player_id=player_id)
+                 .order_by("minute", "id")
+                 .values("minute", "xg", "xgot", "is_goal", "shot_type", "situation"))
+    if not shots:
+        return []
+
+    mins = _minutes_map([match.id]).get(key, 0)
+    exposure = defensive_exposure([match.id], _minutes_map([match.id])).get(key, 0.0)
+    role = (voto_puro_row(match, player_id) or {}).get("role") or ""
+    reference = get_reference(match.competition_season_id)
+    if not role or role not in reference or mins <= 0:
+        return []
+    scales = feature_scales(gk=role == Player.ROLE_GK)
+    band, p95 = goal_impact.fixed_band()
+    goals = goal_impact.goals_by_player(match).get(player_id, [])
+
+    def merit(totals, goal_records):
+        """Il voto di MERITO — l'indice piu' il credito dei gol, prima delle
+        correzioni. Le correzioni (mitigazione, rosso, autogol) non dipendono dai
+        tiri, quindi si semplificano nella differenza e ometterle tiene il numero
+        pulito invece di farlo passare due volte per gli stessi arrotondamenti."""
+        idx = index_for_role(role, totals, mins, exposure, scales)
+        raw = _raw_vote_from_index(idx, role, mins, reference)
+        return raw + goal_impact.goal_credit(
+            goal_impact.importances_of(goal_records), band, p95)
+
+    base = merit(feats, goals)
+    out = []
+    for i, s in enumerate(shots):
+        without = dict(feats)
+        without["shots"] = (without.get("shots") or 0) - 1
+        without["xg_shots"] = (without.get("xg_shots") or 0.0) - (s["xg"] or 0.0)
+        without["xg_on_target"] = (without.get("xg_on_target") or 0.0) - (s["xgot"] or 0.0)
+        if s["is_goal"] or (s["xgot"] or 0.0) > 0:
+            without["shots_on_target"] = (without.get("shots_on_target") or 0) - 1
+        feature = _SHOT_TYPE_FEATURE.get(s["shot_type"])
+        if feature:
+            without[feature] = (without.get(feature) or 0) - 1
+        # Il gol si porta via anche il suo credito d'impatto, che e' la meta' del
+        # suo valore: lasciarlo dentro mostrerebbe un gol che vale quanto un tiro.
+        goals_left = ([g for g in goals if g["minute"] != s["minute"]]
+                      if s["is_goal"] else goals)
+        out.append({
+            "minute": s["minute"],
+            "outcome": SHOT_OUTCOME_IT.get(s["shot_type"], s["shot_type"] or "tiro"),
+            "situation": SHOT_SITUATION_IT.get(s["situation"] or "", ""),
+            "xg": round(s["xg"] or 0.0, 3),
+            "xgot": round(s["xgot"] or 0.0, 3),
+            # xGOT − xG: quanto la conclusione ha aggiunto (o tolto) alla palla che
+            # aveva. E' la grandezza su cui il modello giudica il tiro, quindi si
+            # mostra invece di lasciarla ricavare a chi legge.
+            "added": round((s["xgot"] or 0.0) - (s["xg"] or 0.0), 3),
+            "points": round(base - merit(without, goals_left), 3),
+        })
+    return out
+
+
+def voto_puro_row(match, player_id: int) -> dict | None:
+    """La riga del voto di un giocatore, dalla pagella gia' in cache quando c'e'."""
+    for r in voto_puro_for_match(match, get_reference(match.competition_season_id)):
+        if r["player_id"] == player_id:
+            return r
+    return None
