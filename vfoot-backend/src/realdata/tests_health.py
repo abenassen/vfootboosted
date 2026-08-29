@@ -20,6 +20,7 @@ porta via anche quello vero:
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 from django.test import TestCase
@@ -229,7 +230,10 @@ class CanarinoFormaDati(TestCase):
         import tempfile
         self.dir = tempfile.mkdtemp(prefix="canary_")
 
-    def _lineups(self, event_id, *, keys=None, players=22, broken=0):
+    def _lineups(self, event_id, *, keys=None, players=22, broken=0, mtime=None):
+        """Una partita GIOCATA: la distinta e le tracce che il giro completo lascia
+        accanto (v. shape_canary.PLAYED_SIBLINGS). Senza quelle è indistinguibile
+        da una probabile, e il canarino la salta — che è esattamente il punto."""
         from pathlib import Path
         keys = shape_canary.CORE_STAT_KEYS if keys is None else keys
         def entry(i, ok=True):
@@ -243,6 +247,26 @@ class CanarinoFormaDati(TestCase):
         path = Path(self.dir) / f"api_v1_event_{event_id}_lineups.json"
         path.write_text(json.dumps({"home": {"players": rows[:half]},
                                     "away": {"players": rows[half:]}}))
+        (Path(self.dir) / f"api_v1_event_{event_id}_shotmap.json").write_text(
+            json.dumps({"shotmap": []}))
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+        return path
+
+    def _probable(self, event_id, *, players=44, mtime=None):
+        """Una distinta PREVISTA: il giro `probable` scarica il foglio squadra e
+        basta — niente statistiche, perché la partita non è ancora stata giocata,
+        e nessun fratello in cache."""
+        from pathlib import Path
+        rows = [{"player": {"id": 2000 + i, "name": f"P{i}"},
+                 "position": "M", "substitute": i >= 11} for i in range(players)]
+        half = len(rows) // 2
+        path = Path(self.dir) / f"api_v1_event_{event_id}_lineups.json"
+        path.write_text(json.dumps({"confirmed": False,
+                                    "home": {"players": rows[:half]},
+                                    "away": {"players": rows[half:]}}))
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
         return path
 
     def _run(self, **kw):
@@ -294,6 +318,42 @@ class CanarinoFormaDati(TestCase):
             self._lineups(eid, broken=2)
         rep = self._run()
         self.assertIn("player-identity", [a.code for a in rep.alarms])
+
+    def test_le_distinte_previste_non_sono_un_guasto(self):
+        """La mail del 29/08/2026: sei probabili in cima alla cache e il canarino
+        gridava «31 colonne sparite, copertura 0%» di un fornitore che stava bene."""
+        for eid in range(1, 7):
+            self._probable(eid)
+        rep = self._run()
+        self.assertTrue(rep.ok)
+        self.assertEqual([f.code for f in rep.findings], ["no-data"])
+        self.assertEqual(rep.stats["skipped_predicted"], 6)
+
+    def test_le_previste_non_coprono_le_giocate(self):
+        """Il caso vero: le probabili sono PIÙ FRESCHE delle partite giocate — è
+        per questo che l'ordinamento per mtime da solo le pescava tutte."""
+        for eid in (1, 2, 3):
+            self._lineups(eid, mtime=1_000_000)
+        for eid in (10, 11, 12, 13, 14, 15):
+            self._probable(eid, mtime=2_000_000)
+        rep = self._run()
+        self.assertTrue(rep.ok, [str(f) for f in rep.findings])
+        self.assertEqual(rep.checked, 3)
+        self.assertEqual(rep.stats["skipped_predicted"], 6)
+
+    def test_una_giocata_senza_statistiche_resta_un_allarme(self):
+        """Il filtro è su «è stata giocata», non su «ha statistiche». Se SofaScore
+        smettesse di mandare il blocco su una partita finita, quello è il guasto per
+        cui questo file esiste e deve continuare a gridare."""
+        from pathlib import Path
+        for eid in (1, 2):
+            self._probable(eid)   # la distinta senza statistiche...
+            (Path(self.dir) / f"api_v1_event_{eid}_shotmap.json").write_text(
+                json.dumps({"shotmap": []}))   # ...ma la partita è stata giocata
+        rep = self._run()
+        self.assertFalse(rep.ok)
+        self.assertIn("stat-keys-lost", [a.code for a in rep.alarms])
+        self.assertIn("coverage-collapsed", [a.code for a in rep.alarms])
 
     def test_le_colonne_rare_non_fanno_rumore(self):
         """`penaltySave` c'è nel 6% delle partite: la sua assenza è calcio, non un

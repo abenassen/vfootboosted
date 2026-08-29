@@ -27,6 +27,26 @@ A matches in ``historical-data/serie-a/sofascore/cache``:
   sensitive check (the named keys are), it is the one that still fires if the
   payload changes in a way nobody anticipated.
 
+WHY THE SAMPLE STEPS OVER THE PREDICTED SHEETS. Since the probable-lineups round
+exists, the freshest ``_lineups.json`` in the cache is normally a match that has NOT
+been played: forty-four names and no ``statistics`` at all, because there is nothing
+yet to count. Read by mtime alone that is indistinguishable from the catastrophe
+this file watches for, and on 29/08/2026 it duly reported "31 columns gone, coverage
+0%" about a provider that was perfectly fine — every morning the 84h window is open,
+which is five mornings out of seven.
+
+The discriminator is what the ROUND WROTE, not what the payload says: ``confirmed``
+covers both a prediction and an empty answer (v. ``probable_lineups``), while
+``fetch_probable`` warms the squad sheet ALONE and every round for a played match
+warms the shot map and the incidents beside it. Measured over the 610 lineups files
+in the cache: 600 played, every one with both siblings; 10 predicted, with neither;
+no ambiguous case.
+
+Note it filters on WAS THIS PLAYED, never on "does this file carry statistics". The
+difference is the whole point of the module: a played match whose statistics block
+has vanished is exactly the failure worth shouting about, and a filter on emptiness
+would throw it away together with the noise.
+
 The other half is ``unknown``: columns the provider sends that we do not map. A
 rename shows up here as the NEW name on the same day the old one disappears — which
 is the difference between "something broke" and "``duelWon`` is now ``duelsWon``,
@@ -99,6 +119,14 @@ SHOT_FIELDS = ("id", "isHome", "player", "playerCoordinates", "shotType",
                "situation", "time", "xg")
 INCIDENT_FIELDS = ("incidentType", "time")
 
+# What a match that has BEEN PLAYED leaves in the cache beside its squad sheet. The
+# probable round writes the sheet alone (``egress/fetch_worker.fetch_probable``);
+# every round for a match being played or finished writes the shot map and the
+# incidents next to it. ``.json`` — the light event — comes last because the bulk
+# historical scrape never wrote it: of the 600 played matches in the cache 6 have
+# it, all 600 have the other two.
+PLAYED_SIBLINGS = ("_shotmap.json", "_incidents.json", ".json")
+
 MIN_BATCH = 2          # matches whose union must hold every core key
 MIN_COVERAGE = 0.60    # blunt backstop; observed floor is 0.71 per single match
 MIN_RATED_PLAYERS = 30 # per match; observed range 40-52
@@ -154,21 +182,50 @@ def _read(path: Path):
         return None
 
 
-def freshest_lineups(cache_dir: Path, sample: int) -> list[Path]:
-    """The most recently WARMED lineups files, newest first.
-
-    By modification time and not by match date on purpose: the question is what the
-    provider is sending *now*, and the file the egress rewrote twenty minutes ago
-    answers it — whichever match it belongs to.
-    """
-    files = list(cache_dir.glob("api_v1_event_*_lineups.json"))
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return files[:sample]
-
-
 def _event_id(path: Path) -> str:
     m = re.search(r"api_v1_event_(\d+)_lineups\.json$", path.name)
     return m.group(1) if m else ""
+
+
+def _was_played(path: Path) -> bool:
+    """Is this squad sheet the sheet of a match that has actually been PLAYED?
+
+    Asked of the CACHE and not of the payload, because the payload cannot answer:
+    a predicted sheet and an official one differ by a flag that also covers the
+    empty case (v. ``probable_lineups.is_usable_prediction``), and neither says
+    whether a ball has been kicked. What the cache knows is which round wrote the
+    file, and the two rounds leave different traces — see the module docstring.
+    """
+    event_id = _event_id(path)
+    if not event_id:
+        return False
+    return any((path.parent / f"api_v1_event_{event_id}{suffix}").exists()
+               for suffix in PLAYED_SIBLINGS)
+
+
+def freshest_lineups(cache_dir: Path, sample: int) -> tuple[list[Path], int]:
+    """The freshest warmed sheets OF MATCHES ALREADY PLAYED, newest first — and how
+    many predicted ones were stepped over to reach them.
+
+    By modification time and not by match date on purpose: the question is what the
+    provider is sending *now*, and the file the egress rewrote twenty minutes ago
+    answers it — whichever match it belongs to. But only a played match can answer
+    it at all, which is why the predicted sheets are stepped over instead of being
+    judged: a formation for Sunday has no statistics because Sunday has not
+    happened, and that is not news about the provider.
+    """
+    files = sorted(cache_dir.glob("api_v1_event_*_lineups.json"),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    played: list[Path] = []
+    skipped = 0
+    for path in files:
+        if not _was_played(path):
+            skipped += 1
+            continue
+        played.append(path)
+        if len(played) == sample:
+            break
+    return played, skipped
 
 
 def _stat_keys(lineups: dict) -> tuple[set[str], int, int]:
@@ -213,11 +270,16 @@ def run(*, cache_dir=None, sample: int = 6, now=None) -> CanaryReport:
     cache = _cache_dir(cache_dir)
     report = CanaryReport()
 
-    paths = freshest_lineups(cache, sample)
+    paths, skipped = freshest_lineups(cache, sample)
+    report.stats["skipped_predicted"] = skipped
     if len(paths) < MIN_BATCH:
         report.add("info", "no-data",
-                   f"cache con {len(paths)} tabellini: troppo poco per giudicare "
-                   f"(ne servono {MIN_BATCH}). Normale prima della prima giornata.")
+                   f"cache con {len(paths)} tabellini giocati: troppo poco per "
+                   f"giudicare (ne servono {MIN_BATCH}). "
+                   + (f"Le {skipped} distinte previste in cache non contano: sono "
+                      f"formazioni di partite non ancora giocate, e non hanno "
+                      f"statistiche da controllare."
+                      if skipped else "Normale prima della prima giornata."))
         return report
 
     newest = datetime.fromtimestamp(paths[0].stat().st_mtime, tz=dt_timezone.utc)
