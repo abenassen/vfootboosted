@@ -114,7 +114,7 @@ from vfoot.services.league_competitions import main_competition
 from vfoot.services.formation_rules import CLASSIC_CONSTRAINTS, validate_classic_lineup
 from vfoot.services.classic_pagella import (
     elapsed_minutes, get_reference, match_in_progress, match_of_player,
-    pagella_for_match, shot_detail, vote_ledger,
+    pagella_for_match, save_detail, shot_detail, vote_ledger,
 )
 from vfoot.services.classic_rating import current_role_map
 from vfoot.services import league_decisions
@@ -6685,9 +6685,17 @@ class VoteLedgerView(APIView):
         # la si rifa' a ogni spinta del punteggio in diretta, per ventidue
         # giocatori; questa la chiede solo chi ha aperto il dettaglio di un voto.
         detail = shot_detail(match, player_id)
+        # E LE PARATE, per il portiere: la stessa sezione letta dall'altra parte
+        # (v. ``save_detail``). Viaggia nella stessa risposta perche' e' lo stesso
+        # gesto dell'utente — ha aperto un voto — e perche' un giocatore e' o
+        # l'uno o l'altro: una delle due liste e' sempre vuota, e vuota non costa.
+        keeper = save_detail(match, player_id)
         return Response({**led, "shots": detail["shots"],
                          "shots_baseline": detail["baseline"],
-                         "shots_total": detail["total"]})
+                         "shots_total": detail["total"],
+                         "saves": keeper["saves"],
+                         "saves_baseline": keeper["baseline"],
+                         "saves_total": keeper["total"]})
 
 
 class LeagueVoteLedgerView(VoteLedgerView):

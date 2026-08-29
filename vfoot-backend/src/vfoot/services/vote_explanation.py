@@ -248,6 +248,22 @@ MERGES = [
     # la riga esce dal riassunto e resta nel registro col suo nome.
     (("expected_assists", "assists"),
      "una o più occasioni create per i compagni", None, "creazione", None),
+    # LE PARATE: quanti tiri gli sono arrivati e come li ha gestiti sono lo stesso
+    # gesto contato e pesato, e separate dicevano due volte la stessa cosa — "tanti
+    # gol evitati rispetto ai tiri affrontati +0,37" nel riassunto e "3 parate
+    # +0,01" trenta righe più sotto. Unite sono una riga sola, ed è quella che la
+    # MAPPA DELLE PARATE apre (v. ``classic_pagella.save_detail``): la sezione somma
+    # a questa riga, quindi ``_SAVE_FAMILY`` e questo gruppo devono restare la stessa
+    # coppia di chiavi.
+    #
+    # Le frasi sono quelle che gk_goals_prevented aveva già da solo: la riga cambia
+    # di che cosa è il netto, non come si legge. Il quarto caso — nessun tiro nello
+    # specchio — capita davvero (31 presenze su 765 nella 25-26) e senza una frase
+    # sua uscirebbe col segno del netto, che lì è negativo per costruzione.
+    (("gk_goals_prevented", "gk_saves"),
+     "tanti gol evitati rispetto ai tiri affrontati",
+     "pochi gol evitati rispetto ai tiri affrontati",
+     "parate", "nessun tiro nello specchio da respingere"),
 ]
 # {feature: family name} — the same table read the other way round.
 MERGE_FAMILY = {k: name for keys, _pos, _neg, name, _none in MERGES for k in keys}
@@ -315,7 +331,8 @@ GROUP_OF = {k: (key, title) for key, title, keys in LEDGER_GROUPS for k in keys}
 # Le famiglie unite portano il nome della famiglia, non quello della prima feature.
 GROUP_OF_FAMILY = {"conclusioni": ("conclusioni", "Conclusioni"),
                    "dribbling": ("duelli", "Duelli"),
-                   "creazione": ("creazione", "Creazione")}
+                   "creazione": ("creazione", "Creazione"),
+                   "parate": ("portiere", "Parate e uscite")}
 
 
 def group_ledger(rows: list[dict]) -> list[dict]:

@@ -1,4 +1,5 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { Button, Card, SectionTitle } from '../ui';
 import { MatchScoreHeader, type MatchHeaderVM } from './MatchScoreHeader';
@@ -10,6 +11,7 @@ import type {
   ClassicPlayerLine,
   ClassicRole,
   ClassicTeamDetail,
+  SaveDetail,
   ShotDetail,
   VoteLedger,
   VoteLedgerGroup,
@@ -99,7 +101,7 @@ function EventIcons({ ev }: { ev?: ClassicPlayerEvents }) {
   ].filter((x) => x.n > 0);
   if (!items.length && !ev.own_goals) return null;
   return (
-    <span className="ml-1 inline-flex items-center gap-0.5 align-middle">
+    <span className="ml-1 inline-flex shrink-0 items-center gap-0.5 align-middle">
       {items.map((x, i) => (
         <span key={i} title={x.title} className="text-[11px] leading-none">
           {x.node}
@@ -292,6 +294,34 @@ function ProjectionBar({
   );
 }
 
+/** Vero quando lo schermo è quello di un telefono, e le due squadre stanno
+ *  affiancate in mezza colonna ciascuna.
+ *
+ *  640px è la soglia `sm` di Tailwind, la stessa che il resto dell'app usa per
+ *  decidere che cosa è un telefono (v. la formazione verticale in FormationPage):
+ *  due soglie diverse sarebbero due idee diverse di piccolo, e si vedrebbe nel
+ *  punto in cui una scatta e l'altra no.
+ *
+ *  Si misura in JavaScript e non solo in CSS perché sotto quella soglia non
+ *  cambia soltanto l'aspetto della riga: il dettaglio del voto smette di aprirsi
+ *  sotto di essa e sale in un foglio ancorato in fondo allo schermo, e quello è
+ *  un albero diverso, non una classe diversa. */
+function useCompactColumns(): boolean {
+  const query = '(max-width: 639px)';
+  const [compact, setCompact] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(query);
+    const onChange = (e: MediaQueryListEvent) => setCompact(e.matches);
+    setCompact(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return compact;
+}
+
 export function ClassicMatchDetail({
   fixture,
   backTo,
@@ -328,6 +358,7 @@ export function ClassicMatchDetail({
 }) {
   const d = fixture;
   const realMatch = variant === 'real';
+  const compact = useCompactColumns();
   // Il turno non è ancora cominciato: quella che si sta guardando è l'ANTEPRIMA
   // delle formazioni, non un tabellino. Tutto ciò che qui sotto è condizionato da
   // `preview` sono numeri che esistono solo perché la somma di zero giocate fa
@@ -476,12 +507,21 @@ export function ClassicMatchDetail({
         />
       ) : null}
 
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      {/* AFFIANCATE SEMPRE, anche sul telefono. Impilate erano tremila pixel di
+          scorrimento per una partita sola, e per confrontare due giocatori di
+          ruolo uguale bisognava tenere a mente il primo mentre si cercava il
+          secondo: la lettura naturale di un tabellino è per righe, e impilare le
+          due squadre la impedisce. Quello che ci voleva non era il nome più corto
+          — dal fornitore arriva già «V. Milinković-Savić» — ma togliere dalla riga
+          le pastiglie lunghe e mandare i numeri d'appoggio sul piano di sotto
+          (v. `PlayerRow` compatta). */}
+      <div className="grid grid-cols-2 items-start gap-1.5 sm:gap-4">
         <TeamColumn
           name={d.home_team}
           team={d.home}
           realMatch={realMatch}
           preview={preview}
+          compact={compact}
           submitted={d.lineup_source?.home === 'lineup'}
           lineupHref={mineSide === 'home' ? lineupHref : null}
         />
@@ -490,6 +530,7 @@ export function ClassicMatchDetail({
           team={d.away}
           realMatch={realMatch}
           preview={preview}
+          compact={compact}
           submitted={d.lineup_source?.away === 'lineup'}
           lineupHref={mineSide === 'away' ? lineupHref : null}
         />
@@ -519,10 +560,13 @@ function TeamColumn({
   preview = false,
   submitted = false,
   lineupHref = null,
+  compact = false,
 }: {
   name: string;
   team: ClassicTeamDetail;
   realMatch: boolean;
+  /** Mezza colonna: righe su due piani, e le frasi accessorie ridotte all'osso. */
+  compact?: boolean;
   /** Dove si va a schierare, e solo sulla colonna di chi sta guardando. */
   lineupHref?: string | null;
   /** La giornata non è cominciata: niente punteggi, sono zeri per costruzione. */
@@ -543,10 +587,14 @@ function TeamColumn({
   const homeBonus =
     team.modifiers?.find((m) => m.key === 'home_advantage' && m.eligible)?.value ?? 0;
   return (
-    <Card className="p-4">
-      <div className="flex items-baseline justify-between gap-2">
-        <SectionTitle>{name}</SectionTitle>
-        <div className="flex items-center gap-1.5 text-sm text-ink-soft">
+    <Card className="p-2 sm:p-4">
+      {/* In mezza colonna il nome della squadra e il suo punteggio non stanno
+          sulla stessa riga: «Anomalia statistica F.C.» da solo la riempie. Si
+          incolonnano, e il punteggio resta il primo numero che si incontra
+          scendendo. */}
+      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
+        <SectionTitle className="truncate">{name}</SectionTitle>
+        <div className="flex items-center gap-1.5 text-[11px] text-ink-soft sm:text-sm">
           {preview ? (
             submitted ? (
               <span className="text-xs font-semibold text-good">✓ formazione inviata</span>
@@ -577,14 +625,24 @@ function TeamColumn({
         <div className="mt-0.5 text-[11px]">
           {team.defense.eligible ? (
             <span className="text-ink-soft">
-              🛡 Modificatore difesa: media <b>{fmt(team.defense.avg ?? 0)}</b> →{' '}
+              🛡 <span className="hidden sm:inline">Modificatore difesa: </span>media{' '}
+              <b>{fmt(team.defense.avg ?? 0)}</b> →{' '}
               <b className="text-good">+{fmt(team.defense.bonus)}</b>
             </span>
           ) : (
-            <span className="text-ink-faint">🛡 Modificatore difesa non attivo ({defenseReason(team.defense)})</span>
+            /* In mezza colonna la regola che non è scattata occupa tre righe e
+               nessuno la sta leggendo adesso: resta il fatto (non attivo), e il
+               perché lo dice il tocco prolungato — per esteso, dove c'è spazio. */
+            <span className="text-ink-faint" title={defenseReason(team.defense)}>
+              🛡 <span className="hidden sm:inline">Modificatore difesa </span>non attivo
+              <span className="hidden sm:inline"> ({defenseReason(team.defense)})</span>
+            </span>
           )}
           {team.defense.applied !== 0 ? (
-            <span className="text-ink-faint">
+            /* Il conto per esteso è la verifica di un numero che sta già scritto
+               due righe sopra: in mezza colonna occupava una riga in più a
+               squadra per non dire niente di nuovo. */
+            <span className="hidden text-ink-faint sm:inline">
               {' '}
               · totale {fmt(team.base_total)} {team.defense.applied >= 0 ? '+' : '−'}
               {fmt(Math.abs(team.defense.applied))} = {fmt(team.total)}
@@ -617,19 +675,21 @@ function TeamColumn({
         </div>
       ) : (
         <>
-          <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Titolari</div>
+          <div className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-ink-faint sm:text-[11px]">
+            Titolari
+          </div>
           <div className="divide-y">
             {team.starters.map((p) => (
-              <PlayerRow key={p.player_id} p={p} />
+              <PlayerRow key={p.player_id} p={p} compact={compact} />
             ))}
           </div>
 
-          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-            {realMatch ? 'Panchina' : 'Panchina · ordine = priorità'}
+          <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-ink-faint sm:text-[11px]">
+            Panchina{!realMatch && !compact ? ' · ordine = priorità' : ''}
           </div>
           <div className="divide-y">
             {team.bench.map((p, i) => (
-              <PlayerRow key={p.player_id} p={p} order={i + 1} bench />
+              <PlayerRow key={p.player_id} p={p} order={i + 1} bench compact={compact} />
             ))}
           </div>
         </>
@@ -638,7 +698,161 @@ function TeamColumn({
   );
 }
 
-function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: number; bench?: boolean }) {
+/** Il verdetto di una riga che un voto non ce l'ha: com'è scritto per esteso, e
+ *  come si riduce quando la colonna è larga la metà.
+ *
+ *  Le due grafie non sono la stessa frase accorciata: «—» non dice niente, ed è
+ *  giusto così — sulla riga stretta il posto del numero deve restare VUOTO, e la
+ *  ragione («non ancora giocata») scende sulla riga sotto, dove c'è lo spazio per
+ *  dirla intera. Accorciarla lì avrebbe prodotto abbreviazioni che nessuno sa
+ *  leggere; toglierla del tutto avrebbe fatto sembrare un dato mancante un voto
+ *  di zero. */
+type Verdict = {
+  long: string;
+  short: string;
+  cls: string;
+  title: string;
+  /** La sua partita è sul campo adesso: al posto della sigla, il punto che pulsa. */
+  live?: boolean;
+};
+
+function verdictOf(p: ClassicPlayerLine): Verdict | null {
+  if (p.pending) {
+    // An unplayed match is not a senza voto and must not read like one: nothing
+    // happened yet, the bench does not cover it, and the slot settles when the
+    // match is played (or by an office vote, if it never is).
+    //
+    // "rinviata" was a lie for most of the players who land here. `pending` has
+    // always meant "his club's match has not been played" — which covers a genuine
+    // postponement AND the 20:45 kick-off that simply has not happened yet, and on
+    // a round in progress the second is nearly all of them. The badge now says the
+    // thing both cases have in common; the reason is the round's business, not the
+    // row's.
+    return {
+      long: 'non ancora giocata',
+      short: '—',
+      cls: 'rounded border border-dashed border-accent px-1.5 py-0.5 text-[10px] font-bold text-accent',
+      title: 'Il suo club non ha ancora giocato la partita di questa giornata',
+    };
+  }
+  if (!p.sv) return null;
+  const kind = svKind(p);
+  // NON SAPPIAMO ANCORA NIENTE DI LUI, e la sua partita è appena cominciata. Nei
+  // primi minuti il fornitore non ha pubblicato le formazioni: non esiste nemmeno
+  // una riga di presenza, quindi non risulta né in campo né in panchina, e la
+  // pastiglia cadeva sul verdetto più forte che ci sia — «S.V., impiego
+  // insufficiente» — su un giocatore regolarmente titolare al 3'. Non è un
+  // verdetto: è una partita che deve ancora dirci qualcosa.
+  if (kind === 'sv' && p.in_progress) {
+    return {
+      long: 'in corso',
+      short: '',
+      live: true,
+      cls: 'inline-flex items-center gap-1 rounded-full bg-live-bg px-1.5 py-0.5 text-[10px] font-bold text-live',
+      title: 'La sua partita è appena cominciata: non ci sono ancora dati sui giocatori',
+    };
+  }
+  // He is playing RIGHT NOW and we have nothing on him yet — which is not a senza
+  // voto and must not be printed as one. S.V. is a verdict on a finished
+  // performance; at the fifth minute there is no performance to judge, only a
+  // match that has barely started.
+  if (kind === 'in_campo') {
+    return {
+      long: 'in campo',
+      short: '',
+      live: true,
+      cls: 'inline-flex items-center gap-1 rounded-full bg-live-bg px-1.5 py-0.5 text-[10px] font-bold text-live',
+      title: 'È in campo: la partita è in corso e il suo voto non è ancora determinabile',
+    };
+  }
+  // The bench, said plainly. And it is a DIFFERENT sentence depending on whether
+  // the match is over: at the fortieth minute "non ha giocato" is not yet true, and
+  // a reserve keeper can still come on. `provisional` is the same mark the rest of
+  // the row uses for "this can still move".
+  if (kind === 'non_entrato') {
+    return {
+      long: p.provisional ? 'in panchina' : 'non ha giocato',
+      short: '—',
+      cls: 'rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-faint',
+      title: p.provisional
+        ? 'Non ancora entrato: la partita è in corso, può ancora giocare'
+        : 'Non è entrato in campo: nessun minuto giocato',
+    };
+  }
+  // 'dati mancanti' is not a verdict on the player — say so, rather than letting a
+  // gap in our data read as "he did nothing".
+  if (kind === 'dati_mancanti') {
+    return {
+      long: 'n.d.',
+      short: 'n.d.',
+      cls: 'rounded border border-dashed border-warn px-1.5 py-0.5 text-[10px] font-bold text-warn',
+      title: 'Ha giocato, ma non abbiamo la sua prestazione per questa partita',
+    };
+  }
+  return {
+    long: 'S.V.',
+    short: 'S.V.',
+    cls: 'rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-faint',
+    title: 'Senza voto: impiego insufficiente',
+  };
+}
+
+/** Il punto che pulsa, senza la parola accanto: sulla riga stretta la parola non
+ *  ci sta, e il colore la dice lo stesso. */
+function LiveDot({ title }: { title?: string }) {
+  return (
+    <span
+      title={title}
+      className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-live"
+    />
+  );
+}
+
+/* A guessed role is drawn hollow with a '?': showing it solid would state as fact
+   something we inferred because his squad data is incomplete. No role at all draws
+   NOTHING — an empty coloured box is worse than a gap, because it looks like a chip
+   whose label failed to load.
+
+   Sulla colonna stretta resta la sola iniziale. Non è un'abbreviazione da
+   indovinare: le quattro pastiglie hanno quattro colori e arrivano nell'ordine
+   POR → DIF → CEN → ATT, quindi la lettera è una conferma, non l'unico indizio. */
+function RoleChip({
+  role,
+  known,
+  compact,
+}: {
+  role: ClassicRole;
+  known: boolean;
+  compact: boolean;
+}) {
+  return (
+    <span
+      title={known ? undefined : 'Ruolo non disponibile: stimato dai dati della partita'}
+      className={
+        !known
+          ? `rounded border border-dashed border-line py-0.5 text-[10px] font-bold leading-none text-ink-faint ${compact ? 'px-1' : 'px-1.5'}`
+          : `rounded py-0.5 text-[10px] font-bold leading-none text-white ${compact ? 'px-1' : 'px-1.5'} ${ROLE_CHIP[role]}`
+      }
+    >
+      {compact ? ROLE_LABEL[role][0] : ROLE_LABEL[role]}
+      {!known ? '?' : ''}
+    </span>
+  );
+}
+
+function PlayerRow({
+  p,
+  order,
+  bench = false,
+  compact = false,
+}: {
+  p: ClassicPlayerLine;
+  order?: number;
+  bench?: boolean;
+  /** La colonna è larga la metà dello schermo: la riga si dispone su due piani
+   *  invece che su uno (v. `CompactRow`). */
+  compact?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const played = !p.sv && p.fantavoto != null;
   const role = roleOf(p);
@@ -649,15 +863,145 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
   // own pulsing badge (so the generic "live" one beside it would say it again),
   // and a substitute who has just come on is anything but inactive.
   const onPitchNow = p.sv && svKind(p) === 'in_campo';
-  // NON SAPPIAMO ANCORA NIENTE DI LUI, e la sua partita è appena cominciata. Nei
-  // primi minuti il fornitore non ha pubblicato le formazioni: non esiste nemmeno
-  // una riga di presenza, quindi non risulta né in campo né in panchina, e la
-  // pastiglia cadeva sul verdetto più forte che ci sia — «S.V., impiego
-  // insufficiente» — su un giocatore regolarmente titolare al 3'. Non è un
-  // verdetto: è una partita che deve ancora dirci qualcosa.
   const nothingYet = p.sv && !!p.in_progress && svKind(p) === 'sv';
   // a benched player who never entered and has no vote is greyed out
   const inactive = bench && !p.entered && !played && !onPitchNow && !nothingYet;
+  const verdict = verdictOf(p);
+
+  // Il dettaglio del voto. Sulla colonna intera si apre sotto la riga; sulla
+  // mezza colonna non ci starebbe — è una tabella di voci con la mappa dei tiri
+  // dentro — e sale in un foglio a tutta larghezza, ancorato in fondo allo
+  // schermo, che è dove il pollice arriva.
+  const detail =
+    open && why ? (
+      compact ? (
+        <VoteSheet p={p} why={why} onClose={() => setOpen(false)} />
+      ) : (
+        <WhyThisVote why={why} playerId={p.player_id} />
+      )
+    ) : null;
+
+  if (compact) {
+    // Sopra: chi è, e quanto ha preso — quello che si legge di sfuggita.
+    // Sotto, in grigio: i numeri da cui quel voto nasce, o il motivo per cui non
+    // c'è. Niente sparisce rispetto alla colonna intera; cambia il piano su cui sta.
+    return (
+      <>
+        <div
+          onClick={hasWhy ? () => setOpen((v) => !v) : undefined}
+          className={`flex items-center gap-1 py-1 ${inactive ? 'opacity-50' : ''} ${
+            hasWhy ? 'cursor-pointer' : ''
+          }`}
+        >
+          <div className="flex min-w-0 flex-1 flex-col">
+            {/* Altezza fissa anche qui, non solo sulla riga d'appoggio: le
+                pastiglie degli eventi sono più alte del testo, e una riga con un
+                cartellino cresceva di due pixel — abbastanza perché le due
+                colonne, riga dopo riga, smettessero di essere alla stessa
+                altezza, che è tutto il vantaggio dell'averle affiancate. */}
+            <span className="flex h-[17px] min-w-0 items-center gap-1">
+              {order != null ? (
+                <span className="w-3 shrink-0 text-right text-[10px] font-semibold tabular-nums text-ink-faint">
+                  {order}
+                </span>
+              ) : null}
+              {role ? <RoleChip role={role} known={p.role_known !== false} compact /> : null}
+              <span
+                className={`min-w-0 truncate text-[13px] font-semibold leading-tight text-ink ${
+                  p.replaced_by ? 'line-through opacity-60' : ''
+                }`}
+              >
+                {p.name}
+              </span>
+              <EventIcons ev={p.events} />
+            </span>
+            {/* Riga d'appoggio ad altezza fissa: le due colonne hanno un numero
+                diverso di titolari e di panchinari, e senza un passo costante le
+                due panchine cominciavano a due altezze diverse. */}
+            <span className="flex h-[15px] min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[10px] leading-[15px] text-ink-faint">
+              {verdict ? (
+                /* Anche qui il cambio, e con il NOME: un titolare senza voto è
+                   esattamente quello di cui si vuole sapere chi l'ha coperto, e
+                   sulla sua riga non c'è nessun numero che gli contenda il posto. */
+                <>
+                  {p.replaced_by ? (
+                    <span className="truncate" title={`Esce · entra ${p.replaced_by.name}`}>
+                      ↓ {p.replaced_by.name}
+                    </span>
+                  ) : p.entered && p.entered_for ? (
+                    <span className="truncate font-semibold text-good" title={`Entra per ${p.entered_for.name}`}>
+                      ▲ {p.entered_for.name}
+                    </span>
+                  ) : null}
+                  {verdict.long === verdict.short ? null : (
+                    <span className="truncate" title={verdict.title}>
+                      {verdict.long}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {p.minutes > 0 ? <span className="tabular-nums">{p.minutes}′</span> : null}
+                  {p.replaced_by ? (
+                    <span title={`Esce · entra ${p.replaced_by.name}`}>↓</span>
+                  ) : p.entered && p.entered_for ? (
+                    <span className="font-semibold text-good" title={`Entra per ${p.entered_for.name}`}>
+                      ▲
+                    </span>
+                  ) : null}
+                  <span
+                    className={hasWhy ? 'underline decoration-dotted underline-offset-2' : undefined}
+                    title={hasWhy ? 'Tocca la riga per il dettaglio del voto' : 'Voto puro'}
+                  >
+                    {fmt(p.voto_puro ?? 0)}
+                  </span>
+                  {p.office ? (
+                    <span className="font-semibold text-accent" title="Voto d’ufficio">
+                      uff.
+                    </span>
+                  ) : null}
+                  {p.bonus > 0 ? (
+                    <span className="font-semibold text-good">+{fmt(p.bonus)}</span>
+                  ) : null}
+                  {p.malus > 0 ? <span className="font-semibold text-bad">−{fmt(p.malus)}</span> : null}
+                  {p.provisional ? (
+                    <LiveDot
+                      title={
+                        p.in_progress
+                          ? 'Il dato arriva da una partita ancora in corso: questo numero può ancora cambiare.'
+                          : 'La partita è finita, ma i dati non sono ancora confermati: questo numero può cambiare di poco.'
+                      }
+                    />
+                  ) : null}
+                </>
+              )}
+            </span>
+          </div>
+          <span className="flex w-7 shrink-0 items-center justify-end gap-1">
+            {verdict ? (
+              verdict.live ? (
+                <LiveDot title={verdict.title} />
+              ) : (
+                <span className="text-[11px] font-bold text-ink-faint" title={verdict.title}>
+                  {verdict.short}
+                </span>
+              )
+            ) : (
+              <span
+                className={`text-[13px] font-bold tabular-nums ${
+                  (p.fantavoto ?? 0) >= 6 ? 'text-good' : 'text-bad'
+                }`}
+              >
+                {fmt(p.fantavoto ?? 0)}
+              </span>
+            )}
+          </span>
+        </div>
+        {detail}
+      </>
+    );
+  }
+
   return (
     <>
     <div className={`flex items-center justify-between gap-2 py-1.5 ${inactive ? 'opacity-50' : ''}`}>
@@ -665,23 +1009,7 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
         {order != null ? (
           <span className="w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums text-ink-faint">{order}</span>
         ) : null}
-        {/* A guessed role is drawn hollow with a '?': showing it solid would state
-            as fact something we inferred because his squad data is incomplete.
-            No role at all draws NOTHING — an empty coloured box is worse than a
-            gap, because it looks like a chip whose label failed to load. */}
-        {role ? (
-          <span
-            title={p.role_known === false ? 'Ruolo non disponibile: stimato dai dati della partita' : undefined}
-            className={
-              p.role_known === false
-                ? 'rounded border border-dashed border-line px-1.5 py-0.5 text-[10px] font-bold leading-none text-ink-faint'
-                : `rounded px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ${ROLE_CHIP[role]}`
-            }
-          >
-            {ROLE_LABEL[role]}
-            {p.role_known === false ? '?' : ''}
-          </span>
-        ) : null}
+        {role ? <RoleChip role={role} known={p.role_known !== false} compact={false} /> : null}
         <span className="min-w-0">
           <span className={`block truncate text-sm font-semibold text-ink ${p.replaced_by ? 'line-through opacity-60' : ''}`}>
             {p.name}
@@ -718,76 +1046,11 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
             }
           />
         ) : null}
-        {p.pending ? (
-          // An unplayed match is not a senza voto and must not read like one:
-          // nothing happened yet, the bench does not cover it, and the slot settles
-          // when the match is played (or by an office vote, if it never is).
-          //
-          // "rinviata" was a lie for most of the players who land here. `pending`
-          // has always meant "his club's match has not been played" — which covers
-          // a genuine postponement AND the 20:45 kick-off that simply has not
-          // happened yet, and on a round in progress the second is nearly all of
-          // them. The badge now says the thing both cases have in common; the
-          // reason is the round's business, not the row's.
-          <span
-            title="Il suo club non ha ancora giocato la partita di questa giornata"
-            className="rounded border border-dashed border-accent px-1.5 py-0.5 text-[10px] font-bold text-accent"
-          >
-            non ancora giocata
+        {verdict ? (
+          <span title={verdict.title} className={verdict.cls}>
+            {verdict.live ? <LiveDot /> : null}
+            {verdict.long}
           </span>
-        ) : p.sv ? (
-          // 'dati mancanti' is not a verdict on the player — say so, rather than
-          // letting a gap in our data read as "he did nothing".
-          nothingYet ? (
-            <span
-              title="La sua partita è appena cominciata: non ci sono ancora dati sui giocatori"
-              className="inline-flex items-center gap-1 rounded-full bg-live-bg px-1.5 py-0.5 text-[10px] font-bold text-live"
-            >
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" />
-              in corso
-            </span>
-          ) : svKind(p) === 'in_campo' ? (
-            // He is playing RIGHT NOW and we have nothing on him yet — which is
-            // not a senza voto and must not be printed as one. S.V. is a verdict
-            // on a finished performance; at the fifth minute there is no
-            // performance to judge, only a match that has barely started.
-            <span
-              title="È in campo: la partita è in corso e il suo voto non è ancora determinabile"
-              className="inline-flex items-center gap-1 rounded-full bg-live-bg px-1.5 py-0.5 text-[10px] font-bold text-live"
-            >
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" />
-              in campo
-            </span>
-          ) : svKind(p) === 'non_entrato' ? (
-            // The bench, said plainly. And it is a DIFFERENT sentence depending on
-            // whether the match is over: at the fortieth minute "non ha giocato" is
-            // not yet true, and a reserve keeper can still come on. `provisional`
-            // is the same mark the rest of the row uses for "this can still move".
-            <span
-              title={
-                p.provisional
-                  ? 'Non ancora entrato: la partita è in corso, può ancora giocare'
-                  : 'Non è entrato in campo: nessun minuto giocato'
-              }
-              className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-faint"
-            >
-              {p.provisional ? 'in panchina' : 'non ha giocato'}
-            </span>
-          ) : svKind(p) === 'dati_mancanti' ? (
-            <span
-              title="Ha giocato, ma non abbiamo la sua prestazione per questa partita"
-              className="rounded border border-dashed border-warn px-1.5 py-0.5 text-[10px] font-bold text-warn"
-            >
-              n.d.
-            </span>
-          ) : (
-            <span
-              title="Senza voto: impiego insufficiente"
-              className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-faint"
-            >
-              S.V.
-            </span>
-          )
         ) : (
           <>
             {/* The voto puro itself opens the breakdown — it is the number the
@@ -828,8 +1091,64 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
         )}
       </div>
     </div>
-    {open && why ? <WhyThisVote why={why} playerId={p.player_id} /> : null}
+    {detail}
     </>
+  );
+}
+
+/** Il dettaglio del voto quando la riga è larga mezzo schermo: un foglio ancorato
+ *  in fondo, a tutta larghezza.
+ *
+ *  Sotto la riga non poteva starci. Il pannello è una tabella di voci con dentro
+ *  la mappa dei tiri, e in centosessanta pixel ogni etichetta andava a capo tre
+ *  volte: la spiegazione diventava meno leggibile del numero che spiega. A tutta
+ *  larghezza è esattamente quella che si legge sul desktop.
+ *
+ *  Fuori dalla gerarchia della pagina (`createPortal`) perché il tabellino vive
+ *  dentro riquadri che tagliano quel che esce; e in fondo, non al centro, perché è
+ *  lì che il pollice arriva. */
+function VoteSheet({
+  p,
+  why,
+  onClose,
+}: {
+  p: ClassicPlayerLine;
+  why: NonNullable<ClassicPlayerLine['explanation']>;
+  onClose: () => void;
+}) {
+  // Il tasto indietro del telefono chiude il foglio invece di lasciare la pagina:
+  // è quello che chiunque si aspetta da un pannello che si apre sopra a tutto.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-end bg-black/40"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="max-h-[85vh] w-full overflow-auto overscroll-contain rounded-t-2xl bg-surface p-3 pb-6 shadow-card"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <span className="min-w-0 truncate text-sm font-bold text-ink">{p.name}</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-lg bg-surface-2 px-2 py-1 text-[11px] font-semibold text-ink-soft"
+          >
+            Chiudi
+          </button>
+        </div>
+        <WhyThisVote why={why} playerId={p.player_id} flush />
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -843,17 +1162,25 @@ function PlayerRow({ p, order, bench = false }: { p: ClassicPlayerLine; order?: 
  *  L'elenco NON viaggia nel tabellino: ventidue giocatori per trenta righe, e a
  *  partita in corso il tabellino si ricarica a ogni spinta. Si chiede al momento,
  *  una volta sola per giocatore, e resta lì per la riapertura. */
-/** La riga delle conclusioni del riassunto, apribile sulla mappa dei tiri.
+/** La riga del riassunto che si apre su una mappa: i TIRI per chi conclude, le
+ *  PARATE per chi para.
  *
- *  «una o piu' conclusioni pericolose +1,04» e' il netto di sei voci su otto tiri:
- *  da sola non dice ne' che cosa abbia fatto ne' perche'. I tiri arrivano con la
- *  stessa chiamata del registro, e solo quando qualcuno chiede. */
-function ShootingLine({
+ *  «una o piu' conclusioni pericolose +1,04» e' il netto di sei voci su otto tiri, e
+ *  «tanti gol evitati rispetto ai tiri affrontati +0,38» il netto di due voci su tre
+ *  tiri subiti: da sole non dicono ne' che cosa sia successo ne' perche'. Le due
+ *  mappe arrivano con la stessa chiamata del registro, e solo quando qualcuno chiede.
+ *
+ *  Una sola macchina a stati per entrambe, di proposito: sono lo stesso gesto
+ *  dell'utente e lo stesso caricamento, e tenerne due copie voleva dire correggere
+ *  ogni difetto due volte. */
+function MapLine({
+  kind,
   label,
   points,
   playerId,
   fmtPts,
 }: {
+  kind: 'shots' | 'saves';
   label: string;
   points: number;
   playerId: number;
@@ -861,10 +1188,13 @@ function ShootingLine({
 }) {
   const load = useContext(LedgerContext);
   const [shots, setShots] = useState<ShotDetail[] | null>(null);
-  // Il METRO viaggia con i tiri perché senza di lui la tabella non somma alla
-  // riga che sta aprendo, ed è il 96% dello scarto (v. shot_detail).
+  const [saves, setSaves] = useState<SaveDetail[] | null>(null);
+  // Il METRO viaggia con la mappa perché senza di lui la tabella non somma alla
+  // riga che sta aprendo (v. shot_detail / save_detail).
   const [baseline, setBaseline] = useState<number>(0);
   const [state, setState] = useState<'closed' | 'loading' | 'open' | 'error'>('closed');
+  const rows = kind === 'shots' ? shots : saves;
+  const noun = kind === 'shots' ? 'i tiri' : 'le parate';
 
   const value = (
     <span
@@ -886,12 +1216,17 @@ function ShootingLine({
 
   const toggle = () => {
     if (state === 'open') return setState('closed');
-    if (shots) return setState('open');
+    if (rows) return setState('open');
     setState('loading');
     load(playerId)
       .then((l) => {
-        setShots(l.shots ?? []);
-        setBaseline(l.shots_baseline ?? 0);
+        if (kind === 'shots') {
+          setShots(l.shots ?? []);
+          setBaseline(l.shots_baseline ?? 0);
+        } else {
+          setSaves(l.saves ?? []);
+          setBaseline(l.saves_baseline ?? 0);
+        }
         setState('open');
       })
       .catch(() => setState('error'));
@@ -912,18 +1247,24 @@ function ShootingLine({
         {value}
       </button>
       {state === 'loading' ? (
-        <div className="pl-3 text-[11px] text-ink-faint">Apro i tiri…</div>
+        <div className="pl-3 text-[11px] text-ink-faint">Apro {noun}…</div>
       ) : null}
       {state === 'error' ? (
-        <div className="pl-3 text-[11px] text-bad">Non sono riuscito a caricare i tiri.</div>
+        <div className="pl-3 text-[11px] text-bad">Non sono riuscito a caricare {noun}.</div>
       ) : null}
       {state === 'open' ? (
-        shots && shots.length ? (
+        rows && rows.length ? (
           <div className="border-l border-line pl-3">
-            <ShotMap shots={shots} baseline={baseline} total={points} fmtPts={fmtPts} />
+            {kind === 'shots' ? (
+              <ShotMap shots={shots ?? []} baseline={baseline} total={points} fmtPts={fmtPts} />
+            ) : (
+              <SaveMap saves={saves ?? []} baseline={baseline} total={points} fmtPts={fmtPts} />
+            )}
           </div>
         ) : (
-          <div className="pl-3 text-[11px] text-ink-faint">Nessun tiro da mostrare.</div>
+          <div className="pl-3 text-[11px] text-ink-faint">
+            {kind === 'shots' ? 'Nessun tiro da mostrare.' : 'Nessun tiro nello specchio.'}
+          </div>
         )
       ) : null}
     </>
@@ -973,7 +1314,13 @@ function LedgerGroup({
   shots?: ShotDetail[];
   /** Il metro dei tiri (v. ShotMap). Le due voci del gruppo che la mappa non
    *  copre — il gol e il legno — pesano zero, quindi il subtotale del gruppo è
-   *  esattamente il totale a cui la tabella deve sommare. */
+   *  esattamente il totale a cui la tabella deve sommare.
+   *
+   *  IL GRUPPO «PARATE E USCITE» NON HA L'EQUIVALENTE, e non è una dimenticanza:
+   *  lì le voci che la mappa non copre — uscite alte, pugni, uscite fuori area,
+   *  parate ravvicinate — pesano eccome, quindi il subtotale del gruppo NON è il
+   *  totale a cui la tabella delle parate somma. La mappa del portiere sta appesa
+   *  alla riga del riassunto, dove il conto torna esatto. */
   baseline?: number;
 }) {
   const [open, setOpen] = useState(false);
@@ -1075,6 +1422,73 @@ function ShotMap({
           </tr>
           <tr className="border-t border-line">
             <td className="py-0.5 pr-2 font-semibold text-ink-soft" colSpan={3}>
+              totale
+            </td>
+            <td className={`${cell(total)} font-semibold`}>{fmtPts(total)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Le parate una per una: minuto, esito, quanto quel tiro era gol nel momento in
+ *  cui è partito (xGOT), e quanto vale nel voto.
+ *
+ *  È la mappa dei tiri vista dalla porta, e vale la stessa disciplina: LA TABELLA
+ *  SOMMA ALLA RIGA CHE LA APRE, metro compreso. Due differenze rispetto ai tiri,
+ *  entrambe volute:
+ *
+ *  — non c'è la colonna xG. Al portiere non interessa da dove è partita la palla ma
+ *    che cosa gli è arrivato addosso: l'xGOT è l'unico metro con cui il modello lo
+ *    giudica, e una seconda colonna inviterebbe a confrontarle come se il portiere
+ *    rispondesse anche della posizione da cui gli hanno tirato.
+ *  — IL GOL SUBITO È IN TABELLA, col suo segno. Vale −(1 − xGOT): uno su un tiro da
+ *    0,95 quasi non costa, uno su un tiro da 0,15 costa quasi un gol intero. È la
+ *    cosa che questo modello sa dire meglio di una pagella, e prima non si vedeva. */
+function SaveMap({
+  saves,
+  baseline,
+  total,
+  fmtPts,
+}: {
+  saves: SaveDetail[];
+  baseline: number;
+  total: number;
+  fmtPts: (n: number) => string;
+}) {
+  const cell = (n: number) =>
+    `py-0.5 text-right font-mono ${n > 0 ? 'text-good' : n < 0 ? 'text-bad' : 'text-ink-faint'}`;
+  return (
+    <div className="mt-1.5 overflow-x-auto">
+      <table className="w-full text-[11px] tabular-nums">
+        <thead>
+          <tr className="text-ink-faint">
+            <th className="py-0.5 pr-2 text-left font-semibold">Tiro subito</th>
+            <th className="py-0.5 pr-2 text-right font-semibold">xGOT</th>
+            <th className="py-0.5 text-right font-semibold">Voto</th>
+          </tr>
+        </thead>
+        <tbody>
+          {saves.map((s, i) => (
+            <tr key={`${s.minute}-${i}`} className="border-t border-line/60">
+              <td className="py-0.5 pr-2 text-ink-soft">
+                {s.minute != null ? <span className="text-ink-faint">{s.minute}′ </span> : null}
+                {s.outcome}
+                {s.situation ? <span className="text-ink-faint"> {s.situation}</span> : null}
+              </td>
+              <td className="py-0.5 pr-2 text-right text-ink-faint">{s.xgot.toFixed(2)}</td>
+              <td className={cell(s.points)}>{fmtPts(s.points)}</td>
+            </tr>
+          ))}
+          <tr className="border-t border-line/60">
+            <td className="py-0.5 pr-2 text-ink-faint" colSpan={2}>
+              per un portiere a cui non arriva niente
+            </td>
+            <td className={cell(baseline)}>{fmtPts(baseline)}</td>
+          </tr>
+          <tr className="border-t border-line">
+            <td className="py-0.5 pr-2 font-semibold text-ink-soft" colSpan={2}>
               totale
             </td>
             <td className={`${cell(total)} font-semibold`}>{fmtPts(total)}</td>
@@ -1204,9 +1618,13 @@ function OtherVoices({
 function WhyThisVote({
   why,
   playerId,
+  flush = false,
 }: {
   why: NonNullable<ClassicPlayerLine['explanation']>;
   playerId: number;
+  /** Dentro il foglio del telefono: niente rientro sotto la riga — di riga sopra
+   *  non ce n'è, e il margine sinistro rubava spazio a una colonna che non ne ha. */
+  flush?: boolean;
 }) {
   const fmtPts = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(2)}`;
   const line = (label: string, pts: number, key?: string) => (
@@ -1218,7 +1636,7 @@ function WhyThisVote({
     </div>
   );
   return (
-    <div className="mb-2 ml-8 rounded-xl bg-surface-2 px-3 py-2 text-[12px]">
+    <div className={`rounded-xl bg-surface-2 px-3 py-2 text-[12px] ${flush ? '' : 'mb-2 ml-8'}`}>
       <div className="mb-1 flex items-baseline justify-between text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
         <span>Come nasce il voto puro</span>
         <span>{why.minutes}′ giocati</span>
@@ -1234,9 +1652,10 @@ function WhyThisVote({
             meritarsi la riga in cima -- cioe' esattamente chi ha una mappa dei
             tiri da leggere -- non esiste. */}
         {why.contributions.map((c) =>
-          c.family === 'conclusioni' ? (
-            <ShootingLine
+          c.family === 'conclusioni' || c.family === 'parate' ? (
+            <MapLine
               key={c.label}
+              kind={c.family === 'parate' ? 'saves' : 'shots'}
               label={c.label}
               points={c.points}
               playerId={playerId}

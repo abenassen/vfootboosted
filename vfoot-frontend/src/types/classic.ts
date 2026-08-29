@@ -132,6 +132,16 @@ export interface VoteLedger {
   shots_baseline?: number;
   /** somma dei tiri + metro, cioè la riga «conclusioni» del riassunto. */
   shots_total?: number;
+  /** Le parate, una per una — l'equivalente di ``shots`` per il portiere. Una
+   *  delle due liste è sempre vuota: un giocatore è o l'uno o l'altro. */
+  saves?: SaveDetail[];
+  /** Il METRO del portiere: quanto vale la riga per uno a cui non è arrivato
+   *  niente nello specchio. Prima del credito per l'assenza era una voragine —
+   *  non aver parato metteva sotto la media per costruzione — e adesso è quasi
+   *  zero: è il posto in cui quel cambiamento si vede. */
+  saves_baseline?: number;
+  /** somma delle parate + metro, cioè la riga «gol evitati» del riassunto. */
+  saves_total?: number;
   /** Le voci sotto il centesimo, contate e sommate insieme (e con loro gli
    *  arrotondamenti di tutte le altre): trenta righe di «+0,00» non si leggono. */
   tiny: { count: number; points: number };
@@ -158,6 +168,23 @@ export interface ShotDetail {
   added: number;
   /** Quanto vale QUESTO tiro, in punti di voto: il voto con lui meno il voto
    *  senza. Non è una quota di una somma — la compressione non è additiva. */
+  points: number;
+}
+
+/** Un tiro NELLO SPECCHIO che il portiere ha affrontato: la mappa dei tiri letta
+ *  dall'altra parte. Solo quelli arrivati in porta — i tiri fuori non sono suoi. */
+export interface SaveDetail {
+  minute: number | null;
+  /** parata / gol subito */
+  outcome: string;
+  /** da dove veniva: su assist, su corner, su rigore… vuoto se non si sa. */
+  situation: string;
+  /** Quanto quel tiro era un gol nel momento in cui è partito. È il metro con cui
+   *  il modello giudica il portiere: pararne uno da 0,64 non è pararne uno da 0,05. */
+  xgot: number;
+  /** Quanto vale QUESTA parata (o questo gol subito) in punti di voto. Uno Shapley,
+   *  perché il conteggio delle parate passa per la compressione e per il credito
+   *  d'assenza: la sesta parata non vale quanto la seconda. */
   points: number;
 }
 
