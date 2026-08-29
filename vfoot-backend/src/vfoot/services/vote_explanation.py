@@ -303,7 +303,10 @@ LEDGER_GROUPS = (
      ("errors_bad_passes", "errors_dispossessed", "errors_miscontrols",
       "errors_fouls_committed", "errors_led_to_goal", "errors_led_to_shot",
       "penalties_conceded")),
-    ("portiere", "Porta",
+    # "Porta" da solo non si legge: accanto a "Difesa" e "Errori" sembra un verbo,
+    # e comunque nomina il posto invece del mestiere. Qui dentro ci sono i GESTI del
+    # portiere — parate, uscite, pugni — e il titolo li dice.
+    ("portiere", "Parate e uscite",
      ("gk_goals_prevented", "gk_saves", "gk_saves_inside_box", "gk_high_claims",
       "gk_punches", "gk_sweeper", "gk_crosses_not_claimed", "gk_penalty_saves")),
 )
