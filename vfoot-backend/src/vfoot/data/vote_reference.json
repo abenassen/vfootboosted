@@ -326,14 +326,14 @@
   },
   "goal_impact": {
     "band": [
-      0.2526,
-      0.5894
+      0.276,
+      0.644
     ],
     "p95": 1.6036,
     "role_mean_credit": {
-      "ATT": 0.0892,
-      "CEN": 0.0403,
-      "DIF": 0.0186,
+      "ATT": 0.0975,
+      "CEN": 0.044,
+      "DIF": 0.0203,
       "POR": 0.0
     },
     "xp": {
@@ -561,5 +561,5 @@
       "passes_completed": 0.031010015493522967
     }
   },
-  "weights_fingerprint": "2d11d05687f6fb28"
+  "weights_fingerprint": "afb3eeb93e7980d1"
 }

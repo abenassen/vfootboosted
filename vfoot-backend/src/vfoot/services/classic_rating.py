@@ -850,7 +850,31 @@ POOLED_ROLE_SPREAD = True
 
 # Tunables (calibrate against the real distribution before fixing).
 VOTE_CENTER = 6.0
-VOTE_SPREAD_K = 0.8        # vote points per 1 std of within-role index
+# RIDOTTO da 0.8 a 0.727 il 29/08/2026, e il numero non e' scelto: e' 0.8 x
+# (0.4347 / 0.4781), il rapporto fra la sigma dell'indice dopo e prima l'uscita
+# di ``shots_goal``. Togliendo il gol dall'indice se ne va anche la sua varianza,
+# la sigma scende del 9,1%, e ogni deviazione dal centro finisce divisa per un
+# numero piu' piccolo: il voto di CHI NON HA SEGNATO veniva amplificato del 10%
+# senza che il giocatore avesse fatto niente per meritarlo (misurato su Yildiz,
+# Frosinone-Juventus: +0.073 di puro riscalamento). Questo riporta il non-marcatore
+# esattamente dov'era e chiude anche l'allargamento della sigma del voto che il
+# credito del gol, sommato fuori dalla normalizzazione, introduceva.
+#
+# NB: il credito del gol e' in punti di voto e NON passa di qui, quindi abbassare
+# K lo rende relativamente piu' pesante; la banda va risolta di nuovo, e
+# ``calibrate_vote_reference`` lo fa da solo contro lo stesso bersaglio.
+VOTE_SPREAD_K = 0.727      # vote points per 1 std of within-role index
+# ...MA NON PER IL PORTIERE. La riduzione sopra compensa una varianza che l'indice
+# di MOVIMENTO ha perso; il canale del portiere ``shots_goal`` non l'ha mai avuto,
+# la sua sigma e' rimasta 2.2172 identica, e applicargli lo stesso taglio gli
+# comprimeva i voti del 9% per una modifica che non lo riguarda (sigma del voto
+# 0.625 -> 0.568, e 2 pagelle su 22 mosse nelle prime due giornate).
+GK_SPREAD_K = 0.8
+
+
+def spread_k_for(ref_key: str, default: float = VOTE_SPREAD_K) -> float:
+    """Quanti punti di voto vale una sigma dell'indice, per questo canale."""
+    return GK_SPREAD_K if ref_key == Player.ROLE_GK and default == VOTE_SPREAD_K else default
 
 # --- Il centro PER RUOLO -------------------------------------------------------
 # Fino al 25/08/2026 il centro era 6.0 per tutti, e la questione era stata chiusa
@@ -2308,6 +2332,7 @@ def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: di
     r = reference.get(ref_key)
     if not r:
         return centre
+    spread_k = spread_k_for(ref_key, spread_k)
     z = (index - r["mean"]) / r["std"]
     # Shrink toward the role prior (z -> 0) when minutes are few: we don't trust a
     # per-90 rate extrapolated from a short cameo, so the vote regresses to 6 in
