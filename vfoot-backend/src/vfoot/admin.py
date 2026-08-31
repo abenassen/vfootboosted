@@ -13,7 +13,9 @@ import base64
 from django.contrib import admin
 from django.utils.html import format_html
 
-from vfoot.models import CrestImage, CrestReport, Feedback, ProductNews
+from vfoot.models import (
+    CrestImage, CrestReport, Feedback, LiveEventNotice, ProductNews,
+)
 
 
 @admin.register(ProductNews)
@@ -121,3 +123,37 @@ class CrestReportAdmin(admin.ModelAdmin):
     search_fields = ("image__hash", "reporter__username", "team__name", "reason")
     readonly_fields = ("image", "league", "team", "reporter", "reason", "created_at")
     date_hierarchy = "created_at"
+
+
+@admin.register(LiveEventNotice)
+class LiveEventNoticeAdmin(admin.ModelAdmin):
+    """Che cosa il server crede di aver notificato, e a chi.
+
+    Sola lettura, e sta qui per una domanda sola ma ricorrente: «il gol c'era e la
+    notifica non l'ho vista». Prima non c'era modo di risponderle — il registro dei
+    lavori contava le consegne e basta, non a chi ne' quale — e la differenza fra
+    «non e' partita» e «e' partita e il telefono non l'ha mostrata» e' esattamente
+    la differenza fra un difetto nostro e uno del servizio di consegna.
+    """
+
+    list_display = ("created_at", "match", "player", "kind", "occurrence",
+                    "destinatari", "retracted_at")
+    list_filter = ("kind", "created_at")
+    search_fields = ("player__full_name", "recipients")
+    ordering = ("-created_at",)
+    readonly_fields = ("match", "player", "kind", "occurrence", "created_at",
+                       "retracted_at", "recipients")
+
+    @admin.display(description="consegne")
+    def destinatari(self, obj) -> str:
+        rows = obj.recipients or []
+        if not rows:
+            return "—"
+        return ", ".join(f"{r.get('username')} {r.get('delivered')}/{r.get('devices')}"
+                         for r in rows)
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False

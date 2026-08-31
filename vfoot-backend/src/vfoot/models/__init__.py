@@ -37,7 +37,7 @@ from vfoot.models.feedback import Feedback
 from vfoot.models.heatmap import HeatmapGrid
 from vfoot.models.lineup import SavedLineupSnapshot
 from vfoot.models.presence import PlayerZonePresence, ZoneDuel
-from vfoot.models.push import PushSubscription
+from vfoot.models.push import LiveEventNotice, PushSubscription
 from vfoot.models.zones import Zone, ZoneSet
 
 __all__ = [
@@ -80,6 +80,7 @@ __all__ = [
     "OfficeOverride",
     "SavedLineupSnapshot",
     "PlayerZonePresence",
+    "LiveEventNotice",
     "PushSubscription",
     "Zone",
     "ZoneDuel",

@@ -140,14 +140,26 @@ class Command(BaseCommand):
         # 1) Stamp observed full-time (state we own). This is the ONE instant at
         #    which a match is first seen to be over, so it is where the full-time
         #    notification belongs — not in the import, which runs again afterwards.
+        #
+        #    Gli eventi ancora da dire si annunciano PRIMA, ed e' l'unico punto in
+        #    cui questo ramo puo' farlo: lo stato FINISHED lo scrive anche il sync
+        #    del calendario, che gira per conto suo ogni ora. Se e' lui a vincere la
+        #    corsa, la partita salta il round live e arriva qui direttamente — e i
+        #    gol degli ultimi minuti non li annuncerebbe nessuno, perche' ne'
+        #    final_check ne' final_confirm annunciano. Dopo il fischio non si
+        #    annuncia piu' niente: un gol raccontato a un quarto d'ora dalla fine
+        #    non e' una notizia, e' un rumore.
         for m in plan.stamp_ft:
             self.stdout.write(f"  [stamp-ft] {m} — full-time observed")
             if not dry:
                 m.finished_at = now
                 m.save(update_fields=["finished_at"])
+                late = live_updates.announce_events(m)
                 sent = live_updates.announce_full_time(m)
                 nudge |= live_updates.leagues_to_nudge(m)
-                run.did(stamped_ft=1, pushes=sent or 0)
+                run.did(stamped_ft=1, pushes=(sent or 0) + (late or 0))
+                if late:
+                    self.stdout.write(f"    push eventi in ritardo: {late}")
                 if sent:
                     self.stdout.write(f"    push fine partita: {sent}")
 
@@ -164,8 +176,11 @@ class Command(BaseCommand):
             if dry:
                 self.stdout.write(f"  [{label}] {m} — would warm+import")
                 continue
-            before = live_updates.snapshot_events(m)
             if not live_ingest.live_round(m, heavy=heavy):
+                # Un import fallito a meta' ha comunque potuto scrivere qualcosa. Non
+                # si annuncia da qui (lo stato del match non e' avanzato), ma non si
+                # perde niente: il round successivo confronta la partita col
+                # registro, non con un'istantanea presa un attimo fa.
                 run.did(egress_blocked=1)
                 self.stdout.write(f"  [{label}] {m} — egress blocked; will retry")
                 continue
@@ -175,7 +190,7 @@ class Command(BaseCommand):
                 m.data_imported_at = now
                 fields.append("data_imported_at")
             m.save(update_fields=fields)
-            events = live_updates.announce_events(m, before)
+            events = live_updates.announce_events(m)
             nudge |= live_updates.leagues_to_nudge(m)
             run.did(imported=1, heavy=1 if heavy else 0, pushes=events or 0)
             self.stdout.write(

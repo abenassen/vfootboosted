@@ -68,8 +68,19 @@ def _claims() -> dict:
                                "mailto:no-reply@vfoot.it"))}
 
 
+# RFC 8030 §5.3. Il valore di serie e' ``normal``, che il servizio del dispositivo
+# e' libero di rimandare quando lo schermo e' spento; ``high`` chiede la consegna
+# subito. La distinzione e' la stessa del resto del canale: un gol mentre si gioca
+# vale la sveglia (fra due minuti non e' piu' una notizia), una consultazione di
+# lega no. Non e' un lasciapassare — le urgenze alte le concede il servizio, non
+# noi — ma chiederla per cio' che scade e' l'unico modo di distinguerlo.
+URGENCY_HIGH = "high"
+URGENCY_NORMAL = "normal"
+
+
 def send_to_user(user, *, title: str, body: str, url: str = "/",
-                 tag: str = "", check: tuple[str, int] | None = None) -> int:
+                 tag: str = "", check: tuple[str, int] | None = None,
+                 urgency: str = URGENCY_NORMAL) -> int:
     """Push to every live installation of one user. Returns how many got through.
 
     ``check`` distingue le notifiche che CHIEDONO QUALCOSA da quelle che
@@ -98,12 +109,13 @@ def send_to_user(user, *, title: str, body: str, url: str = "/",
         payload = json.dumps(data)
     sent = 0
     for sub in subs:
-        if _send_one(sub, payload):
+        if _send_one(sub, payload, urgency=urgency):
             sent += 1
     return sent
 
 
-def _send_one(sub: PushSubscription, payload: str) -> bool:
+def _send_one(sub: PushSubscription, payload: str,
+              *, urgency: str = URGENCY_NORMAL) -> bool:
     try:
         from pywebpush import WebPushException, webpush
     except ImportError:                                   # pragma: no cover
@@ -113,7 +125,8 @@ def _send_one(sub: PushSubscription, payload: str) -> bool:
         webpush(subscription_info=sub.as_subscription_info(), data=payload,
                 vapid_private_key=str(settings.VFOOT_VAPID_PRIVATE_KEY),
                 vapid_claims=_claims(), ttl=int(
-                    getattr(settings, "VFOOT_PUSH_TTL_SECONDS", 86400)))
+                    getattr(settings, "VFOOT_PUSH_TTL_SECONDS", 86400)),
+                headers={"Urgency": urgency})
     except WebPushException as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status in GONE_STATUSES:
