@@ -16,7 +16,7 @@ export default function TeamRosterPage() {
   const { data, loading, error } = useAsync(
     () =>
       selectedLeagueId && teamId
-        ? getTeamLineup(selectedLeagueId, null, null, Number(teamId))
+        ? getTeamLineup(selectedLeagueId, null, null, Number(teamId), 'now')
         : Promise.reject(new Error('Parametri mancanti')),
     [selectedLeagueId, teamId],
   );

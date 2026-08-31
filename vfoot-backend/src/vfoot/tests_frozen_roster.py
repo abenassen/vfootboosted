@@ -192,6 +192,154 @@ class YouCannotFieldSomeoneWhoArrivedMidRoundTests(_ClassicRound):
         self.assertEqual(r.status_code, 200, r.data)
 
 
+class TheWalletIsNotFrozenWithTheRosterTests(_ClassicRound):
+    """IL PORTAFOGLIO NON SI CONGELA CON LA ROSA.
+
+    Segnalato in produzione il 31/08/2026: la pagina Rose dichiarava 138 crediti
+    e quella Mercato 124, cioe' proprio i due acquisti validati quel giorno a
+    turno gia' cominciato. Il residuo si contava sulla rosa MOSTRATA — quella
+    della giornata, dove chi e' appena arrivato non c'e' ancora — e la pagina
+    prometteva crediti che il mercato rifiutava di far spendere.
+
+    R4 congela CHI PUO' GIOCARE, non quanto hai in tasca: i contratti sono
+    aperti, i crediti sono usciti, e non c'e' nessuna giornata a cui riferire un
+    portafoglio.
+    """
+
+    AUCTION = datetime(2026, 1, 10, 12, 0, tzinfo=dttz.utc)
+
+    def setUp(self):
+        super().setUp()
+        FantasyRosterSlot.objects.filter(team=self.team).update(acquired_at=self.AUCTION)
+        # La 22 e' cominciata (il sabato ha giocato) ma non e' finita.
+        now = timezone.now()
+        Match.objects.filter(external_id="sat22").update(kickoff=now - timedelta(hours=2))
+        Match.objects.filter(external_id="mon22").update(kickoff=now + timedelta(days=1))
+
+    def _newcomer(self, price=14):
+        p = Player.objects.create(full_name="Arrivato", short_name="Arrivato",
+                                  classic_role_seed="CEN")
+        PlayerTeamStint.objects.create(player=p, team_season=self.ts["lun"])
+        FantasyRosterSlot.objects.create(
+            team=self.team, player=p, purchase_price=price, acquired_at=timezone.now())
+        return p
+
+    def _lineup(self, query=""):
+        r = self._client().get(f"/api/v1/leagues/{self.league.id}/lineup?matchday=22{query}")
+        self.assertEqual(r.status_code, 200)
+        return r.data
+
+    def test_a_purchase_validated_mid_round_leaves_the_page_immediately(self):
+        """IL CASO. L'acquisto non e' schierabile in questa giornata, ma e'
+        pagato: il residuo deve scendere subito, o la pagina promette crediti che
+        il mercato non lascia spendere."""
+        before = self._lineup()["budget"]["remaining"]
+        self._newcomer(price=14)
+        after = self._lineup()
+        self.assertEqual(
+            after["budget"]["remaining"], before - 14,
+            "il residuo si conta sulla rosa schierabile invece che sui contratti")
+        self.assertEqual(after["budget"]["spent"], 130 + 14)
+
+    def test_the_wallet_matches_the_market_engine(self):
+        """L'unico numero possibile e' quello con cui il mercato giudica le
+        offerte: due pagine, un portafoglio."""
+        from vfoot.services.auction_engine import team_budgets
+
+        self._newcomer(price=14)
+        FantasyRosterSlot.objects.filter(
+            team=self.team, player_id=self.pid["m4"]).update(
+                released_at=timezone.now(), sale_price=4)
+        self.assertEqual(self._lineup()["budget"]["remaining"],
+                         team_budgets(self.league)[self.team.id].remaining)
+
+    def test_the_squad_page_asks_for_the_roster_it_owns(self):
+        """``?roster=now``: la pagina Rose mostra i contratti — chi e' appena
+        arrivato c'e', chi e' stato ceduto no — e la divergenza con la giornata
+        viaggia coi nomi, non come regola da dedurre."""
+        newcomer = self._newcomer()
+        FantasyRosterSlot.objects.filter(
+            team=self.team, player_id=self.pid["m4"]).update(released_at=timezone.now())
+
+        owned = self._lineup("&roster=now")
+        served = {row["player_id"] for row in owned["roster"]}
+        self.assertIn(newcomer.id, served)
+        self.assertNotIn(self.pid["m4"], served)
+        self.assertEqual(owned["roster_scope"], "now")
+        self.assertEqual([r["player_id"] for r in owned["roster_freeze"]["arriving"]],
+                         [newcomer.id])
+        self.assertEqual([r["player_id"] for r in owned["roster_freeze"]["leaving"]],
+                         [self.pid["m4"]])
+        self.assertEqual(owned["roster_freeze"]["leaving"][0]["name"], "m4")
+
+    def test_the_formation_page_still_gets_the_matchday_roster(self):
+        """Lo specchio: senza il parametro non cambia niente: chi schiera vede
+        chi puo' giocare questo turno, che e' la domanda di quella pagina."""
+        newcomer = self._newcomer()
+        served = {row["player_id"] for row in self._lineup()["roster"]}
+        self.assertNotIn(newcomer.id, served)
+        self.assertEqual(self._lineup()["roster_scope"], "matchday")
+
+    def test_the_note_speaks_of_the_round_being_played(self):
+        """La pagina Rose non chiede una giornata, e la prima del calendario non
+        e' una risposta: contro quella, a stagione avanzata, ogni acquisto
+        dell'anno risulterebbe «appena arrivato»."""
+        from vfoot.models import FantasyMatchday
+
+        old_kickoff = timezone.now() - timedelta(days=7)
+        for code, home, away in (("sat21", "sab", "terzo"), ("mon21", "lun", "quarto")):
+            Match.objects.create(
+                competition_season=self.cs, matchday=21, kickoff=old_kickoff,
+                kickoff_provisional=False, home_team=self.ts[home], away_team=self.ts[away],
+                status=Match.STATUS_FINISHED, external_source="sofascore", external_id=code)
+        FantasyMatchday.objects.create(
+            league=self.league, real_competition_season=self.cs, real_matchday=21)
+        self._newcomer()
+
+        r = self._client().get(f"/api/v1/leagues/{self.league.id}/lineup?roster=now")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["roster_freeze"]["matchday"], 22)
+
+    def test_before_the_round_starts_there_is_nothing_to_explain(self):
+        """Fuori dalla finestra le due rose coincidono, e la pagina non deve
+        spiegare una divergenza che non c'e'."""
+        Match.objects.filter(matchday=22).update(kickoff=timezone.now() + timedelta(days=2))
+        self._newcomer()
+        data = self._lineup("&roster=now")
+        self.assertIsNone(data["roster_freeze"])
+        self.assertEqual(data["roster_scope"], "now")
+
+
+class TheWalletCountsWhatIsPromisedToOffersTests(_ClassicRound):
+    """Il residuo e' quanto possiedi, il disponibile quanto puoi ancora offrire.
+
+    L'altra meta' della stessa segnalazione: con un'offerta aperta le due pagine
+    direbbero di nuovo due numeri diversi — «residuo» qui, «disponibili» la' —
+    senza che nessuna delle due dica perche'. Il conto e' quello di
+    ``MarketTeamState.available``, e adesso lo fanno tutte e due.
+    """
+
+    def test_a_live_offer_reserves_credits_on_the_squad_page_too(self):
+        from vfoot.models import MarketOffer, MarketSession
+
+        target = Player.objects.create(full_name="Obiettivo", short_name="Obiettivo",
+                                       classic_role_seed="CEN")
+        session = MarketSession.objects.create(
+            league=self.league, name="Sessione", status=MarketSession.STATUS_OPEN,
+            created_by=self.owner)
+        MarketOffer.objects.create(
+            session=session, team=self.team, target_player=target,
+            release_player_id=self.pid["m4"], amount=20, recovery_amount=5,
+            role="CEN", status=MarketOffer.STATUS_LEADING,
+            deadline_at=timezone.now() + timedelta(hours=24))
+
+        budget = self._client().get(
+            f"/api/v1/leagues/{self.league.id}/lineup").data["budget"]
+        self.assertEqual(budget["remaining"], 870)
+        self.assertEqual(budget["reserved"], 15)
+        self.assertEqual(budget["available"], 855)
+
+
 class ASaveCannotUndoTheRepairTests(_ClassicRound):
     """La giornata NON e' ancora cominciata, quindi R4 non congela niente — ma la
     proprieta' va verificata lo stesso, contro la rosa di adesso.

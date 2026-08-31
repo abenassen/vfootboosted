@@ -27,10 +27,25 @@ const ROLE_CHIP: Record<PlayerRole, string> = {
 };
 const ROLES: PlayerRole[] = ['GK', 'DEF', 'MID', 'ATT'];
 
+/** «Fitz-Jim», «Fitz-Jim e Calò», «Fitz-Jim, Calò e Moreira»: l'elenco come si
+ *  legge in una frase, che è l'unico posto dove serve. */
+function namesOf(rows: { player_id: number; name: string | null }[]) {
+  const names = rows.map((r) => r.name || 'un giocatore');
+  if (names.length <= 1) return <b className="text-ink">{names[0] ?? ''}</b>;
+  return (
+    <b className="text-ink">
+      {names.slice(0, -1).join(', ')} e {names[names.length - 1]}
+    </b>
+  );
+}
+
 export default function RosterView({ data }: { data: TeamLineupContext }) {
   const [openPlayer, setOpenPlayer] = useState<number | null>(null);
   const roster = [...data.roster].sort((a, b) => b.price - a.price);
   const budget = data.budget;
+  // Solo sulla rosa POSSEDUTA: sulla pagina della formazione la differenza fra
+  // le due rose e' gia' spiegata li', accanto ai giocatori che riguarda.
+  const freeze = data.roster_scope === 'now' ? data.roster_freeze : null;
   const statsNote = data.stats_season
     ? data.stats_is_reference
       ? `Presenze, minuti e impiego sono aggiornati al campionato in corso (${data.stats_season}).`
@@ -58,6 +73,25 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
               {budget.trade_cash ? <><b className="text-ink-soft">{price(budget.trade_cash)}</b> di conguagli da scambi</> : null}.
             </div>
           ) : null}
+          {/* I tre numeri in alto non tornano da soli quando un contratto si e'
+              chiuso in perdita: quei crediti non sono ne' spesi (chi li ha
+              spesi non e' piu' in rosa) ne' residui. Detti qui, invece di
+              lasciar fare la sottrazione a chi guarda e non torna. */}
+          {budget.sunk ? (
+            <div className="mt-1 text-[11px] text-ink-faint">
+              <b className="text-ink-soft">{price(budget.sunk)}</b> persi in svincoli: pagati più di
+              quanto è stato recuperato.
+            </div>
+          ) : null}
+          {/* Il residuo e' quanto si possiede, il disponibile quanto si puo'
+              ancora offrire. Finche' un'offerta e' aperta i due numeri sono
+              diversi, ed e' lo stesso conto che fa la pagina Mercato. */}
+          {budget.reserved ? (
+            <div className="mt-1 text-[11px] text-ink-faint">
+              Di cui <b className="text-ink-soft">{price(budget.reserved)}</b> impegnati in offerte
+              aperte: puoi offrirne <b className="text-ink-soft">{price(budget.available)}</b>.
+            </div>
+          ) : null}
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
             {ROLES.filter((r) => budget.by_role[r]).map((r) => (
               <span key={r}>
@@ -65,6 +99,31 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
               </span>
             ))}
           </div>
+        </Card>
+      ) : null}
+
+      {/* PERCHE' LA ROSA E LA FORMAZIONE NON COINCIDONO, per i giorni in cui non
+          coincidono. A turno cominciato chi e' stato ceduto resta schierabile
+          fino alla fine del turno e chi e' stato comprato entra dal successivo
+          (R4): senza questa riga la pagina mostra l'effetto — un giocatore che
+          non c'e' piu' ancora in campo, uno appena preso che non si puo'
+          schierare — e tace la causa. */}
+      {freeze && (freeze.leaving.length > 0 || freeze.arriving.length > 0) ? (
+        <Card className="p-4 text-[13px] text-ink-soft">
+          <b>Giornata {freeze.matchday} già cominciata.</b> Qui sotto c’è la rosa di adesso.{' '}
+          {freeze.leaving.length ? (
+            <>
+              {namesOf(freeze.leaving)} {freeze.leaving.length > 1 ? 'sono stati ceduti' : 'è stato ceduto'}{' '}
+              a turno iniziato e {freeze.leaving.length > 1 ? 'restano schierabili' : 'resta schierabile'}{' '}
+              in questa giornata.{' '}
+            </>
+          ) : null}
+          {freeze.arriving.length ? (
+            <>
+              {namesOf(freeze.arriving)} {freeze.arriving.length > 1 ? 'entrano' : 'entra'} dalla
+              prossima giornata.
+            </>
+          ) : null}
         </Card>
       ) : null}
 

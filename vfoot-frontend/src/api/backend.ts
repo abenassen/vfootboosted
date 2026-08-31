@@ -1454,11 +1454,15 @@ export async function getTeamLineup(
   matchday?: number | null,
   competition?: number | null,
   teamId?: number | null,
+  /** «now» chiede la rosa POSSEDUTA invece di quella schierabile in giornata:
+   *  la pagina Rose vuole i contratti, la formazione chi puo' giocare. */
+  rosterScope?: 'now' | null,
 ): Promise<TeamLineupContext> {
   const params = new URLSearchParams();
   if (matchday != null) params.set('matchday', String(matchday));
   if (competition != null) params.set('competition', String(competition));
   if (teamId != null) params.set('team_id', String(teamId));
+  if (rosterScope) params.set('roster', rosterScope);
   const q = params.toString() ? `?${params.toString()}` : '';
   const res = await fetch(`${baseUrl()}/leagues/${leagueId}/lineup${q}`, {
     headers: { Accept: 'application/json', ...authHeaders() },

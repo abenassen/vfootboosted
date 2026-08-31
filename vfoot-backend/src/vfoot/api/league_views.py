@@ -81,6 +81,8 @@ from vfoot.models import (
     FantasyTeam,
     LeagueMembership,
     LeaguePlayerRole,
+    MarketOffer,
+    MarketSession,
     OfficeOverride,
     PlayerTrade,
     SavedLineupSnapshot,
@@ -5731,11 +5733,20 @@ class LeagueTeamLineupView(APIView):
         # quella della rosa dicono due cose diverse, ed e' per questo che la
         # risposta porta ``roster_frozen_at``: la divergenza va spiegata a
         # schermo, non lasciata dedurre.
+        #
+        # QUALE DELLE DUE la risposta porta lo decide ``?roster=``: la formazione
+        # chiede quella schierabile (default), la pagina Rose quella POSSEDUTA —
+        # «cosa ho in rosa» e «chi posso schierare in questo turno» sono due
+        # domande diverse, e per qualche giorno al turno hanno due risposte
+        # diverse. La differenza fra le due viaggia sempre (``roster_freeze``):
+        # chi la mostra la deve poter spiegare coi nomi, non con una regola.
+        want_now = request.query_params.get("roster") == "now"
         fieldable = frozen_roster.frozen_ids(league, team, matchday)
-        if fieldable is None:
-            slots = list(FantasyRosterSlot.objects
-                         .filter(team=team, released_at__isnull=True)
-                         .select_related("player"))
+        current_slots = list(FantasyRosterSlot.objects
+                             .filter(team=team, released_at__isnull=True)
+                             .select_related("player"))
+        if fieldable is None or want_now:
+            slots = current_slots
         else:
             # Senza il filtro su released_at: il ceduto a turno iniziato e' ancora
             # dei nostri per questa giornata. Un giocatore puo' avere piu' di un
@@ -5748,6 +5759,12 @@ class LeagueTeamLineupView(APIView):
                     seen.add(slot.player_id)
                     slots.append(slot)
         player_ids = [s.player_id for s in slots]
+        # I profili (e con loro i ruoli) coprono anche chi sta solo nell'altra
+        # delle due rose: il portafoglio qui sotto si divide per ruolo sui
+        # contratti di ADESSO, e senza quegli id un acquisto di ieri finirebbe
+        # nel mucchio sbagliato.
+        profile_ids = sorted({s.player_id for s in slots}
+                             | {s.player_id for s in current_slots})
         # Which season should the playing-time stats describe? The reference season
         # while it is under way, but BEFORE it starts it has no games at all — and
         # reporting "poco impiegato" for everybody because nobody has played yet is
@@ -5755,7 +5772,7 @@ class LeagueTeamLineupView(APIView):
         # choice and the profiles live in lineup_suggest, shared with the server-side
         # suggester, so page and baseline rank the roster the same way.
         ref_cs = league.reference_season
-        profiles, stats_cs = lineup_suggest.roster_profiles(league, player_ids, as_of)
+        profiles, stats_cs = lineup_suggest.roster_profiles(league, profile_ids, as_of)
         total_matches = (
             Match.objects.filter(competition_season=stats_cs)
             .values("matchday").distinct().count()
@@ -5817,11 +5834,23 @@ class LeagueTeamLineupView(APIView):
         if is_classic:
             frozen_roles = {
                 lpr.player_id: _CLASSIC_ROLE_TO_LINEUP.get(lpr.role, "MID")
-                for lpr in LeaguePlayerRole.objects.filter(league=league, player_id__in=player_ids)
+                for lpr in LeaguePlayerRole.objects.filter(league=league, player_id__in=profile_ids)
             }
             seed_roles = dict(
-                Player.objects.filter(id__in=player_ids).exclude(classic_role_seed="").values_list("id", "classic_role_seed")
+                Player.objects.filter(id__in=profile_ids).exclude(classic_role_seed="").values_list("id", "classic_role_seed")
             )
+
+        def role_for(player_id: int) -> str:
+            """Il ruolo con cui questo giocatore compare in questa lega. Uno solo
+            per tutti i posti che ne hanno bisogno — le righe della rosa e la
+            divisione per ruolo del portafoglio — perche' due copie della stessa
+            gerarchia sono due occasioni di scriverla diversa."""
+            role = profiles.get(player_id, {}).get("role", "MID")
+            if is_classic:
+                role = frozen_roles.get(player_id) or _CLASSIC_ROLE_TO_LINEUP.get(
+                    seed_roles.get(player_id, ""), role
+                )
+            return role
 
         # Il club di ciascun giocatore, cosi' che una riga di rosa dica per chi
         # gioca e non solo quanto e' costato.
@@ -5891,11 +5920,7 @@ class LeagueTeamLineupView(APIView):
         roster = []
         for s in slots:
             p = profiles.get(s.player_id, {})
-            role = p.get("role", "MID")
-            if is_classic:
-                role = frozen_roles.get(s.player_id) or _CLASSIC_ROLE_TO_LINEUP.get(
-                    seed_roles.get(s.player_id, ""), role
-                )
+            role = role_for(s.player_id)
             roster.append(
                 {
                     "player_id": s.player_id,
@@ -5932,6 +5957,48 @@ class LeagueTeamLineupView(APIView):
                 }
             )
         roster.sort(key=lambda r: (r["avg_col"], -r["price"]))
+
+        # LA DIFFERENZA FRA LE DUE ROSE, COI NOMI. Il turno cominciato la apre e
+        # la fine del turno la chiude: chi e' stato ceduto nel mezzo resta
+        # schierabile in questa giornata pur non essendo piu' in rosa, chi e'
+        # stato comprato e' in rosa ma gioca dalla prossima. E' la regola R4, e
+        # senza i nomi la si puo' solo enunciare — «Fitz-Jim e' ancora nella mia
+        # rosa» e' arrivato in segnalazione proprio perche' la pagina mostrava
+        # l'effetto e taceva la causa.
+        #
+        # CONTRO QUALE GIORNATA. Quella chiesta, se e' stata chiesta (la pagina
+        # Formazione lavora sempre su una): altrimenti quella che si sta
+        # giocando, che e' l'unica in cui la divergenza esiste. Non
+        # ``matchdays[0]``, che e' la prima del calendario e a novembre
+        # spaccerebbe per «appena arrivato» ogni acquisto della stagione.
+        freeze_md = matchday if matchday_param is not None else matchday_state.playing_matchday(league)
+        if freeze_md is None:
+            freeze_fieldable = None
+        elif freeze_md == matchday:
+            freeze_fieldable = fieldable
+        else:
+            freeze_fieldable = frozen_roster.frozen_ids(league, team, freeze_md)
+        roster_freeze = None
+        if freeze_fieldable is not None:
+            current_ids = {c.player_id for c in current_slots}
+            leaving = sorted(freeze_fieldable - current_ids)
+            arriving = sorted(current_ids - freeze_fieldable)
+            if leaving or arriving:
+                freeze_names = {
+                    pl.id: (pl.short_name or pl.full_name)
+                    for pl in Player.objects.filter(id__in=leaving + arriving)
+                }
+                frozen_at = frozen_roster.lock_instant(league, freeze_md)
+                roster_freeze = {
+                    "matchday": freeze_md,
+                    "frozen_at": frozen_at.isoformat() if frozen_at else None,
+                    # Ceduti, ma ancora schierabili in QUESTA giornata.
+                    "leaving": [{"player_id": pid, "name": freeze_names.get(pid)}
+                                for pid in leaving],
+                    # In rosa, ma schierabili dalla PROSSIMA.
+                    "arriving": [{"player_id": pid, "name": freeze_names.get(pid)}
+                                 for pid in arriving],
+                }
 
         lineup_key = f"team{team.id}" + (f":comp{competition_id}" if competition_id is not None else "")
         snap = SavedLineupSnapshot.objects.filter(
@@ -6071,10 +6138,16 @@ class LeagueTeamLineupView(APIView):
                 },
                 "mode": league.mode,
                 "roster": roster,
+                # Quale delle due rose e' quella qui sopra, e in cosa differisce
+                # dall'altra. Entrambe le chiavi viaggiano sempre: la pagina che
+                # mostra la rosa posseduta deve poter dire chi gioca comunque
+                # questo turno, e quella della formazione chi non gioca ancora.
+                "roster_scope": "now" if (fieldable is None or want_now) else "matchday",
+                "roster_freeze": roster_freeze,
                 # Spending summary: a fixed 500 budget (as used elsewhere), what
                 # this squad cost, and per-role breakdown — so the manager reads
                 # where his money went without adding it up by hand.
-                "budget": _roster_budget(roster, league.initial_budget, team.id),
+                "budget": _roster_budget(league, team.id, current_slots, role_for),
                 # Which season the appearances/minutes/label describe. The client
                 # must say so: pre-season these are LAST year's, and a silent
                 # "poco impiegato" from stale data is exactly the confusion to avoid.
@@ -6104,8 +6177,18 @@ class LeagueTeamLineupView(APIView):
         )
 
 
-def _roster_budget(roster: list, initial: int, team_id: int) -> dict:
+def _roster_budget(league, team_id: int, current_slots: list, role_for) -> dict:
     """Spending summary against the LEAGUE's budget.
+
+    SI LEGGE DAI CONTRATTI APERTI, mai dalla rosa che la pagina sta mostrando.
+    Le due cose divergono per qualche giorno a ogni turno (R4: chi e' stato
+    ceduto a giornata iniziata resta schierabile fino alla fine del turno, chi e'
+    stato comprato entra dal successivo), e finche' il residuo si contava sulla
+    rosa schierabile la pagina Rose dichiarava crediti che il mercato rifiutava
+    di far spendere — 138 contro 124, segnalato in produzione il 31/08/2026 da
+    una squadra che nello stesso turno aveva validato due acquisti. Il
+    portafoglio e' uno solo, e ce l'ha ``team_budgets``: qui si ripete solo la
+    divisione per ruolo, che quello non calcola.
 
     Was hardcoded to 500 while FantasyLeague.initial_budget defaults to 1000 and
     is configurable per league, so the Squadra page reported a residue of zero to
@@ -6123,6 +6206,7 @@ def _roster_budget(roster: list, initial: int, team_id: int) -> dict:
     dimenticarli qui rifarebbe esattamente quell'errore al contrario — la pagina
     Squadra dichiarerebbe meno di quanto l'asta e il mercato lasciano spendere.
     """
+    initial = league.initial_budget
     granted = trade_cash = 0
     for a, trade_id in (BudgetGrant.objects.filter(team_id=team_id)
                         .values_list("amount", "trade_id")):
@@ -6130,7 +6214,7 @@ def _roster_budget(roster: list, initial: int, team_id: int) -> dict:
             granted += int(a)
         else:
             trade_cash += int(a)
-    spent = sum(r["price"] for r in roster)
+    spent = sum(int(s.purchase_price) for s in current_slots)
     sunk = 0
     for price, sale in (
         FantasyRosterSlot.objects.filter(team_id=team_id, released_at__isnull=False)
@@ -6138,11 +6222,32 @@ def _roster_budget(roster: list, initial: int, team_id: int) -> dict:
     ):
         sunk += int(price) - (int(price) if sale is None else int(sale))
     by_role: dict[str, int] = {}
-    for r in roster:
-        by_role[r["role"]] = by_role.get(r["role"], 0) + r["price"]
+    for slot in current_slots:
+        r = role_for(slot.player_id)
+        by_role[r] = by_role.get(r, 0) + int(slot.purchase_price)
+    remaining = max(0, initial + granted + trade_cash - spent - sunk)
+    # I CREDITI GIA' IMPEGNATI in offerte vive, con lo stesso conto della pagina
+    # Mercato (``MarketTeamState.available``): il residuo e' quanto si possiede,
+    # il disponibile e' quanto si puo' ancora offrire, e chi ha un'offerta aperta
+    # vedrebbe altrimenti due numeri diversi sulle due pagine senza che nessuna
+    # delle due dica perche'.
+    session = (MarketSession.objects
+               .filter(league=league, status__in=(MarketSession.STATUS_OPEN,
+                                                  MarketSession.STATUS_SUSPENDED))
+               .order_by("-created_at").first())
+    reserved = 0
+    if session is not None:
+        for amount, recovery in (MarketOffer.objects
+                                 .filter(session=session, team_id=team_id,
+                                         status__in=MarketOffer.LIVE_STATUSES)
+                                 .values_list("amount", "recovery_amount")):
+            reserved += int(amount) - int(recovery)
+    reserved = max(0, reserved)
     return {"initial": initial, "granted": granted, "trade_cash": trade_cash,
             "spent": spent, "sunk": sunk,
-            "remaining": max(0, initial + granted + trade_cash - spent - sunk),
+            "remaining": remaining,
+            "reserved": reserved,
+            "available": max(0, remaining - reserved),
             "by_role": by_role}
 
 

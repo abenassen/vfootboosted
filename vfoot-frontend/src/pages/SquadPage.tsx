@@ -9,7 +9,14 @@ import TeamIdentityCard from '../components/TeamIdentityCard';
 export default function SquadPage() {
   const { selectedLeagueId } = useLeagueContext();
   const { data, loading, error } = useAsync(
-    () => (selectedLeagueId ? getTeamLineup(selectedLeagueId) : Promise.reject(new Error('Nessuna lega selezionata'))),
+    // La rosa POSSEDUTA, non quella schierabile in giornata: qui si guarda cosa
+    // si ha e quanto e' costato. Chi resta schierabile pur essendo stato ceduto
+    // lo dice il riquadro dentro RosterView, e chi puo' giocare questo turno lo
+    // decide la pagina Formazione.
+    () =>
+      selectedLeagueId
+        ? getTeamLineup(selectedLeagueId, null, null, null, 'now')
+        : Promise.reject(new Error('Nessuna lega selezionata')),
     [selectedLeagueId],
   );
   const [exporting, setExporting] = useState(false);

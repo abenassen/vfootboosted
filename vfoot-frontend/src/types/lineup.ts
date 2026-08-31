@@ -87,6 +87,11 @@ export interface TeamLineupContext {
      *  non e' initial - spent, e questo e' il pezzo che manca all'appello. */
     sunk: number;
     remaining: number;
+    /** Gia' impegnati in offerte di mercato aperte. */
+    reserved: number;
+    /** Quanto si puo' ancora offrire: residuo meno impegnato. E' il numero che
+     *  la pagina Mercato chiama «disponibili». */
+    available: number;
     by_role: Record<string, number>;
   };
   stats_season?: string | null;      // stagione da cui vengono presenze/minuti/etichetta
@@ -104,6 +109,19 @@ export interface TeamLineupContext {
   };
   mode: LeagueMode;
   roster: TeamLineupPlayer[];
+  /** Quale rosa e' quella qui sopra: quella POSSEDUTA adesso («now», la pagina
+   *  Rose) o quella schierabile in questa giornata («matchday», la formazione).
+   *  Divergono solo a turno cominciato. */
+  roster_scope?: 'now' | 'matchday';
+  /** In cosa differiscono le due, coi nomi. Null quando coincidono. */
+  roster_freeze?: {
+    matchday: number;
+    frozen_at: string | null;
+    /** Ceduti a turno iniziato: fuori rosa, ma schierabili in questa giornata. */
+    leaving: { player_id: number; name: string | null }[];
+    /** Arrivati a turno iniziato: in rosa, ma schierabili dalla prossima. */
+    arriving: { player_id: number; name: string | null }[];
+  } | null;
   saved_lineup: {
     gk_player_id: number | null;
     starter_player_ids: number[];
