@@ -103,8 +103,6 @@ def weights_fingerprint() -> str:
 #   4 -> 5: the result mitigation can no longer erase the WHOLE divergence from 6
 #           (RESULT_MITIGATION_MAX_SHARE): at four goals of margin it used to pin
 #           every divergent vote to exactly 6.0, and past four it crossed the centre.
-#           (Il "mai sotto il 6" che questo giro difendeva vale, dalla 9, solo per
-#           le vittorie: v. 8 -> 9.)
 #           The post-index constants now key the scoring fingerprint below, so a
 #           future change to them invalidates caches on its own — this bump covers
 #           the one that introduced them.
@@ -138,17 +136,7 @@ def weights_fingerprint() -> str:
 #           segnato, −0.880 e un punto pieno di voto (6.0 invece di 7.0). Ora il
 #           buco si tappa con l'xGOT della mappa dei tiri, che e' gia' la fonte
 #           dell'altra meta' della sottrazione. Due righe in tutta la 25-26.
-#   8 -> 9: la mitigazione del risultato diventa ASIMMETRICA. Nella sconfitta il
-#           bersaglio della tirata scende a ``centro_di_ruolo − 0.35``, quindi una
-#           goleada subita puo' portare il voto sotto il centro (5.65 per un
-#           centrocampista) invece di fermarlo li'; nella vittoria non cambia
-#           niente e il tetto resta il centro. Le tre costanti nuove sono nel
-#           fingerprint qui sotto, ma questo giro serve lo stesso: si spostano 343
-#           voti su 9.933 nella 25-26, e la cache su FILE della produzione avrebbe
-#           continuato a servire quelli vecchi fino al primo dato nuovo di quella
-#           giornata. Chi rilegge: il perche' e la misura stanno nel blocco
-#           RESULT_MITIGATION_LOSS_ANCHOR di classic_rating.
-SCORING_CODE_VERSION = 9
+SCORING_CODE_VERSION = 8
 
 
 def scoring_fingerprint() -> str:
@@ -186,9 +174,6 @@ def scoring_fingerprint() -> str:
         # calcolati prima senza che nessuna chiave si muovesse.
         "post_index": [cr.RESULT_MITIGATION_K, cr.RESULT_MITIGATION_BASE,
                        cr.RESULT_MITIGATION_CAP, cr.RESULT_MITIGATION_MAX_SHARE,
-                       cr.RESULT_MITIGATION_LOSS_ANCHOR, cr.RESULT_MITIGATION_LOSS_K,
-                       cr.RESULT_MITIGATION_LOSS_BASE,
-                       cr.RESULT_MITIGATION_LOSS_MAX_SHARE,
                        cr.RED_CARD_K, sorted(cr.RED_CARD_SEVERITY.items()),
                        sorted(cr.RED_CARD_FIXED.items()),
                        cr.OWN_GOAL_VOTE_DEFLECTION, cr.OWN_GOAL_VOTE_SOLO,

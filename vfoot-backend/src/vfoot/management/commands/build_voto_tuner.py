@@ -463,9 +463,9 @@ class Command(BaseCommand):
         # ---- Tuner ----
         tun = wb.create_sheet("Tuner"); wb.move_sheet("Tuner", -(len(wb.sheetnames) - 1))
         tun["A1"] = "VOTO PURO — tuner dei pesi"; tun["A1"].font = Font(bold=True, size=14)
-        tun["A2"] = ("Edita i PESI (col C, celle gialle) e le costanti della mitigazione "
-                     "(riga 5). Interruttore RAW/SQRT in B4. Il VOTO FINALE (riga 24) si "
-                     "colora: verde=accordo, giallo=borderline, rosso=outlier.")
+        tun["A2"] = ("Edita i PESI (col C, celle gialle) e K mitigazione (B5). Interruttore "
+                     "RAW/SQRT in B4. Il VOTO FINALE (riga 24) si colora: verde=accordo, "
+                     "giallo=borderline, rosso=outlier.")
         tun["A3"] = ("Pipeline: voto base = 6+0.8·(min/(min+25))·(indice−media)/σ in [3,10]; "
                      "poi + mitigazione risultato (solo divergenze, cap ±1) + red/autogol; "
                      "poi clamp [3,10] e arrotondamento 0.5. gd_on e red/autogol sono FISSI "
@@ -476,15 +476,9 @@ class Command(BaseCommand):
                      "ristandardizza), quindi indice = SOMMAPRODOTTO(pesi, colonna). "
                      "Per far contare A la meta' di B, dai ad A meta' peso: adesso e' vero.")
         tun["A4"].font = Font(italic=True, size=9)
-        # I due lati della mitigazione hanno costanti diverse dal 30/08/2026, quindi
-        # anche le manopole sono due gruppi: la sconfitta ha in piu' l'ANCORA, cioe'
-        # di quanto scende il bersaglio della tirata sotto il centro.
-        tun["A5"] = "vittoria K:"; tun["B5"] = cr.RESULT_MITIGATION_K
-        tun["C5"] = "base:"; tun["D5"] = cr.RESULT_MITIGATION_BASE
-        tun["E5"] = "sconfitta K:"; tun["F5"] = cr.RESULT_MITIGATION_LOSS_K
-        tun["G5"] = "base:"; tun["H5"] = cr.RESULT_MITIGATION_LOSS_BASE
-        tun["I5"] = "ancora:"; tun["J5"] = cr.RESULT_MITIGATION_LOSS_ANCHOR
-        for cell in ("B5", "D5", "F5", "H5", "J5"):
+        tun["A5"] = "K mitigazione:"; tun["B5"] = cr.RESULT_MITIGATION_K
+        tun["C5"] = "base sc/vitt:"; tun["D5"] = cr.RESULT_MITIGATION_BASE
+        for cell in ("B5", "D5"):
             tun[cell].font = Font(bold=True); tun[cell].fill = yel
             tun[cell].number_format = "0.00"
         murow_dif = murow["DIF"]
@@ -525,9 +519,7 @@ class Command(BaseCommand):
                 tun.cell(7 + i, 5, "—")
         # c0 = 6: le etichette di riga dei casi stanno in F, non in E, perche' la
         # colonna E ora appartiene alla tabella dei pesi ("1 EVENTO in VOTI").
-        KM = "Tuner!$B$5"; BB = "Tuner!$D$5"                    # lato vittoria
-        KL = "Tuner!$F$5"; BL = "Tuner!$H$5"; AN = "Tuner!$J$5"  # lato sconfitta
-        c0 = 6
+        KM = "Tuner!$B$5"; BB = "Tuner!$D$5"; c0 = 6
         rowlab = [(7, "giocatore"), (8, "TIPO"), (9, "ruolo"), (10, "partita (gd, risultato, gol)"),
                   (11, "minuti"), (12, "fanta"), (13, "statistico"), (14, "sofascore"),
                   (15, "nostro(attuale)"), (16, "indice"), (17, "media INDICE ruolo"),
@@ -551,18 +543,12 @@ class Command(BaseCommand):
             tun.cell(20, cc, c["red_adj"])
             # voto base (clamp [3,10], pre-arrotondamento)
             tun.cell(21, cc, f'=MAX(3,MIN(10,6+0.8*({L}11/({L}11+25))*(({L}16-{L}17)/{L}18)))')
-            # mitigazione: solo divergenze, gravità = MIN(quota, base + K·|gd_on|),
-            # cap ±1. I due lati hanno bersagli diversi (v. classic_rating):
-            #   sconfitta (gd_on<0): voto sopra 6−ancora scende verso 6−ancora
-            #   vittoria  (gd_on>0): voto sotto 6 sale verso 6, mai oltre
-            # La quota c'e' anche qui: senza, il foglio smetteva di somigliare al
-            # deployato da due gol di scarto in su (0.85 contro 0.70 a tre).
+            # mitigazione: solo divergenze, gravità = base + K·|gd_on|, cap ±1.
+            #   sconfitta (gd_on<0): voto alto scende di (voto-6)·(base+K·|gd_on|)
+            #   vittoria  (gd_on>0): voto basso sale di (6-voto)·(base+K·gd_on)
             tun.cell(22, cc,
-                     f'=MAX(-1,MIN(1,IF({L}19<0,'
-                     f'-MAX(0,{L}21-(6-{AN}))*MIN({cr.RESULT_MITIGATION_LOSS_MAX_SHARE},'
-                     f'{BL}+{KL}*(-{L}19)),'
-                     f'IF({L}19>0,MAX(0,6-{L}21)*MIN({cr.RESULT_MITIGATION_MAX_SHARE},'
-                     f'{BB}+{KM}*{L}19),0))))')
+                     f'=MAX(-1,MIN(1,IF({L}19<0,-MAX(0,{L}21-6)*({BB}+{KM}*(-{L}19)),'
+                     f'IF({L}19>0,MAX(0,6-{L}21)*({BB}+{KM}*{L}19),0))))')
             # voto finale = clamp(base + mitigazione + red_adj), arrotondato a 0.5
             tun.cell(24, cc, f'=ROUND(MAX(3,MIN(10,{L}21+{L}22+{L}20))*2)/2')
             tun.cell(24, cc).font = Font(bold=True, size=12)
@@ -590,16 +576,9 @@ class Command(BaseCommand):
                       "GOL=marcatore, 'KO netto'=sconfitta ≥3 gol, OUTLIER, buono=accordo; "
                       "'ESTREMO alto/basso'=i voti difensori più alti e più bassi della "
                       "stagione, ripescati a ogni rebuild (lì il modello è meno vincolato).")
-        tun["F28"] = (
-            "Mitigazione: solo divergenze, gravità = MIN(quota, base + K·|gd_on|), cap ±1, "
-            "ma i due lati NON sono simmetrici (30/08/2026). SCONFITTA: il bersaglio è "
-            f"6−ancora ({cr.RESULT_MITIGATION_LOSS_ANCHOR}), quota "
-            f"{cr.RESULT_MITIGATION_LOSS_MAX_SHARE} — manopole F5/H5/J5 — quindi una goleada "
-            "subita porta il voto SOTTO il 6. VITTORIA: bersaglio 6, quota "
-            f"{cr.RESULT_MITIGATION_MAX_SHARE}, manopole B5/D5, e il voto basso arriva al 6 e "
-            "non oltre. NB: qui il centro è 6 fisso, mentre il modello usa quello di RUOLO "
-            "(difensore 5.91), quindi sui difensori il foglio approssima. "
-            "SGA_Pali: xgOT−xg + palo.")
+        tun["F28"] = ("Mitigazione: solo divergenze (voto>6 in sconfitta → giù; voto<6 in vittoria → su), "
+                      "gravità = base + K·|gd_on|, cap ±1. K in B5, 'base sc/vitt' (contributo "
+                      "discreto sconfitta/vittoria, oltre i gol) in D5. SGA_Pali: xgOT−xg + palo.")
         tun["F29"] = (
             f"EXPOSURE (_exposure, peso {-cr.EXPOSURE_WEIGHT:.2f}): pericolo SUBITO addebitato "
             f"a chi era in quella zona. Per ogni tiro avversario (rigori esclusi, solo minuti "

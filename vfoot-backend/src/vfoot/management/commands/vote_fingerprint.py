@@ -59,9 +59,7 @@ class Command(BaseCommand):
         self.stdout.write(f"codice     : SCORING_CODE_VERSION {SCORING_CODE_VERSION}")
         self.stdout.write(f"pesi       : {weights_fingerprint()}")
         self.stdout.write(f"modello    : {scoring_fingerprint()}")
-        self.stdout.write(f"costanti   : mitigazione vittoria max {cr.RESULT_MITIGATION_MAX_SHARE}, "
-                          f"sconfitta ancora {cr.RESULT_MITIGATION_LOSS_ANCHOR} "
-                          f"max {cr.RESULT_MITIGATION_LOSS_MAX_SHARE}, "
+        self.stdout.write(f"costanti   : mitigazione max {cr.RESULT_MITIGATION_MAX_SHARE}, "
                           f"autogol-portiere {cr.OWN_GOAL_KEEPER_XGOT_DEFAULT}, "
                           f"decimali {cr.PROVIDER_SUM_DECIMALS}")
 
