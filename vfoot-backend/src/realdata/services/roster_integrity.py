@@ -309,12 +309,28 @@ def split_identities(provider: str = "sofascore") -> list[SplitIdentity]:
 ROSTER_COVERAGE_FLOOR = 0.90
 #
 # COSA E' RUMORE, misurato sulla 26-27 al 31/08/2026: 16 orfani in dieci giorni,
-# di cui QUATTORDICI mai entrati in campo — ragazzi delle giovanili messi in
-# distinta e mai usati, che non prendono voto e non fanno male a nessuno. Chi ha
-# davvero giocato erano due, di 9 e 2 minuti, nessuno titolare. Alhassane, in
-# mezzo a loro, sarebbe stato l'unico titolare da novanta minuti. Percio' la
-# panchina si conta ma non alza il verdetto: il giallo e' per chi il campo l'ha
-# calpestato.
+# di cui quattordici mai entrati in campo — ragazzi delle giovanili messi in
+# distinta e mai usati — e due entrati per 9 e 2 minuti. Nessuno titolare.
+#
+# IL GIALLO E' PER IL TITOLARE, e la prima versione sbagliava di un gradino: dava
+# il giallo a chi avesse messo piede in campo, e quindi lo avrebbe dato a Zulevic
+# per nove minuti e a Kulla per due. Il controllo contro il listone di
+# fantacalcio.it (Quotazioni 26-27, 526 quotati) dice che quei due non sono un
+# buco di nessuno: **sedici orfani su sedici mancano anche li'**, e la nostra rosa
+# e' gia' un soprainsieme della loro (598 tesserati contro 526 quotati). Allarmare
+# per una comparsata dalla panchina vuol dire allarmare per il funzionamento
+# normale del campionato — v. [[roster-boundary-primavera]].
+#
+# Quello che distingueva Alhassane non erano i minuti: era essere in DISTINTA DA
+# TITOLARE in una partita di Serie A senza stare in nessuna rosa. Una squadra non
+# schiera dal primo minuto un ragazzo che non ha tesserato, e infatti Alhassane
+# non lo era: era tesserato eccome, sotto un'altra riga. Il titolare e' una forma
+# che la chiamata dalle giovanili non produce, e per questo fa da soglia meglio di
+# qualunque numero di minuti scelto a tavolino.
+#
+# Chi entra dalla panchina resta contato in ``info``, con nome e minuti: se una
+# meta' spezzata giocasse solo da subentrato, la riga la nomina lo stesso e la sua
+# rete e' ``split_identities``, che ora ha anche la prova del cognome.
 
 
 @dataclass(frozen=True)
@@ -331,7 +347,11 @@ class Unrostered:
 
     @property
     def played(self) -> bool:
-        """Ha messo piede in campo, o e' solo stato in distinta?"""
+        """Ha messo piede in campo, o e' solo stato in distinta?
+
+        NON e' la soglia del giallo — quella e' ``started``. Serve a raccontare la
+        riga: chi e' entrato per due minuti va detto, senza svegliare nessuno.
+        """
         return self.minutes > 0 or self.started
 
     def describe(self) -> str:
@@ -390,5 +410,7 @@ def unrostered_players(*, since, coverage_floor: float = ROSTER_COVERAGE_FLOOR,
                 player_id=pid, name=d["name"], club=d["club"], season=str(cs),
                 appearances=d["pres"], minutes=d["min"], started=d["tit"]))
 
-    found.sort(key=lambda u: (-u.minutes, -u.appearances, u.name))
+    # Il titolare per primo, e non perche' ha piu' minuti: e' l'unica riga che
+    # alza il verdetto, e chi legge il rapporto guarda la prima.
+    found.sort(key=lambda u: (not u.started, -u.minutes, -u.appearances, u.name))
     return found[:limit] if limit else found

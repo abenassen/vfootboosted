@@ -419,15 +419,44 @@ class OrfaniTests(TestCase):
         codes = {c.code: c for c in health.report(skip_shape=True).checks}
         self.assertEqual(codes["player:unrostered"].level, "info")
 
-    def test_chi_ha_calpestato_il_campo_alza_il_verdetto(self):
+    def test_una_comparsata_dalla_panchina_non_alza_il_verdetto(self):
+        # Zulevic 9 minuti col Genoa, Kulla 2 col Sassuolo: nessuno dei due manca
+        # a qualcuno — mancano anche al listone di fantacalcio.it. Un giallo per
+        # loro e' un giallo per il funzionamento normale del campionato.
         m = self._match(1)
         self._rosa_regolare(m)
-        self._gioca(m, minuti=0, titolare=False, ext="9", nome="Ragazzo")
+        self._gioca(m, minuti=9, titolare=False, nome="Adam Zulevic")
+        [found] = self._orfani()
+        self.assertTrue(found.played)          # e' entrato, e la riga lo dice
+        self.assertFalse(found.started)        # ma non e' la soglia del giallo
+        check = {c.code: c for c in health.report(skip_shape=True).checks}[
+            "player:unrostered"]
+        self.assertEqual(check.level, "info")
+        self.assertIn("Adam Zulevic", str(check.detail))
+
+    def test_il_titolare_alza_il_verdetto(self):
+        # Una squadra non schiera dal primo minuto chi non ha tesserato: era la
+        # forma di Alhassane, che infatti tesserato lo era, sotto un'altra riga.
+        m = self._match(1)
+        self._rosa_regolare(m)
+        self._gioca(m, minuti=9, titolare=False, ext="9", nome="Adam Zulevic")
         self._gioca(m, minuti=90, titolare=True, ext="10", nome="Rahim Alhassane")
-        codes = {c.code: c for c in health.report(skip_shape=True).checks}
-        self.assertEqual(codes["player:unrostered"].level, "warn")
-        # La prima riga e' sempre quella che conta.
-        self.assertIn("Rahim Alhassane", codes["player:unrostered"].message)
+        check = {c.code: c for c in health.report(skip_shape=True).checks}[
+            "player:unrostered"]
+        self.assertEqual(check.level, "warn")
+        # Il titolare in testa, e non perche' ha piu' minuti: e' la riga che conta.
+        self.assertIn("Rahim Alhassane", check.message)
+        self.assertNotIn("Adam Zulevic", check.message)
+        self.assertEqual(self._orfani()[0].name, "Rahim Alhassane")
+
+    def test_il_titolare_va_in_testa_anche_con_pochi_minuti(self):
+        # Titolare sostituito al 5': meno minuti del subentrato, ma e' lui la riga
+        # che alza il verdetto, quindi e' lui che si deve leggere per primo.
+        m = self._match(1)
+        self._rosa_regolare(m)
+        self._gioca(m, minuti=40, titolare=False, ext="9", nome="Subentrato Lungo")
+        self._gioca(m, minuti=5, titolare=True, ext="10", nome="Titolare Corto")
+        self.assertEqual(self._orfani()[0].name, "Titolare Corto")
 
     def test_lo_spezzato_compare_in_tutte_e_due_le_righe(self):
         # La sovrapposizione e' voluta: una volta col rimedio pronto, una volta

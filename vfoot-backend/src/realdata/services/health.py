@@ -437,36 +437,45 @@ def _check_unrostered(health: Health, now) -> None:
     vuoto, finche' non se n'e' accorto un utente da uno screenshot. Qui non si
     riconosce nessuno — si constata un buco, che e' un fatto e non un'euristica.
 
-    IL GIALLO E' PER CHI HA CALPESTATO IL CAMPO. La panchina delle giovanili e' la
-    quasi totalita' delle righe (quattordici su sedici alla misura del 31/08/2026)
-    e non fa male a nessuno: chi non entra non prende voto. Alzare il verdetto per
-    loro vorrebbe dire tenerlo giallo da agosto a maggio, che e' il modo piu'
-    rapido per insegnare a non leggerlo. Restano contate in ``info``, perche' sono
-    il contesto che rende leggibile la riga gialla — e perche' la prima presenza
-    di uno spezzato puo' benissimo essere una panchina.
+    IL GIALLO E' PER IL TITOLARE, non per chi ha messo piede in campo. Alla misura
+    del 31/08/2026 i due che avevano giocato erano Zulevic (9 minuti) e Kulla (2),
+    e nessuno dei due manca a qualcuno: sedici orfani su sedici mancano anche al
+    listone di fantacalcio.it, e la nostra rosa e' gia' un soprainsieme della loro.
+    Il giallo per una comparsata dalla panchina e' un giallo per il funzionamento
+    normale del campionato, e un verdetto giallo da agosto a maggio e' il modo piu'
+    rapido per insegnare a non leggerlo.
+
+    Il titolare invece e' una forma che la chiamata dalle giovanili non produce:
+    una squadra non schiera dal primo minuto un ragazzo che non ha tesserato. Era
+    la forma di Alhassane, che infatti tesserato lo era — sotto un'altra riga.
+
+    Tutti gli altri restano contati in ``info``, coi nomi: sono il contesto che
+    rende leggibile la riga gialla, e se una meta' spezzata giocasse solo da
+    subentrato la riga la nomina lo stesso. La sua rete e' ``split_identities``.
     """
     rows = roster_integrity.unrostered_players(since=now - UNROSTERED_WINDOW)
     if not rows:
         return
-    in_campo = [u for u in rows if u.played]
-    panchina = len(rows) - len(in_campo)
+    titolari = [u for u in rows if u.started]
+    entrati = [u for u in rows if u.played and not u.started]
     finestra = _human(UNROSTERED_WINDOW)
-    if in_campo:
+    if titolari:
         health.add("warn", "player:unrostered",
-                   f"{len(in_campo)} giocatori hanno messo piede in campo negli "
-                   f"ultimi {finestra} senza risultare in NESSUNA rosa "
-                   f"(+{panchina} rimasti in panchina). O sono esordienti dalle "
-                   f"giovanili che l'import rose non ha ancora preso, o sono la "
-                   f"meta' che gioca di qualcuno che nel listone c'e' gia' — e in "
-                   f"quel caso chi l'ha comprato non ne prende il voto. Il primo: "
-                   f"{in_campo[0].describe()}.",
-                   players=[u.describe() for u in in_campo[:10]])
+                   f"{len(titolari)} giocatori sono partiti TITOLARI negli ultimi "
+                   f"{finestra} senza risultare in NESSUNA rosa (e altri "
+                   f"{len(rows) - len(titolari)} sono stati in distinta). Una "
+                   f"squadra non schiera dal primo minuto chi non ha tesserato: o "
+                   f"l'import rose e' rimasto indietro, o e' la meta' che gioca di "
+                   f"qualcuno che nel listone c'e' gia' — e in quel caso chi l'ha "
+                   f"comprato non ne prende il voto. Il primo: "
+                   f"{titolari[0].describe()}.",
+                   players=[u.describe() for u in rows[:10]])
         return
     health.add("info", "player:unrostered",
-               f"{panchina} giocatori in distinta negli ultimi {finestra} senza "
-               f"risultare in nessuna rosa, nessuno dei quali e' entrato: la forma "
-               f"normale delle chiamate dalle giovanili. Nessuno di loro prende "
-               f"voto.",
+               f"{len(rows)} giocatori in distinta negli ultimi {finestra} senza "
+               f"risultare in nessuna rosa, nessuno dei quali e' partito titolare "
+               f"({len(entrati)} entrati dalla panchina): la forma normale delle "
+               f"chiamate dalle giovanili, che nemmeno fantacalcio.it quota.",
                players=[u.describe() for u in rows[:10]])
 
 
