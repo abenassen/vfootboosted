@@ -98,6 +98,86 @@ def spell_out_particles(short_name: str | None, full_name: str | None) -> str:
     return " ".join(out) if changed else (short_name or "")
 
 
+# --- la terza prova d'identita': il cognome ----------------------------------
+#
+# Le prime due — il nome intero uguale, la data di nascita uguale — si reggono a
+# vicenda finche' ALMENO UNA delle due e' scritta bene da entrambi i fornitori.
+# Quando nessuna delle due lo e', non resta niente, e la persona si spezza in due
+# righe. Il caso che ha fatto scrivere questo: Rahim Alhassane del Bologna, che
+# Transfermarkt chiama 'Rahim Alhassane' e SofaScore 'Abdel Rahim' col cognome
+# nel solo nome breve ('A. R. Alhassane'), tutti e due col 1 gennaio.
+#
+# La prova e' il COGNOME, che e' l'unica parte del nome che i due fornitori
+# scrivono uguale anche quando litigano su tutto il resto — un secondo nome in
+# piu', un nome intero abbreviato, il campo lungo troncato. Da solo pero' non
+# identifica: in produzione ha appaiato Ricardo Bordon (2006) a Filipe Bordon
+# (2005), due persone diverse nella stessa rosa della Lazio. Servono i due
+# testimoni che l'hanno rifiutato, e servono ENTRAMBI perche' uno solo dei due
+# basta a spiegare un caso ma non l'altro:
+#
+#   * un'INIZIALE di nome in comune (Ricardo contro Filipe: R e F, non e' lui);
+#   * una data che non CONTRADDICE (2006 contro 2005, non e' lui).
+#
+# Misurata sulla produzione del 31/08/2026: su 332 righe SofaScore senza
+# tesseramento, il cognome da solo dava 2 coppie (una sbagliata), il cognome coi
+# due testimoni ne da' 1, quella giusta.
+
+
+def name_parts(*names: str | None) -> tuple[frozenset[str], frozenset[str]]:
+    """(cognomi, iniziali dei nomi) leggendo insieme piu' scritture della stessa persona.
+
+    Piu' scritture perche' nessuna e' affidabile da sola: il campo lungo di
+    SofaScore puo' arrivare troncato ('Abdel Rahim') e il cognome sopravvivere
+    solo nel nome breve. Si prende quindi l'ultima parola di OGNUNA — un insieme
+    di cognomi possibili, non un cognome — e basta che uno combaci.
+
+    Le particelle non contano come nome di battesimo: la 'D' di 'De Rossi' non e'
+    un Daniele, e contarla regalerebbe un'iniziale in comune a chiunque.
+    """
+    surnames: set[str] = set()
+    initials: set[str] = set()
+    for name in names:
+        tokens = norm_name(name).split()
+        if not tokens:
+            continue
+        surnames.add(tokens[-1])
+        initials.update(t[0] for t in tokens[:-1] if t not in SURNAME_PARTICLES)
+    return frozenset(surnames), frozenset(initials)
+
+
+def dob_contradicts(a: date | None, b: date | None) -> bool:
+    """Queste due date escludono che sia la stessa persona?
+
+    Solo due date VERE e diverse lo escludono. Una data mancante non dice niente,
+    e nemmeno il 1 gennaio segnaposto: non sapere non e' sapere il contrario.
+
+    Nessuna tolleranza sullo scarto di un giorno ne' sul giorno e mese scambiati,
+    che pure esistono (Giacomo Calo': 5 febbraio contro 2 maggio). Chi ha quel
+    problema ha il nome scritto bene e lo aggancia la prova del nome; qui la data
+    fa il guardiano, e un guardiano indulgente non guarda niente.
+    """
+    if a is None or b is None:
+        return False
+    if is_placeholder_dob(a) or is_placeholder_dob(b):
+        return False
+    return a != b
+
+
+def matches_by_surname(names_a, dob_a: date | None,
+                       names_b, dob_b: date | None) -> bool:
+    """Stesso cognome, un'iniziale di nome in comune, e date che non si smentiscono.
+
+    ``names_a``/``names_b`` sono le scritture note della stessa persona presso un
+    fornitore (nome intero e nome breve). Il chiamante deve pretendere l'UNICITA'
+    della corrispondenza dentro la rosa: qui si dice se due righe possono essere
+    la stessa persona, non che lo sono.
+    """
+    surn_a, init_a = name_parts(*names_a)
+    surn_b, init_b = name_parts(*names_b)
+    return (bool(surn_a & surn_b) and bool(init_a & init_b)
+            and not dob_contradicts(dob_a, dob_b))
+
+
 # --- id di fornitore che nessun fornitore ha mai emesso ----------------------
 #
 # Circa duecento dei giocatori tesserati per una stagione arrivano da

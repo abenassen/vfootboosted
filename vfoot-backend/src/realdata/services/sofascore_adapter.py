@@ -76,7 +76,8 @@ from realdata.services.statsbomb_adapter import (
     BOX_X_MIN, BOX_Y_MIN, BOX_Y_MAX, _zone_key)
 from realdata.services.sofascore_client import SofaScoreBlocked
 from realdata.services.identity import (
-    is_placeholder_dob, is_synthetic_sofascore_id, norm_name, spell_out_particles,
+    is_placeholder_dob, is_synthetic_sofascore_id, matches_by_surname, norm_name,
+    spell_out_particles,
 )
 
 PROVIDER = PROVIDER_SOFASCORE
@@ -379,7 +380,8 @@ def _already_sofascore(players: list[Player]) -> set[int]:
     return taken
 
 
-def _adopt_by_identity(name: str, dob, team_season: TeamSeason | None = None) -> Player | None:
+def _adopt_by_identity(name: str, dob, team_season: TeamSeason | None = None,
+                       short_name: str | None = None) -> Player | None:
     """Find an EXISTING canonical player (from another provider) for this human.
 
     Enforces "one Player across providers": before minting a new SofaScore row,
@@ -387,10 +389,10 @@ def _adopt_by_identity(name: str, dob, team_season: TeamSeason | None = None) ->
     member who just made their debut. The SofaScore id is then attached as an alias
     so future imports resolve straight to the same entity.
 
-    Due prove, e la seconda esiste perche' la prima da sola lasciava passare i
-    doppioni. La prima e' GLOBALE e chiede tutto: nome normalizzato uguale E data
-    di nascita uguale. La seconda si restringe alla ROSA della squadra per cui il
-    giocatore e' appena sceso in campo, e li' ne basta UNA delle due:
+    Tre prove, e ognuna esiste perche' la precedente lasciava passare i doppioni.
+    La prima e' GLOBALE e chiede tutto: nome normalizzato uguale E data di nascita
+    uguale. La seconda si restringe alla ROSA della squadra per cui il giocatore
+    e' appena sceso in campo, e li' ne basta UNA delle due:
 
     * il nome, perche' dentro venticinque persone un nome completo identico e' gia'
       un'identificazione — e le due date sono spesso diverse: un giorno di scarto,
@@ -400,7 +402,14 @@ def _adopt_by_identity(name: str, dob, team_season: TeamSeason | None = None) ->
       ('Manga Foe Ondoa' contro 'Foe Ondoa', 'Alvin Obinna Okoro' contro
       'Alvin Okoro').
 
-    In entrambi i casi la corrispondenza dev'essere UNICA dentro la rosa: due
+    La terza risponde al caso in cui NESSUNA delle due e' scritta bene da tutti e
+    due i fornitori — Rahim Alhassane del Bologna, 'Abdel Rahim' su SofaScore col
+    cognome nel solo nome breve, 1 gennaio da entrambe le parti — e si regge sul
+    cognome, con l'iniziale del nome e la data a fargli da testimoni
+    (``identity.matches_by_surname``). E' l'unica che ha bisogno anche del nome
+    BREVE: e' li' che il cognome era rimasto.
+
+    In tutti i casi la corrispondenza dev'essere UNICA dentro la rosa: due
     omonimi, o due nati lo stesso giorno, e non si adotta nessuno. L'asimmetria e'
     voluta — un aggancio sbagliato fonde due persone per sempre, un doppione lo si
     fonde dopo (``merge_duplicate_players``).
@@ -440,6 +449,14 @@ def _adopt_by_identity(name: str, dob, team_season: TeamSeason | None = None) ->
         by_dob = [p for p in squad if p.date_of_birth == dob]
         if len(by_dob) == 1:
             return by_dob[0]
+    # Ultima prova: il cognome coi suoi due testimoni. Il nome breve entra solo
+    # qui perche' solo qui serve — un cognome che il campo lungo ha perso.
+    by_surname = [p for p in squad
+                  if matches_by_surname((name, short_name), dob,
+                                        (p.full_name, p.short_name),
+                                        p.date_of_birth)]
+    if len(by_surname) == 1:
+        return by_surname[0]
     return None
 
 
@@ -460,7 +477,7 @@ def _player(player_id: Any, name: str, short_name: str,
     player = (Player.objects.filter(external_source=PROVIDER, external_id=ext_id).first()
               or _player_by_alias(ext_id))
     if player is None:
-        adopted = _adopt_by_identity(name, dob, team_season)
+        adopted = _adopt_by_identity(name, dob, team_season, short_name=short_name)
         if adopted is not None:
             PlayerAlias.objects.get_or_create(
                 player=adopted, source=PROVIDER, alias=ext_id)

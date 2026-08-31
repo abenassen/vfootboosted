@@ -83,6 +83,62 @@ class AdozioneTests(TestCase):
         self.assertIsNone(
             _adopt_by_identity("Caio Due", date(2005, 1, 1), self.ts))
 
+    def test_il_cognome_nel_solo_nome_breve_basta_ad_adottare(self):
+        # Rahim Alhassane, Bologna: SofaScore manda il campo lungo troncato
+        # ('Abdel Rahim') e il cognome sopravvive solo nel nome breve. Il 1
+        # gennaio da entrambe le parti spegne anche la prova della data.
+        alhassane = self._in_rosa(self.ts, full_name="Rahim Alhassane",
+                                  external_id="929899",
+                                  date_of_birth=date(2002, 1, 1))
+        self.assertEqual(
+            _adopt_by_identity("Abdel Rahim", date(2002, 1, 1), self.ts,
+                               short_name="A. R. Alhassane"),
+            alhassane)
+
+    def test_lo_stesso_cognome_con_un_altro_nome_non_adotta(self):
+        # Filipe Bordon e Ricardo Bordon, Lazio: due persone diverse. Il cognome
+        # da solo li appaiava; l'iniziale e la data lo impediscono.
+        self._in_rosa(self.ts, full_name="Filipe Bordon", external_id="1",
+                      date_of_birth=date(2005, 6, 24))
+        self.assertIsNone(
+            _adopt_by_identity("Ricardo Bordon", date(2006, 11, 2), self.ts,
+                               short_name="R. Bordon"))
+
+    def test_col_cognome_la_data_diversa_basta_a_fermare_l_adozione(self):
+        # Stessa iniziale: a rifiutare resta solo la data, ed e' abbastanza.
+        self._in_rosa(self.ts, full_name="Roberto Bordon", external_id="1",
+                      date_of_birth=date(2005, 6, 24))
+        self.assertIsNone(
+            _adopt_by_identity("Ricardo Bordon", date(2006, 11, 2), self.ts,
+                               short_name="R. Bordon"))
+
+    def test_col_cognome_l_iniziale_diversa_basta_a_fermare_l_adozione(self):
+        # Due date segnaposto non contraddicono niente: a rifiutare resta solo
+        # l'iniziale, ed e' abbastanza.
+        self._in_rosa(self.ts, full_name="Filipe Bordon", external_id="1",
+                      date_of_birth=date(2005, 1, 1))
+        self.assertIsNone(
+            _adopt_by_identity("Ricardo Bordon", date(2006, 1, 1), self.ts,
+                               short_name="R. Bordon"))
+
+    def test_la_particella_del_cognome_non_e_un_nome_di_battesimo(self):
+        # 'De Rossi' contro 'De Rossi': la 'D' della particella regalerebbe
+        # un'iniziale in comune a due persone che non ne hanno nessuna.
+        self._in_rosa(self.ts, full_name="Daniele De Rossi", external_id="1",
+                      date_of_birth=date(1983, 1, 1))
+        self.assertIsNone(
+            _adopt_by_identity("Marco De Rossi", date(2006, 1, 1), self.ts,
+                               short_name="M. De Rossi"))
+
+    def test_due_cognomi_uguali_nella_rosa_non_adottano_nessuno(self):
+        self._in_rosa(self.ts, full_name="Rahim Alhassane", external_id="1",
+                      date_of_birth=date(2002, 1, 1))
+        self._in_rosa(self.ts, full_name="Rachid Alhassane", external_id="2",
+                      date_of_birth=date(2004, 1, 1))
+        self.assertIsNone(
+            _adopt_by_identity("Abdel Rahim", date(2002, 1, 1), self.ts,
+                               short_name="A. R. Alhassane"))
+
     def test_chi_ha_gia_un_id_sofascore_vero_non_e_adottabile(self):
         p = self._in_rosa(self.ts, full_name="Giacomo Calò", external_id="301235",
                           date_of_birth=date(1997, 2, 5))
@@ -193,12 +249,13 @@ class GuardianoTests(TestCase):
             competition_season=self.cs, home_team=self.ts, away_team=self.ts,
             matchday=1, external_source="sofascore", external_id="390")
 
-    def _spezzato(self, nome_tm, dob_tm, nome_ss, dob_ss):
+    def _spezzato(self, nome_tm, dob_tm, nome_ss, dob_ss, breve_ss=""):
         tm = Player.objects.create(full_name=nome_tm, external_source="transfermarkt",
                                    external_id="1", date_of_birth=dob_tm)
         PlayerTeamStint.objects.create(player=tm, team_season=self.ts,
                                        start_date=date(2026, 7, 1))
-        ss = Player.objects.create(full_name=nome_ss, external_source="sofascore",
+        ss = Player.objects.create(full_name=nome_ss, short_name=breve_ss,
+                                   external_source="sofascore",
                                    external_id="9", date_of_birth=dob_ss)
         MatchAppearance.objects.create(match=self.match, player=ss,
                                        team_season=self.ts, side="home",
@@ -218,10 +275,20 @@ class GuardianoTests(TestCase):
         [found] = roster_integrity.split_identities()
         self.assertEqual((found.keeper_id, found.stray_id), (tm.id, ss.id))
 
+    def test_lo_trova_col_cognome_quando_il_nome_lungo_e_troncato(self):
+        # Ne' il nome intero ne' la data reggono: 'Abdel Rahim' contro 'Rahim
+        # Alhassane', 1 gennaio da entrambe le parti. Senza la prova del cognome
+        # questo giocatore restava spezzato e il canarino taceva.
+        tm, ss = self._spezzato("Rahim Alhassane", date(2002, 1, 1),
+                                "Abdel Rahim", date(2002, 1, 1),
+                                breve_ss="A. R. Alhassane")
+        [found] = roster_integrity.split_identities()
+        self.assertEqual((found.keeper_id, found.stray_id), (tm.id, ss.id))
+
     def test_due_persone_diverse_non_sono_una_coppia(self):
         # Filipe Bordon e Ricardo Bordon, Lazio: cognome uguale, nient'altro.
         self._spezzato("Filipe Bordon", date(2005, 6, 24),
-                       "Ricardo Bordon", date(2006, 11, 2))
+                       "Ricardo Bordon", date(2006, 11, 2), breve_ss="R. Bordon")
         self.assertEqual(roster_integrity.split_identities(), [])
 
     def test_un_esordiente_che_non_e_in_nessuna_rosa_non_e_un_doppione(self):

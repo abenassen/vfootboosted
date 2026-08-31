@@ -193,19 +193,24 @@ def split_identities(provider: str = "sofascore") -> list[SplitIdentity]:
     """Le identita' spezzate: una riga che gioca, una riga che e' tesserata.
 
     Si cerca DENTRO la rosa del club per cui la riga del fornitore e' scesa in
-    campo, e li' basta una delle due prove — il nome (i due fornitori scrivono
-    date diverse) o la data di nascita (i due fornitori scrivono nomi diversi:
-    'Manga Foe Ondoa' contro 'Foe Ondoa'). E' la stessa regola dell'adozione in
+    campo, e li' basta una delle tre prove — il nome (i due fornitori scrivono
+    date diverse), la data di nascita (i due fornitori scrivono nomi diversi:
+    'Manga Foe Ondoa' contro 'Foe Ondoa'), o il cognome coi suoi due testimoni
+    quando ne' il nome intero ne' la data sono scritti bene da entrambi ('Rahim
+    Alhassane' contro 'Abdel Rahim'). E' la stessa regola dell'adozione in
     ``sofascore_adapter._adopt_by_identity``, di proposito: cosi' questo elenco e'
     esattamente cio' che l'adozione ha mancato, e non un secondo criterio che
-    contraddice il primo.
+    contraddice il primo. Le due vanno cambiate INSIEME, ed e' per questo che la
+    prova del cognome sta in ``identity.matches_by_surname`` e non qui.
 
     La corrispondenza dev'essere UNICA nella rosa. Due omonimi, o due nati lo
     stesso giorno, e la coppia non si riporta: qui si guarda, ma chi legge fonde,
     e una fusione sbagliata non si disfa.
     """
     from realdata.models import MatchAppearance, Player, PlayerAlias
-    from realdata.services.identity import is_placeholder_dob, is_synthetic_sofascore_id
+    from realdata.services.identity import (is_placeholder_dob,
+                                            is_synthetic_sofascore_id,
+                                            matches_by_surname)
 
     played: dict[int, set[int]] = {}
     counts: dict[int, int] = {}
@@ -239,6 +244,12 @@ def split_identities(provider: str = "sofascore") -> list[SplitIdentity]:
             if not cands and stray.date_of_birth and not is_placeholder_dob(stray.date_of_birth):
                 cands = [p for p in squad if p.date_of_birth == stray.date_of_birth]
                 evidence = "stessa data di nascita nella stessa rosa"
+            if not cands:
+                cands = [p for p in squad
+                         if matches_by_surname(
+                             (stray.full_name, stray.short_name), stray.date_of_birth,
+                             (p.full_name, p.short_name), p.date_of_birth)]
+                evidence = "stesso cognome e iniziale nella stessa rosa"
             if len(cands) == 1:
                 found.append(SplitIdentity(
                     keeper_id=cands[0].id, stray_id=stray.id,
