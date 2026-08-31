@@ -571,14 +571,41 @@ SHOT_DETAIL_FEATURES = frozenset(SHOT_TYPE_TO_FEATURE.values())
 # lo batte una buona parata, non gli arriva un tiro debole e centrale — che e' il
 # giudizio che si voleva.
 SGA_POST_WOODWORK = 0.40
-# L'xGOT che un tiro MURATO avrebbe avuto, in valore atteso. Stessa domanda del
-# legno, posta ai dati: P(in porta | non murato) x E[xGOT | in porta] = 0.439 x
-# 0.314 sulla 25-26. Esiste perche' un tiro murato non ha MAI avuto la possibilita'
-# di essere misurato, e imputargli xGOT = 0 lo trattava come uno sbagliato: il
-# tasso di tiri murati non e' nemmeno una qualita' ripetibile del tiratore
-# (correlazione meta'-meta' della stagione -0.006 su 143 giocatori, contro +0.174
-# dei tiri fuori), quindi addebitarglielo per intero era addebitare del rumore.
-SGA_POST_BLOCKED = 0.1378
+# UN TIRO MURATO NON VALE NIENTE, e la ragione non e' una scelta di gusto: e' che
+# l'xG ha GIA' scontato il rischio di essere murati, quindi qualunque imputazione
+# positiva conta due volte la stessa cosa.
+#
+# La costante valeva 0.1378, cioe' P(in porta | NON murato) x E[xGOT | in porta].
+# L'errore sta nel condizionamento: "non murato" e' un evento favorevole che il
+# modello dell'xG mette gia' nel prezzo, e ridare il valore pieno di chi al muro e'
+# scampato significa pagare due volte quella fortuna. Tre misure sulla 25-26, tutte
+# nella stessa direzione (31/08/2026):
+#
+#  1. un tiro murato porta gia' META' xG: 0.056 di media contro 0.111, e 0.057
+#     contro 0.113 a parita' di zona di campo. Se il modello ignorasse i difensori
+#     porterebbe lo STESSO xG di uno non murato dalla stessa posizione;
+#  2. i tiri non murati rendono il 113% del loro xG (gol/xG 1.130, contro 0.947 su
+#     tutti i tiri). Quel 13% in eccesso e' esattamente l'xG che siede sui murati e
+#     non si converte mai. Se l'xG fosse condizionato al "non murato", i non murati
+#     renderebbero ~1.00;
+#  3. Sigma xGOT / Sigma xG su TUTTI i tiri, con murati e fuori a zero, fa 0.965 —
+#     il sistema torna gia' da solo. Ogni imputazione positiva e' un surplus che il
+#     modello non aveva: con 0.1378 i murati mettevano +208.9 di SGA sulla stagione
+#     invece di toglierne 143.6, e sga_post complessivo valeva +392.8 invece di
+#     +40.3.
+#
+# RESTA UN ARGOMENTO DALL'ALTRA PARTE, ed e' quello che aveva fatto nascere la
+# costante: farsi murare non sarebbe una qualita' ripetibile del tiratore
+# (correlazione meta'-meta' -0.006 su 143 giocatori contro +0.174 dei tiri fuori),
+# quindi addebitarlo sarebbe addebitare rumore. Due obiezioni: giustificherebbe la
+# NEUTRALITA' (imputazione = xG, SGA zero), mai un premio; e la sua premessa non si
+# riproduce — su meta' stagione contro meta', >=15 tiri per meta', 67 giocatori, la
+# quota di murati correla +0.051 e quella dei tiri fuori +0.062, cioe' nessuna
+# delle due sembra ripetibile a quel campione. Se un giorno si volesse tornare
+# sulla neutralita', la leva e' questa costante messa a "xG del tiro murato" e non
+# a un numero fisso — il che richiede la somma degli xG dei murati, che
+# ``_merge_shot_detail`` puo' produrre senza ri-estrarre niente.
+SGA_POST_BLOCKED = 0.0
 DERIVED_FEATURES = ("sga_post",)
 # Weighted features that are neither zone features nor computed: folded in from
 # elsewhere in the DB (see ``_merge_defensive_value``). Kept apart from
@@ -592,16 +619,16 @@ DERIVED_INPUTS = frozenset({"xg_on_target", "shots_post"})
 def derived_features(totals: dict) -> dict:
     """{feature: value} for features computed FROM the provider totals, not stored.
 
-    ``sga_post`` = xGOT − xG + legno + murati: the shot's post-strike value over its
+    ``sga_post`` = xGOT − xG + legno: the shot's post-strike value over its
     pre-strike value, i.e. what the player added by hitting it the way he did. It is
     legitimately NEGATIVE for a wasteful shooter (five shots off target: xGOT 0, xG
     0.4) and the compression preserves that sign.
 
-    I due addendi sono la STESSA correzione applicata due volte: il fornitore da'
-    xGOT solo ai tiri in porta, quindi a un tiro sul legno e a uno murato ne
-    assegna zero — non perche' valessero zero, ma perche' non sono misurabili. Le
-    due costanti sono l'xGOT che avrebbero avuto (v. SGA_POST_WOODWORK e
-    SGA_POST_BLOCKED); senza, il modello li tratta come tiri sbagliati."""
+    Il legno ha un addendo suo perche' il fornitore da' xGOT solo ai tiri in porta:
+    a un tiro sul palo assegna zero, non perche' valesse zero ma perche' non e'
+    misurabile, e SGA_POST_WOODWORK e' l'xGOT che avrebbe avuto. Il tiro MURATO
+    non ha piu' un addendo (SGA_POST_BLOCKED = 0): li' lo zero e' la risposta
+    giusta, non un buco di misura — v. il commento della costante."""
     return {
         "sga_post": (totals.get("xg_on_target", 0.0) - totals.get("xg_shots", 0.0)
                      + SGA_POST_WOODWORK * (totals.get("shots_post") or 0.0)
