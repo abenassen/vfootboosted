@@ -761,55 +761,48 @@ GK_WEIGHTS = {**GK_TOTAL_WEIGHTS, **GK_PER90_WEIGHTS}
 # scelta è di principio e non di numeri.
 OWN_GOAL_KEEPER_XGOT_DEFAULT = 0.834
 
-# How many shots ON TARGET a keeper must face before we trust the reading of his
-# match in full. Below it his deviation from 6 is scaled down in proportion, exactly
-# as few minutes already shrink an outfielder's.
+# QUI STAVA GK_EVIDENCE_FULL, lo smorzamento del voto del portiere quando gli
+# erano arrivati meno di quattro tiri in porta. Rimosso il 31/08/2026, e le tre
+# misure che l'hanno chiuso vanno tenute perche' l'idea e' seducente e tornera'.
 #
-# This is the second half of the same diagnosis. goals_prevented is a DIFFERENCE
-# against expectation, and a difference measured over one or two shots is mostly
-# noise. Over the season we sat 0.47 of a vote below fantacalcio on exactly those
-# matches (<= 1 save, >= 1 goal conceded); with the damper, 0.23.
+#  1. NON SERVIVA PIU' AL CASO PER CUI ERA NATO. Era stato introdotto per il
+#     portiere inoperoso che finiva sotto il 6 senza colpe. Con zero tiri
+#     affrontati, acceso e spento davano lo STESSO identico risultato: media
+#     6.00, nessuno sotto il 6, in accordo con la Redazione (6.02, 0%). Il
+#     centro di ruolo (POR 6.15) e il credito d'assenza fanno gia' tutto il
+#     lavoro; il freno non contribuiva niente.
 #
-# L'ESEMPIO CHE STAVA QUI ERA SBAGLIATO, ed e' stato tolto il 30/08/2026. Diceva:
-# «un portiere che affronta un tiro solo e lo subisce esce a 5.0, mentre le pagelle
-# lo lasciano a 6.0 — non sono generose, si rifiutano di giudicare chi non ha avuto
-# niente da fare». Misurato sulla 25-26: quel caso e' 24 presenze su 765, l'xGOT
-# mediano del tiro incassato e' 0.685 (cioe' quasi imparabile) e il 5.0 capita DUE
-# volte in tutta la stagione — sui due tiri da 0.151 e 0.216, cioe' quando il gol
-# era davvero parabile. Li' il modello non stava facendo rumore, stava dicendo una
-# cosa precisa. E «non ha avuto niente da fare» descrive un caso diverso: lo ZERO
-# tiri, dove senza freno la media e' 5.70 contro il 6.02 della Redazione.
+#  2. COMPRAVA ACCORDO PEGGIORANDO L'ORDINAMENTO. Nel gruppo dove agiva (meno
+#     di 4 tiri, n=344) il MAE contro la Redazione scendeva da 0.250 a 0.198,
+#     ma la CORRELAZIONE peggiorava: 0.547 -> 0.538 con la Redazione, 0.581 ->
+#     0.538 con lo Statistico. E' la firma della riduzione di varianza, non
+#     dell'informazione: spingendo verso un centro dove il bersaglio e' gia'
+#     ammucchiato, l'errore medio cala mentre si dice meno. La nostra sigma in
+#     quel gruppo passava da 0.415 — praticamente identica al loro 0.401 — a
+#     0.272, cioe' un terzo piu' stretta di chi stavamo cercando di imitare.
 #
-# QUELLO CHE IL FRENO VALE DAVVERO, per fascia, contro la Redazione (scarto medio e
-# deviazione standard dello scarto, che il livello non la vede):
+#     La verifica che l'aveva promosso guardava la popolazione sbagliata: la
+#     sigma GLOBALE restava larga (0.603 contro 0.545) solo perche' la tengono
+#     su le partite con 4+ tiri, che il freno non toccava.
 #
-#   tiri   n     col freno            senza freno
-#     0    31    -0.016 · 0.088       -0.468 · 0.177
-#     1    71    -0.049 · 0.280       -0.261 · 0.383
-#    2-3   252   -0.214 · 0.398       -0.246 · 0.442
-#    4+    411   nessuno e' frenato
+#  3. I GIUDIZI CHE SOPPRIMEVA ERANO IN MAGGIORANZA GIUSTI. Nei 45 casi in cui
+#     senza freno bocciamo un portiere che la Redazione promuove, tre arbitri
+#     che non dipendono dal nostro modello stanno con noi: rating SofaScore
+#     6.40 (contro 7.02 di chi promuovono entrambi e 6.21 di chi bocciano
+#     entrambi) e Statistico 6.00 contro 6.24. Nella cella specchio — noi
+#     promuoviamo, loro bocciano — i casi sono 11, un quarto, e li' lo
+#     Statistico sta con loro: non siamo giusti in ogni direzione, ma di gran
+#     lunga piu' spesso in una.
 #
-# Si guadagna il posto a OGNI gradino, non solo allo zero, e il guadagno non e' un
-# artefatto del livello. Provate e scartate il 30/08/2026: il gradino secco (freno
-# solo a zero tiri) 85.6% contro 87.8% di accordo entro mezzo punto; l'evidenza
-# contata in xGOT invece che in tiri, che e' doppio conteggio (goals_prevented È
-# xGOT meno gol); l'evidenza contata come varianza binomiale Σp(1−p), che non lo e'
-# ma misura peggio (0.343 contro 0.333 di scarto assoluto).
+# Il prezzo pagato, che va detto: sui portieri con 2-3 tiri mandiamo sotto il 6
+# il 21.9% contro il 10.1% della Redazione. Non e' ampiezza — la nostra sigma e
+# la loro coincidono — e' che le redazioni un portiere non testato quasi mai lo
+# bocciano. Su quella asimmetria abbiamo deciso di non inseguirle.
 #
-# IL SUO COSTO, da tenere presente: fra 2 e 3 tiri il moltiplicatore cambia di un
-# terzo, e su un voto vicino al bordo della griglia dei mezzi punti quel terzo vale
-# mezzo voto. Il credito per l'assenza sulle voci di volume (v. CREDITED_FEATURES)
-# ne ha tolto una parte — non e' piu' il freno a portare da solo il peso del
-# portiere poco impegnato — ma il gradino resta.
-#
-# 4 is the MEDIAN shots-on-target faced in Serie A 2025-26 (mean 4.00), so the
-# typical keeper-match is judged at full strength and 47% of matches are damped, by
-# half on average. Capped rather than smooth (min(1, faced/4), not faced/(faced+k))
-# on purpose: a smooth factor would shrink EVERY keeper including the busy ones and
-# flatten the whole scale, which buys agreement by saying less. With the cap our
-# spread stays wider than theirs (sigma 0.58 against 0.54) while the agreement
-# improves — the point is to stop over-reading thin evidence, not to hedge.
-GK_EVIDENCE_FULL = 4.0
+# La papera resta punita dove deve: ``errors_led_to_goal`` a -0.60 quando il
+# fornitore la marca, e ``gk_goals_prevented`` (xGOT affrontato meno gol subiti,
+# gia' pesato per la difficolta') quando non la marca — che e' il caso piu'
+# frequente, ed e' esattamente quello che il freno dimezzava.
 
 # --- Tail compression ---------------------------------------------------------
 # Applied to EVERY feature, in units of that feature's own spread (see
@@ -2510,31 +2503,10 @@ def on_pitch_goal_difference(match_ids, minutes: dict) -> dict:
 def on_pitch_goals_against(match_ids, minutes: dict) -> dict:
     """{(match_id, player_id): goals conceded WHILE he was on the pitch}.
 
-    The keeper's half of the same count: it feeds ``gk_evidence`` (shots on target
-    faced = saves + goals conceded), never a penalty of its own — conceding is
+    The keeper's half of the same count, never a penalty of its own — conceding is
     priced by goals_prevented in the index and by the -1/goal malus in the bonus
     layer, and a third charge here would be the double count we are removing."""
     return {k: ga for k, (_gf, ga) in _on_pitch_goals(match_ids, minutes).items() if ga}
-
-
-def gk_evidence(totals: dict, goals_against: int) -> float:
-    """Shots ON TARGET a keeper faced ≈ what he saved plus what went in.
-
-    The unit of evidence for a keeper's match: everything the keeper channel
-    measures well (goals prevented, saves) is a statement about the shots that
-    reached the goal, so that count is how much the match tells us about him. Shots
-    off target and blocked ones are deliberately absent — he had nothing to do with
-    them, and a keeper who watched fifteen wild efforts fly over still had a quiet
-    afternoon."""
-    return totals.get("gk_saves", 0.0) + max(0, goals_against)
-
-
-def gk_evidence_weight(evidence: float) -> float:
-    """How much of a keeper's deviation from 6 survives the thinness of his match.
-    1.0 from GK_EVIDENCE_FULL shots on target upward — see the constant."""
-    if GK_EVIDENCE_FULL <= 0:
-        return 1.0
-    return min(1.0, max(0.0, evidence) / GK_EVIDENCE_FULL)
 
 
 def _on_pitch_goals(match_ids, minutes: dict) -> dict:
@@ -2735,16 +2707,14 @@ def build_reference(competition_season_id: int, *,
 
 
 def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
-                         spread_k: float = VOTE_SPREAD_K,
-                         evidence_weight: float = 1.0) -> float:
+                         spread_k: float = VOTE_SPREAD_K) -> float:
     """The vote before the 0.5-grid rounding (and before result mitigation), clamped
     to the pagella range. Split out so the mitigation nudge can be applied to the
     raw value and the result rounded once.
 
-    ``evidence_weight`` is a second shrinkage on the same footing as the minutes one
-    — how much the match tells us about the player, over and above how long he was
-    on it. Only the keeper channel uses it today (see GK_EVIDENCE_FULL); 1.0 leaves
-    the vote exactly as it was."""
+    L'unico restringimento e' quello dei MINUTI. Ce n'era un secondo per i
+    portieri, sull'evidenza della partita, tolto il 31/08/2026: v. la lapide di
+    GK_EVIDENCE_FULL."""
     centre = vote_center_for(ref_key)
     r = reference.get(ref_key)
     if not r:
@@ -2755,7 +2725,7 @@ def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: di
     # per-90 rate extrapolated from a short cameo, so the vote regresses to 6 in
     # proportion to the evidence. w -> 1 for full games, ~0.4 at 20', ~0.3 at 10'.
     w = minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0
-    raw = centre + spread_k * w * evidence_weight * z
+    raw = centre + spread_k * w * z
     return max(VOTE_MIN, min(VOTE_MAX, raw))
 
 
@@ -2914,11 +2884,7 @@ def voto_puro_for_match(match, reference: dict,
         rated = (is_rated(mins, feats) or pid in forcing or pid in always_rate
                  or feats.get("penalties_won", 0.0) > 0
                  or feats.get("penalties_conceded", 0.0) > 0)
-        # A keeper's match is also judged by HOW MUCH of it reached him: one shot on
-        # target is not enough to call him, whichever way it went (GK_EVIDENCE_FULL).
-        ev_w = (gk_evidence_weight(gk_evidence(feats, ga_on.get((mid, pid), 0)))
-                if role == Player.ROLE_GK else 1.0)
-        raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k, ev_w)
+        raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k)
         # I GOL, in punti di voto e PRIMA della mitigazione: sono merito, quindi
         # devono essere temperati dal risultato come tutto il resto — un gol in una
         # goleada subita non fa eccezione. Sommati al voto grezzo e non all'indice
@@ -2959,10 +2925,6 @@ def voto_puro_for_match(match, reference: dict,
             # sotto un 6.5. Chi vuole vederli scritti corti li arrotondi dove li
             # stampa.
             #
-            # Passed on so the vote EXPLANATION shrinks its slices by the same
-            # factor the vote did — otherwise a damped keeper's breakdown would add
-            # up to a vote he did not get.
-            "evidence_weight": ev_w,
             # Il credito dei gol, gia' centrato sulla media di ruolo. Esposto come
             # le altre correzioni post-indice perche' la SPIEGAZIONE deve poterlo
             # nominare: e' una voce che puo' valere mezzo voto e non compare in

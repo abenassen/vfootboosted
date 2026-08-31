@@ -116,6 +116,11 @@ class SaveSectionAddsUpTests(TestCase):
                     feature_key=key, zone_key="Z_0_1", value=value, team_side="home")
 
     def _summary_line(self):
+        """La voce «parate» del pannello. Deve ESSERCI: sotto il 5.5 il pannello
+        ripiega i positivi deboli dentro «altro» (elogio fiacco per una brutta
+        partita), quindi gli scenari qui sotto vanno tenuti sopra quella soglia —
+        altrimenti si finisce a confrontare il totale con un «resto» che contiene
+        anche altro, e l'invariante non direbbe piu' niente."""
         pag = pagella_for_match(self.match, ledger=True)
         line = [l for side in ("home", "away") for grp in ("starters", "bench")
                 for l in pag[side][grp] if l["player_id"] == self.keeper.id][0]
@@ -210,7 +215,11 @@ class SaveSectionAddsUpTests(TestCase):
             match=self.match, player=scorer, provider="sofascore",
             feature_key="touches", zone_key="Z_0_1", value=40.0, team_side="home")
         self._keeper()
-        self._faced((12, "save", 0.30), (55, "own", 0.0), scorer=scorer)
+        # Due parate e non una: senza lo smorzamento sull'evidenza (tolto il
+        # 31/08/2026) una sola parata piu' un autogol porta il voto sotto il 5.5,
+        # e li' il pannello ripiega i positivi in «altro» — v. _summary_line.
+        self._faced((12, "save", 0.30), (33, "save", 0.55), (55, "own", 0.0),
+                    scorer=scorer)
         d = save_detail(self.match, self.keeper.id)
         rows = {s["minute"]: s for s in d["saves"]}
         self.assertEqual(rows[55]["outcome"], "autogol di un compagno")

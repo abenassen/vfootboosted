@@ -177,7 +177,6 @@ def scoring_fingerprint() -> str:
         "reference": _load() or {},
         "gates": [cr.MIN_MINUTES_RATED, cr.MIN_TOUCHES_RATED,
                   cr.ALWAYS_RATED_MINUTES],
-        "gk_evidence": cr.GK_EVIDENCE_FULL,
         # Le correzioni APPLICATE DOPO l'indice: mitigazione del risultato, rosso,
         # autogol, rigore sbagliato. Non stanno nel fingerprint dei pesi perché non
         # entrano nella calibrazione — l'indice non le vede, quindi la reference

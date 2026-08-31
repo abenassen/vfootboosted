@@ -764,7 +764,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
             goal_adjustment: float = 0.0, goal_detail: list | None = None,
             assist_adjustment: float = 0.0, assist_detail: list | None = None,
-            evidence_weight: float = 1.0, full: bool = False,
+            full: bool = False,
             ledger: bool = False,
             red_detail: dict | None = None, own_goal_detail: dict | None = None,
             assists: int = 0) -> dict:
@@ -795,11 +795,9 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                 "low_minutes": False, "flat": False, "note": ""}
 
     mean_terms = averages.get(role, {})
-    # Same two shrinkages the vote applies: how long he played, and — for a keeper —
-    # how much of the match actually reached him (``evidence_weight``, see
-    # GK_EVIDENCE_FULL). Both scale every slice, so the breakdown keeps adding up.
+    # Lo stesso restringimento che applica il voto: quanto ha giocato. Scala ogni
+    # fetta, cosi' la scomposizione continua a tornare col voto scritto sopra.
     weight = (minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0)
-    weight *= evidence_weight
     # spread_k_for, non VOTE_SPREAD_K: dal 29/08/2026 il portiere ha la sua scala
     # (GK_SPREAD_K 0.8 contro 0.727), e una spiegazione costruita sulla scala di
     # movimento comprimeva ogni fetta del 9,1% — cioe' raccontava a un portiere un
@@ -874,8 +872,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # un "altre N voci" gonfio dell'offset invece del vero resto.
     centre = vote_center_for(role)
     raw = _raw_vote_from_index(
-        index_for_role(role, totals, minutes, exposure), role, minutes, reference,
-        evidence_weight=evidence_weight)
+        index_for_role(role, totals, minutes, exposure), role, minutes, reference)
     # Same order as the scorer: clamp the merit vote, add the (divergence-only)
     # result nudge, the red-card drop and the own-goal drop, then clamp back.
     # Stesso ordine dello scorer: il credito dei GOL entra nel voto grezzo (e' merito,
@@ -1042,12 +1039,6 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         note = ((note + " ") if note else "") + (
             "Nessuna voce si stacca dalla media del suo ruolo: quelle qui sopra "
             "sono le piu' grandi di una prestazione senza sporgenze.")
-    if evidence_weight < 1.0:
-        # A keeper who faced almost nothing: say so, or the muted breakdown reads
-        # as a bug. This is the same statement the vote itself is making.
-        note = ((note + " ") if note else "") + (
-            "Gli sono arrivati pochi tiri in porta: c'e' poco su cui giudicarlo, "
-            "quindi ogni voce pesa meno e il voto resta vicino al 6.")
     return {
         # perche' un assist puo' non muovere il voto base: e' la ragione piu' comune
         # per cui stiamo sotto una pagella su un giocatore che "ha fatto qualcosa"

@@ -144,19 +144,19 @@ class VoteExplanationTests(SimpleTestCase):
              {"shots": 2.0, "touches": 40.0}, 1.0),
             ("POR", {"gk_saves": 4.0, "gk_goals_prevented": 0.9, "touches": 30.0},
              {"gk_saves": 2.0, "gk_goals_prevented": 0.1, "touches": 28.0}, 1.0),
-            # e lo stesso portiere con mezza prova: l'altro smorzamento del canale
+            # e il portiere poco impegnato, che dal 31/08/2026 non ha piu' un
+            # secondo smorzamento tutto suo: il pannello deve tornare anche li'.
             ("POR", {"gk_saves": 1.0, "gk_goals_prevented": -0.8, "touches": 25.0},
-             {"gk_saves": 2.0, "gk_goals_prevented": 0.1, "touches": 28.0}, 0.4),
+             {"gk_saves": 2.0, "gk_goals_prevented": 0.1, "touches": 28.0}, 1.0),
         ]
-        for role, feats, mean_feats, ev in cases:
+        for role, feats, mean_feats, _ev in cases:
             for minutes in (12, 45, 90):
-                with self.subTest(role=role, minutes=minutes, evidence=ev):
+                with self.subTest(role=role, minutes=minutes):
                     e = explain(role, feats, minutes, self.REFERENCE,
-                                self._averages(role, mean_feats),
-                                evidence_weight=ev)
+                                self._averages(role, mean_feats))
                     row = _round_half(_raw_vote_from_index(
                         index_for_role(role, feats, minutes), role, minutes,
-                        self.REFERENCE, evidence_weight=ev))
+                        self.REFERENCE))
                     self.assertEqual(e["voto"], row)
 
     def test_result_nudge_and_red_card_reconcile_and_are_named(self):
@@ -444,15 +444,17 @@ class VoteExplanationTests(SimpleTestCase):
                     average, full=True)
         expected = VOTE_SPREAD_K * (90 / (90 + SHRINKAGE_MINUTES)) / self.REFERENCE["ATT"]["std"]
         self.assertAlmostEqual(e["per_unit"], expected, places=5)
-        # a keeper with thin evidence carries the damper in the same number
-        thin = explain("POR", {"gk_saves": 1.0, "touches": 25.0}, 90, self.REFERENCE,
-                       self._averages("POR", {"gk_saves": 2.0, "touches": 25.0}),
-                       evidence_weight=0.25, full=True)
+        # e il portiere, che ha una scala sua
+        por = explain("POR", {"gk_saves": 1.0, "touches": 25.0}, 90, self.REFERENCE,
+                      self._averages("POR", {"gk_saves": 2.0, "touches": 25.0}),
+                      full=True)
         # GK_SPREAD_K, non VOTE_SPREAD_K: il portiere ha la sua scala, e questa
-        # riga la fissa proprio perche' la spiegazione l'aveva persa.
+        # riga la fissa proprio perche' la spiegazione l'aveva persa. Il fattore
+        # 0.25 che stava qui era il vecchio smorzamento sull'evidenza, tolto il
+        # 31/08/2026: ora l'unico restringimento e' quello dei minuti.
         self.assertAlmostEqual(
-            thin["per_unit"],
-            GK_SPREAD_K * (90 / (90 + SHRINKAGE_MINUTES)) * 0.25
+            por["per_unit"],
+            GK_SPREAD_K * (90 / (90 + SHRINKAGE_MINUTES))
             / self.REFERENCE["POR"]["std"], places=5)
 
     def test_a_clearly_poor_vote_drops_the_faint_positives(self):

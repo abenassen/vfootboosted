@@ -28,10 +28,10 @@ Today those two very nearly cancel, which is WHY the roles land on 6.00 — an
 accident of the current constants, not a designed balance. If one of them moves,
 expect the other to stop hiding it.
 
-For POR the two terms do NOT add up to the drift, and that is expected: the keeper
-channel also damps the deviation by the evidence of the match (GK_EVIDENCE_FULL),
-which shrinks votes toward 6 asymmetrically and so lifts the mean a little on its
-own. That is the +0.04 you see there.
+Fino al 31/08/2026 per il POR i due termini NON tornavano con la deriva, perche'
+il canale del portiere smorzava lo scostamento con l'evidenza della partita
+(GK_EVIDENCE_FULL) e questo alzava un po' la media da solo — era il +0.04 che si
+leggeva li'. Quel freno non c'e' piu': se la discrepanza resta, non e' quella.
 """
 
 from __future__ import annotations
@@ -138,16 +138,9 @@ class Command(BaseCommand):
             r = ref.get(role)
             if not r:
                 continue
-            # The keeper channel damps the deviation by how much the match actually
-            # told us about him, so the check has to apply it too or it would be
-            # measuring a vote nobody is shown.
-            ev = (cr.gk_evidence_weight(
-                      cr.gk_evidence(feats, goals_against.get((mid, pid), 0)))
-                  if role == "POR" else 1.0)
             z = (idx - r["mean"]) / r["std"]
             w = mins / (mins + cr.SHRINKAGE_MINUTES)
-            vote = cr._round_half(cr._raw_vote_from_index(
-                idx, role, mins, ref, evidence_weight=ev))
+            vote = cr._round_half(cr._raw_vote_from_index(idx, role, mins, ref))
             samples.setdefault(role, []).append((z, w, vote))
 
         report = centering_report(samples, cr.VOTE_SPREAD_K)

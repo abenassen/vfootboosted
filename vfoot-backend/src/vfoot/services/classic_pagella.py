@@ -603,9 +603,6 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           goal_detail=row.get("goal_detail"),
                           assist_adjustment=row.get("assist_adjustment", 0.0),
                           assist_detail=row.get("assist_detail"),
-                          # taken from the row that produced the vote, never
-                          # recomputed here: the two must not be able to disagree
-                          evidence_weight=row.get("evidence_weight", 1.0),
                           # WHY the sending-off / own goal cost what it cost: the
                           # drops are graded (severity x man-down time; deflection vs
                           # own error), so naming only the event would leave most of
@@ -762,7 +759,7 @@ def shot_detail(match, player_id: int) -> dict:
     # La stessa conversione indice -> punti di voto che usa la spiegazione, e per la
     # stessa ragione per cui quella la prende da ``classic_rating``: due formule
     # copiate divergono, e qui il conto DEVE tornare con la riga scritta sopra.
-    weight = mins / (mins + SHRINKAGE_MINUTES) * (row.get("evidence_weight") or 1.0)
+    weight = mins / (mins + SHRINKAGE_MINUTES)
     per_unit = spread_k_for(role) * weight / reference[role]["std"]
 
     counted = [i for i, s in enumerate(shots) if not s["own_goal"]]
@@ -924,7 +921,7 @@ def save_detail(match, player_id: int) -> dict:
     possono raccontare due partite diverse. I tiri fuori e quelli murati non ci sono
     perché non sono suoi: il canale del portiere legge quello che ha raggiunto la
     porta, e chi ha guardato quindici conclusioni volare alte ha comunque passato un
-    pomeriggio tranquillo (v. ``gk_evidence``).
+    pomeriggio tranquillo.
 
     IL VALORE DI UNA PARATA È UNO SHAPLEY, per lo stesso motivo delle conclusioni:
     ``gk_saves`` passa per la compressione, quindi il contributo di una parata
@@ -1016,7 +1013,7 @@ def save_detail(match, player_id: int) -> dict:
 
     scales = feature_scales(gk=True)
     weights = weights_for_role(role)
-    weight = mins / (mins + SHRINKAGE_MINUTES) * (row.get("evidence_weight") or 1.0)
+    weight = mins / (mins + SHRINKAGE_MINUTES)
     per_unit = spread_k_for(role) * weight / reference[role]["std"]
     n = len(faced)
 
