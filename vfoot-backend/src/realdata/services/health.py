@@ -90,6 +90,13 @@ SETTLE_AFTER = timedelta(hours=4)   # from kickoff, by when a match should be re
 # vedere un ritmo (una giornata sono dieci partite), abbastanza poco da non
 # rileggere mezza stagione a ogni report.
 MISSING_XGOT_WINDOW = timedelta(days=14)
+# Quanto indietro guardare per chi ha giocato senza essere in nessuna rosa. Dieci
+# giorni, cioe' due turni con un infrasettimanale in mezzo: chi gioca in giornate
+# consecutive — la forma di una meta' spezzata — resta acceso, chi e' stato
+# chiamato una volta sola si spegne da se'. La finestra guarda le PARTITE e non
+# l'esordio, apposta: e' cio' che fa svuotare l'elenco invece di gonfiarlo fino a
+# maggio.
+UNROSTERED_WINDOW = timedelta(days=10)
 
 
 @dataclass(frozen=True)
@@ -421,6 +428,48 @@ def _check_split_identities(health: Health, now) -> None:
                players=[s.describe() for s in splits[:10]])
 
 
+def _check_unrostered(health: Health, now) -> None:
+    """Ha giocato, e non e' in nessuna rosa.
+
+    Il guardiano che regge quando l'euristica cade. ``_check_split_identities``
+    chiede di RICONOSCERE il gemello, e quando non ci riesce tace: Alhassane ha
+    giocato novanta minuti da titolare col Bologna e l'elenco degli spezzati era
+    vuoto, finche' non se n'e' accorto un utente da uno screenshot. Qui non si
+    riconosce nessuno — si constata un buco, che e' un fatto e non un'euristica.
+
+    IL GIALLO E' PER CHI HA CALPESTATO IL CAMPO. La panchina delle giovanili e' la
+    quasi totalita' delle righe (quattordici su sedici alla misura del 31/08/2026)
+    e non fa male a nessuno: chi non entra non prende voto. Alzare il verdetto per
+    loro vorrebbe dire tenerlo giallo da agosto a maggio, che e' il modo piu'
+    rapido per insegnare a non leggerlo. Restano contate in ``info``, perche' sono
+    il contesto che rende leggibile la riga gialla — e perche' la prima presenza
+    di uno spezzato puo' benissimo essere una panchina.
+    """
+    rows = roster_integrity.unrostered_players(since=now - UNROSTERED_WINDOW)
+    if not rows:
+        return
+    in_campo = [u for u in rows if u.played]
+    panchina = len(rows) - len(in_campo)
+    finestra = _human(UNROSTERED_WINDOW)
+    if in_campo:
+        health.add("warn", "player:unrostered",
+                   f"{len(in_campo)} giocatori hanno messo piede in campo nelle "
+                   f"ultime {finestra} senza risultare in NESSUNA rosa "
+                   f"(+{panchina} rimasti in panchina). O sono esordienti dalle "
+                   f"giovanili che l'import rose non ha ancora preso, o sono la "
+                   f"meta' che gioca di qualcuno che nel listone c'e' gia' — e in "
+                   f"quel caso chi l'ha comprato non ne prende il voto. Il primo: "
+                   f"{in_campo[0].describe()}.",
+                   players=[u.describe() for u in in_campo[:10]])
+        return
+    health.add("info", "player:unrostered",
+               f"{panchina} giocatori in distinta nelle ultime {finestra} senza "
+               f"risultare in nessuna rosa, nessuno dei quali e' entrato: la forma "
+               f"normale delle chiamate dalle giovanili. Nessuno di loro prende "
+               f"voto.",
+               players=[u.describe() for u in rows[:10]])
+
+
 def _check_missing_xgot(health: Health, now) -> None:
     """Il fornitore ha smesso di mandare ``expectedGoalsOnTarget`` per qualcuno.
 
@@ -484,6 +533,7 @@ def report(*, now=None, skip_shape: bool = False) -> Health:
     _check_pending_digests(health, now)
     _check_roster_overlap(health, now)
     _check_split_identities(health, now)
+    _check_unrostered(health, now)
     _check_missing_xgot(health, now)
     if not skip_shape:
         _check_shape(health, now)

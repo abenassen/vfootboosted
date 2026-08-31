@@ -13,10 +13,11 @@ Insieme a lui, la stessa cosa per altri nove: 'Manga Foe Ondoa' contro
 from __future__ import annotations
 
 import io
-from datetime import date
+from datetime import date, timedelta
 
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
 from realdata.models import (Competition, CompetitionSeason, Match,
                              MatchAppearance, Player, PlayerAlias,
@@ -313,3 +314,129 @@ class GuardianoTests(TestCase):
         codes = {c.code: c for c in report.checks}
         self.assertIn("player:split-identity", codes)
         self.assertEqual(codes["player:split-identity"].level, "warn")
+class OrfaniTests(TestCase):
+    """Ha giocato, e non e' in nessuna rosa.
+
+    Il guardiano che regge quando l'euristica dell'adozione cade: Alhassane ha
+    giocato novanta minuti da titolare col Bologna mentre l'elenco degli spezzati
+    era vuoto, e a vederlo e' stato un utente.
+    """
+
+    def setUp(self):
+        comp = Competition.objects.create(name="Serie A", external_source="sofascore",
+                                          external_id="23")
+        season = Season.objects.create(code="2026-2027")
+        self.cs = CompetitionSeason.objects.create(
+            competition=comp, season=season, external_source="sofascore",
+            external_id="76457", num_rounds=38)
+        self.ts = TeamSeason.objects.create(
+            team=Team.objects.create(name="Bologna", external_source="sofascore",
+                                     external_id="1"),
+            competition_season=self.cs)
+        self.now = timezone.now()
+
+    def _match(self, giorni_fa, ext="390"):
+        return Match.objects.create(
+            competition_season=self.cs, home_team=self.ts, away_team=self.ts,
+            matchday=1, external_source="sofascore", external_id=ext,
+            kickoff=self.now - timedelta(days=giorni_fa))
+
+    def _in_rosa(self, **kw):
+        p = Player.objects.create(external_source="transfermarkt", **kw)
+        PlayerTeamStint.objects.create(player=p, team_season=self.ts,
+                                       start_date=date(2026, 7, 1))
+        return p
+
+    def _rosa_regolare(self, match, quanti=19):
+        """Tesserati che giocano davvero: e' cio' che tiene alta la copertura.
+
+        Senza di loro ogni prova qui dentro descriverebbe un'edizione le cui rose
+        non coprono nessuno, e il controllo tacerebbe per il motivo sbagliato.
+        """
+        for i in range(quanti):
+            p = self._in_rosa(full_name=f"Regolare {i}", external_id=f"r{i}")
+            MatchAppearance.objects.create(match=match, player=p,
+                                           team_season=self.ts, side="home",
+                                           minutes_played=90, is_starter=True)
+
+    def _gioca(self, match, *, minuti, titolare, ext="9", nome="Chi E'"):
+        p = Player.objects.create(full_name=nome, external_source="sofascore",
+                                  external_id=ext)
+        MatchAppearance.objects.create(match=match, player=p, team_season=self.ts,
+                                       side="home", minutes_played=minuti,
+                                       is_starter=titolare)
+        return p
+
+    def _orfani(self, giorni=10):
+        return roster_integrity.unrostered_players(
+            since=self.now - timedelta(days=giorni))
+
+    def test_chi_gioca_senza_rosa_e_un_orfano(self):
+        m = self._match(1)
+        self._rosa_regolare(m)
+        ss = self._gioca(m, minuti=90, titolare=True, nome="Rahim Alhassane")
+        [found] = self._orfani()
+        self.assertEqual(found.player_id, ss.id)
+        self.assertEqual((found.minutes, found.started, found.appearances),
+                         (90, True, 1))
+        self.assertTrue(found.played)
+
+    def test_chi_e_in_rosa_non_e_un_orfano(self):
+        self._rosa_regolare(self._match(1))
+        self.assertEqual(self._orfani(), [])
+
+    def test_un_edizione_senza_rose_non_si_guarda(self):
+        # In produzione la Serie A 25-26 da' 772 orfani su 772: l'assenza di
+        # tesseramenti non dice niente sul giocatore, dice che mancano le rose.
+        self._gioca(self._match(1), minuti=90, titolare=True)
+        self.assertEqual(self._orfani(), [])
+
+    def test_una_rosa_parziale_non_si_guarda(self):
+        # L'errore che questo controllo ha fatto per primo: chiedere che UN
+        # tesseramento esista. Nel database di sviluppo la 25-26 ne ha 536 su 772
+        # e il controllo tirava dentro Guendouzi con 1430 minuti giocati.
+        m = self._match(1)
+        self._rosa_regolare(m, quanti=1)
+        for i in range(9):
+            self._gioca(m, minuti=90, titolare=True, ext=f"9{i}",
+                        nome=f"Fuori Rosa {i}")
+        self.assertEqual(self._orfani(), [])          # copertura 10%, si tace
+
+    def test_fuori_finestra_si_spegne_da_se(self):
+        vecchia = self._match(30)
+        self._rosa_regolare(vecchia)
+        self._gioca(vecchia, minuti=90, titolare=True)
+        self.assertEqual(self._orfani(), [])
+
+    def test_la_panchina_non_alza_il_verdetto(self):
+        # Quattordici su sedici, alla misura del 31/08/2026: chi non entra non
+        # prende voto, e un giallo da agosto a maggio non lo legge nessuno.
+        m = self._match(1)
+        self._rosa_regolare(m)
+        self._gioca(m, minuti=0, titolare=False, nome="Ragazzo")
+        [found] = self._orfani()
+        self.assertFalse(found.played)
+        codes = {c.code: c for c in health.report(skip_shape=True).checks}
+        self.assertEqual(codes["player:unrostered"].level, "info")
+
+    def test_chi_ha_calpestato_il_campo_alza_il_verdetto(self):
+        m = self._match(1)
+        self._rosa_regolare(m)
+        self._gioca(m, minuti=0, titolare=False, ext="9", nome="Ragazzo")
+        self._gioca(m, minuti=90, titolare=True, ext="10", nome="Rahim Alhassane")
+        codes = {c.code: c for c in health.report(skip_shape=True).checks}
+        self.assertEqual(codes["player:unrostered"].level, "warn")
+        # La prima riga e' sempre quella che conta.
+        self.assertIn("Rahim Alhassane", codes["player:unrostered"].message)
+
+    def test_lo_spezzato_compare_in_tutte_e_due_le_righe(self):
+        # La sovrapposizione e' voluta: una volta col rimedio pronto, una volta
+        # in mezzo ai suoi simili.
+        m = self._match(1)
+        self._rosa_regolare(m)
+        self._in_rosa(full_name="Giacomo Calò", external_id="calo",
+                      date_of_birth=date(1997, 2, 5))
+        self._gioca(m, minuti=90, titolare=True, nome="Giacomo Calò")
+        codes = {c.code: c for c in health.report(skip_shape=True).checks}
+        self.assertIn("player:split-identity", codes)
+        self.assertIn("player:unrostered", codes)

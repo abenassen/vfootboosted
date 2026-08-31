@@ -1,4 +1,8 @@
-"""Contraddizioni nella storia dei tesseramenti: due club nello stesso momento.
+"""Le contraddizioni che il modello permette e nessun vincolo puo' vietare.
+
+Tre, e la prima e' quella che ha fatto nascere il modulo: due club nello stesso
+momento. Le altre due — la stessa persona scritta due volte, e chi gioca senza
+essere in nessuna rosa — hanno la loro sezione piu' sotto.
 
 PERCHE' ESISTE. Una squadra non e' una colonna di ``Player``: e' la relazione
 ``PlayerTeamStint`` fra giocatore e ``TeamSeason``, valida su un intervallo di
@@ -259,3 +263,132 @@ def split_identities(provider: str = "sofascore") -> list[SplitIdentity]:
                 break
     found.sort(key=lambda s: (-s.appearances, s.name))
     return found
+
+
+# -- chi gioca senza esistere ---------------------------------------------------
+#
+# La TERZA contraddizione, e la piu' larga delle tre: qualcuno e' sceso in campo
+# in un'edizione di cui conosciamo le rose, e in nessuna di quelle rose c'e'.
+#
+# PERCHE' NON BASTA ``split_identities``. Quel controllo risponde a una domanda
+# stretta — «di chi e' la meta' che gioca?» — e per rispondere deve riconoscere
+# il gemello: nome, data, o cognome coi suoi testimoni. Quando nessuna delle tre
+# prove attacca, tace, e ha taciuto davvero: Rahim Alhassane ha giocato due
+# partite col Bologna, una da titolare per novanta minuti, e l'elenco degli
+# spezzati era vuoto. Se ne e' accorto un utente da uno screenshot.
+#
+# Questo controllo non chiede di riconoscere nessuno. Chiede una cosa sola, che
+# e' un fatto e non un'euristica: **ha giocato, e non e' in nessuna rosa**. Non
+# dice di chi sia — non lo sa — dice che c'e' un buco. E' il guardiano che regge
+# quando l'euristica cade, ed e' per questo che i due si SOVRAPPONGONO di
+# proposito: chi e' spezzato e riconoscibile compare in tutte e due le righe, una
+# volta col rimedio pronto e una volta in mezzo ai suoi simili.
+#
+# IL GUARDIANO DEL GUARDIANO: le rose devono COPRIRE chi gioca. Su un'edizione di
+# cui non abbiamo le rose l'assenza non dice niente del giocatore, e il controllo
+# direbbe soltanto, con enorme sicurezza, che le rose non ci sono: in produzione
+# la Serie A 25-26 da' 772 orfani su 772.
+#
+# Non basta pero' chiedere che UN tesseramento esista, ed e' l'errore che questo
+# controllo ha fatto per primo: una rosa PARZIALE passa quella soglia e allaga il
+# rapporto. Nel database di sviluppo la 25-26 ne ha 536 su 772, e il controllo
+# tirava dentro Guendouzi con 1430 minuti e Asllani con 1135 — gente che ha
+# giocato mezza stagione in Serie A, non meta' spezzate.
+#
+# La misura che separa i due casi (31/08/2026, quota di chi ha giocato ed e'
+# anche tesserato):
+#
+#     rose complete    100,0% (sviluppo 26-27) e 97,0% (produzione 26-27)
+#     rosa parziale     68,9% (sviluppo 25-26)
+#     nessuna rosa       0,0% (produzione 25-26, e la 2015/2016)
+#
+# Il 90% sta in mezzo al burrone fra 97 e 69, con margine da tutte e due le parti.
+# Sotto quella quota l'edizione non si guarda affatto e non si dice niente: il
+# canarino non allarma su cio' che non puo' vedere, e la 25-26 senza rose e' una
+# scelta, non un guasto.
+ROSTER_COVERAGE_FLOOR = 0.90
+#
+# COSA E' RUMORE, misurato sulla 26-27 al 31/08/2026: 16 orfani in dieci giorni,
+# di cui QUATTORDICI mai entrati in campo — ragazzi delle giovanili messi in
+# distinta e mai usati, che non prendono voto e non fanno male a nessuno. Chi ha
+# davvero giocato erano due, di 9 e 2 minuti, nessuno titolare. Alhassane, in
+# mezzo a loro, sarebbe stato l'unico titolare da novanta minuti. Percio' la
+# panchina si conta ma non alza il verdetto: il giallo e' per chi il campo l'ha
+# calpestato.
+
+
+@dataclass(frozen=True)
+class Unrostered:
+    """Uno che e' sceso in campo in un'edizione di cui conosciamo le rose."""
+
+    player_id: int
+    name: str
+    club: str
+    season: str
+    appearances: int
+    minutes: int
+    started: bool
+
+    @property
+    def played(self) -> bool:
+        """Ha messo piede in campo, o e' solo stato in distinta?"""
+        return self.minutes > 0 or self.started
+
+    def describe(self) -> str:
+        campo = (f"{self.minutes}'" + (" da titolare" if self.started else "")
+                 if self.played else "mai entrato")
+        return (f"{self.name} ({self.club}, id {self.player_id}): "
+                f"{self.appearances} presenze, {campo}")
+
+
+def unrostered_players(*, since, coverage_floor: float = ROSTER_COVERAGE_FLOOR,
+                       limit: int | None = None) -> list[Unrostered]:
+    """Chi ha giocato dal ``since`` in poi senza essere in nessuna rosa.
+
+    La finestra guarda le PARTITE, non l'esordio: un ragazzo chiamato una volta
+    in agosto sparisce da solo dopo dieci giorni, mentre una meta' spezzata —
+    che continua a giocare ogni settimana — resta accesa finche' non la si
+    ripara. E' la differenza fra un elenco che si svuota e uno che cresce tutto
+    l'anno finche' nessuno lo legge piu'.
+
+    La COPERTURA invece si misura su tutta l'edizione e non sulla finestra: e' una
+    proprieta' dell'import rose, non del turno, e chiederla a dieci giorni di
+    partite la farebbe ballare con chi e' sceso in campo quella settimana.
+
+    Ordinati per minuti giocati: la prima riga e' sempre quella che conta.
+    """
+    from realdata.models import CompetitionSeason, MatchAppearance
+
+    found: list[Unrostered] = []
+    for cs in CompetitionSeason.objects.all():
+        rostered = set(PlayerTeamStint.objects
+                       .filter(team_season__competition_season=cs)
+                       .values_list("player_id", flat=True))
+        if not rostered:
+            continue          # senza rose l'assenza non dice niente
+        played = set(MatchAppearance.objects
+                     .filter(match__competition_season=cs)
+                     .values_list("player_id", flat=True))
+        if not played:
+            continue
+        if 1 - len(played - rostered) / len(played) < coverage_floor:
+            continue          # rose parziali: il buco e' nell'import, non nei nomi
+        agg: dict[int, dict] = {}
+        for a in (MatchAppearance.objects
+                  .filter(match__competition_season=cs, match__kickoff__gt=since)
+                  .exclude(player_id__in=rostered)
+                  .select_related("player", "team_season__team")):
+            d = agg.setdefault(a.player_id, {
+                "name": a.player.full_name or a.player.short_name,
+                "club": str(a.team_season.team),
+                "pres": 0, "min": 0, "tit": False})
+            d["pres"] += 1
+            d["min"] += a.minutes_played or 0
+            d["tit"] = d["tit"] or a.is_starter
+        for pid, d in agg.items():
+            found.append(Unrostered(
+                player_id=pid, name=d["name"], club=d["club"], season=str(cs),
+                appearances=d["pres"], minutes=d["min"], started=d["tit"]))
+
+    found.sort(key=lambda u: (-u.minutes, -u.appearances, u.name))
+    return found[:limit] if limit else found
