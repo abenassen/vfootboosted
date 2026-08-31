@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone as dttz
 
+from django.utils import timezone
+
 from django.contrib.auth.models import User
 from django.test import TestCase
 from rest_framework.authtoken.models import Token
@@ -402,32 +404,62 @@ class SaveEndpointTests(_Season):
 
 
 class RepairTests(_Season):
-    """R1, per player: a settlement may not pull someone off the pitch."""
+    """R2: la riparazione si ferma al primo calcio d'inizio del turno.
+
+    Non «alla scadenza della formazione», che nella modalita' per giocatore
+    arriva il lunedi' sera: in mezzo c'e' una giornata gia' in campo, dove la
+    rosa e' quella congelata (R4) e quindi non c'e' niente da riparare — il
+    ceduto e' ancora schierabile, l'acquistato non lo e' ancora.
+    """
 
     def setUp(self):
         super().setUp()
+        self._snapshot("22")
+        now = timezone.now()
+        Match.objects.filter(external_id="sat22").update(kickoff=now - timedelta(hours=2))
+        Match.objects.filter(external_id="mon22").update(kickoff=now + timedelta(days=1))
+
+    def _snapshot(self, matchday: str):
         SavedLineupSnapshot.objects.create(
-            league_id=str(self.league.id), matchday_id="22",
+            league_id=str(self.league.id), matchday_id=matchday,
             lineup_id=f"team{self.team.id}",
             gk_player_id=str(self.pid["como1"]),
             starter_player_ids=[str(self.pid["milan1"]), str(self.pid["lazio1"])],
             bench_player_ids=[],
         )
-        from django.utils import timezone
-        now = timezone.now()
-        Match.objects.filter(external_id="sat22").update(kickoff=now - timedelta(hours=2))
-        Match.objects.filter(external_id="mon22").update(kickoff=now + timedelta(days=1))
 
     def test_a_player_on_the_pitch_is_not_swapped_out(self):
         touched = lineup_repair.swap_player(
             self.league, self.team.id, self.pid["milan1"], self.pid["roma2"])
         self.assertEqual(touched, [])
-        snap = SavedLineupSnapshot.objects.get(lineup_id=f"team{self.team.id}")
+        snap = SavedLineupSnapshot.objects.get(matchday_id="22")
         self.assertIn(str(self.pid["milan1"]), snap.starter_player_ids)
 
-    def test_a_player_who_has_not_kicked_off_is_repaired_as_usual(self):
+    def test_nor_is_one_who_has_not_kicked_off_yet(self):
+        """IL CAMBIO. Il lunedi' non ha ancora giocato e la formazione della 22 e'
+        ancora modificabile, ma il turno E' COMINCIATO: la sua rosa e' quella del
+        sabato, e il mercato non la tocca piu'. Prima qui la riparazione passava,
+        e con essa passava un giocatore comprato a giornata in corso."""
         touched = lineup_repair.swap_player(
             self.league, self.team.id, self.pid["lazio1"], self.pid["roma2"])
-        self.assertEqual(touched, [22])
-        snap = SavedLineupSnapshot.objects.get(lineup_id=f"team{self.team.id}")
-        self.assertIn(str(self.pid["roma2"]), snap.starter_player_ids)
+        self.assertEqual(touched, [])
+        snap = SavedLineupSnapshot.objects.get(matchday_id="22")
+        self.assertIn(str(self.pid["lazio1"]), snap.starter_player_ids)
+        self.assertNotIn(str(self.pid["roma2"]), snap.starter_player_ids)
+
+    def test_a_round_that_has_not_begun_is_repaired_as_always(self):
+        """E il mestiere di R2 resta: sul turno successivo, che non e' cominciato,
+        l'acquisto prende il posto del ceduto come ha sempre fatto."""
+        Match.objects.create(
+            competition_season=self.cs, matchday=23,
+            kickoff=timezone.now() + timedelta(days=7), kickoff_provisional=False,
+            home_team=self.ts["lazio"], away_team=self.ts["roma"],
+            status=Match.STATUS_SCHEDULED, external_source="sofascore", external_id="sat23")
+        self._snapshot("23")
+        touched = lineup_repair.swap_player(
+            self.league, self.team.id, self.pid["lazio1"], self.pid["roma2"])
+        self.assertEqual(touched, [23])
+        self.assertIn(str(self.pid["roma2"]),
+                      SavedLineupSnapshot.objects.get(matchday_id="23").starter_player_ids)
+        self.assertIn(str(self.pid["lazio1"]),
+                      SavedLineupSnapshot.objects.get(matchday_id="22").starter_player_ids)

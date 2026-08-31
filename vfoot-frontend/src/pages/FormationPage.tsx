@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Badge, Button, Card, SectionTitle } from '../components/ui';
-import { getLeagueMatchdays, getTeamLineup, saveTeamLineup } from '../api';
+import { getLeagueMatchdays, getTeamLineup, rosterChanged, saveTeamLineup } from '../api';
 import Jersey, { kitFromCrest, type Kit } from '../components/Jersey';
 import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext } from '../league/CompetitionContext';
@@ -501,6 +501,18 @@ export default function FormationPage() {
   }, [selectedLeagueId]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  /** Bussa qui per rileggere il contesto senza cambiare giornata né competizione.
+   *  Serve al 409 «la tua rosa è cambiata»: quel che la pagina ha in mano non è
+   *  più vero, e ritentare lo stesso invio lo rifarebbe rifiutare. */
+  const [reloadKey, setReloadKey] = useState(0);
+  /** LA ROSA E' CAMBIATA SOTTO LA PAGINA, e il salvataggio è stato rifiutato.
+   *
+   *  Non è un toast e non ricarica da solo: tutt'e due le cose farebbero sparire
+   *  il messaggio insieme al lavoro dell'allenatore, e uno schermo che si azzera
+   *  da sé mentre compili sembra un guasto, non la spiegazione di un rifiuto.
+   *  Resta lì finché non lo legge, dice CHI non è più suo, e il ricarica lo
+   *  preme lui — sapendo che perderà quello che stava provando. */
+  const [staleRoster, setStaleRoster] = useState<{ detail: string; names: string[] } | null>(null);
   /** L'impronta della formazione COM'E' SUL SERVER per questa giornata, o null se
    *  il server non ne ha nessuna. Serve a sapere se c'è ancora qualcosa da
    *  salvare: un pulsante che dopo il salvataggio torna verde e pronto invita a
@@ -580,7 +592,7 @@ export default function FormationPage() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [selectedLeagueId, competition, matchday, fieldableMd, fieldableAsked]);
+  }, [selectedLeagueId, competition, matchday, fieldableMd, fieldableAsked, reloadKey]);
 
   const byId = useMemo(() => new Map((ctx?.roster ?? []).map((p) => [p.player_id, p])), [ctx]);
   const gkStarters = useMemo(
@@ -1141,11 +1153,24 @@ export default function FormationPage() {
       // formazione che il server ha rifiutato sarebbe la bugia peggiore di tutte.
       setSavedPrint(lineupPrint(gkId, starterIds, benchIds, sendAll));
     } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Errore nel salvataggio');
+      // Fra il caricamento e il salvataggio l'admin ha validato un'offerta, e il
+      // mercato ha già rimesso l'acquisto al posto esatto del ceduto. Ritentare
+      // non serve — lo stesso invio verrebbe rifiutato uguale — e insistere
+      // disferebbe quella riparazione, che è ciò che il rifiuto impedisce.
+      const stale = rosterChanged(e);
+      if (stale) setStaleRoster(stale);
+      else setToast(e instanceof Error ? e.message : 'Errore nel salvataggio');
     } finally {
       setSaving(false);
       setTimeout(() => setToast(null), 2800);
     }
+  };
+
+  /** Il ricarica, premuto dall'allenatore. Rilegge il contesto senza cambiare
+   *  giornata: la formazione che compare è quella riparata dal mercato. */
+  const onReloadRoster = () => {
+    setStaleRoster(null);
+    setReloadKey((k) => k + 1);
   };
 
   const compName = ctx.competitions.find((c) => c.competition_id === competition)?.name;
@@ -1201,6 +1226,17 @@ export default function FormationPage() {
                         ? `Si schiera fino a ${fmtDeadline(lock.closes_at)}, con ${lock.closes_with.home}-${lock.closes_with.away}: la prima partita in cui hai un giocatore.`
                         : `Si schiera fino alla prima partita in cui hai un giocatore: ${fmtDeadline(lock.closes_at)}.`
                       : `La formazione si blocca al primo calcio d'inizio della giornata: ${fmtDeadline(lock.closes_at)}.`}
+              </div>
+            ) : null}
+            {/* LA ROSA DI QUESTA GIORNATA. A turno cominciato questa pagina e
+                quella della rosa dicono due cose diverse per qualche giorno: qui
+                si vede chi era in rosa al primo calcio d'inizio, li' chi c'e'
+                adesso. La divergenza va spiegata, non lasciata dedurre. */}
+            {!closed && lock?.roster_frozen_at ? (
+              <div className="mt-1 text-[11px] text-ink-faint">
+                La giornata è iniziata: vale la rosa che avevi alle{' '}
+                {fmtDeadline(lock.roster_frozen_at)}. Chi è arrivato dopo entra dalla prossima,
+                chi hai ceduto lo puoi ancora schierare qui.
               </div>
             ) : null}
             {/* «SE NON LA TOCCHI, GIOCA QUESTA». Detto qui perche' e' vero:
@@ -1329,6 +1365,24 @@ export default function FormationPage() {
                 );
               })}
             </div>
+            {staleRoster ? (
+              <div className="mt-2 rounded border border-bad/40 bg-bad-bg p-2 text-[11px] text-bad">
+                <div className="font-semibold">{staleRoster.detail}</div>
+                {staleRoster.names.length ? (
+                  <ul className="mt-1 list-disc pl-4">
+                    {staleRoster.names.map((n) => <li key={n}>{n}</li>)}
+                  </ul>
+                ) : null}
+                <div className="mt-1 text-ink-soft">
+                  La formazione non è stata salvata, e da qui non puoi sistemarla: questa
+                  pagina sta ancora lavorando sulla rosa di prima. Ricarica per ripartire da
+                  quella vera — le modifiche che stavi facendo andranno perse.
+                </div>
+                <Button size="sm" variant="secondary" className="mt-2" onClick={onReloadRoster}>
+                  Ricarica la formazione
+                </Button>
+              </div>
+            ) : null}
             {moduleNote ? (
               <div className="mt-1 text-[11px] font-semibold text-bad">{moduleNote}</div>
             ) : null}

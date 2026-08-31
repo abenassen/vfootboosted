@@ -10,15 +10,25 @@ That rule only holds if a lineup is never left holding a player its manager no
 longer has AT THE MOMENT OF THE LOCK. Three invariants do it, and this module is
 the second:
 
-* **R1 — a locked lineup is immutable.** Past its matchday's first kickoff nobody
-  touches it: not the manager, not a transfer.
-* **R2 — a settlement repairs the lineups that are still open.** The market's
-  same-role rule means every acquisition covers exactly the role the release
-  empties, so the incoming player takes the outgoing one's PLACE — in the XI, in
-  goal or on the bench, in the same position. The XI stays eleven, the module stays
-  legal, and the manager is told.
-* **R3 — no settlement while a matchday is being played** (enforced in the market
-  engine, keyed on the real calendar).
+* **R1 — a locked lineup is immutable.** WHEN it locks is the league's own
+  deadline (``lineup_lock_mode``), and R1 answers "fino a quando si salva".
+* **R2 — a settlement repairs the lineups of matchdays NOT YET BEGUN.** The
+  market's same-role rule means every acquisition covers exactly the role the
+  release empties, so the incoming player takes the outgoing one's PLACE — in the
+  XI, in goal or on the bench, in the same position. The XI stays eleven, the
+  module stays legal, and the manager is told.
+* **R4 — schierabile e' chi era in rosa al primo calcio d'inizio del turno**
+  (``services/frozen_roster``), che risponde a "chi puo' giocare" — un'altra
+  domanda, e per questo un'altra regola.
+
+R3 NON C'E' PIU'. Diceva «nessuna validazione mentre si gioca», ed era il modo di
+tenere in piedi R2 dove R2 non poteva funzionare: a turno iniziato la
+riparazione avrebbe messo in formazione un giocatore che quel turno non poteva
+giocarlo, e allora si vietava alla rosa di cambiare. Il prezzo lo pagava
+l'allenatore, che con un acquisto in attesa di validazione restava con i crediti
+prenotati e senza poter offrire per nessun altro, per giorni. R4 dice la stessa
+cosa in modo piu' preciso — non "la rosa non cambia", ma "la rosa di QUESTA
+giornata non cambia" — e cosi' il mercato puo' andare avanti.
 
 A manual roster removal by an admin has no incoming player to swap in, so there the
 slot is simply vacated: honest, and recoverable because the lineup is not locked.
@@ -34,13 +44,24 @@ log = logging.getLogger(__name__)
 
 
 def _open_snapshots(league, team_id: int, now=None) -> list:
-    """This team's saved lineups whose matchday has NOT locked yet (R1).
+    """This team's saved lineups for matchdays that have NOT BEGUN (R2).
 
-    "Locked" is the league's own deadline: under the per-player one a round stays
-    repairable while it is being played, for the players who have not kicked off.
-    Which of them may actually be touched is decided in ``swap_player`` — here the
-    question is only whether the matchday is over and done with.
+    NON PIU' «non ancora chiusa», MA «non ancora cominciata». Sono due confini
+    diversi e in mezzo ci stava il danno: una giornata gia' in campo puo' essere
+    ancora modificabile (modalita' ``player`` sempre, ``own`` fino al primo
+    giocatore della squadra), e li' la riparazione infilava nella formazione un
+    giocatore che quella giornata non poteva giocarla — a volte con il voto gia'
+    noto, perche' ``swap_player`` guarda se l'USCENTE ha gia' giocato e mai se
+    l'entrante l'ha fatto.
+
+    Ora non c'e' piu' niente da riparare li' dentro: la rosa di una giornata e'
+    quella del suo primo calcio d'inizio (``frozen_roster``), quindi in un turno
+    cominciato il ceduto resta schierabile e l'acquistato non lo e'. La
+    formazione e' gia' giusta com'e', e la sostituzione arriva dal turno dopo.
     """
+    csid = league.reference_season_id
+    started = (matchday_state.locked_matchdays(csid, now)
+               if csid is not None and league.enforce_lineup_deadline else set())
     out = []
     for snap in SavedLineupSnapshot.objects.filter(
         league_id=str(league.id), lineup_id__startswith=f"team{team_id}"
@@ -54,11 +75,12 @@ def _open_snapshots(league, team_id: int, now=None) -> list:
             md = int(snap.matchday_id)
         except (TypeError, ValueError):
             continue
-        # Per snapshot and not for the whole season at once: under the ``own``
-        # deadline "closed" is a property of THIS team, and it counts the players
-        # he owned when their clubs kicked off — so a transfer can never reopen a
-        # round that had closed on him (see ``team_deadline``).
-        if not matchday_state.is_closed_for(league, md, team_id, now):
+        # Un confine solo per tutta la lega, e letto in una query sola per tutta
+        # la stagione: prima serviva ``is_closed_for``, che deve sapere la
+        # modalita' di scadenza e, in modalita' ``own``, interrogare la squadra
+        # snapshot per snapshot. La riparazione ha smesso di dipendere dalla
+        # modalita', ed e' il groviglio che la rendeva difficile da ragionare.
+        if md not in started:
             out.append(snap)
     return out
 
@@ -73,18 +95,13 @@ def swap_player(league, team_id: int, out_pid: int, in_pid: int | None, now=None
     touched: list[int] = []
     out_s, in_s = str(out_pid), (str(in_pid) if in_pid is not None else None)
 
+    # QUI C'ERA un guardiano sul singolo giocatore: sotto la scadenza per giocatore
+    # una giornata aperta poteva contenere qualcuno gia' in campo, e la
+    # riparazione non doveva sfilarlo da una formazione che si stava scorando.
+    # Ora e' irraggiungibile — ``_open_snapshots`` rende solo turni non ancora
+    # cominciati, e in un turno non cominciato nessuno ha ancora giocato — e
+    # copriva comunque meta' del problema: guardava l'uscente e mai l'entrante.
     for snap in _open_snapshots(league, team_id, now):
-        # Under the per-player deadline an OPEN matchday can still hold a player who
-        # is on the pitch right now, and R1 protects him individually: a settlement
-        # cannot pull him out of a lineup that is already being scored, even though
-        # the round as a whole is still being edited.
-        try:
-            snap_md = int(snap.matchday_id)
-        except (TypeError, ValueError):
-            snap_md = None
-        if snap_md is not None and matchday_state.locked_players(
-                league, snap_md, [out_pid], now):
-            continue
         changed = False
 
         if snap.gk_player_id is not None and str(snap.gk_player_id) == out_s:

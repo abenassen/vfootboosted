@@ -244,6 +244,18 @@ def team_first_kickoff(league, team, real_matchday: int):
         ).values_list("player_id", "team_season_id")
     )
     fixtures = matchday_fixtures_by_team(csid, real_matchday)
+    # La rosa di questa giornata (R4), ricavata dai contratti GIA' in memoria:
+    # ``frozen_roster.frozen_ids`` li rileggerebbe, e questa funzione gira una
+    # volta per giornata per squadra — su una stagione intera sono decine di
+    # interrogazioni per una risposta che abbiamo gia' in mano. L'istante invece
+    # si chiede a lui, perche' la definizione del blocco deve restare una sola.
+    from vfoot.services import frozen_roster  # locale: frozen_roster importa questo modulo
+
+    lock = frozen_roster.lock_instant(league, real_matchday)
+    frozen = None
+    if lock is not None:
+        frozen = {pid for pid, acq, rel in slots
+                  if (acq is None or acq <= lock) and (rel is None or rel > lock)} or None
     best, best_match = None, None
     for pid, acquired_at, released_at in slots:
         m = fixtures.get(stint.get(pid))
@@ -255,6 +267,23 @@ def team_first_kickoff(league, team, real_matchday: int):
         if released_at is not None and not (
                 (acquired_at is None or acquired_at <= k) and k < released_at):
             continue        # gone before his match began: not yours when it mattered
+        if frozen is not None and pid not in frozen:
+            # NON E' NELLA ROSA DI QUESTA GIORNATA (R4), quindi non e' schierabile
+            # in questo turno — e chi non puo' giocare non puo' nemmeno chiudere
+            # la formazione: vincolare senza dare niente in cambio e' solo una
+            # porta che si chiude in faccia.
+            #
+            # Il caso: comprare il sabato uno che ha giocato il venerdi'. Prima
+            # non poteva capitare perche' R3 teneva fermo il mercato per tutta la
+            # giornata; senza R3 sarebbe il MOMENTO IN CUI L'ADMIN CLICCA a
+            # spegnere la domenica di un allenatore che non ha fatto niente.
+            #
+            # ``frozen is None`` vuol dire «non so dirti la rosa di allora» (v.
+            # frozen_roster.frozen_ids) e li' non si esclude nessuno: sbagliare
+            # per eccesso qui chiude una formazione che poteva restare aperta,
+            # sbagliare per difetto la lascia aperta a voti noti. Non e' la
+            # stessa cosa.
+            continue
         if best is None or k < best:
             best, best_match = k, m
     return best, best_match

@@ -142,6 +142,9 @@ export interface TeamLineupContext {
      *  di difensori schierati non cambia piu': ne' inviando, ne' per sostituzione.
      *  `defence_count` è quello fissato, dalla formazione che fa da base. */
     defence_locked?: boolean;
+    // Da quando la rosa di questa giornata e' quella che e' (R4). Null finche'
+    // il turno non e' cominciato, cioe' quasi sempre.
+    roster_frozen_at?: string | null;
     defence_count?: number | null;
   };
 }

@@ -463,12 +463,18 @@ def apply_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
                         MarketOffer.STATUS_CANCELLED):
         raise OfferApplyError("Offerta gia' risolta.")
 
-    # R3: nothing changes hands while the championship is on the pitch. Keyed on the
-    # real calendar and NOT on the league's conclusions — a freeze that waited for an
-    # admin to close a matchday would let a forgetful one freeze the market for good.
-    if matchday_state.is_matchday_in_progress(league, now):
-        raise OfferApplyError(
-            "Giornata in corso: le validazioni riprendono a fine giornata.")
+    # QUI STAVA R3: «niente passa di mano mentre il campionato e' in campo». Non
+    # c'e' piu'. Era la stampella di R2 — a turno iniziato la riparazione avrebbe
+    # infilato in formazione un giocatore che quel turno non poteva giocarlo, e
+    # allora si vietava alla rosa di cambiare del tutto. A pagarlo era
+    # l'allenatore: con un acquisto in coda restava per giorni con i crediti
+    # prenotati, il giocatore da svincolare impegnato e nessuna possibilita' di
+    # offrire per chi si liberava nel frattempo.
+    #
+    # Al suo posto R4 (``services/frozen_roster``): la rosa di una giornata e'
+    # quella del suo primo calcio d'inizio. Il ceduto resta schierabile in quel
+    # turno, l'acquistato entra dal successivo, e le formazioni gia' spedite non
+    # si toccano — che era l'unica cosa che R3 stesse davvero proteggendo.
 
     # Release slot must still be on the roster.
     release_slot = FantasyRosterSlot.objects.filter(

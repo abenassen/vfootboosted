@@ -97,7 +97,7 @@ from vfoot.services.fantasy_simulation import (
     generate_knockout_fixtures,
     generate_round_robin_fixtures,
 )
-from vfoot.services import competition_calendar, competition_plan
+from vfoot.services import competition_calendar, competition_plan, frozen_roster
 from vfoot.services.competition_prizes import describe_condition, prize_winner_team_ids
 from vfoot.services.competition_stages import (
     MAX_LEGS,
@@ -5724,9 +5724,29 @@ class LeagueTeamLineupView(APIView):
         else:
             matchday = matchdays[0] if matchdays else 1
 
-        slots = list(
-            FantasyRosterSlot.objects.filter(team=team, released_at__isnull=True).select_related("player")
-        )
+        # LA ROSA DI QUESTA GIORNATA, non quella di adesso (R4, v.
+        # services/frozen_roster). A turno cominciato le due divergono: chi e'
+        # stato ceduto resta schierabile fino alla fine del turno, chi e' stato
+        # comprato entra dal successivo. Sono i giorni in cui questa pagina e
+        # quella della rosa dicono due cose diverse, ed e' per questo che la
+        # risposta porta ``roster_frozen_at``: la divergenza va spiegata a
+        # schermo, non lasciata dedurre.
+        fieldable = frozen_roster.frozen_ids(league, team, matchday)
+        if fieldable is None:
+            slots = list(FantasyRosterSlot.objects
+                         .filter(team=team, released_at__isnull=True)
+                         .select_related("player"))
+        else:
+            # Senza il filtro su released_at: il ceduto a turno iniziato e' ancora
+            # dei nostri per questa giornata. Un giocatore puo' avere piu' di un
+            # contratto (comprato, ceduto, ricomprato), e ne basta uno.
+            seen: set[int] = set()
+            slots = []
+            for slot in (FantasyRosterSlot.objects.filter(team=team)
+                         .select_related("player").order_by("-acquired_at")):
+                if slot.player_id in fieldable and slot.player_id not in seen:
+                    seen.add(slot.player_id)
+                    slots.append(slot)
         player_ids = [s.player_id for s in slots]
         # Which season should the playing-time stats describe? The reference season
         # while it is under way, but BEFORE it starts it has no games at all — and
@@ -5857,6 +5877,11 @@ class LeagueTeamLineupView(APIView):
             "closed": bool(lock_closes_at is not None and lock_closes_at <= timezone.now()),
             "locked_player_ids": sorted(locked_pids),
             "defence_locked": defence_locked,
+            # Da quando la rosa di questa giornata e' quella che e' (R4). Null
+            # finche' il turno non e' cominciato, cioe' quasi sempre.
+            "roster_frozen_at": (
+                frozen_roster.lock_instant(league, matchday).isoformat()
+                if fieldable is not None else None),
             # Quanti difensori sono fissati. Si legge dalla formazione che fa da
             # base — la propria salvata, o quella ereditata — perche' e' con quella
             # che il salvataggio confronta. Null quando non c'e' niente di fissato.
@@ -5950,14 +5975,17 @@ class LeagueTeamLineupView(APIView):
         if snap is None and is_own:
             from vfoot.services.classic_matchday_scoring import (
                 lineup_still_owned,
-                owned_player_ids,
                 read_previous_lineup,
                 role_map_for,
             )
 
             prev = read_previous_lineup(league_id, matchday, team.id, competition_id)
             if prev is not None:
-                owned = owned_player_ids(team)
+                # La rosa di QUESTA giornata (R4), la stessa su cui il salvataggio
+                # giudichera' l'invio: con quella di adesso la pagina apriva un
+                # buco da riempire al posto di un giocatore ceduto a turno
+                # iniziato, che invece qui e' ancora schierabile.
+                owned = frozen_roster.owned_for_matchday(league, team, matchday)
                 gk_i, xi_i, bench_i, gone = lineup_still_owned(prev, owned)
                 if gk_i or xi_i:
                     try:
@@ -6193,9 +6221,58 @@ class LeagueTeamLineupSaveView(APIView):
                         status=status.HTTP_409_CONFLICT,
                     )
 
-        # Classic mode: enforce the role constraints server-side using the FROZEN
-        # listone roles, so a hand-crafted request can't bypass the client validator.
+        # R4: SI SCHIERA CHI ERA IN ROSA AL PRIMO CALCIO D'INIZIO DEL TURNO.
+        #
+        # Questo controllo prima non c'era affatto — ne' qui ne' altrove: il
+        # salvataggio verificava scadenza, ruoli, giocatori gia' in campo e numero
+        # di difensori, mai la proprieta'. Finche' il mercato restava fermo per
+        # tutta la giornata (R3) la falla era stretta ma reale: con un rinvio, la
+        # giornata resta aperta fino al recupero — settimane — e in quella
+        # finestra il mercato lavora, quindi si poteva comprare un giocatore e
+        # schierarlo in un turno per il resto gia' scorato, col voto in chiaro.
+        #
+        # Chi non e' nella rosa della giornata viene RIFIUTATO e non tolto in
+        # silenzio: una formazione a dieci mandata senza dirlo e' peggio di un
+        # errore, e la pagina manda tutti e venticinque i giocatori, quindi un
+        # filtro muto qui vorrebbe dire panchine dimezzate senza traccia.
         outfield_ids = [int(x) for x in request.data.get("starter_player_ids", []) if x is not None]
+        fieldable = frozen_roster.owned_for_matchday(league, team, md_int)
+        started = frozen_roster.lock_instant(league, md_int) is not None
+        sent = ([int(gk)] if gk else []) + outfield_ids + [
+            int(x) for x in request.data.get("bench_player_ids", []) if x is not None]
+        intruders = [pid for pid in dict.fromkeys(sent) if pid not in fieldable]
+        if intruders:
+            names = {
+                pid: (short or full or f"giocatore {pid}")
+                for pid, short, full in Player.objects.filter(id__in=intruders)
+                .values_list("id", "short_name", "full_name")
+            }
+            if started:
+                return Response(
+                    {"detail": "La giornata è già cominciata: vale la rosa che avevi "
+                               "al primo calcio d'inizio.",
+                     # Marchio leggibile dal client: quello che ha in mano non e'
+                     # piu' vero, e il rimedio e' ricaricare — non ritentare.
+                     "roster_changed": True,
+                     "errors": [f"{names.get(pid, pid)} è arrivato a giornata "
+                                f"iniziata: puoi schierarlo dalla prossima."
+                                for pid in intruders]},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            # LA ROSA E' CAMBIATA MENTRE COMPILAVA. Quasi sempre e' questo: una
+            # validazione arrivata fra il caricamento della pagina e il salvataggio.
+            # R2 ha gia' messo l'acquisto al posto esatto del ceduto, e accettare
+            # questo invio DISFEREBBE la riparazione — rimettendo in formazione uno
+            # che al calcio d'inizio non sara' piu' in rosa, e che verrebbe contato
+            # lo stesso perche' una formazione spedita non si filtra. Meglio un
+            # rifiuto che si legge e una pagina da ricaricare.
+            return Response(
+                {"detail": "La tua rosa è cambiata mentre compilavi: ricarica la formazione.",
+                 "roster_changed": True,
+                 "errors": [f"{names.get(pid, pid)} non è più nella tua rosa."
+                            for pid in intruders]},
+                status=status.HTTP_409_CONFLICT,
+            )
         role_of: dict[int, str] = {}
         if league.mode == FantasyLeague.MODE_CLASSIC:
             starter_ids = ([int(gk)] if gk else []) + outfield_ids
@@ -6256,20 +6333,23 @@ class LeagueTeamLineupSaveView(APIView):
         if per_player:
             from vfoot.services.classic_matchday_scoring import (
                 lineup_still_owned,
-                owned_player_ids,
                 read_previous_lineup,
             )
 
-            owned_now = None
+            # La rosa DI QUESTA GIORNATA anche qui (R4). Con quella di adesso, un
+            # giocatore ceduto a turno iniziato spariva dalla formazione ereditata,
+            # e allora rimandarlo in campo — cosa che R4 consente, era tuo al calcio
+            # d'inizio — risultava un ingresso "da fuori" e veniva rifiutato.
+            owned = None
             for cid, key in zip(target_comp_ids, keys):
                 if key in previous:
                     continue
                 prev_snap = read_previous_lineup(league_id, md_int, team.id, cid)
                 if prev_snap is None:
                     continue
-                if owned_now is None:
-                    owned_now = owned_player_ids(team)
-                gk_p, xi_p, bench_p, _ = lineup_still_owned(prev_snap, owned_now)
+                if owned is None:
+                    owned = frozen_roster.owned_for_matchday(league, team, md_int)
+                gk_p, xi_p, bench_p, _ = lineup_still_owned(prev_snap, owned)
                 previous[key] = {
                     "gk_player_id": str(gk_p) if gk_p else None,
                     "starter_player_ids": xi_p,

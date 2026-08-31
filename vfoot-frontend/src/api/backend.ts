@@ -120,6 +120,30 @@ export class ApiError extends Error {
   }
 }
 
+/** Il server dice che la rosa su cui la pagina sta lavorando non è più quella
+ *  vera: fra il caricamento e l'invio qualcosa l'ha cambiata (una validazione di
+ *  mercato). Il rimedio è RICARICARE, non ritentare — lo stesso invio verrebbe
+ *  rifiutato uguale, e insistere disferebbe la riparazione già applicata.
+ *
+ *  Torna anche i nomi, perché «la tua rosa è cambiata» senza dire CHI non è un
+ *  avviso, è un enigma: l'allenatore deve poter riconoscere il giocatore che sta
+ *  guardando sullo schermo. `null` quando l'errore è un altro. */
+export function rosterChanged(e: unknown): { detail: string; names: string[] } | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  try {
+    const parsed = JSON.parse(e.detail) as {
+      roster_changed?: unknown; detail?: unknown; errors?: unknown;
+    };
+    if (parsed?.roster_changed !== true) return null;
+    return {
+      detail: typeof parsed.detail === 'string' ? parsed.detail : e.message,
+      names: Array.isArray(parsed.errors) ? parsed.errors.map(String) : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Technical field names -> the label the user sees in the form. */
 const FIELD_LABELS: Record<string, string> = {
   name: 'Nome',

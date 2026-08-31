@@ -252,6 +252,8 @@ export const getVoteLedger = typedImpl.getVoteLedger;
 export const getChampionshipPlayers = typedImpl.getChampionshipPlayers;
 export const getTeamLineup = typedImpl.getTeamLineup;
 export const saveTeamLineup = typedImpl.saveTeamLineup;
+// Non passa dallo switch mock/reale: legge una risposta d'errore, non ne fa una.
+export { rosterChanged } from './backend';
 export const syncLeagueMatchdays = typedImpl.syncLeagueMatchdays;
 export const getLeagueMatchdays = typedImpl.getLeagueMatchdays;
 export const concludeLeagueMatchday = typedImpl.concludeLeagueMatchday;

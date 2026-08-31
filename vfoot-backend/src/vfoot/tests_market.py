@@ -580,12 +580,17 @@ class DiscardRebidTests(MarketBase):
 
 
 class MatchdayFreezeTests(MarketBase):
-    """R3: mentre il campionato e' in campo non cambia nessuna rosa.
+    """R3 NON C'E' PIU': a giornata in corso si valida.
 
-    Il divieto e' del motore, ma la coda dell'admin deve saperlo PRIMA del click:
-    finche' il payload non lo diceva, il bottone «Accetta» restava acceso e il
-    rifiuto arrivava come un 400 dopo il click, in cima al pannello — spesso
-    fuori schermo rispetto alla riga premuta.
+    Diceva «mentre il campionato e' in campo non cambia nessuna rosa», ed era la
+    stampella di R2. Il prezzo lo pagava l'allenatore: con un acquisto in coda
+    restava per giorni con i crediti prenotati e il giocatore da svincolare
+    impegnato, senza poter offrire per chi si liberava nel frattempo — e senza
+    poter mettere in svincolo l'acquisto stesso, che in rosa non c'era ancora.
+
+    A proteggere le formazioni gia' schierate ora c'e' R4 (la rosa di una
+    giornata e' quella del suo primo calcio d'inizio), che e' piu' preciso: non
+    «la rosa non cambia», ma «la rosa di QUESTA giornata non cambia».
     """
 
     def _kickoff_now(self):
@@ -607,18 +612,22 @@ class MatchdayFreezeTests(MarketBase):
         offer.refresh_from_db()
         return offer, fa
 
-    def test_applying_is_refused_while_the_round_is_on_the_pitch(self):
+    def test_applying_goes_through_while_the_round_is_on_the_pitch(self):
+        """IL CASO DELL'UTENTE: l'acquisto in coda si valida anche col campionato
+        in campo, e da li' e' in rosa — cioe' offribile in svincolo per il
+        giocatore che si e' liberato nel frattempo."""
         self._kickoff_now()
         offer, fa = self._queued_offer()
-        with self.assertRaises(me.OfferApplyError):
-            me.apply_offer(offer, actor=self.admin)
-        # Niente a meta': l'offerta resta da decidere e le rose non si muovono.
+        me.apply_offer(offer, actor=self.admin)
         offer.refresh_from_db()
-        self.assertEqual(offer.status, MarketOffer.STATUS_ACCEPTED)
-        self.assertFalse(FantasyRosterSlot.objects.filter(
+        self.assertEqual(offer.status, MarketOffer.STATUS_SETTLED)
+        self.assertTrue(FantasyRosterSlot.objects.filter(
             team=self.t2, player=fa, released_at__isnull=True).exists())
 
-    def test_the_queue_says_it_before_the_click(self):
+    def test_the_queue_still_says_a_round_is_being_played(self):
+        """Il pannello non lo usa piu' per spegnere il bottone, ma l'admin deve
+        sapere che sta validando a giornata in corso: cambia cosa succede alle
+        formazioni (niente, fino al turno dopo), e va detto."""
         self._kickoff_now()
         offer, _ = self._queued_offer()
         body = self._as(self.admin).get(
@@ -626,12 +635,11 @@ class MatchdayFreezeTests(MarketBase):
         self.assertTrue(body["matchday_in_progress"])
         self.assertEqual(body["playing_matchday"], 5)
         self.assertEqual(len(body["admin_queue"]), 1)
-        # E il server continua a difendersi da solo.
         r = self._as(self.admin).post(
             f"/api/v1/leagues/{self.league.id}/market/offers/{offer.id}/accept",
             format="json")
-        self.assertEqual(r.status_code, 400)
-        self.assertIn("Giornata in corso", r.json()["detail"])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["status"], "settled")
 
     def test_between_rounds_nothing_is_frozen(self):
         offer, fa = self._queued_offer()

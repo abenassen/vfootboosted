@@ -111,13 +111,25 @@ def starting_odds(league, player_ids, as_of: int | None) -> dict[int, dict]:
 
 
 def roster_for_suggestion(league, team, as_of: int | None) -> list[dict]:
-    """[{player_id, role, form, starting}] for the team's current roster."""
-    from vfoot.models import FantasyRosterSlot
+    """[{player_id, role, form, starting}] per la rosa DI QUELLA GIORNATA.
 
-    player_ids = list(
-        FantasyRosterSlot.objects.filter(team=team, released_at__isnull=True)
-        .values_list("player_id", flat=True)
-    )
+    Non quella di adesso: il suggeritore scrive formazioni (la baseline), e una
+    formazione puo' contenere solo chi era in rosa al primo calcio d'inizio del
+    turno (R4, v. services/frozen_roster). Senza ``as_of`` non c'e' una giornata
+    a cui riferirsi e vale la rosa corrente.
+    """
+    from vfoot.models import FantasyRosterSlot
+    from vfoot.services import frozen_roster
+
+    frozen = (frozen_roster.frozen_ids(league, team, as_of)
+              if as_of is not None else None)
+    if frozen is not None:
+        player_ids = sorted(frozen)
+    else:
+        player_ids = list(
+            FantasyRosterSlot.objects.filter(team=team, released_at__isnull=True)
+            .values_list("player_id", flat=True)
+        )
     if not player_ids:
         return []
     profiles, _ = roster_profiles(league, player_ids, as_of)

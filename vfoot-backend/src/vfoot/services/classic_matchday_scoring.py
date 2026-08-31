@@ -37,6 +37,7 @@ from vfoot.services.classic_pagella import (
     pagella_for_match,
 )
 from vfoot.services.classic_scoring import Ruleset, resolve_fixture, score_team
+from vfoot.services import frozen_roster
 from vfoot.services.match_resolver import (
     matchday_fixtures_by_team,
     pending_matches,
@@ -144,10 +145,9 @@ def build_matchday_index(competition_season_id: int, real_matchday: int, league)
 
 
 def owned_player_ids(team) -> set:
-    return set(
-        FantasyRosterSlot.objects.filter(team=team, released_at__isnull=True)
-        .values_list("player_id", flat=True)
-    )
+    """La rosa di ADESSO. Per tutto cio' che riguarda una giornata gia' cominciata
+    la domanda giusta e' un'altra — v. ``frozen_roster.owned_for_matchday``."""
+    return frozen_roster.owned_now(team)
 
 
 def role_map_for(league, player_ids: list[int]) -> dict:
@@ -441,7 +441,13 @@ def team_lines_for_conclusion(league, team, competition_id, real_matchday, index
       - "missing":  no lineup and no admin resolution yet — the caller must ask the
                     admin (meta carries has_previous_lineup + previous_lineup_stale).
     """
-    owned = owned_player_ids(team)
+    # LA ROSA DI QUANDO LA GIORNATA E' COMINCIATA, non quella di adesso. Fra
+    # l'ultimo fischio e la conclusione il mercato lavora, e leggendo la rosa di
+    # oggi uno svincolo validato in quella finestra apriva un buco a ritroso in
+    # una giornata gia' giocata: la stessa giornata chiusa lunedi' sera e chiusa
+    # mercoledi' dava due risultati diversi. Il punteggio di un turno non puo'
+    # dipendere dal giorno in cui l'admin lo chiude.
+    owned = frozen_roster.owned_for_matchday(league, team, real_matchday)
     snap = read_saved_lineup(league.id, real_matchday, team.id, competition_id)
     source = "lineup"
 
@@ -897,7 +903,7 @@ def score_and_persist_matchday(md, league, ruleset, fixtures, resolutions, force
     teams = {t.id: t for fx in fixtures for t in (fx.home_team, fx.away_team)}
     roster_ids = set()
     for team in teams.values():
-        roster_ids |= owned_player_ids(team)
+        roster_ids |= frozen_roster.owned_for_matchday(league, team, md.real_matchday)
     pending = pending_player_ids(md.real_competition_season_id, md.real_matchday, roster_ids)
     # The league's ruling on the matches it decided not to wait for. It covers part
     # (or all) of the pending set: what stays pending is what nobody has ruled on.

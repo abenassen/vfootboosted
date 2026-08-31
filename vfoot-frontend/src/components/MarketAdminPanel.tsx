@@ -83,8 +83,9 @@ export default function MarketAdminPanel({ leagueId }: { leagueId: number }) {
   const phase = session ? sessionPhase(session, nowMs) : null;
   const isClassic = data?.mode === 'classic';
   const queue = data?.admin_queue ?? [];
-  // La giornata vera, non il registro della lega: mentre si gioca, applicare
-  // un'offerta e' vietato dal server (muove due rose a partita in corso).
+  // La giornata vera, non il registro della lega. Non spegne piu' niente:
+  // validare mentre si gioca e' ammesso, e serve a dire all'admin che cosa
+  // succedera' alle formazioni (niente, fino al turno dopo).
   const frozen = !!data?.matchday_in_progress;
   const playingMd = data?.playing_matchday ?? null;
   const leadingOffers = useMemo(
@@ -236,16 +237,16 @@ function QueueCard({ queue, sessionLive, busy, leagueId, nowMs, frozen, playingM
             </div>
           )}
           {frozen && (
-            <div className="mt-1 text-xs text-warn">
-              {playingMd ? <>Giornata <b>{playingMd}</b> in corso</> : <>Giornata in corso</>}: mentre
-              si gioca nessuna rosa cambia, quindi le validazioni riprendono a fine giornata.
-              Rifiutare si può — non muove nessuna rosa.
+            <div className="mt-1 text-xs text-ink-soft">
+              {playingMd ? <>Giornata <b>{playingMd}</b> in corso</> : <>Giornata in corso</>}: puoi
+              validare. Le formazioni di questa giornata non cambiano — vale la rosa che ogni
+              squadra aveva al primo calcio d'inizio, e chi arriva ora entra dalla prossima.
             </div>
           )}
           <div className="mt-2 divide-y divide-line">
             {queue.map((o) => (
               <QueueRow key={o.offer_id} o={o} busy={busy} leagueId={leagueId} nowMs={nowMs}
-                frozen={frozen} onAccept={() => onAccept(o.offer_id)} onDiscard={onDiscard} />
+                onAccept={() => onAccept(o.offer_id)} onDiscard={onDiscard} />
             ))}
           </div>
         </>
@@ -254,8 +255,8 @@ function QueueCard({ queue, sessionLive, busy, leagueId, nowMs, frozen, playingM
   );
 }
 
-function QueueRow({ o, busy, leagueId, nowMs, frozen, onAccept, onDiscard }: {
-  o: MarketOfferRow; busy: boolean; leagueId: number; nowMs: number; frozen: boolean;
+function QueueRow({ o, busy, leagueId, nowMs, onAccept, onDiscard }: {
+  o: MarketOfferRow; busy: boolean; leagueId: number; nowMs: number;
   onAccept: () => void; onDiscard: (d: Discard) => void;
 }) {
   const [asking, setAsking] = useState(false);
@@ -268,10 +269,10 @@ function QueueRow({ o, busy, leagueId, nowMs, frozen, onAccept, onDiscard }: {
           {' · '}<b>{price(o.amount)}</b> <span className="text-ink-faint">(recupero {o.recovery})</span>
         </div>
         <div className="flex gap-2">
-          {/* Il server lo rifiuta comunque (400), ma lo diceva DOPO il click e in
-              cima al pannello, spesso fuori schermo rispetto alla riga premuta. */}
-          <Button size="sm" disabled={busy || asking || frozen} onClick={onAccept}
-            title={frozen ? 'Giornata in corso: le validazioni riprendono a fine giornata.' : undefined}>
+          {/* Il bottone non si spegne piu' a giornata in corso: validare mentre si
+              gioca e' ammesso, e le formazioni gia' schierate le protegge la rosa
+              congelata al primo calcio d'inizio, non il divieto di validare. */}
+          <Button size="sm" disabled={busy || asking} onClick={onAccept}>
             Accetta (applica rose)
           </Button>
           <Button size="sm" variant="danger" disabled={busy || asking} onClick={() => setAsking(true)}>Rifiuta</Button>
