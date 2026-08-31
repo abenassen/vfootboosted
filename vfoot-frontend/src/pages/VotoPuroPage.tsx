@@ -187,7 +187,10 @@ export default function VotoPuroPage() {
             di gioco il voto vale quasi per intero, a un quarto d'ora conta meno della metà. Poi c'è
             il risultato: un voto alto in una sconfitta scende un po', un voto basso in una vittoria
             sale un po' — <b className="text-ink">mai il contrario</b>, quindi il risultato non
-            gonfia nessuno e tempera solo i casi stonati. E infine
+            gonfia nessuno e tempera solo i casi stonati. I due versi però non pesano uguale: più
+            larga è la sconfitta, più il voto può scendere, fino a scivolare{' '}
+            <b className="text-ink">sotto la sufficienza</b>; in una vittoria, invece, il risultato
+            può portare un voto basso al 6 e non oltre. E infine
             i tre episodi che una pagella non può ignorare — espulsione, autogol, rigore sbagliato —
             che leggiamo{' '}
             <a href="#errori" className="font-semibold text-accent underline decoration-dotted">
@@ -511,10 +514,11 @@ export default function VotoPuroPage() {
           <p>
             Una pagella legge anche il risultato: chi perde 0-3 raramente prende più di 6, chi vince
             prende di più. Noi guardiamo il risultato solo per <i>temperare</i> i voti stonati (alto
-            in una sconfitta, basso in una vittoria) e mai per esaltarli: per quanto pesante sia
-            stata la sconfitta, una buona partita resta una buona partita. Il rovescio è che un
-            difensore o un centrocampista di una squadra in difficoltà, se ha tenuto la sua zona,
-            resta alto.
+            in una sconfitta, basso in una vittoria) e mai per esaltarli. Una goleada subita porta
+            la squadra verso l'insufficienza, come nelle pagelle — ma non azzera quel che uno ha
+            fatto: chi ha giocato davvero bene in quella disfatta resta il più alto dei suoi, e
+            sopra il 6. Il rovescio è che un difensore o un centrocampista di una squadra in
+            difficoltà, se ha tenuto la sua zona, resta alto.
           </p>
           <Caso
             partita="Verona–Inter 1-2 · 10ª giornata"
@@ -573,7 +577,7 @@ export default function VotoPuroPage() {
         <p>
           Lo scarto medio è {VOTO.scartoMedio} punti: siamo <i>vicini</i> alle pagelle, non
           allineati. Per ruolo:
-          0,33 portieri e centrocampisti, 0,34 i difensori, 0,35 gli attaccanti. E la parte in cui
+          0,31 i portieri, 0,34 difensori e centrocampisti, 0,35 gli attaccanti. E la parte in cui
           non siamo allineati è quella che ci interessa, perché è dove i dati dicono qualcosa che
           l'impressione non aveva registrato.
         </p>

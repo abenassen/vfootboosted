@@ -1055,9 +1055,9 @@ MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distributi
 # --- Result-mitigation (v2 stage 2) ------------------------------------------
 # A mild nudge toward the team's result WHILE THE PLAYER WAS ON THE PITCH, acting
 # ONLY on DIVERGENT cases: a high vote in a defeat comes down, a low vote in a win
-# goes up — always TOWARD 6, never away. It deliberately leaves aligned votes alone
-# (a high vote in a win is untouched), which is what a symmetric additive term got
-# wrong: it further exalted a De Ketelaere already high in a win. Calibrated by the
+# goes up — never the other way. It deliberately leaves aligned votes alone (a high
+# vote in a win is untouched), which is what a symmetric additive term got wrong: it
+# further exalted a De Ketelaere already high in a win. Calibrated by the
 # SofaScore-merit correlation, not the result-based Statistico (which would be
 # circular). Outfield only — the GK channel already reflects the result through
 # goals-prevented. gd_on is the on-pitch goal difference (see on_pitch_goal_difference).
@@ -1066,12 +1066,18 @@ MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distributi
 # ("i gol successivi", weighted fine already), BASE is the discrete "a loss is a
 # loss / a win is a win" that fires on the FIRST goal — so crossing draw→defeat
 # weighs BASE+K, each further goal only K. Still divergence-only (it multiplies how
-# far the vote is from 6), so an aligned vote is untouched. BASE=0 ⇒ the old
-# purely-linear behaviour.
+# far the vote is from the target), so an aligned vote is untouched.
+#
+# I DUE LATI NON SONO PIU' SIMMETRICI (30/08/2026) — v. RESULT_MITIGATION_LOSS_ANCHOR:
+# nella sconfitta il bersaglio della tirata scende sotto il centro di ruolo, nella
+# vittoria resta il centro. Le costanti qui sotto sono quelle del LATO VITTORIA e
+# non sono state toccate: un voto basso in una goleada inflitta arriva al massimo
+# al 6, mai oltre.
 RESULT_MITIGATION_K = 0.15
 RESULT_MITIGATION_BASE = 0.40
 RESULT_MITIGATION_CAP = 1.0
-# QUANTA PARTE dello scostamento dal 6 il risultato può cancellare, al massimo.
+# QUANTA PARTE dello scostamento dal centro il risultato può cancellare, al massimo
+# — DAL LATO VITTORIA (dal 30/08/2026 la sconfitta ha la sua, più larga).
 # Il tetto sopra è in punti di voto; questo è una quota, e serve a due cose che il
 # solo cap non copriva.
 #
@@ -1110,6 +1116,103 @@ RESULT_MITIGATION_CAP = 1.0
 # che sposta — e il benchmark lo conferma: divergenze 595 -> 596, tutto il resto
 # identico alla terza cifra.
 RESULT_MITIGATION_MAX_SHARE = 0.70
+
+# --- Il lato SCONFITTA: l'ancora scende sotto il centro (30/08/2026) ----------
+# Fino a qui il bersaglio della tirata era il centro di ruolo da entrambe le parti,
+# quindi il risultato poteva SCHIACCIARE un voto alto sul 6 ma non portarlo sotto:
+# in una goleada subita nessuno poteva prendere meno di quanto le sue statistiche
+# valevano. Adesso, nella sola sconfitta, il bersaglio è ``centro − ANCHOR``.
+#
+# PERCHE'. Lo scarto residuo del voto finale contro la Redazione, per differenza
+# reti in campo (2025-26, 9.774 presenze di movimento appaiate a entrambi i fogli,
+# escluse quelle con rosso/autogol/rigore sbagliato, dove la contabilità dei due
+# metodi diverge di suo):
+#
+#     scarto   −4     −3     −2     −1      0     +1     +2     +3
+#     bias   +0.22  +0.21  +0.09  +0.02  −0.01  −0.04  −0.07  −0.20
+#
+# Sistematico, e la mitigazione di prima non lo toccava: il suo effetto MEDIO era
+# −0.073 a un gol di scarto, −0.052 a due, −0.044 a tre, −0.042 a quattro. Cioè
+# faceva MENO proprio nelle disfatte — perché in una goleada subita solo il 17%
+# delle presenze sta sopra il centro (contro il 31% a un gol) e il meccanismo, che
+# moltiplica lo scostamento, non ha su cosa mordere. Alzare BASE/K non serviva:
+# provate tutte le combinazioni fino a quota 1.00, cambiano al massimo 29 voti su
+# 9.933 in tutta la stagione e lasciano il bias a −3 esattamente a +0.21. Il
+# tetto teorico della vecchia forma — azzerare OGNI scostamento — vale −0.06 di
+# media sulle sconfitte da 3+ gol, contro i +0.21 da chiudere. Non era una
+# taratura sbagliata, era la leva sbagliata.
+#
+# QUANTO E' MERITO E QUANTO E' LETTURA COLLETTIVA. A parità di nostro voto grezzo,
+# la Redazione applica −0.47 a tre gol di scarto e lo Statistico −0.49; il rating
+# SofaScore — giudice a eventi, riscalato alla stessa σ — applica −0.06. Cioè la
+# severità delle pagelle nella sconfitta NON è merito misurabile. Prendendone una
+# parte importiamo consapevolmente un pezzo di quel ragionamento collettivo da cui
+# il resto del modello si tiene lontano (v. l'esposizione, che addebita per zona).
+# La scelta è stata fatta sapendo questo, e per questo la parte presa è parziale.
+#
+# LE TRE COSTANTI, e il vincolo che le lega. Chiesto esplicitamente: a UN gol di
+# scarto non deve cambiare niente di sostanziale. Misurando lo scostamento da
+# ``centro − 0.35`` invece che dal centro, la severità che riproduce ESATTAMENTE
+# l'effetto medio di prima a un gol (0.1719 punti di voto) è 0.35, non 0.55 —
+# da cui BASE 0.15 + K 0.20. La media a un gol resta identica; la forma no, ed è
+# l'unico effetto collaterale vero: cambiano 250 voti su 4.183 (6,0%), 159 in giù
+# e 91 in su. Le prestazioni buone in una sconfitta di misura vengono punite MENO
+# di prima (il grezzo 7.45 di Comuzzo in un 1-2 tiene il 7.0 invece di scendere a
+# 6.5), quelle mediocri un po' di più. Sembra il verso giusto per entrambe.
+#
+# La QUOTA a 0.85 e non 0.70 è quel che rende visibile il resto: la caduta massima
+# è quota·ANCHOR per chi sta esattamente sul centro, e con 0.70 fa 0.245, che non
+# scavalca mai il bordo dell'arrotondamento — il 6.0 resterebbe 6.0 anche in un
+# 0-4. Con 0.85 il centrocampista da grezzo 6.0 arriva a 5.5 dal terzo gol, che è
+# lo scopo dichiarato della modifica. Restando SOTTO 1 nessuno viene inchiodato
+# esattamente sull'ancora, quindi l'ordine di merito dentro la squadra sconfitta
+# sopravvive: è la stessa ragione per cui la quota del lato vittoria è < 1.
+#
+# COSA PRODUCE, misurato sulla 25-26 (attuale -> nuovo): MAE 0.3482 -> 0.3425
+# contro la Redazione e 0.3583 -> 0.3514 contro lo Statistico, voti entro mezzo
+# punto 89,5% -> 90,1%, divergenze (fuori da ENTRAMBE le letture di almeno un
+# punto) 597 -> 560. Il bias residuo nelle sconfitte si chiude quasi del tutto
+# (−3: +0.21 -> +0.11, −2: +0.09 -> +0.03) e il lato vittoria resta dov'era, per
+# costruzione. Si spostano 343 voti su 9.933: 323 giù di mezzo punto e 20 su.
+# Nelle sconfitte da 3+ gol le insufficienze passano dal 73% al 90% (Redazione
+# 89%) e la dispersione DENTRO la squadra sconfitta resta 0.447 contro 0.512 loro
+# — cioè il merito individuale continua a vedersi, che era il vincolo. Tarato
+# sulle giornate dispari e verificato sulle pari (0.3397 / 0.3454 contro 0.3456 /
+# 0.3507 di prima), quindi non è sovradattamento.
+#
+# LO STESSO GIRO SULLO STRUMENTO UFFICIALE (``build_voto_benchmark``, che include
+# anche portieri ed episodi e quindi dà numeri più grossi): divergenze **658 ->
+# 619**, entro mezzo voto 89.2% -> 89.8% contro la Redazione e 88.6% -> 89.2%
+# contro lo Statistico, corr 0.66 -> 0.67 e 0.68 -> 0.69, e il picco dei nostri
+# voti esattamente sul 6 dal 42.5% al 39.7% (Redazione 36.4%) — la distribuzione
+# si allarga verso la loro. Il bias generale scivola da −0.00 a −0.02, ed è la
+# centratura di cui sopra. ATTENZIONE a confrontarsi con i numeri scritti altrove:
+# il "595 divergenze" dell'11/08 è di prima del centro di ruolo e del modello a
+# impatto, e sullo stesso codice di oggi il "prima" vale 658. Il confronto va
+# rifatto, non citato.
+#
+# IL PREZZO ACCETTATO. (1) Togliendo da un lato senza restituire dall'altro la
+# centratura scivola: medie realizzate DIF 5.912 -> 5.893, CEN 5.999 -> 5.987,
+# ATT 6.009 -> 5.996, e il listone da 5.9569 a 5.9413. Un centesimo e mezzo, che
+# si può compensare solo alzando ROLE_VOTE_CENTER (v. weights-rank-not-level) —
+# ma quello sposterebbe anche i voti dei pareggi per rimettere a posto un
+# centesimo, e non vale lo scambio. L'invariante dichiarato non è più "il voto
+# puro è centrato sul 6" senza riserve: è centrato sul 6 nei pareggi, e mezzo
+# centesimo sotto sul totale di stagione. (2) Moreo nella 22ª (due gol nel 2-6
+# dell'Inter, grezzo 6.955) torna da 6.5 a 6.0 contro il 7.5 di entrambi i fogli:
+# è il caso che aveva motivato RESULT_MITIGATION_MAX_SHARE l'11/08, e questa
+# modifica lo ripaga. Succede per qualunque ancora ≥ 0.05 perché il suo grezzo è
+# a cavallo del bordo dell'arrotondamento, quindi è il costo della direzione, non
+# della taratura.
+#
+# NUOVO INVARIANTE, da tenere: il risultato non può mai portare un voto sotto
+# ``centro_di_ruolo − ANCHOR`` (5.65 per un centrocampista, 5.56 per un difensore),
+# né sopra il centro dal lato vittoria. Sostituisce "sempre verso il 6, mai oltre",
+# che ora vale solo per le vittorie.
+RESULT_MITIGATION_LOSS_ANCHOR = 0.35
+RESULT_MITIGATION_LOSS_BASE = 0.15
+RESULT_MITIGATION_LOSS_K = 0.20
+RESULT_MITIGATION_LOSS_MAX_SHARE = 0.85
 
 # --- Red-card performance adjustment (v2 stage 3) ----------------------------
 # A sending-off is a PERFORMANCE fact the base vote must reflect, over and above
@@ -2639,38 +2742,57 @@ def _vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
                                             spread_k))
 
 
-def result_mitigation(raw_vote: float, gd_on: int,
+def result_mitigation(raw_vote: float, gd_on: int, *,
+                      centre: float = VOTE_CENTER,
+                      cap: float = RESULT_MITIGATION_CAP,
                       k: float = RESULT_MITIGATION_K,
                       base: float = RESULT_MITIGATION_BASE,
-                      cap: float = RESULT_MITIGATION_CAP,
                       max_share: float = RESULT_MITIGATION_MAX_SHARE,
-                      centre: float = VOTE_CENTER) -> float:
-    """Divergence-only nudge toward the on-pitch result (see RESULT_MITIGATION_K).
+                      anchor: float = RESULT_MITIGATION_LOSS_ANCHOR,
+                      loss_k: float = RESULT_MITIGATION_LOSS_K,
+                      loss_base: float = RESULT_MITIGATION_LOSS_BASE,
+                      loss_max_share: float = RESULT_MITIGATION_LOSS_MAX_SHARE) -> float:
+    """Divergence-only nudge toward the on-pitch result. ASIMMETRICA.
 
-    Fires only for a high vote (>6) in a net defeat (gd_on<0) — pulled DOWN — or a
-    low vote (<6) in a net win (gd_on>0) — pulled UP; an aligned vote gets neither,
-    so the nudge always moves TOWARD 6 and never inflates. The result severity is
-    ``base + k·|gd_on|``: the discrete ``base`` marks that it IS a defeat/win (fires
-    on the first goal), ``k`` weights each further goal of margin.
+    Fires only for a vote ABOVE the target in a net defeat (gd_on<0) — pulled DOWN —
+    or BELOW the centre in a net win (gd_on>0) — pulled UP. An aligned vote gets
+    neither, so the nudge never inflates and never pushes a bad game further down in
+    a win. The result severity is ``base + k·|gd_on|``: the discrete ``base`` marks
+    that it IS a defeat/win (fires on the first goal), ``k`` weights each further
+    goal of margin.
 
-    TWO limits, and they answer different questions (see RESULT_MITIGATION_MAX_SHARE):
-    ``max_share`` is the largest FRACTION of the divergence the result may erase —
-    which is also what keeps the nudge on this side of 6, whatever the margin — and
-    ``cap`` is the largest absolute drop in vote points.
+    I DUE LATI HANNO BERSAGLI DIVERSI, ed è deliberato (30/08/2026, v. il blocco
+    RESULT_MITIGATION_LOSS_ANCHOR per la misura che lo giustifica):
+
+      * sconfitta — il bersaglio è ``centre - anchor``, quindi una goleada subita
+        può portare un voto SOTTO il centro di ruolo, fino a 5.65 per un
+        centrocampista. È il motivo per cui esiste questa asimmetria: le pagelle
+        esterne in una disfatta mandano la squadra all'insufficienza, e fermarsi
+        al 6 lasciava un bias sistematico di +0.21 a tre gol di scarto;
+      * vittoria — il bersaglio resta il centro, con le costanti di sempre: un
+        voto basso in una goleada inflitta arriva al 6 e non un centesimo oltre.
+
+    TRE limiti, e rispondono a domande diverse: ``max_share`` / ``loss_max_share``
+    sono la FRAZIONE massima della divergenza che il risultato può cancellare — ed è
+    quel che tiene il voto da questa parte del bersaglio, qualunque sia lo scarto —
+    mentre ``cap`` è la caduta massima in punti di voto.
 
     ``centre`` e' il voto ORDINARIO del ruolo, non il 6 fisso: dal 25/08/2026 un
     difensore e' costruito attorno a 5.905 (ROLE_VOTE_CENTER), e misurare la sua
     divergenza dal 6 lo avrebbe fatto passare per «voto basso» anche quando era
     esattamente nella media del suo ruolo — spinto su in ogni vittoria, cioe' un
     offset che si mangiava da solo (misurato: +0.015 sulla media realizzata).
+    L'ancora della sconfitta si misura da lì, non dal 6, per la stessa ragione.
     """
-    over = max(0.0, raw_vote - centre)   # only a high vote is tempered in a loss
-    under = max(0.0, centre - raw_vote)  # only a low vote is lifted in a win
     if gd_on == 0:
         return 0.0
-    severity = min(max_share, base + k * abs(gd_on))
     if gd_on < 0:
+        # only a vote above the (lowered) target is tempered in a defeat
+        over = max(0.0, raw_vote - (centre - anchor))
+        severity = min(loss_max_share, loss_base + loss_k * abs(gd_on))
         return max(-cap, -over * severity)
+    under = max(0.0, centre - raw_vote)  # only a low vote is lifted in a win
+    severity = min(max_share, base + k * gd_on)
     return min(cap, under * severity)
 
 
