@@ -453,8 +453,8 @@ def _check_unrostered(health: Health, now) -> None:
     finestra = _human(UNROSTERED_WINDOW)
     if in_campo:
         health.add("warn", "player:unrostered",
-                   f"{len(in_campo)} giocatori hanno messo piede in campo nelle "
-                   f"ultime {finestra} senza risultare in NESSUNA rosa "
+                   f"{len(in_campo)} giocatori hanno messo piede in campo negli "
+                   f"ultimi {finestra} senza risultare in NESSUNA rosa "
                    f"(+{panchina} rimasti in panchina). O sono esordienti dalle "
                    f"giovanili che l'import rose non ha ancora preso, o sono la "
                    f"meta' che gioca di qualcuno che nel listone c'e' gia' — e in "
@@ -463,7 +463,7 @@ def _check_unrostered(health: Health, now) -> None:
                    players=[u.describe() for u in in_campo[:10]])
         return
     health.add("info", "player:unrostered",
-               f"{panchina} giocatori in distinta nelle ultime {finestra} senza "
+               f"{panchina} giocatori in distinta negli ultimi {finestra} senza "
                f"risultare in nessuna rosa, nessuno dei quali e' entrato: la forma "
                f"normale delle chiamate dalle giovanili. Nessuno di loro prende "
                f"voto.",
