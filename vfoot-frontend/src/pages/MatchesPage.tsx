@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { getLeagueFixtures } from '../api';
@@ -6,6 +6,7 @@ import { useLeagueContext } from '../league/LeagueContext';
 import { useCompetitionContext, useCompetitionFromQuery } from '../league/CompetitionContext';
 import { competitionFormatLabel } from '../league/competitionFormat';
 import { Badge, Card, SectionTitle } from '../components/ui';
+import { useResetOnChange, useUrlParam } from '../utils/useUrlParam';
 import Crest from '../components/Crest';
 import type {
   CompetitionBlocker,
@@ -66,10 +67,20 @@ export default function MatchesPage() {
   const [fixtures, setFixtures] = useState<LeagueFixtureItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [entryKey, setEntryKey] = useState<string | null>(null);
+  // IL TURNO STA NELL'INDIRIZZO (`?turno=3`), non qui dentro: si guarda un turno
+  // passato, si apre una partita, si torna indietro — e con lo stato dentro il
+  // componente si ripartiva ogni volta dal turno in corso (v. useUrlParam).
+  const [turno, setTurno] = useUrlParam('turno');
+  // Cambiare competizione lo dimentica: è il conto interno di un'altra. Non al
+  // montaggio, però, o cancellerebbe il turno appena ripescato dall'indirizzo.
+  useResetOnChange(
+    selectedLeagueId && selectedCompetitionId
+      ? `${selectedLeagueId}:${selectedCompetitionId}`
+      : null,
+    useCallback(() => setTurno(null), [setTurno]),
+  );
 
   useEffect(() => {
-    setEntryKey(null);
     if (!selectedLeagueId || !selectedCompetitionId) {
       setFixtures([]);
       return;
@@ -188,7 +199,21 @@ export default function MatchesPage() {
     return next?.key ?? entries[entries.length - 1]?.key ?? null;
   }, [entries, fixtures]);
 
-  const activeKey = entryKey ?? defaultEntry;
+  /** Il turno chiesto dall'indirizzo. Si nomina col NUMERO e non con la chiave
+   *  interna (`r3`, `p5`) perché l'indirizzo lo legge anche una persona, e perché
+   *  una fase non sorteggiata copre più turni: chiedendo uno dei suoi si apre
+   *  lei. Un numero che questa competizione non ha vale come se non ci fosse. */
+  const wantedKey = useMemo(() => {
+    const n = turno != null ? Number(turno) : null;
+    if (n == null || !Number.isFinite(n)) return null;
+    return (
+      entries.find((e) =>
+        e.kind === 'round' ? e.roundNo === n : e.rows.some((r) => r.round_no === n),
+      )?.key ?? null
+    );
+  }, [entries, turno]);
+
+  const activeKey = wantedKey ?? defaultEntry;
   const active = entries.find((e) => e.key === activeKey) ?? null;
   const shown = useMemo(
     () => (active?.kind === 'round' ? fixtures.filter((f) => f.round_no === active.roundNo) : []),
@@ -240,7 +265,7 @@ export default function MatchesPage() {
           {entries.map((e) => (
             <button
               key={e.key}
-              onClick={() => setEntryKey(e.key)}
+              onClick={() => setTurno(e.kind === 'round' ? e.roundNo : e.rows[0].round_no)}
               className={clsx(
                 'rounded-lg px-2.5 py-1 text-xs font-semibold',
                 e.key === activeKey

@@ -93,18 +93,24 @@ export default function LeagueMatchDetailPage() {
     return <Card className="p-4 text-sm text-bad">Errore nel caricamento della partita: {error?.message ?? 'sconosciuto'}</Card>;
   }
   if (!data) return null;
+  // Si torna AL TURNO DA CUI SI È ARRIVATI, non a quello in corso: lo dice il
+  // referto, quindi vale anche per un indirizzo aperto da un segnalibro. La
+  // competizione non serve nell'indirizzo — questa pagina ha già riallineato il
+  // guscio qui sopra (v. useUrlParam).
+  const round = data.fantasy_round;
+  const backTo = Number.isFinite(round) ? `/matches?turno=${round}` : '/matches';
   // Classic leagues carry mode:'classic' in the payload -> fantavoto detail (no zone
   // duel). Aura leagues fall through to the zone-duel MatchDetail.
   if (classicData) {
     return (
       <ClassicMatchDetail
         fixture={classicData}
-        backTo="/matches"
+        backTo={backTo}
         myUserId={user?.id ?? null}
         loadLedger={loadLedger}
         projection={{ on: projection, busy: loading, onChange: setProjection }}
       />
     );
   }
-  return <MatchDetail fixture={data as SimFixtureDetail} backTo="/matches" />;
+  return <MatchDetail fixture={data as SimFixtureDetail} backTo={backTo} />;
 }

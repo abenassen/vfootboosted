@@ -6,6 +6,7 @@ import { useChampionship } from '../league/ChampionshipContext';
 import ChampionshipPicker from '../components/ChampionshipPicker';
 import { useLiveSocket } from '../hooks/useNudgeSocket';
 import { Badge, Card, SectionTitle } from '../components/ui';
+import { useResetOnChange, useUrlParam } from '../utils/useUrlParam';
 import ProbableLineups from '../components/match/ProbableLineups';
 import type { RealFixtureItem, RealFixturesResponse } from '../types/realChampionship';
 
@@ -19,7 +20,10 @@ export default function RealChampionshipPage() {
   const [data, setData] = useState<RealFixturesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [matchday, setMatchday] = useState<number | null>(null);
+  // LA GIORNATA STA NELL'INDIRIZZO (`?giornata=2`), non qui dentro: chi sta
+  // sfogliando una giornata passata ne apre più di una partita, e tornare
+  // indietro dal tabellino rimonta questa pagina da zero (v. useUrlParam).
+  const [giornata, setGiornata] = useUrlParam('giornata');
   // Bumped by the socket; the only reason this page ever re-fetches on its own.
   const [tick, setTick] = useState(0);
 
@@ -33,9 +37,7 @@ export default function RealChampionshipPage() {
   // likely to be reading another round. Hence two effects rather than one.
   // (`scope` regge come dipendenza perché il contesto lo memoizza: cambia
   // identità solo quando cambia davvero la lega o la stagione guardata.)
-  useEffect(() => {
-    setMatchday(null);
-  }, [scope]);
+  useResetOnChange(scope, useCallback(() => setGiornata(null), [setGiornata]));
 
   useEffect(() => {
     if (!scope) {
@@ -63,7 +65,14 @@ export default function RealChampionshipPage() {
     () => (data?.matchdays ?? []).map((g) => g.matchday).filter((m): m is number => m != null),
     [data],
   );
-  const active = matchday ?? data?.current_matchday ?? matchdays[0] ?? null;
+  // Una giornata che questo calendario non ha — un indirizzo copiato da un'altra
+  // stagione, o scritto a mano — non svuota la pagina: vale come se non ci fosse.
+  const chiesta = giornata != null ? Number(giornata) : null;
+  const active =
+    (chiesta != null && matchdays.includes(chiesta) ? chiesta : null) ??
+    data?.current_matchday ??
+    matchdays[0] ??
+    null;
   const group = useMemo(
     () => data?.matchdays.find((g) => g.matchday === active) ?? null,
     [data, active],
@@ -104,7 +113,7 @@ export default function RealChampionshipPage() {
           {matchdays.map((m) => (
             <button
               key={m}
-              onClick={() => setMatchday(m)}
+              onClick={() => setGiornata(m)}
               className={
                 m === active
                   ? 'rounded-lg bg-ink px-2.5 py-1 text-xs font-semibold text-paper'

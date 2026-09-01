@@ -66,7 +66,11 @@ export default function RealMatchDetailPage() {
   return (
     <ClassicMatchDetail
       fixture={data}
-      backTo="/serie-a"
+      // Si torna ALLA GIORNATA DA CUI SI È ARRIVATI, non a quella corrente: la
+      // legge il referto invece di farsela passare, così vale anche per un
+      // indirizzo aperto da un segnalibro. Stessa cosa che fa il tasto
+      // «indietro» del browser, e per la stessa ragione (v. useUrlParam).
+      backTo={md != null ? `/serie-a?giornata=${md}` : '/serie-a'}
       backLabel="← Serie A"
       variant="real"
       loadLedger={loadLedger}
