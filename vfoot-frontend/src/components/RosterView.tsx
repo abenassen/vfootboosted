@@ -65,12 +65,24 @@ export default function RosterView({ data }: { data: TeamLineupContext }) {
             <Stat label="Speso" value={budget.spent} tone="rose" />
             <Stat label="Residuo" value={budget.remaining} tone="emerald" />
           </div>
-          {budget.granted || budget.trade_cash ? (
+          {budget.granted || budget.trade_cash > 0 ? (
             <div className="mt-1 text-[11px] text-ink-faint">
               Compresi{' '}
               {budget.granted ? <><b className="text-ink-soft">{price(budget.granted)}</b> dati dall’admin</> : null}
-              {budget.granted && budget.trade_cash ? ' e ' : null}
-              {budget.trade_cash ? <><b className="text-ink-soft">{price(budget.trade_cash)}</b> di conguagli da scambi</> : null}.
+              {budget.granted && budget.trade_cash > 0 ? ' e ' : null}
+              {budget.trade_cash > 0 ? <><b className="text-ink-soft">{price(budget.trade_cash)}</b> incassati negli scambi</> : null}.
+            </div>
+          ) : null}
+          {/* I conguagli in uscita non sono «compresi» in niente: sono usciti, e
+              il budget qui sopra è più piccolo di quello di partenza. Chi ha dato
+              via un contratto caro per uno da poco vede questa riga, ed è la
+              ragione per cui il suo residuo NON si è alzato — che è la cosa che
+              altrimenti verrebbe chiesta. */}
+          {budget.trade_cash < 0 ? (
+            <div className="mt-1 text-[11px] text-ink-faint">
+              <b className="text-ink-soft">{price(-budget.trade_cash)}</b> girati negli scambi per
+              pareggiare i contratti: è il motivo per cui il residuo non si è mosso quando hai
+              ceduto un giocatore pagato più di quello che hai ricevuto.
             </div>
           ) : null}
           {/* I tre numeri in alto non tornano da soli quando un contratto si e'

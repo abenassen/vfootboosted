@@ -1427,8 +1427,13 @@ export default function LeagueAdminPage() {
                     <div className="mt-2 text-sm text-ink-soft">Team: <span className="font-semibold">{selectedTeamName || '-'}</span></div>
                     {roster?.budget ? (
                       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border bg-surface-2 px-3 py-2 text-[11px]">
+                        {/* La dote di partenza COMPRESO quel che e' arrivato dopo
+                            (admin, conguagli di scambio): e' lo stesso conto della
+                            pagina Rose, e senza i suoi due addendi «speso 961 di
+                            1000» accanto a «residuo 89» non torna. */}
                         <span>
-                          speso <b className="text-ink">{price(roster.budget.spent)}</b> di {price(roster.budget.initial)}
+                          speso <b className="text-ink">{price(roster.budget.spent)}</b> di{' '}
+                          {price(roster.budget.initial + roster.budget.granted + roster.budget.trade_cash)}
                         </span>
                         <span>
                           residuo{' '}

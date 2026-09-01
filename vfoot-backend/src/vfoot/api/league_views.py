@@ -1774,7 +1774,11 @@ class LeagueTradeCheckView(APIView):
             d.get("cash_amount", 0), d.get("cash_from", "a"))
         return Response({"ok": check.ok, "reason": check.reason,
                          "remaining_a": check.remaining_a,
-                         "remaining_b": check.remaining_b})
+                         "remaining_b": check.remaining_b,
+                         # Quanti crediti passano da una parte all'altra per
+                         # pareggiare i contratti: l'admin non lo decide, ma
+                         # deve poterlo vedere prima di premere.
+                         "settlement": check.settlement})
 
 
 class LeagueRosterBulkAssignView(APIView):

@@ -5,6 +5,10 @@ Il punto dello scambio non e' che le rose cambino — quello lo fanno gia' vendi
 e acquisto separati — ma che il PREZZO viaggi col giocatore: comprato a 50, arriva
 a 50, e quel 50 e' la cifra su cui si calcolera' il recupero il giorno che verra'
 svincolato. Qui sotto si controlla proprio quello, oltre ai conti.
+
+E il conto principale e' che i RESIDUI NON SI MUOVONO: due giocatori scambiati si
+equivalgono per definizione, quindi la differenza fra i loro contratti si pareggia
+in crediti dentro lo scambio invece di comparire in cassa a chi cede il piu' caro.
 """
 from __future__ import annotations
 
@@ -132,9 +136,52 @@ class TradeTests(MarketBase):
         vecchio = FantasyRosterSlot.objects.get(
             team=self.t2, player=self.yildiz, released_at__isnull=False)
         self.assertEqual(vecchio.sale_price, 50)
-        # 1000 - 50 (Yildiz) diventa 1000 - 20 (Pellegrini): +30 in cassa.
-        self.assertEqual(self._remaining(self.t2), 1000 - 20)
-        self.assertEqual(self._remaining(self.t3), 1000 - 50)
+
+    def test_uno_scambio_non_muove_i_residui(self):
+        """Il conto che questa lega vuole: Yildiz (50) per Pellegrini (20) non
+        mette trenta crediti in mano a chi cede il piu' caro.
+
+        Sui soli contratti li metterebbe — 1000-50 diventa 1000-20 — e sono
+        crediti spesi mesi prima. Il pareggio li fa passare all'altro, che
+        altrimenti si troverebbe trenta crediti in meno senza aver comprato
+        niente: due residui fermi, e in mezzo alla lega non nasce ne' si brucia
+        un credito."""
+        prima = (self._remaining(self.t2), self._remaining(self.t3))
+        econ.apply_trade(self.league, self.t2, self.t3,
+                         [self.yildiz.id], [self.pellegrini.id], actor=self.admin)
+        self.assertEqual((self._remaining(self.t2), self._remaining(self.t3)), prima)
+        # Il pareggio e' scritto, non implicito: due righe che si annullano.
+        righe = BudgetGrant.objects.filter(trade__isnull=False)
+        self.assertEqual(sorted(g.amount for g in righe), [-30, 30])
+        self.assertEqual(sum(g.amount for g in righe), 0)
+
+    def test_il_pareggio_lo_versa_chi_cede_il_piu_caro(self):
+        """Trenta crediti da t2 (cede 50, riceve 20) a t3, e si vedono nel
+        portafoglio: il budget di t2 si e' rimpicciolito di quel tanto."""
+        econ.apply_trade(self.league, self.t2, self.t3,
+                         [self.yildiz.id], [self.pellegrini.id], actor=self.admin)
+        self.assertEqual(team_budgets(self.league)[self.t2.id].trade_cash, -30)
+        self.assertEqual(team_budgets(self.league)[self.t3.id].trade_cash, 30)
+
+    def test_alla_pari_non_si_pareggia_niente(self):
+        """Stesso prezzo, nessuna riga: il pareggio esiste solo dove c'e' una
+        differenza da coprire."""
+        mio = self._player("Mio CEN", "CEN")
+        suo = self._player("Suo CEN", "CEN")
+        self._own(self.t2, mio, 12)
+        self._own(self.t3, suo, 12)
+        econ.apply_trade(self.league, self.t2, self.t3, [mio.id], [suo.id],
+                         actor=self.admin)
+        self.assertEqual(BudgetGrant.objects.count(), 0)
+
+    def test_il_pareggio_non_e_una_notizia_di_bacheca(self):
+        """Non cambia i rapporti di forza — li tiene fermi — e in bacheca
+        sarebbe una dote dell'admin che l'admin non ha dato."""
+        econ.apply_trade(self.league, self.t2, self.t3,
+                         [self.yildiz.id], [self.pellegrini.id], actor=self.admin)
+        body = self._as(self.u2).get(
+            f"/api/v1/leagues/{self.league.id}/activity?limit=30").json()
+        self.assertEqual([i for i in body if i["kind"] == "concessione"], [])
 
     def test_il_recupero_futuro_e_quello_del_prezzo_ereditato(self):
         """La ragione per cui il prezzo viaggia: svincolandolo dopo, chi lo ha
@@ -146,13 +193,16 @@ class TradeTests(MarketBase):
         self.assertEqual(me.recovery_for(s, slot.purchase_price), 25)
 
     def test_la_contropartita_sposta_i_crediti(self):
+        """L'unica cosa che muove i residui, ed e' quella che i due si sono
+        detta: il pareggio dei contratti gira sotto e non si vede."""
         econ.apply_trade(self.league, self.t2, self.t3,
                          [self.yildiz.id], [self.pellegrini.id],
                          cash_amount=10, cash_from="b", actor=self.admin)
-        # t3 paga 10 a t2, sopra la differenza di prezzo.
-        self.assertEqual(self._remaining(self.t2), 1000 - 20 + 10)
-        self.assertEqual(self._remaining(self.t3), 1000 - 50 - 10)
-        self.assertEqual(BudgetGrant.objects.filter(trade__isnull=False).count(), 2)
+        # I residui di prima (t2 ha speso 50, t3 20), piu' e meno i dieci.
+        self.assertEqual(self._remaining(self.t2), 1000 - 50 + 10)
+        self.assertEqual(self._remaining(self.t3), 1000 - 20 - 10)
+        # Due righe per il pareggio e due per la contropartita.
+        self.assertEqual(BudgetGrant.objects.filter(trade__isnull=False).count(), 4)
 
     def test_la_contropartita_non_porta_sotto_zero(self):
         speso = self._player("Speso", "ATT", fieldable=False)
@@ -247,7 +297,8 @@ class TradeTests(MarketBase):
              "cash_amount": 10, "cash_from": "b", "note": "Accordo di gennaio"},
             format="json")
         self.assertEqual(r.status_code, 201, r.content)
-        self.assertEqual(r.json()["remaining_a"], 1000 - 20 + 10)
+        # Il residuo di prima (t2 aveva speso 50) piu' la contropartita.
+        self.assertEqual(r.json()["remaining_a"], 1000 - 50 + 10)
         self.assertEqual(PlayerTrade.objects.get().note, "Accordo di gennaio")
 
     def test_l_anteprima_non_scrive_niente(self):
@@ -258,7 +309,9 @@ class TradeTests(MarketBase):
             format="json")
         self.assertEqual(r.status_code, 200, r.content)
         self.assertTrue(r.json()["ok"])
-        self.assertEqual(r.json()["remaining_a"], 1000 - 20)
+        self.assertEqual(r.json()["remaining_a"], 1000 - 50)
+        # Il pareggio viaggia con l'anteprima: 50 escono, 20 entrano.
+        self.assertEqual(r.json()["settlement"], 30)
         self.assertFalse(PlayerTrade.objects.exists())
 
     def test_un_manager_non_puo_registrarlo(self):
