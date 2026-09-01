@@ -108,6 +108,36 @@ log = logging.getLogger(__name__)
 # has high xg_shots, low xg_on_target), so weighting it double-penalised the same
 # shot. Its sibling big_chance_created is NOT the same statistic and is weighted
 # below: that earlier removal conflated the two faces of one event.
+# --- GLI EVENTI RARI SI TARANO IN PUNTI DI VOTO, E LA SIGMA LI SPOSTA ------------
+# I pesi degli eventi rari (qui sotto e ``clearances_off_line``) non sono tarati
+# "per 1 sd" come tutti gli altri: sono tarati su QUANTO VALE UNA OCCORRENZA,
+# perche' per un evento che capita nell'1% delle presenze la sd e' un decimo di
+# occorrenza e il numero per sd non si legge (v. il commento lungo piu' sotto).
+#
+# Ma il peso vive nell'INDICE, e il voto divide l'indice per la sigma del ruolo.
+# Quindi il valore in voti di un evento raro cambia da solo ogni volta che una
+# ritaratura muove quella sigma, senza che nessuno abbia toccato il peso — ed e'
+# successo il 01/09/2026: la ritaratura del voto ha portato la sigma dei ruoli di
+# movimento da 0.4273 a 0.2811 e ha gonfiato OGNI evento raro di **x1.52**.
+#
+#   evento                          prima     dopo    corretto
+#   salvataggio sulla linea        +0.355   +0.539      +0.300
+#   rigore conquistato             +0.510   +0.776      +0.510
+#   rigore concesso                -0.850   -1.292      -0.850
+#   errore che porta a un gol      -0.596   -0.906      -0.596
+#   errore che concede un tiro     -0.170   -0.259      -0.170
+#
+# Il metro per giudicarli: un GOL vale fra +0.34 e +0.79 (v. goal_impact). Un
+# rigore concesso a -1.29 costava piu' di quanto renda qualunque gol, e un pallone
+# tolto dalla linea valeva quanto segnare il gol decisivo. Il salvataggio non
+# torna al valore di prima ma alla PROVA ESTERNA gia' citata piu' sotto (+0.30 su
+# 63 presenze): e' il caso che ha fatto scoprire tutto, segnalato su Dybala.
+#
+# I numeri sono stati risolti DOPO il taglio del possesso e DOPO la ricalibrazione,
+# in due giri, perche' anche quel taglio muove la sigma: l'ordine e' tagliare,
+# ricalibrare, poi risolvere questi. E c'e' un test che li tiene fermi
+# (tests_rare_events.py): se una ritaratura futura li rigonfia, se ne accorge lui.
+# --------------------------------------------------------------------------------
 TOTAL_WEIGHTS = {
     # xA: la creazione, accreditata a CHI FA IL PASSAGGIO.
     # 0.11 -> 0.07 il 01/09/2026, insieme all'azzeramento di ``key_passes`` qui
@@ -281,14 +311,24 @@ TOTAL_WEIGHTS = {
     "shots_on_target": 0.01557,
     "shots": 0.0176,              # shot ACTIVITY still rewarded, not penalised
     "shots_off": 0.00617,          # even an off-target attempt: small credit for shooting
-    "errors_led_to_goal": -0.0354,   # decisive error (heavy)
+    "errors_led_to_goal": -0.02124,  # una occorrenza: -0.91 -> -0.60 (era -0.0354)
     # Conceding a penalty hands over roughly 0.78 expected goals through a clear
     # individual foul, and — unlike a missed penalty — carries NO fantacalcio
     # malus, so the base vote is the only place it can register at all.
-    "penalties_conceded": -0.0505,
+    # UNA FRAZIONE DI GOL, non un gol. Concedere un rigore non e' subire una rete:
+    # nella 25-26 sono 106 rigori e 81 segnati, cioe' **76,4%** di conversione (e
+    # 0.788 di xG medio, che e' la stessa cosa detta dal fornitore). Il costo giusto
+    # e' quindi 0.764 volte quello di CAUSARE un gol, che il modello gia' quota:
+    # ``errors_led_to_goal``, -0.596 per occorrenza. Da cui -0.455.
+    #
+    # Prima stava a -0.850, cioe' PIU' di un errore che porta al gol davvero — un
+    # rigore concesso costava piu' del gol che non sempre ne segue. Verificato che
+    # non c'e' doppio addebito: sulle 105 presenze con un rigore concesso, UNA sola
+    # e' anche marcata come errore che porta a un gol.
+    "penalties_conceded": -0.01618,  # una occorrenza: -0.455
     # Winning one is the mirror image and equally unrewarded: the bonus goes to
     # whoever converts, never to the player who earned it.
-    "penalties_won": 0.0244,
+    "penalties_won": 0.01463,  # una occorrenza: +0.78 -> +0.51 (era 0.0244)
     # Interventions in a dangerous position. Kept as impact totals, not per-90:
     # their value does not scale with how long you played.
     #
@@ -342,10 +382,10 @@ TOTAL_WEIGHTS = {
     # in the per-feature table with its value, and its zero is a DECISION anyone can
     # see and revisit — deleting the key would hide the question instead of answering
     # it.
-    "clearances_off_line": 0.0175,
+    "clearances_off_line": 0.00888,  # una occorrenza: +0.54 -> +0.30 (era 0.0175)
     "last_man_tackle": 0.0,
     # An error that let the opponent SHOOT, without a goal following.
-    "errors_led_to_shot": -0.0189,
+    "errors_led_to_shot": -0.01131,  # una occorrenza: -0.26 -> -0.17 (era -0.0189)
     "shots_blocked": 0.00877,      # the defence intervened (x0.7 col blocco volume)
     # PROVIDER PROXY, and the only one in the model — read the note below before
     # touching it.
@@ -508,6 +548,34 @@ PER90_WEIGHTS = {
     "duels_lost": -0.0631,          # the losing side of the contests we reward
     "dribbled_past": -0.0341,       # subset of duels_lost: beaten one-on-one is worse
                                     # ...ma SOLO per un difensore: v. ROLE_WEIGHTS
+    # IL BLOCCO DEL POSSESSO, x0.50 il 01/09/2026 — questo peso, ``passes_completed``
+    # e ``touches``. Sono TRE MODI DI CONTARE LA STESSA COSA: r(palloni giocati,
+    # passaggi riusciti) = 0.92, r(palloni giocati, passaggi in meta' campo
+    # avversaria) = 0.76, e la prima componente principale del blocco spiega il
+    # 48.9% della sua varianza — contro il 34.3% del blocco dei duelli, che proprio
+    # per quella cifra avevamo giudicato NON essere una cosa sola.
+    #
+    # E lo pagavamo come tre. Coefficiente per 1 sd in punti di voto, controllato
+    # per le altre venti voci del modello (5.775 presenze >=60' senza gol ne'
+    # assist, 25-26): il blocco intero valeva +0.283 per noi contro +0.039 della
+    # Redazione, +0.063 dello Statistico e +0.197 di SofaScore. Sette volte una
+    # pagella, quattro e mezzo l'altra.
+    #
+    # Misurato lo sweep sulla scala del trio: la Redazione sale monotona
+    # (0.6922 -> 0.7016 a 0.50 -> 0.7055 a 0.20), lo Statistico pure
+    # (0.7064 -> 0.7137 -> 0.7174), l'errore medio cala (0.3674 -> 0.3640 ->
+    # 0.3593), e SofaScore cala piano (0.7811 -> 0.7762 -> 0.7726). x0.50 e' il
+    # punto in cui il blocco resta FRA le pagelle e SofaScore invece di scavalcare
+    # SofaScore verso il basso: si toglie il doppio conteggio, non il possesso.
+    #
+    # ``long_balls_completed``, ``crosses_completed`` e ``touches_in_box`` NON sono
+    # nel taglio: le loro correlazioni col trio stanno fra -0.17 e +0.46, sono
+    # un'altra cosa, e su una di quelle (i lanci lunghi) siamo gia' sotto SofaScore.
+    #
+    # IL CASO: Dybala in Lecce-Roma prendeva 8.0 — sopra Malen e Soule' che avevano
+    # segnato — con +0.53 di possesso, di cui +0.35 per aver toccato la palla 47
+    # volte nella meta' campo avversaria in una partita vinta 4-0 dalla sua squadra.
+    # Cioe' il merito di stare nella squadra che aveva il pallone. Ora 7.5.
     "passes_opp_half": 0.0548,      # progression: a pass in the opponent half is worth more
     # APPUNTO APERTO (29/08/2026), rimandato di proposito. ``duels_lost`` CONTIENE
     # i duelli aerei persi: verificato su 10.950 presenze della 25-26 con zero
