@@ -12,9 +12,24 @@ registra — v. la formula in ``auction_engine``.
 
 **Scambio** (``PlayerTrade``): i contratti VIAGGIANO. Il giocatore comprato a 50
 arriva alla nuova squadra *a 50*, non a una cifra nuova: il contratto si chiude a
-incasso pieno di qua (nessun buco) e se ne riapre uno identico di la'. Cosi' il
-budget si sposta esattamente del prezzo, e un eventuale svincolo futuro restituisce
-il recupero giusto — la plusvalenza resta di chi l'ha costruita.
+incasso pieno di qua (nessun buco) e se ne riapre uno identico di la'. Cosi' un
+eventuale svincolo futuro restituisce il recupero giusto — la plusvalenza resta di
+chi l'ha costruita.
+
+E IL RESIDUO NON SI MUOVE. Uno scambio e' un accordo alla pari: i due allenatori
+hanno deciso che quei giocatori si equivalgono, non che uno vale piu' crediti
+dell'altro. Se il residuo si contasse sui soli contratti, chi cede il piu' caro si
+ritroverebbe in cassa crediti spesi mesi prima — Okoye a 20 che torna dentro come
+Provedel a 3 sono diciassette crediti comparsi dal niente — e chi lo riceve ne
+perderebbe altrettanti senza aver comprato nulla. Percio' la differenza fra i due
+pacchetti di contratti si PAREGGIA in crediti dentro lo stesso scambio, in
+silenzio: chi cede piu' valore di quanto ne riceve versa la differenza all'altro,
+e i due residui restano quelli di prima. Quel che cambia davvero, ed e' l'unica
+cosa che deve cambiare, e' quanto ciascuno potra' recuperare il giorno che lo
+svincolera': 3 invece di 20.
+
+L'unico numero che sposta i residui e' allora la CONTROPARTITA, che i due si sono
+detti e l'admin trascrive.
 
 In classic i ruoli comandano: si scambia **a coppie di pari ruolo** (un
 centrocampista per un centrocampista, anche piu' coppie insieme). E' la stessa
@@ -145,6 +160,9 @@ class TradeCheck:
     # Quanto resta alle due squadre a scambio fatto.
     remaining_a: int = 0
     remaining_b: int = 0
+    # Il pareggio dei contratti, in crediti: positivo se li versa A, negativo se
+    # li versa B. E' cio' che tiene fermi i due residui qui sopra.
+    settlement: int = 0
 
 
 def _slots(team: FantasyTeam, player_ids: list[int]) -> dict[int, FantasyRosterSlot]:
@@ -248,23 +266,32 @@ def check_trade(
     cash_a = -cash_amount if cash_from == "a" else cash_amount
     cash_b = -cash_a
 
+    # Quanto vale in piu' il pacchetto che parte da A: sono i crediti che A versa
+    # a B perche' nessuno dei due residui si muova (v. l'intestazione del modulo).
+    # In aura non ci sono crediti e non c'e' niente da pareggiare.
+    settlement = (out_a - out_b) if _is_classic(league) else 0
+
     remaining_a = remaining_b = 0
     if _is_classic(league):
         budgets = team_budgets(league)
-        remaining_a = budgets[team_a.id].remaining + out_a - out_b + cash_a
-        remaining_b = budgets[team_b.id].remaining + out_b - out_a + cash_b
+        # Niente `out_a - out_b`: quella differenza la cancella il pareggio, e
+        # l'unica cosa che resta a muovere i residui e' la contropartita. Contarla
+        # anche qui era il modo in cui uno scambio alla pari finiva per liberare
+        # crediti spesi mesi prima.
+        remaining_a = budgets[team_a.id].remaining + cash_a
+        remaining_b = budgets[team_b.id].remaining + cash_b
         short = [t.name for t, r in ((team_a, remaining_a), (team_b, remaining_b)) if r < 0]
         if short:
             return TradeCheck(
                 False,
-                f"{', '.join(short)} non ha i crediti per questo scambio "
-                "(contano la differenza fra i prezzi e la contropartita).")
+                f"{', '.join(short)} non ha i crediti per questa contropartita.")
     elif cash_amount:
         return TradeCheck(
             False, "In modalita' aura non ci sono crediti da scambiare.")
 
     return TradeCheck(True, pairs_a=pairs_a, pairs_b=pairs_b,
-                      remaining_a=remaining_a, remaining_b=remaining_b)
+                      remaining_a=remaining_a, remaining_b=remaining_b,
+                      settlement=settlement)
 
 
 def _role_mismatch(count_a: dict[str, int], count_b: dict[str, int]) -> str:
@@ -316,12 +343,32 @@ def apply_trade(
             "a": _payload_side(slots_a, roles),
             "b": _payload_side(slots_b, roles),
             "cash": {"amount": int(cash_amount), "from": cash_from} if cash_amount else None,
+            # Il pareggio: nessuno l'ha pattuito, ma senza scriverlo qui una
+            # riga di crediti dello scambio resterebbe senza spiegazione.
+            "settlement": ({"amount": abs(check.settlement),
+                            "from": "a" if check.settlement > 0 else "b"}
+                           if check.settlement else None),
             "team_a_name": team_a.name, "team_b_name": team_b.name,
         },
     )
 
     _move(slots_a, team_b, now, trade)
     _move(slots_b, team_a, now, trade)
+
+    # PRIMA la differenza fra i contratti, poi quello che i due si sono detti: il
+    # pareggio riporta i residui dov'erano, e la contropartita si controlla — e si
+    # legge — su quelli. Righe di ``BudgetGrant`` legate allo scambio come la
+    # contropartita, perche' il saldo di un allenatore resta una somma di righe e
+    # non c'e' un secondo posto da cui leggere i suoi crediti.
+    if check.settlement:
+        n = abs(check.settlement)
+        payer, payee = ((team_a, team_b) if check.settlement > 0 else (team_b, team_a))
+        grant_credits(league, [payer], -n,
+                      f"Pareggio contratti nello scambio con {payee.name}",
+                      actor=actor, now=now, trade=trade)
+        grant_credits(league, [payee], n,
+                      f"Pareggio contratti nello scambio con {payer.name}",
+                      actor=actor, now=now, trade=trade)
 
     if cash_amount:
         payer, payee = (team_a, team_b) if cash_from == "a" else (team_b, team_a)

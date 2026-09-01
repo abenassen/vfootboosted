@@ -1066,6 +1066,9 @@ export interface TradeRow {
   a: TradeSidePlayer[];
   b: TradeSidePlayer[];
   cash: { amount: number; from: 'a' | 'b' } | null;
+  /** Il pareggio dei contratti: i crediti passati da una parte all'altra perche'
+   *  i due residui non si muovessero. Non lo decide nessuno — lo fa lo scambio. */
+  settlement?: { amount: number; from: 'a' | 'b' } | null;
 }
 
 export interface TradeRequest {
@@ -1109,7 +1112,11 @@ export async function getTrades(leagueId: number): Promise<{ trades: TradeRow[] 
  *  si compone, invece che dopo aver premuto. */
 export async function checkTrade(
   leagueId: number, body: TradeRequest,
-): Promise<{ ok: boolean; reason: string; remaining_a: number; remaining_b: number }> {
+): Promise<{
+  ok: boolean; reason: string; remaining_a: number; remaining_b: number;
+  /** Crediti che passano da A a B per pareggiare i contratti (negativo: da B ad A). */
+  settlement: number;
+}> {
   return auctionPost(`/leagues/${leagueId}/trades/check`, body as unknown as Record<string, unknown>);
 }
 

@@ -39,6 +39,11 @@ export default function LeagueEconomyPanel({
   const [trades, setTrades] = useState<TradeRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Quante operazioni sono passate di qui. Serve allo scambio: una concessione di
+  // crediti cambia il portafoglio delle stesse squadre che ha in mano, e senza un
+  // segnale mostrerebbe il residuo di prima — cioe' un numero che contraddice la
+  // pagina Rose senza che nessuna delle due dica perche'.
+  const [rev, setRev] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -58,6 +63,7 @@ export default function LeagueEconomyPanel({
     try {
       await fn();
       await load();
+      setRev((n) => n + 1);
       onChanged?.();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Operazione non riuscita.');
@@ -70,7 +76,8 @@ export default function LeagueEconomyPanel({
     <div className="space-y-4">
       {error && <Card className="border border-bad/40 bg-bad-bg p-3 text-sm text-bad">{error}</Card>}
       <GrantCard leagueId={leagueId} teams={teams} grants={grants} busy={busy} act={act} />
-      <TradeCard leagueId={leagueId} teams={teams} mode={mode} trades={trades} busy={busy} act={act} />
+      <TradeCard leagueId={leagueId} teams={teams} mode={mode} trades={trades} busy={busy} act={act}
+        rev={rev} />
     </div>
   );
 }
@@ -195,7 +202,7 @@ function GrantCard({
 /* ------------------------------------------------------------------ */
 
 function TradeCard({
-  leagueId, teams, mode, trades, busy, act,
+  leagueId, teams, mode, trades, busy, act, rev,
 }: {
   leagueId: number;
   teams: TeamRef[];
@@ -203,6 +210,8 @@ function TradeCard({
   trades: TradeRow[];
   busy: boolean;
   act: (fn: () => Promise<unknown>) => Promise<void>;
+  /** Sale a ogni operazione dell'economia: le due rose vanno rilette. */
+  rev: number;
 }) {
   const isClassic = mode === 'classic';
   const [aId, setAId] = useState<number | null>(teams[0]?.team_id ?? null);
@@ -214,7 +223,9 @@ function TradeCard({
   const [cash, setCash] = useState('0');
   const [cashFrom, setCashFrom] = useState<'a' | 'b'>('a');
   const [note, setNote] = useState('');
-  const [verdict, setVerdict] = useState<{ ok: boolean; reason: string; remaining_a: number; remaining_b: number } | null>(null);
+  const [verdict, setVerdict] = useState<{
+    ok: boolean; reason: string; remaining_a: number; remaining_b: number; settlement: number;
+  } | null>(null);
 
   useEffect(() => {
     setPickedA([]); setRosterA(null);
@@ -224,6 +235,17 @@ function TradeCard({
     setPickedB([]); setRosterB(null);
     if (bId != null) void getTeamRoster(leagueId, bId).then(setRosterB).catch(() => setRosterB(null));
   }, [leagueId, bId]);
+
+  // Il portafoglio e' cambiato mentre questo pannello era aperto (crediti dati o
+  // ritirati, uno scambio registrato): si rilegge senza toccare le spunte, perche'
+  // il residuo qui dentro e quello della pagina Rose sono lo STESSO numero e non
+  // possono divergere per il tempo che l'admin resta su questa schermata.
+  useEffect(() => {
+    if (!rev) return;   // 0 = niente e' ancora successo: caricano gli effetti qui sopra
+    if (aId != null) void getTeamRoster(leagueId, aId).then(setRosterA).catch(() => undefined);
+    if (bId != null) void getTeamRoster(leagueId, bId).then(setRosterB).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rev]);
 
   const cashN = Math.max(0, Number(cash) || 0);
   const request: TradeRequest | null = useMemo(() => (
@@ -245,7 +267,10 @@ function TradeCard({
       void checkTrade(leagueId, request).then(setVerdict).catch(() => setVerdict(null));
     }, 250);
     return () => window.clearTimeout(t);
-  }, [leagueId, request, pickedA.length, pickedB.length, aId, bId]);
+    // `rev`: il verdetto porta dentro il residuo delle due squadre, quindi
+    // invecchia insieme a quello. Senza, una dote data mentre lo scambio e' gia'
+    // composto lascia il «prima» aggiornato accanto a un «dopo» di prima.
+  }, [leagueId, request, pickedA.length, pickedB.length, aId, bId, rev]);
 
   const sameTeam = aId != null && aId === bId;
   const canSave = !!request && !!verdict?.ok && !sameTeam && !busy;
@@ -258,7 +283,7 @@ function TradeCard({
         stato comprato, ed è quella che deciderà il suo recupero il giorno che verrà
         svincolato.{' '}
         {isClassic
-          ? 'In classic si scambia a coppie di pari ruolo — anche più coppie insieme.'
+          ? 'I residui non si muovono: la differenza fra i contratti si pareggia in crediti. Si scambia a coppie di pari ruolo — anche più coppie insieme.'
           : 'In questa lega i ruoli non esistono: le due liste possono essere di lunghezze diverse.'}
       </div>
 
@@ -269,9 +294,11 @@ function TradeCard({
       </div>
       <div className="mt-2 grid gap-4 md:grid-cols-2">
         <TradeSide label="Prima squadra" teams={teams} teamId={aId} onTeam={setAId} roster={rosterA}
-          picked={pickedA} onPicked={setPickedA} isClassic={isClassic} />
+          picked={pickedA} onPicked={setPickedA} isClassic={isClassic}
+          after={verdict?.ok && isClassic ? verdict.remaining_a : null} />
         <TradeSide label="Seconda squadra" teams={teams} teamId={bId} onTeam={setBId} roster={rosterB}
-          picked={pickedB} onPicked={setPickedB} isClassic={isClassic} />
+          picked={pickedB} onPicked={setPickedB} isClassic={isClassic}
+          after={verdict?.ok && isClassic ? verdict.remaining_b : null} />
       </div>
 
       {sameTeam && (
@@ -308,11 +335,28 @@ function TradeCard({
           {verdict.reason}
         </div>
       )}
+      {/* IL PAREGGIO SI DICE, anche se non si decide. L'admin non lo compone e non
+          lo puo' cambiare — e' quello che tiene fermi i due residui — ma e' un
+          movimento di crediti fra due squadre, e un movimento di crediti che
+          nessuno vede e' esattamente cio' da cui nascono le segnalazioni. Il
+          saldo a scambio fatto, invece, sta accanto al residuo di ogni squadra e
+          non in fondo: detto qui era una seconda frase con dentro un numero —
+          «Legends resta con 56» a un metro da «residuo 39» — e si leggeva come un
+          secondo portafoglio, non come un dopo. */}
       {verdict?.ok && isClassic && (
         <div className="mt-3 text-sm text-ink-soft">
-          Dopo lo scambio: <b>{teams.find((t) => t.team_id === aId)?.name}</b> resta con{' '}
-          <b>{price(verdict.remaining_a)}</b>, <b>{teams.find((t) => t.team_id === bId)?.name}</b> con{' '}
-          <b>{price(verdict.remaining_b)}</b>.
+          {verdict.settlement === 0 ? (
+            <>Scambio valido: contratti di pari valore, non si muove nulla.</>
+          ) : (
+            <>
+              Scambio valido. I contratti non valgono uguale:{' '}
+              <b>{price(Math.abs(verdict.settlement))}</b> passano da{' '}
+              <b>{teams.find((t) => t.team_id === (verdict.settlement > 0 ? aId : bId))?.name}</b> a{' '}
+              <b>{teams.find((t) => t.team_id === (verdict.settlement > 0 ? bId : aId))?.name}</b>{' '}
+              per pareggiare, così i residui restano quelli di adesso. Cambia il
+              recupero futuro, non la cassa.
+            </>
+          )}
         </div>
       )}
 
@@ -322,9 +366,9 @@ function TradeCard({
           if (!window.confirm('Registrare lo scambio? Le rose cambiano subito, e le formazioni non ancora bloccate vengono riparate.')) return;
           void act(async () => {
             await createTrade(leagueId, request);
+            // Le due rose le rilegge l'effetto su `rev`, con le stesse chiamate
+            // che servono anche dopo una concessione di crediti.
             setPickedA([]); setPickedB([]); setCash('0'); setNote(''); setVerdict(null);
-            if (aId != null) setRosterA(await getTeamRoster(leagueId, aId));
-            if (bId != null) setRosterB(await getTeamRoster(leagueId, bId));
           });
         }}>
         Registra scambio
@@ -347,6 +391,12 @@ function TradeCard({
                   {' → '}
                   {t.b.map((p) => `${p.name} (${p.price})`).join(', ') || '—'}
                   {t.cash ? ` · ${inWords(t.cash.amount)} da ${t.cash.from === 'a' ? t.team_a_name : t.team_b_name}` : ''}
+                  {/* Il pareggio nello storico: mesi dopo, e' l'unica riga che
+                      spiega due movimenti di crediti che nessuno ha pattuito. */}
+                  {t.settlement
+                    ? ` · ${inWords(t.settlement.amount)} di pareggio contratti da `
+                      + `${t.settlement.from === 'a' ? t.team_a_name : t.team_b_name}`
+                    : ''}
                   {t.note ? ` · ${t.note}` : ''}
                 </div>
               </div>
@@ -364,7 +414,7 @@ function TradeCard({
  *  e un campo di ricerca qui vorrebbe dire digitare due volte per uno scambio che
  *  in classic e' quasi sempre uno contro uno. */
 function TradeSide({
-  label, teams, teamId, onTeam, roster, picked, onPicked, isClassic,
+  label, teams, teamId, onTeam, roster, picked, onPicked, isClassic, after,
 }: {
   label: string;
   teams: TeamRef[];
@@ -374,6 +424,8 @@ function TradeSide({
   picked: number[];
   onPicked: (ids: number[]) => void;
   isClassic: boolean;
+  /** Quanto resterebbe a scambio fatto, se lo scambio composto sta in piedi. */
+  after: number | null;
 }) {
   const toggle = (pid: number) => {
     onPicked(picked.includes(pid) ? picked.filter((x) => x !== pid) : [...picked, pid]);
@@ -397,8 +449,12 @@ function TradeSide({
       {roster?.budget && (
         <div className="mt-1 text-xs text-ink-faint">
           residuo {price(roster.budget.remaining)}
+          {after != null && after !== roster.budget.remaining ? (
+            <> → <b className="text-ink">{price(after)}</b> a scambio fatto</>
+          ) : null}
           {roster.budget.granted ? ` · ${price(roster.budget.granted)} dall'admin` : ''}
-          {roster.budget.trade_cash ? ` · ${price(roster.budget.trade_cash)} da scambi` : ''}
+          {roster.budget.trade_cash > 0 ? ` · ${price(roster.budget.trade_cash)} incassati negli scambi` : ''}
+          {roster.budget.trade_cash < 0 ? ` · ${price(-roster.budget.trade_cash)} girati negli scambi` : ''}
         </div>
       )}
 
