@@ -16,14 +16,24 @@ from vfoot.services.scoring_engine import fantavote_to_goals
 
 
 class DefenseBandsTest(SimpleTestCase):
-    """+1 every 0.25 above 6.00, linear and uncapped (inclusive upper bound)."""
+    """+1 dalla media 6.00, uno in piu' ogni 0.25. Bande CHIUSE A SINISTRA."""
 
     def test_bands(self):
         cases = {
-            6.00: 0.0, 6.10: 1.0, 6.25: 1.0, 6.26: 2.0, 6.50: 2.0,
-            6.75: 3.0, 7.00: 4.0, 7.25: 5.0, 7.50: 6.0, 8.00: 8.0,
+            5.99: 0.0, 6.00: 1.0, 6.10: 1.0, 6.24: 1.0,
+            6.25: 2.0, 6.26: 2.0, 6.49: 2.0,
+            6.50: 3.0, 6.75: 4.0, 7.00: 5.0, 7.25: 6.0, 7.50: 7.0, 8.00: 9.0,
         }
         for avg, expected in cases.items():
+            self.assertEqual(defense_bonus_value(avg), expected, f"avg={avg}")
+
+    def test_the_thresholds_the_grid_can_actually_hit(self):
+        """La media e' (3 difensori + portiere)/4 su voti a mezzi punti, quindi un
+        multiplo di 0.125: META' dei valori possibili cade ESATTAMENTE su una
+        soglia. E' li' che la lettura sbagliata del regolamento toglieva un punto,
+        quindi e' li' che il test deve guardare — non a 6.10 e 6.26."""
+        for avg, expected in ((6.000, 1.0), (6.125, 1.0), (6.250, 2.0), (6.375, 2.0),
+                              (6.500, 3.0), (6.625, 3.0), (6.750, 4.0), (6.875, 4.0)):
             self.assertEqual(defense_bonus_value(avg), expected, f"avg={avg}")
 
 
@@ -98,23 +108,24 @@ class ClassicScoringTest(SimpleTestCase):
         home = score_team(legal_xi(6.5), [], rs)   # 4 DEF starters -> eligible
         away = score_team(legal_xi(6.5, n_def=3, n_mid=5), [], rs)  # 3 DEF -> not eligible
         out = resolve_fixture(home, away, rs)
-        # avg = (6.5*3 + 6.5)/4 = 6.5 -> band +2. Home 71.5 + 2 = 73.5.
+        # avg = (6.5*3 + 6.5)/4 = 6.5 — soglia esatta, quindi la banda che APRE:
+        # +3 (v. defense_bonus_value). Home 71.5 + 3 = 74.5.
         self.assertTrue(home["defense"]["eligible"])
-        self.assertEqual(home["defense"]["bonus"], 2.0)
-        self.assertEqual(home["total"], 73.5)
+        self.assertEqual(home["defense"]["bonus"], 3.0)
+        self.assertEqual(home["total"], 74.5)
         self.assertFalse(away["defense"]["eligible"])
         self.assertEqual(away["total"], 71.5)
-        self.assertEqual(out["home_goals"], fantavote_to_goals(73.5))
+        self.assertEqual(out["home_goals"], fantavote_to_goals(74.5))
 
     def test_defense_bonus_subtract_opponent(self):
         rs = Ruleset(defense_enabled=True, defense_mode="subtract_opponent")
-        home = score_team(legal_xi(6.5), [], rs)                    # eligible +2
+        home = score_team(legal_xi(6.5), [], rs)                    # eligible +3
         away = score_team(legal_xi(6.5, n_def=3, n_mid=5), [], rs)  # not eligible
         resolve_fixture(home, away, rs)
-        # Home's +2 is taken OFF the opponent: away 71.5 - 2 = 69.5; home unchanged.
+        # Home's +3 is taken OFF the opponent: away 71.5 - 3 = 68.5; home unchanged.
         self.assertEqual(home["total"], 71.5)
-        self.assertEqual(away["total"], 69.5)
-        self.assertEqual(away["applied"], -2.0)
+        self.assertEqual(away["total"], 68.5)
+        self.assertEqual(away["applied"], -3.0)
 
     def test_defense_gate_effective_counts_the_lineup_that_played(self):
         """End-to-end through score_team: the gate is a Ruleset knob, and what it
@@ -131,7 +142,7 @@ class ClassicScoringTest(SimpleTestCase):
         team = score_team([dict(l) for l in starters], [dict(l) for l in bench],
                           Ruleset(defense_enabled=True, defense_gate="effective"))
         self.assertAlmostEqual(team["defense"]["avg"], 6.5)
-        self.assertEqual(team["defense"]["bonus"], 2.0)
+        self.assertEqual(team["defense"]["bonus"], 3.0)
 
     def test_defense_gate_is_read_from_the_league(self):
         from types import SimpleNamespace
@@ -187,10 +198,11 @@ class ClassicScoringTest(SimpleTestCase):
         team = score_team(starters, [], rs)
         self.assertEqual(team["sv_filled"], [1])
         # Senza il voto d'ufficio il modificatore sarebbe morto (portiere senza
-        # voto); con esso si calcola, e la media lo paga: (7+7+7+4)/4 = 6.25 -> +1.
+        # voto); con esso si calcola, e la media lo paga: (7+7+7+4)/4 = 6.25, che
+        # senza il 4 d'ufficio sarebbe stata 7.0 — due bande piu' su.
         self.assertTrue(team["defense"]["eligible"])
         self.assertAlmostEqual(team["defense"]["avg"], 6.25)
-        self.assertEqual(team["defense"]["bonus"], 1.0)
+        self.assertEqual(team["defense"]["bonus"], 2.0)
         # Ma imbattuto no: nessuno ha giocato quella partita.
         cs = next(m for m in team["modifiers"] if m.key == "keeper_clean_sheet")
         self.assertFalse(cs.eligible)

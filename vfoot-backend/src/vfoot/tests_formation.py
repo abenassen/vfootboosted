@@ -139,13 +139,19 @@ class DefenseBonusTests(SimpleTestCase):
         self.assertFalse(r["eligible"])
 
     def test_eligible_and_average(self):
-        from vfoot.services.defense_bonus import compute_defense_bonus
+        from vfoot.services.defense_bonus import compute_defense_bonus, defense_bonus_value
         roles = ["GK"] + ["DEF"] * 4 + ["MID"] * 3 + ["ATT"] * 3
-        # top 3 defender votes 7,7,6 + gk 6 -> avg 6.5 -> +2
+        # i 3 voti piu' alti (7,7,6) piu' il portiere (6) -> media 6.5. Il QUARTO
+        # difensore (5.0) non entra: e' li' per verificare che si prendano i tre
+        # migliori e non i primi tre.
         r = compute_defense_bonus(roles, [7.0, 7.0, 6.0, 5.0], 6.0)
         self.assertTrue(r["eligible"])
         self.assertAlmostEqual(r["avg"], 6.5)
-        self.assertEqual(r["bonus"], 2.0)
+        # La BANDA non si scrive a numero qui: e' esattamente il duplicato contro cui
+        # mette in guardia il docstring di questa classe, e il 01/09/2026 ci e'
+        # ricascata — asseriva +2 per la media 6.5 dopo che la correzione delle
+        # fasce l'aveva portata a +3. Legata alla fonte unica, non puo' piu' divergere.
+        self.assertEqual(r["bonus"], defense_bonus_value(6.5))
 
     # -- the league's gate: which lineup has to hold four defenders -----------
     #
