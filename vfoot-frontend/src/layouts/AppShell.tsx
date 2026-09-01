@@ -7,7 +7,8 @@ import type { CSSProperties } from 'react';
 // operativi diversi, quindi la stessa barra aveva tre stili e tre spessori.
 import {
   ArrowLeftRight, BarChart3, BookOpen, CalendarDays, CircleDot, ClipboardCheck, ClipboardList,
-  Check, ChevronDown, Home, LayoutGrid, LogOut, MoreHorizontal, Settings, Shirt, UserRound, Vote, X,
+  Check, ChevronDown, Home, LayoutGrid, LogOut, MoreHorizontal, Settings, Shirt, Sparkles,
+  UserRound, Vote, X,
   type LucideIcon,
 } from 'lucide-react';
 import type { CompetitionItem } from '../types/league';
@@ -68,6 +69,11 @@ const leagueNav: NavItem[] = [
   // cui si gioca. NON «Come si vota»: faceva credere che a votare fossero gli
   // utenti, che e' proprio il contrario di quel che la pagina racconta.
   { to: '/voto-puro', label: 'Voto spiegato', icon: BookOpen, scope: 'league', aside: true },
+  // E accanto: che cosa e' cambiato, e quando. Sta qui e non fra le voci di
+  // gioco per la stessa ragione — non serve a giocare una giornata — ma sotto
+  // «Voto spiegato» e non sopra: quella dice come funziona il voto, questa che
+  // cosa gli e' successo la settimana scorsa, e la seconda domanda viene dopo.
+  { to: '/aggiornamenti', label: 'Aggiornamenti', icon: Sparkles, scope: 'league', aside: true },
 ];
 
 /** LE PAGINE CHE UNA COMPETIZIONE PORTA CON SÉ — e sono diverse a seconda di
@@ -124,12 +130,13 @@ const USER_ADMIN_TO = '/league-admin?tab=user';
 
 /** QUELLO CHE SI PUÒ GUARDARE SENZA AVERE UNA LEGA.
  *
- *  Le otto voci di lega restano fuori — senza lega non hanno niente da dire — ma
- *  queste tre sì: il campionato vero, il suo listone e la pagina che spiega i
- *  voti non appartengono a nessuna lega (v. ChampionshipContext). Prima il menu
- *  veniva svuotato del tutto, e un iscritto nuovo si trovava una sola cosa
- *  possibile: creare una lega. Che è anche la ragione per cui «Crea o unisciti»
- *  resta la PRIMA voce, in evidenza: queste tre si consultano, la lega si gioca.
+ *  Le voci di lega restano fuori — senza lega non hanno niente da dire — ma
+ *  queste sì: il campionato vero, il suo listone, la pagina che spiega i voti e
+ *  l'archivio degli aggiornamenti non appartengono a nessuna lega (v.
+ *  ChampionshipContext). Prima il menu veniva svuotato del tutto, e un iscritto
+ *  nuovo si trovava una sola cosa possibile: creare una lega. Che è anche la
+ *  ragione per cui «Crea o unisciti» resta la PRIMA voce, in evidenza: queste si
+ *  consultano, la lega si gioca.
  */
 const browseNav: NavItem[] = [
   // «Home» e non «Home lega»: di leghe non ce ne sono.
@@ -138,6 +145,7 @@ const browseNav: NavItem[] = [
   { to: '/listone', label: 'Listone', icon: ClipboardList, scope: 'league' },
   { to: '/serie-a', label: 'Serie A', icon: CircleDot, scope: 'league' },
   { to: '/voto-puro', label: 'Voto spiegato', icon: BookOpen, scope: 'league' },
+  { to: '/aggiornamenti', label: 'Aggiornamenti', icon: Sparkles, scope: 'league' },
 ];
 
 function usePageTitle(pathname: string) {

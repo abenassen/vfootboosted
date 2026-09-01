@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { getNews, markNewsSeen } from '../api';
 import type { NewsItem } from '../types/news';
 
@@ -16,7 +17,13 @@ import type { NewsItem } from '../types/news';
  *
  *  Si chiude e non torna: il segnalibro è sul server (`news_seen_at`), quindi
  *  vale su ogni dispositivo, e chi la chiude sul telefono non se la ritrova sul
- *  portatile. È l'unica ragione per cui questo stato non sta in `localStorage`. */
+ *  portatile. È l'unica ragione per cui questo stato non sta in `localStorage`.
+ *
+ *  E PORTA ALL'ARCHIVIO. Qui ci stanno due righe: quanto basta a dire che è
+ *  successo qualcosa, non a spiegare che cosa. Il resto — l'elenco completo
+ *  della versione, e di tutte quelle prima — sta in `/aggiornamenti`, e il
+ *  momento in cui uno lo vuole leggere è esattamente questo. Senza il rimando,
+ *  quella pagina la trova solo chi va a cercarla nel menu. */
 export default function NewsBanner() {
   const [items, setItems] = useState<NewsItem[]>([]);
 
@@ -59,6 +66,12 @@ export default function NewsBanner() {
               ) : null}
             </div>
           ))}
+          <Link
+            to="/aggiornamenti"
+            className="inline-block text-[13px] font-semibold text-accent underline decoration-dotted"
+          >
+            Tutti gli aggiornamenti
+          </Link>
         </div>
         <button
           type="button"

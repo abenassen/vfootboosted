@@ -33,6 +33,7 @@ import ProfilePage from './pages/ProfilePage';
 import ManagerProfilePage from './pages/ManagerProfilePage';
 import MaintenancePage from './pages/MaintenancePage';
 import VotoPuroPage from './pages/VotoPuroPage';
+import AggiornamentiPage from './pages/AggiornamentiPage';
 import VotoPubblicoPage from './pages/VotoPubblicoPage';
 import CountdownPage, { isLaunched, rememberBypass, wantsBypass } from './pages/CountdownPage';
 
@@ -134,6 +135,9 @@ export default function App() {
             puro. Ci si arriva dal menu e dal dettaglio di un voto nelle pagelle,
             che e' il momento in cui la domanda nasce. */}
         <Route path="voto-puro" element={<VotoPuroPage />} />
+        {/* L'archivio delle patch. Ci si arriva dal menu e dalla striscia
+            «Novità», che annuncia una versione e rimanda qui per il resto. */}
+        <Route path="aggiornamenti" element={<AggiornamentiPage />} />
         <Route path="competitions/:competitionId" element={<CompetitionPage />} />
         <Route path="market" element={<MarketPage />} />
         <Route path="auction" element={<AuctionRoomPage />} />
