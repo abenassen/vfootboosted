@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Backup notturno di Vfoot: database + media caricati.
+# Backup di Vfoot: database + media caricati. Notturno, e prima di ogni deploy.
 #
 # Perche' esiste: il runbook prevede un pg_dump PRIMA di ogni deploy, che protegge
 # dai deploy — non dal resto. Fra un deploy e l'altro possono passare settimane, e
@@ -11,34 +11,74 @@
 # Cosa salva:
 #   - il database (pg_dump compresso) — l'unica copia dei dati di lega;
 #   - MEDIA_ROOT (avatar dei giocatori caricati dall'admin) — file veri, non in git.
-# Cosa NON salva, di proposito: il checkout (sta su GitHub), la SPA compilata (si
-# ricostruisce), la cache SofaScore (si riscalda), il pool egress (si rigenera).
+# Con --pre-deploy salva anche le due cose che servono a tornare indietro da un
+# rilascio: la SPA in servizio e il commit su cui gira il server.
+# Cosa NON salva, di proposito: il checkout (sta su GitHub), la cache SofaScore (si
+# riscalda), il pool egress (si rigenera).
 #
 # Idempotente e silenzioso quando va bene: una riga di riepilogo, e il codice di
 # uscita che systemd usa per accorgersi dei guai.
 #
-#   vfoot-backup              # esegue
-#   vfoot-backup --dry-run    # dice cosa farebbe
+#   vfoot-backup                # il notturno
+#   vfoot-backup --pre-deploy   # il passo 2 del runbook: db + media + web + commit
+#   vfoot-backup --dry-run      # dice cosa farebbe (vale con entrambi)
 #
+# --------------------------------------------------------------------------------
+# PERCHE' IL RUNBOOK CHIAMA QUESTO SCRIPT invece di fare il suo pg_dump (01/09/2026)
+#
+# Fino a oggi il passo 2 del deploy faceva da se':
+#     sudo -u postgres pg_dump vfoot > /root/backups/vfoot-db-$TS.sql
+# cioe' un dump NON compresso, con un nome che finisce in `.sql`. La rotazione qui
+# sotto cerca `vfoot-*-*.gz`: quei file non li vedeva, e nessuno li cancellava mai.
+#
+# Il conto, misurato il 01/09/2026: 45 dump da ~310 MB l'uno, **15 GB**, su un
+# disco da 25 GB — il 96% pieno, con 1 GB libero, cioe' a un deploy dal non avere
+# piu' spazio per il pg_dump del deploy stesso. E tutti e 45 erano RIDONDANTI: per
+# ognuno esisteva il notturno compresso dello stesso giorno, nove volte piu'
+# piccolo (36 MB contro 330). Due sistemi di backup nella stessa cartella, con due
+# convenzioni di nome, e uno solo che faceva le pulizie.
+#
+# Adesso ce n'e' uno solo. Il dump del deploy nasce compresso e col nome giusto,
+# quindi la stessa rotazione che tiene in ordine i notturni tiene in ordine anche
+# lui, e non c'e' un secondo posto in cui ricordarsi di cambiare le cose.
+# --------------------------------------------------------------------------------
 set -euo pipefail
 
 DEST="${VFOOT_BACKUP_DIR:-/root/backups}"
 KEEP_DAYS="${VFOOT_BACKUP_KEEP_DAYS:-21}"
 DB_NAME="${VFOOT_DB_NAME:-vfoot}"
 MEDIA_DIR="${VFOOT_MEDIA_DIR:-/srv/vfoot-app/vfoot-backend/src/media}"
+WEB_DIR="${VFOOT_WEB_DIR:-/srv/vfoot-web}"
+APP_DIR="${VFOOT_APP_DIR:-/srv/vfoot-app}"
+
 DRY=""
-[ "${1:-}" = "--dry-run" ] && DRY=1
+PRE_DEPLOY=""
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run)    DRY=1 ;;
+    --pre-deploy) PRE_DEPLOY=1 ;;
+    *) echo "uso: $(basename "$0") [--pre-deploy] [--dry-run]" >&2; exit 2 ;;
+  esac
+done
 
 TS="$(date +%Y%m%d-%H%M%S)"
 DB_FILE="$DEST/vfoot-db-$TS.sql.gz"
 MEDIA_FILE="$DEST/vfoot-media-$TS.tar.gz"
+WEB_FILE="$DEST/vfoot-web-$TS.tar.gz"
+COMMIT_FILE="$DEST/ROLLBACK_COMMIT-$TS.txt"
 
 if [ -n "$DRY" ]; then
   echo "[dry-run] pg_dump $DB_NAME -> $DB_FILE"
   [ -d "$MEDIA_DIR" ] && echo "[dry-run] tar $MEDIA_DIR -> $MEDIA_FILE" \
                       || echo "[dry-run] $MEDIA_DIR non esiste: niente media da salvare"
+  if [ -n "$PRE_DEPLOY" ]; then
+    echo "[dry-run] tar $WEB_DIR -> $WEB_FILE"
+    echo "[dry-run] git -C $APP_DIR rev-parse --short HEAD -> $COMMIT_FILE"
+  fi
   echo "[dry-run] cancellerei da $DEST i backup piu' vecchi di $KEEP_DAYS giorni:"
-  find "$DEST" -maxdepth 1 -name 'vfoot-*-*.gz' -mtime "+$KEEP_DAYS" -print 2>/dev/null || true
+  find "$DEST" -maxdepth 1 \( -name 'vfoot-*-*.gz' -o -name 'ROLLBACK_COMMIT-*.txt' \) \
+       -mtime "+$KEEP_DAYS" -print 2>/dev/null || true
+  echo "[dry-run] $DEST/keep/ non viene toccata (la rotazione e' -maxdepth 1)"
   exit 0
 fi
 
@@ -48,7 +88,7 @@ mkdir -p "$DEST"
 # (la rotazione guarda i .gz) e un pg_dump che fallisce ogni notte riempirebbe il
 # disco di mezzi backup. Testato: simulando un pg_dump che esce con errore, la
 # directory resta come prima e i backup vecchi NON vengono toccati.
-cleanup() { rm -f "$DB_FILE.part" "$MEDIA_FILE.part"; }
+cleanup() { rm -f "$DB_FILE.part" "$MEDIA_FILE.part" "$WEB_FILE.part"; }
 trap cleanup EXIT
 
 # Il dump va su file temporaneo e viene rinominato solo a compressione riuscita:
@@ -65,9 +105,38 @@ else
   MEDIA_MSG="media assenti"
 fi
 
+EXTRA_MSG=""
+if [ -n "$PRE_DEPLOY" ]; then
+  # La SPA in servizio: si ricostruisce da git, ma ricostruirla richiede node e
+  # l'ambiente giusto, e quando serve tornare indietro in fretta si vuole il
+  # bundle che stava servendo, non la ricetta per rifarlo.
+  if [ -d "$WEB_DIR" ]; then
+    tar czf "$WEB_FILE.part" -C "$(dirname "$WEB_DIR")" "$(basename "$WEB_DIR")"
+    mv "$WEB_FILE.part" "$WEB_FILE"
+    EXTRA_MSG=", web $(du -h "$WEB_FILE" | cut -f1)"
+  fi
+  # E il commit su cui gira: senza, "torna com'era" e' una domanda a cui nessuno
+  # sa rispondere mezz'ora dopo.
+  if [ -d "$APP_DIR/.git" ]; then
+    git -C "$APP_DIR" rev-parse --short HEAD > "$COMMIT_FILE"
+    EXTRA_MSG="$EXTRA_MSG, rollback $(cat "$COMMIT_FILE")"
+  fi
+fi
+
 # La rotazione viene DOPO il backup nuovo: se il dump di stanotte fallisce, il
 # comando esce prima (set -e) e i vecchi restano dove sono. Cancellare per primi
 # significherebbe fare spazio buttando l'unica copia buona.
-DELETED=$(find "$DEST" -maxdepth 1 -name 'vfoot-*-*.gz' -mtime "+$KEEP_DAYS" -delete -print 2>/dev/null | wc -l)
+#
+# `-maxdepth 1` e' anche il modo di tenere qualcosa PER SEMPRE: quello che sta in
+# $DEST/keep/ non viene mai guardato. Ci stanno i due dump che il notturno non
+# potrebbe rifare (il piu' vecchio che abbiamo, e l'ultimo prima della
+# ricostruzione dell'11/08/2026), con un LEGGIMI accanto che dice perche'.
+DELETED=$(find "$DEST" -maxdepth 1 \( -name 'vfoot-*-*.gz' -o -name 'ROLLBACK_COMMIT-*.txt' \) \
+          -mtime "+$KEEP_DAYS" -delete -print 2>/dev/null | wc -l)
 
-echo "backup ok: db $(du -h "$DB_FILE" | cut -f1), $MEDIA_MSG, ruotati $DELETED file (>$KEEP_DAYS giorni)"
+# Lo spazio residuo nella riga di riepilogo: e' la cifra che, se qualcuno l'avesse
+# guardata ad agosto, avrebbe fatto scoprire i 15 GB di dump non compressi il
+# giorno in cui il problema e' nato invece che il giorno in cui il disco era al 96%.
+FREE="$(df -h --output=avail "$DEST" | tail -1 | tr -d ' ')"
+echo "backup ok: db $(du -h "$DB_FILE" | cut -f1), $MEDIA_MSG$EXTRA_MSG," \
+     "ruotati $DELETED file (>$KEEP_DAYS giorni), liberi $FREE"

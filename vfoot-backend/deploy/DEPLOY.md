@@ -146,11 +146,28 @@ quando è tutto a posto, e non è lei che viene usata.
 ### 2. Backup (always, before migrating)
 
 ```sh
-ssh root@139.162.144.123 'TS=$(date +%Y%m%d-%H%M%S); mkdir -p /root/backups
-  sudo -u postgres pg_dump vfoot > /root/backups/vfoot-db-$TS.sql
-  tar czf /root/backups/vfoot-web-$TS.tar.gz -C /srv vfoot-web
-  git -C /srv/vfoot-app rev-parse --short HEAD > /root/backups/ROLLBACK_COMMIT-$TS.txt'
+ssh root@139.162.144.123 '/usr/local/sbin/vfoot-backup --pre-deploy'
 ```
+
+Database (compresso), media, la SPA in servizio e il commit su cui gira il server —
+e la rotazione dei 21 giorni, che passa da sola. La riga di riepilogo finisce con
+lo spazio libero rimasto: **guardarla.**
+
+> **Qui c'era il `pg_dump` scritto a mano, e ha riempito il disco.** Fino al
+> 01/09/2026 questo passo faceva `pg_dump vfoot > .../vfoot-db-$TS.sql`: NON
+> compresso, e con un nome che finisce in `.sql`. La rotazione di `vfoot-backup`
+> cerca `vfoot-*-*.gz`, quindi quei file non li vedeva e nessuno li cancellava
+> mai. Risultato misurato quel giorno: **45 dump da ~310 MB, 15 GB**, su un disco
+> da 25 GB arrivato al **96%** — a un deploy dal non avere spazio per il pg_dump
+> del deploy stesso. Ed erano tutti ridondanti: per ognuno c'era il notturno
+> compresso dello stesso giorno, nove volte piu' piccolo. Due sistemi di backup
+> nella stessa cartella e uno solo che faceva le pulizie. Se un giorno serve
+> aggiungere qualcosa al backup di deploy, si aggiunge **nello script**, non qui.
+
+`/root/backups/keep/` non viene mai ruotata (la rotazione e' `-maxdepth 1`): ci
+stanno i due dump che il notturno non potrebbe rifare — il piu' vecchio che
+abbiamo, e l'ultimo prima della ricostruzione dell'11/08/2026 — con un `LEGGIMI`
+che dice perche'.
 
 ### 3. Push, then pull on the server (as vfoot)
 
