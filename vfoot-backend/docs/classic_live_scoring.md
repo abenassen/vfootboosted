@@ -24,7 +24,7 @@ Regole fisse (standard fantacalcio, versionate nel codice, tag `rules_version`):
 - Bonus/malus: gol +3, assist +1, rigore parato +3, autogol −2, rigore sbagliato −3, ammonizione −0.5, rosso/doppia gialla −1, portiere −1 per gol subìto.
 - Conversione 66/72/78/84/90/96 = 1/2/3/4/5/6, poi +1 ogni 6.
 - Formazione legale: 1 POR, 3‑5 DIF, 0‑5 CEN, 1‑3 ATT, 11 totali.
-- Fasce modificatore difesa: media (top‑3 difensori + portiere, voto puro)/4 → **+1 ogni 0,25 sopra 6,00**, lineare e senza tetto ((6,00–6,25]:+1 · (6,25–6,50]:+2 · (6,50–6,75]:+3 · (6,75–7,00]:+4 · (7,00–7,25]:+5 · …); solo con ≥4 difensori titolari.
+- Fasce modificatore difesa: media (top‑3 difensori + portiere, voto puro)/4 → **+1 dalla media 6,00, uno in più ogni 0,25**, lineare e senza tetto. Le bande sono **chiuse a sinistra**: [6,00–6,25):+1 · [6,25–6,50):+2 · [6,50–6,75):+3 · [6,75–7,00):+4 · [7,00–7,25):+5 · … Solo con ≥4 difensori titolari. *(Corretto il 01/09/2026: erano chiuse a destra e il 6,00 tondo valeva zero, quindi su ogni soglia esatta — cioè su metà dei valori che la media può assumere — mancava un punto.)*
 
 **Regola s.v. (DEC‑1)**: un s.v. **non è un valore** (né 0 né 6). Va sostituito; se non sostituibile, è **escluso** dal totale (la squadra somma < 11 voti).
 
