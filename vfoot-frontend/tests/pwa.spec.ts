@@ -231,6 +231,66 @@ test.describe('@pwa PWA', () => {
     expect((await shown.jsonValue()) as string[]).toEqual(['Vfoot Boosted']);
     await chiudiNotifiche(page);
   });
+
+  /** Il ritorno in primo piano chiede se c'e' una versione nuova.
+   *
+   *  Prova la CAUSA, non l'effetto: che la banda compaia quando c'e' un worker
+   *  in attesa e' un'altra cosa e la copre gia' `registerSW`. Quello che qui si
+   *  dimostra e' che qualcuno lo CHIEDA, perche' e' esattamente il pezzo che
+   *  mancava — il browser da solo controlla `sw.js` a una navigazione vera, e
+   *  in un'app installata muoversi nella barra in basso non lo e'.
+   *
+   *  L'orologio e' finto perche' la soglia e' di un minuto e il timeout della
+   *  suite di 45 secondi: uno scarto che va solo in avanti non cambia niente a
+   *  nessun altro. `visibilitychange` si consegna a mano — nascondere davvero
+   *  la finestra in Playwright non e' possibile.
+   */
+  test('tornando in primo piano si chiede se c\'e\' una versione nuova', async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __update: number; __hidden: boolean; __avanti: number };
+      w.__update = 0;
+      w.__hidden = false;
+      w.__avanti = 0;
+      const vero = ServiceWorkerRegistration.prototype.update;
+      ServiceWorkerRegistration.prototype.update = function patched() {
+        w.__update += 1;
+        return vero.call(this);
+      };
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => w.__hidden });
+      const adesso = Date.now.bind(Date);
+      Date.now = () => adesso() + w.__avanti;
+    });
+    await page.goto('/');
+    await page.evaluate(() => navigator.serviceWorker.ready);
+
+    const risveglia = () =>
+      page.evaluate(() => {
+        (window as unknown as { __avanti: number }).__avanti += 61_000;
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    const chiesti = () => page.evaluate(() => (window as unknown as { __update: number }).__update);
+
+    // In attesa che l'ascolto sia appeso: `register()` risolve poco dopo che
+    // `ready` ha risolto, e la corsa sarebbe nel test, non nell'app.
+    await expect.poll(async () => { await risveglia(); return chiesti(); }, { timeout: 10_000 })
+      .toBeGreaterThan(0);
+    const dopoIlPrimo = await chiesti();
+
+    // La soglia tiene: due passaggi ravvicinati fra un'app e l'altra non sono
+    // due richieste.
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(await chiesti()).toBe(dopoIlPrimo);
+
+    // E si chiede tornando, non andandosene: a schermo spento non c'e' nessuno
+    // a cui offrire niente.
+    await page.evaluate(() => {
+      const w = window as unknown as { __avanti: number; __hidden: boolean };
+      w.__avanti += 61_000;
+      w.__hidden = true;
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(await chiesti()).toBe(dopoIlPrimo);
+  });
 });
 
 /** Il caso segnalato il 20/08/2026: si decide un ruolo dal telefono, si accende
