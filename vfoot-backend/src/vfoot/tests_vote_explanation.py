@@ -63,16 +63,35 @@ class VoteExplanationTests(SimpleTestCase):
 
     # --- direction in context -------------------------------------------
     def test_losing_fewer_duels_is_good_and_winning_fewer_is_bad(self):
+        """I due versi del duello, e QUANTO valgono l'uno rispetto all'altro.
+
+        Per un difensore non sono simmetrici, ed e' una scelta: perderne uno che
+        porta al gol pesa piu' che vincerne altri nove (v. ROLE_WEIGHTS, duels_lost
+        -0.085 contro duels_won +0.021). Sullo stesso fixture — dodici duelli in
+        meno per verso — fanno +0.34 e -0.09: quattro volte tanto.
+
+        Per questo il verso negativo si controlla NEL REGISTRO e non fra le tre
+        righe in cima: dal 01/09/2026 il riassunto nomina solo cio' che vale almeno
+        un decimo di voto (v. NAMEABLE_MIN_POINTS), e -0.09 non ci arriva. La voce
+        non e' sparita e non ha cambiato verso: sta sotto "altre voci", col suo
+        nome e col suo numero. Un test che pretendesse di vederla in cima
+        chiederebbe al modello di pagare i duelli vinti piu' di quanto abbiamo
+        deciso che valgano."""
         average = self._averages("DIF", {"duels_won": 16.0, "duels_lost": 16.0,
                                          "clearances": 8.0, "touches": 60.0})
         # Strong clearances keep the vote above the faint-praise cutoff, so the
         # duels directions are still surfaced.
         e = explain("DIF", {"duels_won": 4.0, "duels_lost": 4.0,
                             "clearances": 80.0, "touches": 90.0},
-                    90, self.REFERENCE, average)
+                    90, self.REFERENCE, average, ledger=True)
         self.assertGreaterEqual(e["voto"], 5.5)
-        self.assertIn("pochi duelli persi", [x["label"] for x in e["positives"]])
-        self.assertIn("pochi duelli vinti", [x["label"] for x in e["negatives"]])
+        persi = [x for x in e["positives"] if x["label"] == "pochi duelli persi"]
+        self.assertTrue(persi)
+        vinti = [r for r in e["other_terms"] if r["key"] == "duels_won"]
+        self.assertEqual([r["label"] for r in vinti], ["pochi duelli vinti"])
+        self.assertLess(vinti[0]["points"], 0)
+        # e l'asimmetria, che e' il punto: il verso positivo vale molto di piu'
+        self.assertGreater(persi[0]["points"], 3 * abs(vinti[0]["points"]))
 
     def test_rare_events_are_named_only_when_they_happened(self):
         clean = explain("DIF", {"touches": 60.0}, 90, self.REFERENCE,
@@ -496,11 +515,43 @@ class VoteExplanationTests(SimpleTestCase):
                                          "touches": 60.0})
         feats = {"clearances": 12.0, "duels_won": 18.0, "touches": 95.0,
                  "interceptions": 4.0, "tackles_won": 5.0,
-                 "xg_on_target": 0.6, "dribbled_past": 3.0}
+                 "xg_on_target": 0.6, "dribbled_past": 3.0,
+                 # RINFORZATO UNA QUARTA VOLTA il 01/09/2026, e stavolta con la
+                 # voce giusta invece che con un'altra pila di volume. Le tre volte
+                 # precedenti il fixture era fatto di respinte, duelli e tiri —
+                 # esattamente i blocchi che ogni ritaratura tocca — e ogni
+                 # ritaratura lo rimetteva sul confine: coi duelli del difensore
+                 # scesi a 0.021 e le conclusioni a 0.45 era finito a 6.570, cioe'
+                 # 6.5 esatti, e "clearly good" non lo era piu'.
+                 #
+                 # ``defensive_value`` e' l'indice difensivo del fornitore ed e' la
+                 # voce piu' pesante del voto di un difensore vero: un fixture che
+                 # racconta un difensore DOMINANTE senza di lei descriveva un
+                 # giocatore che non esiste. 0.9 non e' scelto per far passare il
+                 # test — sulle prime due giornate della 26-27 (n=404 presenze da
+                 # 60' in su) la mediana e' -0.025, il 90esimo 0.270, il 99esimo
+                 # 0.710 e il massimo osservato 1.000: 0.9 e' una delle migliori
+                 # prestazioni difensive del campione, che e' il caso in questione.
+                 #
+                 # E il fixture ora sta in MEZZO alla banda, non sul suo bordo:
+                 # grezzo 6.930, con 0.18 di margine sotto e 0.32 sopra.
+                 "defensive_value": 0.9}
+        # La terza volta, il 01/09/2026, la lezione era gia' questa:
+        # il blocco delle conclusioni e' sceso a meta' (lo pagavamo 3-5 volte tutti
+        # i giudici) e l'``xg_on_target`` del fixture, dimezzato con lui, l'ha
+        # riportato ESATTO sul confine — 6.510, che si mostra 6.5 e non lo supera.
+        # Misurato: alzare l'xGOT non basta piu' (a 1.2 il grezzo arriva a 6.680 e
+        # il voto mostrato resta 6.5), perche' quel blocco ora pesa meta'.
+        # Quindi DUE gol invece di uno: una doppietta vale in media 0.90 di credito
+        # (misurato sulla 25-26), quindi il numero e' realistico e non gonfiato per
+        # far passare il test — e "un difensore che segna DUE volte dominando" e'
+        # ancora piu' inequivocabilmente il caso che questo test vuole descrivere.
         e = explain("DIF", feats, 90, self.REFERENCE, average,
-                    goal_adjustment=0.52,
+                    goal_adjustment=0.90,
                     goal_detail=[{"minute": 70, "own_after": 1, "opp_after": 0,
-                                  "importance": 1.34}])
+                                  "importance": 1.34},
+                                 {"minute": 84, "own_after": 2, "opp_after": 0,
+                                  "importance": 0.61}])
         self.assertGreater(e["voto"], 6.5)
         self.assertEqual(e["negatives"], [])
         self.assertNotIn("Male", to_sentence(e))
@@ -693,8 +744,12 @@ class VoteExplanationTests(SimpleTestCase):
                          "1 fallo commesso")
         self.assertEqual(ph("ATT", "was_fouled", +0.01, 2.6, count=2),
                          "2 falli subiti")
-        self.assertEqual(ph("ATT", "key_passes", +0.06, 1.3, count=1),
-                         "1 passaggio chiave")
+        # Era ``key_passes``, che dal 01/09/2026 ha peso ZERO: la direzione della
+        # frase si legge dal segno del termine CONFRONTATO col segno del peso, e con
+        # peso nullo quella combinazione (termine positivo) non esiste piu'. Serve
+        # una voce di conteggio che il modello pesi ancora.
+        self.assertEqual(ph("ATT", "interceptions", +0.06, 1.3, count=1),
+                         "1 intercetto")
         # "solo" quando e' SOTTO la media del ruolo: il numero nudo perde la
         # direzione che il quantificatore portava, e "3 duelli persi" accanto a un
         # PIU' sembra una contraddizione senza di essa.

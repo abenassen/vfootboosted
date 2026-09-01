@@ -119,6 +119,25 @@ NEGATIVES_MAX_VOTE = 6.5   # above this: only what went well
 # 29% of them combine xA < 0.15 with no clear chance created at all.
 ASSIST_LOW_XA = 0.15
 
+# QUANTO deve valere una voce per essere chiamata "un motivo del voto". Sotto questa
+# soglia la voce non sparisce: scende in "altre voci", dove sta col suo nome e col
+# suo numero. Quello che cambia e' che non occupa uno dei tre posti in cima.
+#
+# Era 0.05, ed era troppo poco per due ragioni. La prima e' aritmetica: il voto si
+# legge sulla griglia dei mezzi punti, quindi ci vogliono DIECI voci da 0.05 per
+# muovere di un passo il numero scritto accanto al nome — chiamarne una "il
+# motivo" la sopravvaluta di un ordine di grandezza. La seconda e' che il riassunto
+# ha una quota da riempire (fino a tre per lato) e la riempie con quello che trova:
+# abbassando i pesi delle voci grosse — passaggi chiave a zero, conclusioni a 0.45,
+# duelli tagliati — i posti liberi sono andati alle minuzie posizionali. Misurato
+# sulle 578 presenze delle prime due giornate della 26-27, prima e dopo quella
+# ritaratura: "nessun lancio lungo riuscito" da 14 a 71 apparizioni, "poco gioco
+# nella meta' campo avversaria" da 19 a 75, e "nessun intercetto" da 0 a 32 — una
+# frase che compare SEMPRE a 0.050 esatti, cioe' solo perche' arrivava alla soglia.
+# La quota di righe mostrate che valgono meno di un decimo di voto era passata dal
+# 41.7% al 45.7%.
+NAMEABLE_MIN_POINTS = 0.10
+
 # How a sending-off's reason reads in Italian. The severity that scales the drop is
 # RED_CARD_SEVERITY on the same keys; naming the reason is how a reader can tell why
 # one sending-off cost 0.6 and another 1.5.
@@ -598,10 +617,11 @@ def assist_note(assists: int, xa: float, big_chances: float) -> str:
     LA NOTA SIMMETRICA E' STATA TOLTA il 25/08/2026, con la ritaratura. Diceva che
     il passaggio valeva ma "non risulta un'occasione nitida", e aveva senso finche'
     ``big_chance_created`` pesava: era la voce mancante che spiegava un credito
-    dimezzato. Ora quel peso e' ZERO — la creazione la leggono xA e ``key_passes``,
-    che un Diouf ce li ha — quindi non c'e' piu' niente che non abbia pagato, e la
-    nota avrebbe spiegato un meccanismo che non esiste. Il caso che la motivava
-    (Inter-Monza, 2 assist e 6.0) adesso e' 6.5 senza bisogno di scuse."""
+    dimezzato. Ora quel peso e' ZERO — e dal 01/09/2026 lo e' anche ``key_passes``:
+    la creazione la legge la sola xA, che un Diouf ce l'ha — quindi non c'e' piu'
+    niente che non abbia pagato, e la nota avrebbe spiegato un meccanismo che non
+    esiste. Il caso che la motivava (Inter-Monza, 2 assist e 6.0) adesso e' 6.5
+    senza bisogno di scuse."""
     # ``big_chances > 0`` continua a zittire la nota, ma per un'ALTRA ragione da
     # quando quel peso e' zero: non piu' "il voto l'ha gia' pagata", bensi' che le
     # due prove si contraddicono. Se chi fornisce i dati ha riconosciuto
@@ -614,10 +634,15 @@ def assist_note(assists: int, xa: float, big_chances: float) -> str:
     # una riga sola, e chi ha fatto anche autogol ha gia' due clausole davanti.
     #
     # NON dice piu' ne' "conta come bonus, non nel voto base" ne' "il voto base
-    # legge il pallone, non il gol": da quando ``key_passes`` pesa 0.100 e
-    # ``assists`` 0.03, il voto base legge ENTRAMBI. La nota si limita al fatto —
-    # il pallone valeva poco — e lascia che siano le righe a mostrare quanto ha
-    # fruttato: l'assist adesso ha la sua voce, nominata (v. LABELS).
+    # legge il pallone, non il gol". La nota si limita al fatto — il pallone valeva
+    # poco — e lascia che siano le righe a mostrare quanto ha fruttato: l'assist ha
+    # la sua voce, nominata, graduata dal ΔxP del gol che ne e' nato.
+    #
+    # AGGIORNATO col 01/09/2026: ``key_passes`` e ``assists`` pesano ORA ZERO
+    # nell'indice (v. TOTAL_WEIGHTS), quindi il voto base legge la creazione con la
+    # sola xA — che e' esattamente il numero di cui questa nota parla. La frase
+    # regge meglio di prima, non peggio: dice che il valore atteso del pallone era
+    # basso, ed e' l'unica cosa che il voto base abbia guardato.
     head = f"I suoi passaggi valgono {xa:.2f} di xA"
     if assists == 1:
         return f"{head}: l'assist nasce da un pallone di poco valore."
@@ -839,6 +864,19 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             return None
         return totals.get(key, 0.0) if key in per90_keys else raw_values.get(key, 0.0)
 
+    # L'ASSIST HA GIA' UNA RIGA SUA? Allora la parentesi della creazione NON ripete
+    # il conteggio. Con la riga d'impatto accesa il pannello di Dybala (Roma-Bologna)
+    # diceva "3 assist +0.50" e subito sotto "una o piu' occasioni create per i
+    # compagni (3 nitide, 3 assist) +0.83": due numeri diversi accanto alle stesse
+    # tre parole, che si legge come un doppio pagamento. Non lo e' — ``assists``
+    # pesa ZERO nell'indice (v. TOTAL_WEIGHTS), quindi quei +0.83 sono tutti di xA e
+    # i +0.50 sono il ΔxP dei gol che ne sono nati — ma la riga da sola non lo puo'
+    # spiegare, e la parentesi serviva ad ancorare la xA a un numero verificabile
+    # proprio quando quel numero non era gia' scritto una riga piu' su.
+    #
+    # Le occasioni nitide restano: quelle una riga loro non ce l'hanno.
+    assist_line = abs(assist_adjustment) >= 0.005 and bool(assist_detail)
+
     scored = []
     # Collapse the overlapping feature families (see MERGES) into one net line each.
     # ``family`` travels with the line so a reader can find the rows it stands for.
@@ -856,7 +894,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                 phrase = creation_detail(
                     phrase, raw_values.get("big_chance_created", 0.0),
                     raw_values.get("expected_assists", 0.0),
-                    raw_values.get("assists", 0.0))
+                    0.0 if assist_line else raw_values.get("assists", 0.0))
             scored.append((net, group[0], phrase, (family, len(present))))
     for key, pts in points_by_key.items():
         phrase = _phrase(role, key, pts, raw_values.get(key, 0.0), observed(key))
@@ -906,7 +944,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # identity there is no way to tell which ones those are.
     nameable = [(pts, key, ph, fam) for pts, key, ph, fam in scored if ph]
     nameable.sort(key=lambda x: x[0], reverse=True)
-    named = [x for x in nameable if abs(x[0]) >= 0.05]
+    named = [x for x in nameable if abs(x[0]) >= NAMEABLE_MIN_POINTS]
     # One-sided at the extremes (see POSITIVES_MIN_VOTE / NEGATIVES_MAX_VOTE): a bad
     # game's "positives" are faint praise, a fine game's "negatives" are nitpicks.
     # Suppressed items fold into "altre voci", so the breakdown still reconciles.
@@ -927,8 +965,22 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # da 0,01 direbbe che la partita e' stata insignificante mentre il voto lo
     # muoveva quella. In quel caso si tace come prima, e la voce sta nel registro
     # col suo nome — v. LEDGER_LABELS.
-    flat = not shown and not any(abs(pts) >= 0.05 for pts, _k, _ph, _f in scored)
-    if flat:
+    flat = not shown and not any(abs(pts) >= NAMEABLE_MIN_POINTS for pts, _k, _ph, _f in scored)
+    # IL RIPIEGO SCATTA SU ``not shown``, non su ``flat``: il pannello muto e' il
+    # caso peggiore di tutti e non deve dipendere dal perche' e' rimasto vuoto.
+    # Con la soglia a 0.10 se ne aggiungeva un secondo tipo — 16 presenze sulle 578
+    # delle prime due giornate, tutti difensori entrati fra il 14' e il 31' — dove
+    # QUALCOSA supera la soglia ma non ha una frase: sono gli zeri che pagano a
+    # favore (nessun duello perso, mai saltato, nessun errore), che ``_phrase``
+    # tace apposta per non elogiare chi in campo non e' quasi entrato. Il conto
+    # torna lo stesso, ma il lettore apriva il dettaglio e non trovava niente.
+    #
+    # ``flat`` resta piu' stretto della condizione che promuove, e per questo la
+    # NOTA la scrive solo lui: "nessuna voce si stacca" e' vero quando davvero non
+    # c'e' niente di grosso, e sarebbe falso quando il pezzo grosso c'e' e non si
+    # puo' nominare. In quel secondo caso si mostra comunque la voce piu' grande di
+    # ogni lato — piccola, col suo numero accanto — senza raccontarci sopra niente.
+    if not shown:
         positives = [x for x in nameable[:1] if x[0] > 0]
         negatives = [x for x in nameable[-1:] if x[0] < 0]
         shown = positives + negatives
