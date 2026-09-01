@@ -40,6 +40,7 @@ lavora nella direzione giusta.
 """
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 
 # Uno stato: fascia di MINUTE_BIN minuti, differenza reti tagliata a ±GD_CAP.
@@ -267,6 +268,89 @@ def goals_by_player(match) -> dict[int, list[dict]]:
             "opp_after": opp,
             "importance": importance(xp, shot["minute"], own - opp),
         })
+    return dict(out)
+
+
+# --- IL GOL SUBITO, dal punto di vista del portiere ---------------------------
+# Il gol lo pesiamo per quanto ha CAMBIATO la partita da quando esiste
+# ``goal_credit`` — ma solo a credito di chi lo segna. A debito di chi lo subisce
+# valeva uno come tutti gli altri, e le due letture dello stesso evento non
+# possono essere diverse: il pallonetto che al 90' rompe uno 0-0 non e' il quarto
+# gol di un 4-0.
+#
+# CHE COSA MOLTIPLICA, e perche' non il gol intero: il peso moltiplica la GRAVITA'
+# dell'errore, cioe' la parte del tiro che il portiere non ha preso (1 - xGOT), non
+# l'unita' intera. ``gk_goals_prevented`` e' gia' "xGOT parato meno la gravita' dei
+# gol presi" (la somma dell'xGOT affrontato include quello dei gol), quindi qui si
+# scala esattamente quel termine. Un gol decisivo ma IMPARABILE (xGOT 0.9, gravita'
+# 0.1) resta quasi gratis, com'e' giusto: il fattore dice quanto e' pesato
+# l'errore, non quanto e' pesato il gol.
+#
+# LA FORMA e' quella della banda del gol — lo stesso u = sqrt(imp/p95) — ma il
+# bersaglio e' 1.0 invece di un credito in punti: e' un MOLTIPLICATORE, e la
+# ridistribuzione dev'essere a somma zero sulla popolazione. Da cui ``lo`` non e'
+# libero: fissata la forbice, lo = 1 - forbice * u_medio.
+#
+# MEAN_U e' misurato: 0.6021 sui 917 gol subiti della 25-26 con l'importanza letta
+# dal lato che li subisce. Sta scritto qui, come DEFAULT_MEAN_IMPORTANCE, perche'
+# rimisurarlo richiede la stagione intera.
+CONCEDED_MEAN_U = 0.6021
+# La forbice, scelta dall'analista. 0.8 mette il gol ininfluente a 0.518 e quello
+# decisivo a 1.318 — rapporto 2.54, in linea col 2.33 fra i due estremi della banda
+# del gol (0.202 / 0.4714), cioe' la stessa severita' che usiamo a credito.
+CONCEDED_SPREAD = 0.8
+
+
+def conceded_weight(importance: float | None, p95: float = DEFAULT_P95) -> float:
+    """Quanto pesa QUESTO gol subito, in multipli di un gol medio (media 1.0).
+
+    ``importance`` None (stato non campionato) -> 1.0: non sappiamo dire quanto ha
+    cambiato, e l'unica risposta onesta e' "come un gol qualunque"."""
+    if importance is None or not p95:
+        return 1.0
+    u = math.sqrt(max(0.0, min(1.0, importance / p95)))
+    lo = 1.0 - CONCEDED_SPREAD * CONCEDED_MEAN_U
+    return lo + CONCEDED_SPREAD * u
+
+
+def conceded_by_side(match) -> dict[str, list[dict]]:
+    """{lato_che_subisce: [{minute, xgot, weight, own_goal}]} per una partita.
+
+    L'importanza e' letta DAL LATO CHE SUBISCE: la differenza reti passa da d a
+    d-1, quindi e' ``importance(minuto, d-1)`` — la stessa funzione del gol, un
+    gradino piu' in basso.
+
+    L'AUTOGOL RESTA FUORI: la sua difficolta' e' gia' restituita al portiere da
+    ``_merge_own_goal_relief``, e pesarlo anche qui vorrebbe dire graduare due
+    volte lo stesso pallone con due regole diverse.
+    """
+    from realdata.models import MatchAppearance, MatchShot
+    from vfoot.services.classic_rating import is_own_goal
+
+    xp = fixed_xp_table()
+    if not xp:
+        return {}
+    _band, p95 = fixed_band()
+    side_of = dict(MatchAppearance.objects.filter(match=match)
+                   .values_list("player_id", "side"))
+    timeline = sorted(
+        (s for s in MatchShot.objects.filter(match=match, is_goal=True)
+         .values("player_id", "minute", "team_side", "shot_type", "xgot")
+         if s["minute"] is not None),
+        key=lambda s: s["minute"])
+    out: dict[str, list[dict]] = defaultdict(list)
+    for i, shot in enumerate(timeline):
+        if is_own_goal(shot["shot_type"], shot["team_side"],
+                       side_of.get(shot["player_id"])):
+            continue
+        conceding = "away" if shot["team_side"] == "home" else "home"
+        own = sum(1 for e in timeline[:i] if e["team_side"] == conceding)
+        opp = sum(1 for e in timeline[:i] if e["team_side"] != conceding)
+        imp = importance(xp, shot["minute"], own - opp - 1)
+        out[conceding].append({"minute": shot["minute"],
+                               "xgot": float(shot["xgot"] or 0.0),
+                               "importance": imp,
+                               "weight": conceded_weight(imp, p95)})
     return dict(out)
 
 

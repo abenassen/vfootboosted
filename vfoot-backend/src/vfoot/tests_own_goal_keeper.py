@@ -22,6 +22,7 @@ from realdata.models import (
     PlayerOnPitchInterval, PlayerZoneFeature, Season, Team, TeamSeason,
     INTERVAL_SUBSTITUTION_OFF, INTERVAL_SUBSTITUTION_ON,
 )
+from vfoot.services import goal_impact
 from vfoot.services.classic_rating import (
     OWN_GOAL_KEEPER_XGOT_DEFAULT, _per_match_player_totals, own_goal_shots,
 )
@@ -130,7 +131,14 @@ class OwnGoalKeeperReliefTests(TestCase):
             zone_key="Z_4_2", xg=0.3, xgot=0.5, is_goal=True, shot_type="goal",
             provider="sofascore", external_id="vero")
         self.assertEqual(own_goal_shots([self.match.id]), {})
-        self.assertAlmostEqual(self._gp(gk), -0.50, places=6)
+        # NON prende il credito dell'autogol. L'unico scostamento ammesso e' quello
+        # del gol subito graduato per importanza (v. ``_merge_conceded_importance``,
+        # 01/09/2026), che vale (1 - peso) x (1 - xGOT) ed e' un'altra cosa: qui si
+        # ricalcola dalla stessa funzione pubblica invece di scrivere un numero, cosi'
+        # il test resta una verita' sull'autogol e non un'impronta della taratura.
+        imp = goal_impact.importance(goal_impact.fixed_xp_table(), 30, -1)
+        atteso = -0.50 + (1.0 - goal_impact.conceded_weight(imp)) * (1.0 - 0.5)
+        self.assertAlmostEqual(self._gp(gk), atteso, places=6)
 
     def test_the_other_keeper_and_the_outfielders_are_untouched(self):
         gk_home = self._player("portiere casa", "home", keeper=True,

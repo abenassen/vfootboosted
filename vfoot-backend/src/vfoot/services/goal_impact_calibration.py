@@ -29,10 +29,34 @@ from vfoot.services import goal_impact as gi
 TARGET_TOTAL_25_26 = 1.0160
 # La forbice voluta dall'analista, in punti di voto, PRIMA del riscalamento.
 BAND_SHAPE = (0.30, 0.70)
-# Il credito medio di una PRESENZA con assist col modello che aveva ``assists``
-# nell'indice: 546 presenze della 25-26. Stesso ruolo del bersaglio del gol —
-# l'assist si ridistribuisce per impatto, non si gonfia.
-TARGET_ASSIST = 0.1551
+# Il credito medio di una PRESENZA con assist. Era 0.1551 — il credito del modello
+# che aveva ``assists`` nell'indice, 546 presenze della 25-26 — scelto perche' la
+# banda ridistribuisse per impatto senza gonfiare.
+#
+# ALZATO A 0.2016 (x1.3) il 01/09/2026, insieme alla ritaratura della creazione in
+# ``classic_rating.TOTAL_WEIGHTS``. Non e' un gonfiaggio: e' una RIPARTIZIONE dentro
+# lo stesso budget. Misurato sulla 25-26, il pagamento di un assist a parita' di xA,
+# gol e minuti era +0.161 per noi contro +0.211 di SofaScore (e +0.575 / +0.593
+# delle due pagelle, che l'assist lo pagano come esito). Lo pagavamo POCO, non
+# troppo — il contrario di quel che si sospettava — mentre spendevamo troppo sui
+# passaggi chiave.
+#
+# PERCHE' QUI E NON UNA FEATURE NELL'INDICE. Provata e respinta la feature
+# ``xA * assist`` proposta come ibrido: a parita' di pagamento dell'assist il bonus
+# PIATTO la batte sulle pagelle (+0.001 a pagamento basso, +0.003 a medio, +0.012 a
+# alto) e l'ibrido vince solo su SofaScore e solo in basso (+0.002) — e' quasi tutto
+# "c'e' stato un assist", col residuo creativo che non paga. E qualunque feature
+# nell'indice reintrodurrebbe lo shrinkage sui minuti, che e' esattamente il difetto
+# per cui ``assists`` ne era uscito il 29/08.
+#
+# E' L'UNICA LEVA SENZA CONTROPARTITA della ritaratura: il credito d'impatto sta
+# fuori dall'indice, quindi non ruba spazio a nessun altro peso e nessuna σ si
+# restringe. Misurato su tutta la griglia dell'xA, ogni riga x1.3 batte la sua
+# gemella x1.0 su Redazione e Statistico e su SofaScore non perde mai.
+# Porta il pagamento da +0.161 a +0.184: NON arriva al +0.211 di SofaScore perche'
+# una parte degli assist passa dalla ricaduta a importanza media, che smorza —
+# centrarlo vorrebbe circa x1.6, non misurato.
+TARGET_ASSIST = 0.2016
 
 
 def season_timelines(competition_season_id: int):

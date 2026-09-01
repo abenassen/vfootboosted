@@ -18,7 +18,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from realdata.models import CompetitionSeason, Match
 from vfoot.services.classic_pagella import compute_role_averages
-from vfoot.services.classic_rating import build_minute_curves
+from vfoot.services.classic_rating import build_minute_curves, flatten_minute_curves
 from vfoot.services.classic_rating import (
     build_feature_scales, build_reference, clear_scales_cache,
     reference_population_keyed,
@@ -37,6 +37,52 @@ class Command(BaseCommand):
         parser.add_argument("--season", type=int, required=True,
                             help="CompetitionSeason to calibrate on (a COMPLETED one).")
         parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument("--no-flatten", action="store_true",
+                            help="non correggere le curve dei minuti sul residuo "
+                                 "esterno (v. flatten_minute_curves)")
+        parser.add_argument("--external-dir", default=None,
+                            help="cartella degli xlsx del giudice; default: "
+                                 "data_fantacalcio/<stagione>")
+
+    def _external_votes(self, cs, directory=None) -> dict:
+        """{"<giornata>:<player_id>": voto} dal foglio del giudice.
+
+        Riusa il lettore di ``compare_external_votes`` invece di riscriverlo: il
+        formato del foglio e l'aggancio dei nomi sono gia' un problema risolto una
+        volta, e risolverlo due volte vuol dire vederlo divergere.
+        """
+        import glob
+        import re
+        from pathlib import Path
+        from django.conf import settings
+        from realdata.services.identity import norm_name
+        from vfoot.management.commands.compare_external_votes import (
+            Command as Ext, _club_key)
+
+        ext = Ext()
+        base = directory or str(Path(settings.VFOOT_DATA_DIR) / "data_fantacalcio"
+                                / str(cs).split()[-1])
+        files = sorted(glob.glob(f"{base}/*.xlsx"))
+        if not files:
+            return {}
+        team_map = ext._our_team_index(cs.id)
+        pidx = ext._our_player_index(cs.id)
+        gd_re = re.compile(r"Giornata_(\d+)")
+        out = {}
+        for f in files:
+            mm = gd_re.search(f)
+            if not mm:
+                continue
+            gd = int(mm.group(1))
+            for e in ext._parse_file(f, "Fantacalcio"):
+                team = team_map.get(_club_key(e["team"] or ""))
+                if not team or e["voto"] is None:
+                    continue
+                surn = norm_name(e["nome"]).split()[-1] if e["nome"] else ""
+                cands = pidx.get((team, surn), [])
+                if len(cands) == 1:
+                    out[f"{gd}:{cands[0]}"] = e["voto"]
+        return out
 
     def handle(self, *args, **o):
         cs = CompetitionSeason.objects.filter(id=o["season"]).first()
@@ -65,6 +111,33 @@ class Command(BaseCommand):
         build_minute_curves(cs.id, reference, scales=scales)
         if not reference:
             raise CommandError("Nessun dato: impossibile calibrare.")
+
+        # LA CURVA DEI MINUTI SI TARA, NON SI OSSERVA E BASTA. Misurata sul solo
+        # indice fa il suo mestiere male fra i 46 e i 70 minuti, dove il 95% delle
+        # presenze sono titolari SOSTITUITI: per loro il poco minutaggio non e' una
+        # circostanza da perdonare ma la conseguenza di aver giocato male, e la
+        # curva li perdona lo stesso. Si corregge sul residuo contro un giudizio
+        # esterno (v. classic_rating.flatten_minute_curves).
+        #
+        # I FOGLI SONO UN INGRESSO DI CALIBRAZIONE, NON UNA DIPENDENZA DEL MODELLO:
+        # quel che finisce nel file e' una curva come le sigma e i centri, e nessuno
+        # a valle sa da dove viene. E non si sta copiando il giudizio sul MERITO —
+        # per quello il modello diverge apposta — ma si usa un metro esterno per una
+        # cosa che merito non e': quanto pesi aver giocato sessanta minuti invece di
+        # novanta.
+        if not o["no_flatten"]:
+            external = self._external_votes(cs, o["external_dir"])
+            if not external:
+                self.stdout.write(self.style.WARNING(
+                    "   curve dei minuti NON corrette: nessun voto esterno trovato. "
+                    "La calibrazione e' valida ma l'inclinazione per fascia resta."))
+            else:
+                residuo = flatten_minute_curves(cs.id, reference, external)
+                if residuo:
+                    peggio = max(residuo.items(), key=lambda kv: abs(kv[1]))
+                    self.stdout.write(
+                        f"   curve dei minuti corrette su {len(external)} voti esterni: "
+                        f"residuo massimo {peggio[1]:+.3f} al {peggio[0]}'")
 
         self.stdout.write(f"Calibrazione su '{cs}' ({finished} partite):")
         for role in ("POR", "DIF", "CEN", "ATT"):

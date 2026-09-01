@@ -189,4 +189,9 @@ class ShotSectionAddsUpTests(TestCase):
         d = shot_detail(self.match, self.player.id)
         self.assertAlmostEqual(sum(s["points"] for s in d["shots"]) + d["baseline"],
                                d["total"], places=2)
-        self.assertAlmostEqual(d["total"], self._summary_line(), places=2)
+        # La riga del riassunto porta DUE DECIMALI, il totale della sezione no:
+        # il confronto non puo' essere piu' stretto di mezzo passo di
+        # arrotondamento, e con ``places=2`` falliva sui valori che cadono esatti
+        # sul bordo (1.055 contro 1.06). La proprieta' difesa e' che la sezione sia
+        # QUELLA riga, non che i due numeri abbiano la stessa rappresentazione.
+        self.assertAlmostEqual(d["total"], self._summary_line(), delta=0.005 + 1e-9)
