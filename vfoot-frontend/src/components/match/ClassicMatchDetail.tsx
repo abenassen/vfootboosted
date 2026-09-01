@@ -1653,8 +1653,14 @@ function WhyThisVote({
         <span>{why.minutes}′ giocati</span>
       </div>
       <div className="space-y-0.5">
+        {/* «Voto di partenza» e non piu' «Media del ruolo»: dal 01/09/2026 la base
+            assorbe anche quanto il minutaggio spiega gia' da solo (v.
+            classic_rating.MINUTE_CONDITIONING), quindi non e' piu' la media secca
+            del ruolo. Detto cosi', senza spiegare il meccanismo: il numero di
+            partenza e' gia' quello giusto e le voci sotto sono tutte e sole cio'
+            che il giocatore ha aggiunto. */}
         <div className="flex items-baseline justify-between gap-3 text-ink-faint">
-          <span>Media del ruolo</span>
+          <span>Voto di partenza</span>
           <span className="shrink-0 font-mono text-[11px] font-semibold">{why.base.toFixed(1)}</span>
         </div>
         {/* La riga delle CONCLUSIONI si apre sui tiri. Va appesa qui e non al

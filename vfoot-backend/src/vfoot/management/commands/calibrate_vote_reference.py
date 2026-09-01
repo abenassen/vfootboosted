@@ -18,6 +18,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from realdata.models import CompetitionSeason, Match
 from vfoot.services.classic_pagella import compute_role_averages
+from vfoot.services.classic_rating import build_minute_curves
 from vfoot.services.classic_rating import (
     build_feature_scales, build_reference, clear_scales_cache,
     reference_population_keyed,
@@ -58,6 +59,10 @@ class Command(BaseCommand):
         scales = build_feature_scales(cs.id)
         reference = build_reference(cs.id, scales=scales)
         averages = compute_role_averages(cs.id, scales=scales)
+        # Le curve indice-vs-minuti, DOPO la reference perche' ci si appoggiano
+        # (le medie di ruolo restano quelle) e prima di scriverla: v.
+        # classic_rating.build_minute_curves.
+        build_minute_curves(cs.id, reference, scales=scales)
         if not reference:
             raise CommandError("Nessun dato: impossibile calibrare.")
 

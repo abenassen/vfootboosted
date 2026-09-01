@@ -23,9 +23,10 @@ from __future__ import annotations
 from vfoot.services.classic_rating import (
     DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
     GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, SHRINKAGE_MINUTES, TOTAL_WEIGHTS,
-    VOTE_CENTER, VOTE_MAX, VOTE_MIN, WEIGHTS, vote_center_for,
+    UNSHRUNK_FEATURES, VOTE_CENTER, VOTE_MAX, VOTE_MIN, WEIGHTS, vote_center_for,
     _feature_z, _raw_vote_from_index, exposure_z, scored_z, feature_scales,
-    index_for_role, raw_feature_values, spread_k_for, weights_for_role,
+    index_for_role, minute_shift, observed_index, raw_feature_values, spread_k_for,
+    weights_for_role,
 )
 from realdata.models import Player
 from vfoot.services import goal_impact
@@ -641,7 +642,7 @@ def readable_label(key: str) -> str:
     return entry[2] if entry[0] == EVENT else entry[1]
 
 
-def _all_terms(role: str, terms: dict, mean_terms: dict, per_unit: float,
+def _all_terms(role: str, terms: dict, mean_terms: dict, unit_of, 
                totals: dict, minutes: int, exposure: float) -> list[dict]:
     """Every feature of the channel, in the terms the weight tables use.
 
@@ -698,7 +699,7 @@ def _all_terms(role: str, terms: dict, mean_terms: dict, per_unit: float,
             # the same for the AVERAGE player in this role — the yardstick, because
             # what explains a 6.5 rather than a 6 is only the departure from peers
             "index_avg": round(mean_terms.get(key, 0.0), 4),
-            "points": round((terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * per_unit, 3),
+            "points": round((terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * unit_of(key), 3),
         })
     # Left in the order of the weight tables — the same order the tuner spreadsheet
     # lists them in, so a row here can be found there. Callers that want the drivers
@@ -803,15 +804,22 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # movimento comprimeva ogni fetta del 9,1% — cioe' raccontava a un portiere un
     # voto piu' vicino al 6 di quello scritto accanto al suo nome.
     per_unit = spread_k_for(role) * weight / ref["std"]
+    # I FATTI OSSERVATI HANNO LA LORO SCALA, perche' il voto non li attenua (v.
+    # classic_rating.UNSHRUNK_FEATURES): un gol segnato entrando all'85' pesa
+    # nel pannello quanto pesa nel voto, non un terzo. Senza questa riga la fetta
+    # mostrata sarebbe piu' piccola del suo effetto e la differenza finirebbe,
+    # muta, dentro «altre N voci».
+    per_unit_obs = spread_k_for(role) / ref["std"]
+    unit_of = (lambda key: per_unit_obs if key in UNSHRUNK_FEATURES else per_unit)
 
-    points_by_key = {key: (terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * per_unit
+    points_by_key = {key: (terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * unit_of(key)
                      for key in set(terms) | set(mean_terms)}
 
     # The full ledger, before the families are merged and the tail folded away —
     # every feature the channel weighs, named as the weight tables name it. Only
     # built on request: it is four times the size of the vote it explains, which is
     # fine for an analysis page and wasteful in a match-detail API response.
-    all_terms = (_all_terms(role, terms, mean_terms, per_unit, totals, minutes,
+    all_terms = (_all_terms(role, terms, mean_terms, unit_of, totals, minutes,
                             exposure) if full else [])
 
     # The raw value the phrasing quotes comes from the SAME builder the index uses,
@@ -870,9 +878,19 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # vote_center_for, non VOTE_CENTER: il centro dipende dal ruolo (v.
     # ROLE_VOTE_CENTER), e una spiegazione che partisse dal 6 per tutti mostrerebbe
     # un "altre N voci" gonfio dell'offset invece del vero resto.
-    centre = vote_center_for(role)
+    # IL VOTO DI PARTENZA, non piu' il centro secco del ruolo. Il minutaggio spiega
+    # gia' una parte dell'indice (v. classic_rating.MINUTE_CONDITIONING) e quella
+    # parte non e' merito di nessuno: sta qui dentro, cosi' le voci qui sotto
+    # restano tutte e sole cio' che il giocatore ha aggiunto. E' anche il modo di
+    # dirlo senza spiegarlo — il numero di partenza e' gia' quello giusto.
+    centre = vote_center_for(role) - spread_k_for(role) * (
+        weight * minute_shift(role, minutes, reference)
+        + (1.0 - weight) * minute_shift(role, minutes, reference,
+                                        "observed_by_minute", "observed_mean")
+    ) / ref["std"]
     raw = _raw_vote_from_index(
-        index_for_role(role, totals, minutes, exposure), role, minutes, reference)
+        index_for_role(role, totals, minutes, exposure), role, minutes, reference,
+        observed=observed_index(role, totals, minutes, exposure))
     # Same order as the scorer: clamp the merit vote, add the (divergence-only)
     # result nudge, the red-card drop and the own-goal drop, then clamp back.
     # Stesso ordine dello scorer: il credito dei GOL entra nel voto grezzo (e' merito,

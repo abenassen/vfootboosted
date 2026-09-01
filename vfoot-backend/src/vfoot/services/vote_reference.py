@@ -58,6 +58,11 @@ def weights_fingerprint() -> str:
         # stored per-feature spreads mean, so a change to either must invalidate the
         # calibration exactly as a weight change does.
         "compress_k": cr.COMPRESS_K, "sga_post_woodwork": cr.SGA_POST_WOODWORK,
+        # Il minutaggio entra nel voto in due modi, e cambiarne uno cambia ogni
+        # voto: la frazione di scostamento condizionata ai minuti, e QUALI voci
+        # sfuggono all'attenuazione (v. classic_rating.UNSHRUNK_FEATURES).
+        "minute_conditioning": cr.MINUTE_CONDITIONING,
+        "unshrunk": sorted(cr.UNSHRUNK_FEATURES),
         # Stessa ragione del legno: e' un addendo della ricetta di sga_post, quindi
         # cambia i valori grezzi della feature e le sigma calibrate su di essi.
         "sga_post_blocked": cr.SGA_POST_BLOCKED,

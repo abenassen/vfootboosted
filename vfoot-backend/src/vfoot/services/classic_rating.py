@@ -1069,6 +1069,121 @@ def vote_center_for(role: str) -> float:
     5.92, non 6.0."""
     return ROLE_VOTE_CENTER.get(role, VOTE_CENTER)
 
+# --- Il voto di partenza dipende da QUANTO HAI GIOCATO ------------------------
+# L'indice non e' neutro rispetto ai minuti: chi gioca poco ne accumula meno, e
+# non solo nel blocco dei totali (dove sarebbe per costruzione) ma anche nei
+# TASSI per-90, che dovrebbero esserlo. Misurato sulla 25-26, indice medio per
+# fascia di minuti: CEN da -0.02 (1-15') a +0.40 (90'), ATT da -0.04 a +0.42.
+# L'attenuazione sui minuti non lo cura — moltiplica lo scostamento per w<1,
+# quindi RIDUCE un numero negativo invece di portarlo a zero.
+#
+# NON E' UN ARTEFATTO DELLA COMPRESSIONE. L'ipotesi Jensen (trasformazione
+# concava + tassi piu' rumorosi sugli spezzoni) e' stata testata e RESPINTA: il
+# costo della compressione e' costante fra le fasce (-0.18 / -0.14 / -0.15 /
+# -0.18) e senza compressione la pendenza e' identica. I tassi per-90 di chi
+# entra sono davvero piu' bassi — chi subentra impiega tempo a entrare nel
+# match, e spesso entra a partita decisa. E' una circostanza, non un demerito.
+#
+# L'EFFETTO SUL VOTO, e perche' e' un difetto e non una scelta: premiavamo i
+# minuti +0.0443 punti ogni 10', contro +0.0224 della Redazione e +0.0271 dello
+# Statistico — il DOPPIO. Separando titolari e subentrati si vede dove: sui
+# titolari eravamo a 0.91 volte la Redazione (corretti), sui subentrati la loro
+# pendenza e' NEGATIVA (-0.027: al cameo piu' corto danno il voto piu' alto,
+# perche' dieci minuti non si giudicano) e la nostra positiva (+0.037). Segno
+# opposto.
+#
+# LA CURA: si sottrae all'indice una frazione dello scostamento della media
+# condizionata ai minuti (``by_minute`` nella reference). Condizionare sui
+# MINUTI e non sullo stato titolare/subentrato e' deliberato: e' continuo,
+# quindi non crea il gradino del subentrato precoce (l'entrato al 5' finisce in
+# una fascia popolata da titolari e viene giudicato come loro), e a 56-75
+# minuti le due popolazioni convergono da sole (scarto +0.012).
+#
+# LA DOSE E' PIENA (1.0), e il bersaglio su cui e' stata scelta NON e' "quanti
+# stanno sotto il 6". Quella misura mescola due popolazioni e porta fuori strada:
+# la media alta che le redazioni danno al cameo (6.14 a 1-15') non e' un livello
+# di partenza generoso, e' tutta figlia dei PRODUTTORI. Scomposta:
+#
+#   cameo 1-15'      n     Redazione
+#   ha segnato       36      6.88
+#   assist, no gol   29      6.53
+#   NIENTE          143      5.87     <- il vero bersaglio
+#
+# A chi entra e non combina niente danno 5.87, cioe' SOTTO il 6. Su quella cella:
+#
+#   assetto            1-15' niente   1-15' segna   16-30' niente   16-30' segna
+#   oggi                   5.66           6.35          5.70            6.56
+#   lambda 0.5             5.77           6.76          5.77            6.96
+#   lambda 0.8             5.83           6.82          5.84            7.05
+#   lambda 1.0             5.86           6.83          5.88            7.12
+#   Redazione              5.87           6.88          5.82            7.03
+#
+# A 1.0 il cameo che non fa niente cade a UN CENTESIMO dal loro numero. Non c'e'
+# sfondamento: alzando lambda si alza il pavimento, e il tetto lo alza beta.
+#
+# LA FORBICE SI APRE, che e' il contrario dell'appiattimento che il condizionamento
+# sembrerebbe promettere. Distanza fra le due celle estreme del cameo: loro 1.01
+# (5.87 -> 6.88), noi oggi 0.69 (5.66 -> 6.35), noi dopo 0.97 (5.86 -> 6.83).
+# Togliendo l'effetto MECCANICO dei minuti resta la differenziazione VERA fra chi
+# ha prodotto e chi no, e quella si allarga.
+#
+# LE STORTURE, cercate apposta: il titolare tolto presto e punito passa da 9 a 8
+# casi su 52 (Redazione 11 su 47), e sopra il 7.5 nei cameo si arriva a 4 casi su
+# 260 contro i 29 sopra il 7 della Redazione. L'attenuazione sui minuti resta e
+# continua a schiacciare le code: si sposta DOVE si viene schiacciati, non QUANTO.
+#
+# PREZZO: 1.6 punti di accordo (90.2% -> 88.6% entro mezzo voto), con la
+# CORRELAZIONE in salita (0.68 -> 0.69 contro la Redazione). E' la stessa firma
+# del fattore evidenza del portiere, al contrario: li' si comprava accordo
+# peggiorando l'ordinamento, qui si paga accordo per ordinare meglio.
+MINUTE_CONDITIONING = 1.0
+
+# --- I FATTI OSSERVATI NON SI ATTENUANO ---------------------------------------
+# L'attenuazione sui minuti esiste per una ragione precisa: un TASSO per-90
+# estrapolato da dieci minuti e' una stima pessima, e non ci si puo' fidare.
+# Quella ragione non vale per un FATTO: un tiro difficile messo all'incrocio e'
+# accaduto, l'abbiamo visto per intero, e non c'e' nessuna incertezza campionaria
+# da smorzare. Oggi invece ``w`` moltiplicava tutto l'indice, questi compresi.
+#
+# IL DIFETTO, misurato sulla 25-26. Chi entra e segna in 1-15 minuti prendeva in
+# media 6.35 con UN SOLO caso su 36 sopra il 7; la Redazione gli dava 6.88 e 26
+# su 36. A partita intera invece eravamo allineati (7.02 contro 7.06). Il credito
+# del gol (``goal_adjustment``) non c'entra: quello e' gia' sommato DOPO
+# l'attenuazione. A essere schiacciata era l'impronta del gol dentro l'indice —
+# il tiro, l'xG, e soprattutto ``sga_post``, che col suo 0.1448 e' il peso piu'
+# alto del modello. Il gol portava +0.34 dall'indice nel cameo contro +0.67 a
+# partita intera: la meta' mancante era tutta li'.
+#
+# PERCHE' SOLO QUESTE E NON TUTTI I TOTALI. Scorporando l'intero blocco dei
+# totali la dispersione degli spezzoni si allargava in modo SIMMETRICO: salivano
+# i cameo sopra il 7 (bene) ma anche quelli sotto il 6 (male), e il guadagno del
+# condizionamento spariva — sotto il 6 a <=30' tornava da 37.0% a 53.8%, cioe'
+# al punto di partenza. Limitandolo ai fatti passa l'evento e non il rumore
+# d'accumulo: chi entra e segna sale, chi entra e tocca quattro palloni no.
+# Misurato: cameo che segnano sopra il 7 da 1/36 a 20/36, e sotto il 6 comunque
+# in miglioramento (53.1% -> 43.4%).
+#
+# ``defensive_value`` RESTA FUORI, ed e' stato provato: e' un aggregato, non un
+# evento, e scorporarlo portava i titolari tolti presto e puniti da 8 a 15 casi
+# (la Redazione ne ha 11). Stessa ragione per ``key_passes``, ``expected_assists``
+# e i conteggi di tiro grezzi (``shots``, ``shots_off``, ``shots_blocked``): sono
+# accumulo, e da dieci minuti dicono poco.
+#
+# CENTRI E DISPERSIONI, dopo (contro Redazione / Statistico): i centri si
+# spostano al massimo di 0.014 e ogni ruolo resta fra i due fogli (DIF 5.890 su
+# 5.923/5.947, CEN 5.985 su 5.994/5.975, ATT 5.987 su 6.009/5.963). Le
+# dispersioni crescono da SOTTO entrambi a dentro la forcella, piu' vicine allo
+# Statistico: DIF 0.563 -> 0.591 (0.583/0.633), CEN 0.578 -> 0.615
+# (0.579/0.618), ATT 0.644 -> 0.702 (0.681/0.726). Prezzo: 1.0 punti di accordo
+# (90.2% -> 89.2% entro mezzo voto), accettato il 01/09/2026.
+UNSHRUNK_FEATURES = frozenset({
+    # La finitura: quanto e' valso il modo in cui ha colpito, e da dove.
+    "sga_post", "xg_shots", "shots_on_target",
+    # Eventi discreti, rari e pesanti: accaduti o non accaduti.
+    "penalties_won", "penalties_conceded", "errors_led_to_goal",
+    "errors_led_to_shot", "clearances_off_line",
+})
+
 VOTE_MIN, VOTE_MAX = 3.0, 10.0
 MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distribution
 
@@ -1925,6 +2040,24 @@ def index_for_role(role: str, totals: dict, minutes: int, exposure: float = 0.0,
     return idx
 
 
+def observed_index(role: str, totals: dict, minutes: int, exposure: float = 0.0,
+                   scales: dict | None = None) -> float:
+    """La parte dell'indice fatta di FATTI, non di tassi (v. UNSHRUNK_FEATURES).
+
+    Stessi pesi, stesse scale e stessa formula di ``index_for_role``, ristretta a
+    quelle voci: e' un ADDENDO dell'indice, non un secondo indice, ed e' cio' che
+    permette al voto di sottrarle l'attenuazione sui minuti senza ricalcolare
+    niente. Zero per il portiere, che ha un canale suo.
+    """
+    if minutes <= 0 or role == Player.ROLE_GK:
+        return 0.0
+    weights = weights_for_role(role)
+    scales = feature_scales(gk=False) if scales is None else scales
+    values = raw_feature_values(totals, minutes, exposure, gk=False)
+    return sum(w * scored_z(k, values.get(k, 0.0), scales)
+               for k, w in weights.items() if w and k in UNSHRUNK_FEATURES)
+
+
 def _per_match_player_totals(match_ids):
     """{(match_id, player_id): {feature_key: total_over_zones}} for sofascore.
 
@@ -2652,6 +2785,67 @@ def clear_scales_cache() -> None:
     _scales_cache = None
 
 
+MINUTE_CURVE_WINDOW = 8      # +-minuti della media mobile
+MINUTE_CURVE_MIN_N = 30      # sotto questo campione il punto non si stima
+
+
+def build_minute_curves(competition_season_id: int, reference: dict,
+                        scales: dict | None = None) -> None:
+    """Aggiunge a ``reference`` le due curve indice-vs-minuti, IN LOCO.
+
+    ``by_minute`` per l'indice intero e ``observed_by_minute`` per la sola parte
+    dei fatti, piu' ``observed_mean``. Sono cio' che permette di leggere come
+    merito solo lo scarto dal rendimento TIPICO DI QUEL MINUTAGGIO — v.
+    MINUTE_CONDITIONING.
+
+    SU TUTTE LE PRESENZE VALUTATE, non sulla popolazione di riferimento: quella
+    taglia sotto i ``MIN_MINUTES_REFERENCE`` minuti, cioe' proprio la fascia che
+    le curve devono descrivere. Le MEDIE di ruolo restano invece quelle della
+    reference, perche' spostarle muoverebbe ogni voto.
+    """
+    match_ids = list(Match.objects
+                     .filter(competition_season_id=competition_season_id)
+                     .values_list("id", flat=True))
+    totals = _per_match_player_totals(match_ids)
+    minutes = _minutes_map(match_ids)
+    exposure = defensive_exposure(match_ids, minutes)
+    roles = current_role_map()
+    idx_by = defaultdict(lambda: defaultdict(list))
+    obs_by = defaultdict(lambda: defaultdict(list))
+    obs_ref = defaultdict(list)
+    for (mid, pid), feats in totals.items():
+        role = roles.get(pid)
+        if role is None or role == Player.ROLE_GK:
+            continue
+        mins = minutes.get((mid, pid), 0)
+        if not mins or not is_rated(mins, feats):
+            continue
+        exp = exposure.get((mid, pid), 0.0)
+        chan = (scales or {}).get("outfield")
+        idx_by[role][mins].append(index_for_role(role, feats, mins, exp, chan))
+        o = observed_index(role, feats, mins, exp, chan)
+        obs_by[role][mins].append(o)
+        if mins >= MIN_MINUTES_REFERENCE:
+            obs_ref[role].append(o)
+
+    def curva(bymin: dict) -> dict:
+        out = {}
+        for m in range(1, 130):
+            vals = [v for mm, lst in bymin.items()
+                    if abs(mm - m) <= MINUTE_CURVE_WINDOW for v in lst]
+            if len(vals) >= MINUTE_CURVE_MIN_N:
+                out[str(m)] = sum(vals) / len(vals)
+        return out
+
+    for role in idx_by:
+        if role not in reference:
+            continue
+        reference[role]["by_minute"] = curva(idx_by[role])
+        reference[role]["observed_by_minute"] = curva(obs_by[role])
+        vals = obs_ref.get(role) or []
+        reference[role]["observed_mean"] = (sum(vals) / len(vals)) if vals else 0.0
+
+
 def build_reference(competition_season_id: int, *,
                     pooled_std: bool = POOLED_ROLE_SPREAD,
                     scales: dict | None = None) -> dict:
@@ -2706,8 +2900,39 @@ def build_reference(competition_season_id: int, *,
     return ref
 
 
+def minute_shift(ref_key: str, minutes: int, reference: dict,
+                 curve_key: str = "by_minute", mean_key: str = "mean") -> float:
+    """Quanto dell'indice e' spiegato dal solo aver giocato quei minuti.
+
+    ``MINUTE_CONDITIONING`` per lo scostamento fra la media dell'indice a QUEL
+    minutaggio e la media del ruolo. Zero quando la curva non c'e' (reference
+    vecchia, o un ruolo senza abbastanza presenze per stimarla): la mancanza
+    riporta al comportamento di prima, mai a un voto inventato."""
+    r = reference.get(ref_key) or {}
+    curve = r.get(curve_key)
+    if not curve or not MINUTE_CONDITIONING:
+        return 0.0
+    m = max(0, int(minutes or 0))
+    val = curve.get(m) if isinstance(curve, dict) else None
+    if val is None:
+        val = curve.get(str(m)) if isinstance(curve, dict) else None
+    if val is None:                     # fuori dai minuti campionati: il piu' vicino
+        try:
+            keys = sorted(int(k) for k in curve)
+        except (TypeError, ValueError):
+            return 0.0
+        if not keys:
+            return 0.0
+        near = min(keys, key=lambda k: abs(k - m))
+        val = curve.get(near, curve.get(str(near)))
+    if val is None:
+        return 0.0
+    return MINUTE_CONDITIONING * (float(val) - r.get(mean_key, 0.0))
+
+
 def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
-                         spread_k: float = VOTE_SPREAD_K) -> float:
+                         spread_k: float = VOTE_SPREAD_K,
+                         observed: float | None = None) -> float:
     """The vote before the 0.5-grid rounding (and before result mitigation), clamped
     to the pagella range. Split out so the mitigation nudge can be applied to the
     raw value and the result rounded once.
@@ -2720,12 +2945,27 @@ def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: di
     if not r:
         return centre
     spread_k = spread_k_for(ref_key, spread_k)
-    z = (index - r["mean"]) / r["std"]
+    # Il minutaggio spiega gia' una parte dell'indice: la si toglie prima di
+    # leggere il resto come merito (v. MINUTE_CONDITIONING).
+    z = (index - r["mean"] - minute_shift(ref_key, minutes, reference)) / r["std"]
     # Shrink toward the role prior (z -> 0) when minutes are few: we don't trust a
     # per-90 rate extrapolated from a short cameo, so the vote regresses to 6 in
     # proportion to the evidence. w -> 1 for full games, ~0.4 at 20', ~0.3 at 10'.
     w = minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0
-    raw = centre + spread_k * w * z
+    # I FATTI OSSERVATI NON PRENDONO ``w`` (v. UNSHRUNK_FEATURES). Scritto come
+    # correzione additiva e non spaccando l'indice: w*I + (1-w)*O = w*resto + O,
+    # quindi questa riga da' esattamente "i tassi attenuati, i fatti interi" senza
+    # obbligare ogni chiamante a conoscere la divisione. Con ``observed`` assente
+    # la correzione e' nulla e il voto e' quello di prima.
+    extra = 0.0
+    if observed is not None and w < 1.0:
+        o_mean = r.get("observed_mean")
+        if o_mean is not None:
+            o_z = (observed - o_mean
+                   - minute_shift(ref_key, minutes, reference,
+                                  "observed_by_minute", "observed_mean")) / r["std"]
+            extra = (1.0 - w) * o_z
+    raw = centre + spread_k * (w * z + extra)
     return max(VOTE_MIN, min(VOTE_MAX, raw))
 
 
@@ -2873,7 +3113,10 @@ def voto_puro_for_match(match, reference: dict,
             continue
         role, role_known = resolve_role(roles.get(pid) or "", feats,
                                         bool(keepers.get(pid)))
-        idx = index_for_role(role, feats, mins, exposure.get((mid, pid), 0.0))
+        exp = exposure.get((mid, pid), 0.0)
+        idx = index_for_role(role, feats, mins, exp)
+        # La parte fatta di FATTI, che il voto non attenua (v. UNSHRUNK_FEATURES).
+        obs = observed_index(role, feats, mins, exp)
         # An inferred KEEPER still belongs in the keeper distribution — his own
         # features identified him. Only an unknown outfielder needs the pool.
         ref_key = role if role else POOLED_OUTFIELD
@@ -2884,7 +3127,7 @@ def voto_puro_for_match(match, reference: dict,
         rated = (is_rated(mins, feats) or pid in forcing or pid in always_rate
                  or feats.get("penalties_won", 0.0) > 0
                  or feats.get("penalties_conceded", 0.0) > 0)
-        raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k)
+        raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k, obs)
         # I GOL, in punti di voto e PRIMA della mitigazione: sono merito, quindi
         # devono essere temperati dal risultato come tutto il resto — un gol in una
         # goleada subita non fa eccezione. Sommati al voto grezzo e non all'indice
@@ -2915,6 +3158,11 @@ def voto_puro_for_match(match, reference: dict,
             "minutes": mins,
             "touches": round(feats.get("touches", 0.0), 1),
             "index": round(idx, 2),
+            # La parte dell'indice fatta di FATTI, che il voto non attenua (v.
+            # UNSHRUNK_FEATURES). Esposta accanto all'indice perche' senza di lei
+            # la riga non basta a ricostruire il voto — e chi ci prova ottiene il
+            # modello di prima senza accorgersene.
+            "observed": round(obs, 4),
             "rated": rated,
             # DA QUI IN GIU', NIENTE ARROTONDAMENTI. Questi numeri non si mostrano
             # a nessuno: la spiegazione del voto li RIsomma per ricostruire il voto

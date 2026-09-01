@@ -36,6 +36,7 @@ from realdata.models import (
 )
 from vfoot.models import LeaguePlayerRole
 from vfoot.services.classic_rating import (
+    UNSHRUNK_FEATURES,
     build_reference, defensive_exposure, current_role_map, voto_puro_for_match,
     _minutes_map, _per_match_player_totals,
 )
@@ -761,6 +762,13 @@ def shot_detail(match, player_id: int) -> dict:
     # copiate divergono, e qui il conto DEVE tornare con la riga scritta sopra.
     weight = mins / (mins + SHRINKAGE_MINUTES)
     per_unit = spread_k_for(role) * weight / reference[role]["std"]
+    # LA FAMIGLIA DEI TIRI STA A CAVALLO DEI DUE GRUPPI: sga_post, xg_shots e
+    # shots_on_target sono fatti osservati e il voto non li attenua (v.
+    # classic_rating.UNSHRUNK_FEATURES), shots/shots_off/shots_blocked si'. Una
+    # scala sola non basta piu', e va applicata DENTRO il sotto-indice: cosi' le
+    # quote Shapley escono gia' in punti di voto e la sezione torna con la riga.
+    per_unit_obs = spread_k_for(role) / reference[role]["std"]
+    unit_of = (lambda k: per_unit_obs if k in UNSHRUNK_FEATURES else per_unit)
 
     counted = [i for i, s in enumerate(shots) if not s["own_goal"]]
     n = len(counted)
@@ -828,7 +836,7 @@ def shot_detail(match, player_id: int) -> dict:
         che e' fissata da un test."""
         t = totals_for(mask)
         t = {**t, **derived_features(t)}
-        return sum(weights.get(k, 0.0) * scored_z(k, t.get(k, 0.0), scales)
+        return sum(weights.get(k, 0.0) * scored_z(k, t.get(k, 0.0), scales) * unit_of(k)
                    for k in _SHOT_FAMILY)
 
     full = (1 << n) - 1
@@ -860,7 +868,7 @@ def shot_detail(match, player_id: int) -> dict:
         tot = sum(loo)
         share = [x * (joint / tot) if tot else joint / n for x in loo]
 
-    points = dict(zip(counted, (x * per_unit for x in share)))
+    points = dict(zip(counted, share))          # gia' in punti di voto
     out = []
     for i, s in enumerate(shots):
         own = s["own_goal"]
@@ -880,9 +888,9 @@ def shot_detail(match, player_id: int) -> dict:
 
     # Il metro: dove sta la riga di chi non ha concluso, rispetto ai pari ruolo.
     mean_terms = get_role_averages(match.competition_season_id).get(role, {})
-    baseline = (empty_value - sum(mean_terms.get(k, 0.0) for k in _SHOT_FAMILY)) * per_unit
+    baseline = empty_value - sum(mean_terms.get(k, 0.0) * unit_of(k) for k in _SHOT_FAMILY)
     return {"shots": out, "baseline": round(baseline, 3),
-            "total": round(baseline + joint * per_unit, 3)}
+            "total": round(baseline + joint, 3)}
 
 
 # Le due voci che UN TIRO NELLO SPECCHIO muove nel canale del portiere, e quindi
