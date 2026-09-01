@@ -26,6 +26,26 @@ function band(p: ProbablePlayer): { cls: string; label: string } {
   return { cls: 'bg-surface-2 text-ink-faint', label: 'Panchina' };
 }
 
+// L'ORDINE DI LETTURA di una formazione: portiere, difesa, centrocampo, attacco.
+// Ordinare per percentuale decrescente metteva insieme gente che non c'entra —
+// il portiere al 99% accanto al centravanti, il terzino di riserva in mezzo ai
+// centrocampisti — e obbligava a rileggere la lista per capire chi gioca dove.
+// È anche l'ordine con cui la stessa partita si legge a fine giornata nella
+// pagella, che sta due schede più in là.
+//
+// Il backend manda già le righe così; qui si riordina lo stesso, perché le
+// sezioni si ritagliano per probabilità (v. `Side`) e il taglio scompagina.
+const ROLE_ORDER: Record<string, number> = { POR: 0, DIF: 1, CEN: 2, ATT: 3 };
+const ROLE_SHORT: Record<string, string> = { POR: 'P', DIF: 'D', CEN: 'C', ATT: 'A' };
+
+function byRole(a: ProbablePlayer, b: ProbablePlayer): number {
+  return (
+    (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9) ||
+    b.probability - a.probability ||
+    a.name.localeCompare(b.name)
+  );
+}
+
 function Row({ p }: { p: ProbablePlayer }) {
   const b = band(p);
   // Solo un movimento vero merita una freccia: sotto i cinque punti è rumore
@@ -36,6 +56,12 @@ function Row({ p }: { p: ProbablePlayer }) {
     <li className="flex items-center gap-2 py-1">
       <span className={`w-11 shrink-0 rounded px-1 py-0.5 text-center font-mono text-[11px] font-bold ${b.cls}`}>
         {p.status === 'out' ? '—' : `${p.probability}%`}
+      </span>
+      {/* La lettera del ruolo: non è un'abbreviazione da indovinare, è la conferma
+          di un raggruppamento che si vede già dall'ordine. Resta muta quando il
+          ruolo non lo sappiamo, invece di inventare una C. */}
+      <span className="w-2.5 shrink-0 text-center font-mono text-[10px] text-ink-faint">
+        {ROLE_SHORT[p.role] ?? ''}
       </span>
       <span className={p.status === 'out' ? 'text-ink-faint line-through' : 'text-ink-soft'}>
         {p.name}
@@ -52,9 +78,15 @@ function Row({ p }: { p: ProbablePlayer }) {
 }
 
 function Side({ team, formation, players }: { team: string; formation: string; players: ProbablePlayer[] }) {
-  const xi = players.filter((p) => p.status === 'starter');
-  const rest = players.filter((p) => p.status !== 'starter' && p.probability > 0).slice(0, 6);
-  const out = players.filter((p) => p.status === 'out');
+  const xi = players.filter((p) => p.status === 'starter').sort(byRole);
+  // Chi entra nella lista corta lo decide la probabilità — sono i primi rincalzi,
+  // non i primi difensori — ma una volta scelti si leggono per ruolo come gli altri.
+  const rest = players
+    .filter((p) => p.status !== 'starter' && p.probability > 0)
+    .sort((a, b) => b.probability - a.probability)
+    .slice(0, 6)
+    .sort(byRole);
+  const out = players.filter((p) => p.status === 'out').sort(byRole);
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-baseline gap-2">

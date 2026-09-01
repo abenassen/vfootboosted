@@ -92,6 +92,8 @@ export type ProbableStatus = 'starter' | 'bench' | 'doubt' | 'out';
 export interface ProbablePlayer {
   player_id: number;
   name: string;
+  /** POR | DIF | CEN | ATT | '' — il ruolo con cui la lista si ordina. */
+  role: string;
   /** 0..100. Zero significa indisponibile, non "molto improbabile". */
   probability: number;
   /** Il valore del giro precedente, per la freccia. */

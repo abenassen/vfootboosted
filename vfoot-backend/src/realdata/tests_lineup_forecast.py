@@ -880,3 +880,109 @@ class ShownHistoryTests(_Pitch):
         dopo = probable.merged(nxt)
         # Il precedente e' il numero MOSTRATO al giro prima, non quello del motore.
         self.assertEqual(dopo[pid]["previous"], prima)
+
+
+class PayloadOrderTests(_Pitch):
+    """L'ORDINE DELLA LISTA. Una probabile formazione si legge per ruolo — P, D,
+    C, A — non per percentuale decrescente: ordinata per numero, il portiere al
+    99% finiva accanto al centravanti e il terzino di riserva in mezzo ai
+    centrocampisti, e per sapere chi gioca in difesa bisognava rileggerla tutta.
+
+    E' anche l'ordine con cui la stessa partita si rilegge a fine giornata nella
+    pagella (``classic_pagella.ROLE_ORDER``), che sta due schede piu' in la'.
+    """
+
+    def _roles(self, key, mapping):
+        for i, role in mapping.items():
+            p = self.squad[key][i]
+            p.classic_role_seed = role
+            p.save(update_fields=["classic_role_seed"])
+
+    def _upcoming(self):
+        for md in range(1, 4):
+            m = self._match(md, md)
+            self._played(m, "A", self.squad["A"][:11])
+            self._played(m, "B", self.squad["B"][:11])
+        nxt = self._match(4, 10, status=Match.STATUS_SCHEDULED)
+        engine.build_forecast(nxt)
+        return nxt
+
+    def _titolari(self, payload, side="home"):
+        return [r for r in payload[side]["players"] if r["status"] == "starter"]
+
+    def test_l_undici_si_legge_per_ruolo(self):
+        # Gli attaccanti sono i piu' probabili e i difensori i meno: ordinando per
+        # percentuale la lista uscirebbe esattamente al contrario.
+        for key in ("A", "B"):
+            self._roles(key, {0: "POR", 1: "POR",
+                              2: "ATT", 3: "ATT", 4: "ATT",
+                              5: "CEN", 6: "CEN", 7: "CEN",
+                              8: "DIF", 9: "DIF", 10: "DIF",
+                              11: "DIF", 12: "DIF", 13: "CEN", 14: "CEN",
+                              15: "ATT", 16: "ATT", 17: "ATT"})
+        payload = probable.match_payload(self._upcoming())
+        xi = self._titolari(payload)
+        ruoli = [r["role"] for r in xi]
+        self.assertEqual(ruoli, sorted(ruoli, key=probable.ROLE_ORDER.get),
+                         f"l'undici non e' in ordine P, D, C, A: {ruoli}")
+        self.assertEqual(ruoli[0], "POR")
+        self.assertNotEqual([r["player_id"] for r in xi],
+                            [r["player_id"] for r in
+                             sorted(xi, key=lambda r: -r["probability"])],
+                            "prova cieca: qui i due ordini coincidono")
+
+    def test_dentro_il_ruolo_comanda_la_probabilita(self):
+        self._roles("A", {0: "POR", 1: "POR",
+                          2: "DIF", 3: "DIF", 4: "DIF", 5: "DIF",
+                          6: "CEN", 7: "CEN", 8: "CEN",
+                          9: "ATT", 10: "ATT",
+                          11: "DIF", 12: "DIF", 13: "CEN", 14: "CEN",
+                          15: "ATT", 16: "ATT", 17: "ATT"})
+        payload = probable.match_payload(self._upcoming())
+        for row in payload["home"]["players"]:
+            self.assertIn(row["role"], ("POR", "DIF", "CEN", "ATT"))
+        for ruolo in ("POR", "DIF", "CEN", "ATT"):
+            probs = [r["probability"] for r in payload["home"]["players"]
+                     if r["role"] == ruolo]
+            self.assertEqual(probs, sorted(probs, reverse=True))
+
+    def test_il_ruolo_risolto_batte_il_seme(self):
+        """L'ala che Transfermarkt chiama centrocampista sta con gli attaccanti,
+        come nel listone e nella pagella: il seme non e' il ruolo."""
+        from vfoot.models import CurrentPlayerRole
+        self._roles("A", {i: "CEN" for i in range(2, 18)})
+        self._roles("A", {0: "POR", 1: "POR"})
+        ala = self.squad["A"][4]
+        CurrentPlayerRole.objects.create(player=ala, role_mitigated="ATT")
+        payload = probable.match_payload(self._upcoming())
+        xi = self._titolari(payload)
+        self.assertEqual([r for r in xi if r["player_id"] == ala.id][0]["role"],
+                         "ATT")
+        self.assertEqual(xi[-1]["player_id"], ala.id,
+                         "l'attaccante non e' finito in fondo alla lista")
+
+    def test_il_portiere_resta_in_testa_anche_senza_ruolo_scritto(self):
+        """Nessun ruolo da nessuna parte: ``is_goalkeeper`` e' un fatto, e senza
+        di lui il portiere finirebbe in coda invece che in cima."""
+        payload = probable.match_payload(self._upcoming())
+        self.assertEqual(payload["home"]["players"][0]["role"], "POR")
+
+    def test_a_essere_tagliati_sono_gli_improbabili_non_gli_attaccanti(self):
+        """I due ordinamenti non si confondono: la lista si TAGLIA per
+        probabilita' (ventisei righe bastano per una rosa) e si LEGGE per ruolo.
+        Invertendoli, una rosa lunga perdeva un reparto intero."""
+        for i in range(18, 32):
+            p = Player.objects.create(full_name=f"A{i:02d} Giocatore",
+                                      external_source="sofascore",
+                                      external_id=f"A{i:02d}",
+                                      classic_role_seed="ATT")
+            PlayerTeamStint.objects.create(player=p, team_season=self.ts["A"])
+            self.squad["A"].append(p)
+        nxt = self._upcoming()
+        rows = probable.match_payload(nxt)["home"]["players"]
+        self.assertEqual(len(rows), 26)
+        tenuti = {r["player_id"]: r["probability"] for r in rows}
+        tagliati = [v["probability"] for pid, v in probable.merged(nxt).items()
+                    if v["team_season_id"] == self.ts["A"].id and pid not in tenuti]
+        self.assertTrue(tagliati, "prova cieca: non e' stato tagliato nessuno")
+        self.assertGreaterEqual(min(tenuti.values()), max(tagliati))

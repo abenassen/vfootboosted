@@ -622,6 +622,43 @@ def probabilities_for(competition_season, matchday: int,
     return out
 
 
+# L'ordine di lettura di una formazione: portiere, difesa, centrocampo, attacco.
+# Lo stesso di ``classic_pagella.ROLE_ORDER``, e non e' una coincidenza da
+# riconciliare: la probabile e la pagella della stessa partita si leggono a due
+# schede di distanza e un ordine diverso fra le due sarebbe solo un inciampo.
+ROLE_ORDER = {"POR": 0, "DIF": 1, "CEN": 2, "ATT": 3}
+
+
+def classic_roles(player_ids) -> dict[int, str]:
+    """{player_id: POR|DIF|CEN|ATT} per i giocatori chiesti, per ORDINARE la lista.
+
+    Stesso strato che usa il listone — ``CurrentPlayerRole``, col seme
+    Transfermarkt come ripiego — perche' due pagine che nominano lo stesso
+    giocatore non possono dargli due ruoli diversi. Qui non si sceglie una lega:
+    l'endpoint delle probabili e' di partita, non di lega, quindi il ruolo
+    congelato di ``LeaguePlayerRole`` non entra. In pratica coincidono, e quando
+    non coincidono la probabile mostra il ruolo che il giocatore gioca davvero,
+    che per una previsione di formazione e' quello giusto.
+
+    ``is_goalkeeper`` chiude in fondo: e' un fatto del giocatore, non una stima,
+    e senza di lui un portiere mai passato dal calcolo dei ruoli finirebbe in
+    coda alla lista invece che in cima.
+
+    Import locale: realdata non dipende da vfoot.
+    """
+    from vfoot.models import CurrentPlayerRole
+    roles: dict[int, str] = {}
+    for pid, seed, gk in (Player.objects.filter(id__in=player_ids)
+                          .values_list("id", "classic_role_seed", "is_goalkeeper")):
+        roles[pid] = seed or ("POR" if gk else "")
+    for pid, role in (CurrentPlayerRole.objects
+                      .filter(player_id__in=player_ids)
+                      .values_list("player_id", "role_mitigated")):
+        if role:
+            roles[pid] = role
+    return roles
+
+
 def match_payload(match) -> dict | None:
     """Le due formazioni previste di una partita, pronte da disegnare.
 
@@ -639,6 +676,7 @@ def match_payload(match) -> dict | None:
     names = dict(Player.objects.filter(id__in=probs)
                  .values_list("id", "short_name"))
     full = dict(Player.objects.filter(id__in=probs).values_list("id", "full_name"))
+    roles = classic_roles(probs)
 
     sides = {}
     for side, ts_id in (("home", match.home_team_id), ("away", match.away_team_id)):
@@ -649,16 +687,25 @@ def match_payload(match) -> dict | None:
             rows.append({
                 "player_id": pid,
                 "name": names.get(pid) or full.get(pid) or "?",
+                "role": roles.get(pid, ""),
                 "probability": info["probability"],
                 "previous": info.get("previous"),
                 "status": info["status"],
                 "reason": info["reason"],
                 "sources": info["sources"],
             })
+        # DUE ORDINAMENTI, e l'ordine fra i due conta. Chi resta fuori dalla lista
+        # lo decide la PROBABILITA' — ventisei righe bastano per una rosa, e i
+        # tagliati devono essere gli improbabili, non gli attaccanti. Chi legge la
+        # lista la scorre invece per RUOLO, come ogni probabile formazione e come
+        # la pagella della stessa partita due schede piu' in la'.
         rows.sort(key=lambda r: (-r["probability"], r["name"]))
+        rows = rows[:26]
+        rows.sort(key=lambda r: (ROLE_ORDER.get(r["role"], 9),
+                                 -r["probability"], r["name"]))
         sides[side] = {
             "formation": (getattr(sofa, f"{side}_formation", "") if sofa else ""),
-            "players": rows[:26],
+            "players": rows,
         }
 
     return {
