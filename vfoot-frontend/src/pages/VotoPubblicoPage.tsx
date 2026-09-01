@@ -144,7 +144,7 @@ export default function VotoPubblicoPage() {
               <Caso
                 partita="Inter–Pisa 6-2 · 22ª"
                 chi="Moreo"
-                noi="6,5"
+                noi="6,0"
                 loro="7,5"
                 perche="Due gol nel 6-2 dell'Inter: col bonus il fantavoto è 12,5 come per tutti, ma il gioco intorno resta quello di una serata perduta. Qui la pagella sta più in alto di noi."
               />

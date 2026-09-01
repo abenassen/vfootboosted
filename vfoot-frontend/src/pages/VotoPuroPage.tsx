@@ -235,6 +235,12 @@ export default function VotoPuroPage() {
           </div>
         </div>
         <p className="mt-3 text-xs text-ink-faint">
+          I duelli non pesano uguale nei due versi, e per un difensore la differenza è grossa:{' '}
+          <b className="text-ink">perderne uno costa più di quanto renda vincerne uno</b>. È una
+          scelta, e viene dal campo — un duello perso che porta al gol conta più di altri nove
+          vinti a metà campo. Per un centrocampista o un attaccante i due versi si riavvicinano.
+        </p>
+        <p className="mt-3 text-xs text-ink-faint">
           Due voci meritano una riga per conto loro, perché il voto puro è <i>l'unico</i> posto in
           cui possono comparire: il rigore conquistato e il rigore concesso non hanno alcun bonus né
           malus nei sistemi di voto usuali. Chi si procura il penalty non prende niente (il +3 va a
@@ -265,8 +271,9 @@ export default function VotoPuroPage() {
             <b className="text-ink">L'autogol</b> non è tutto uguale: distinguiamo la deviazione
             dalla frittata. Se arriva nello stesso istante di un tiro avversario è una palla
             deviata, sfortuna, e il calo è minimo (due decimi); se è un errore in solitaria pesa di
-            più (mezzo punto). Per dare un metro: un gol <i>fatto</i> vale circa sette decimi di
-            voto, quindi nemmeno l'autogol peggiore arriva a costare quanto una rete rende. Quando
+            più (mezzo punto). Per dare un metro: un gol <i>fatto</i> vale fra tre decimi e mezzo e
+            otto decimi di voto, secondo quanto ha cambiato la partita — quindi nemmeno l'autogol
+            peggiore costa quanto rende un gol che decide. Quando
             non abbiamo il tempo al secondo non pretendiamo di distinguere: applichiamo un unico
             calo piccolo, invece di attribuire una gravità che non possiamo misurare.
           </li>
@@ -279,8 +286,10 @@ export default function VotoPuroPage() {
         </ul>
         <p className="text-xs text-ink-faint">
           È la stessa regola che vale in tutto il modello: non si paga <i>il fatto</i>, si legge il
-          merito dentro il fatto. Vale anche al contrario — il gol non entra nel voto come «gol» ma
-          per come è stato calciato, e il rigore parato per quanto era difficile.
+          merito dentro il fatto. Vale anche al contrario — il gol entra nel voto per{' '}
+          <b className="text-ink">quanto ha cambiato la partita</b>, non a tariffa fissa: il
+          pareggio al 90' e il quarto gol di una goleada non valgono uguale. E il rigore parato
+          entra per quanto era difficile pararlo.
         </p>
       </Section>
 
@@ -311,14 +320,14 @@ export default function VotoPuroPage() {
           partita="Cremonese–Como 1-4 · 38ª giornata"
           chi="Bianchetti e Pezzella, i due centrali"
           righe={[
-            { chi: 'Bianchetti', noi: 4.0, red: 4.5, stat: 4.5, sofa: 5.4 },
+            { chi: 'Bianchetti', noi: 3.0, red: 4.5, stat: 4.5, sofa: 5.4 },
             { chi: 'Pezzella', noi: 5.5, red: 4.5, stat: 4.0, sofa: 6.7 },
           ]}
-          perche="Le pagelle danno lo stesso voto a entrambi: la difesa ha preso quattro gol. Noi li separiamo di un voto e mezzo, perché il rigore lo concede Bianchetti ed è dalla sua parte che passa la maggior parte del pericolo. Il rating di SofaScore, che non entra nel nostro calcolo, mette i due nello stesso ordine (5,4 e 6,7)."
+          perche="Le pagelle danno lo stesso voto a entrambi: la difesa ha preso quattro gol. Noi li separiamo di due voti e mezzo, perché il rigore lo concede Bianchetti ed è dalla sua parte che passa la maggior parte del pericolo. Il rating di SofaScore, che non entra nel nostro calcolo, mette i due nello stesso ordine (5,4 e 6,7)."
         />
         <p className="text-xs text-ink-faint">
-          Nella stagione {VOTO.stagione} è andata così in 17 partite: due difensori della stessa difesa, lo
-          stesso voto dalla Redazione, e da noi più di un voto e mezzo di differenza. Non è un caso
+          Nella stagione {VOTO.stagione} è andata così in 60 difese: due compagni di reparto, lo
+          stesso voto dalla Redazione, e da noi un voto e mezzo di differenza o più. Non è un caso
           limite: è il motivo per cui un difensore, da noi, può prendere 6,5 in una serata da tre
           gol presi.
         </p>
@@ -351,9 +360,14 @@ export default function VotoPuroPage() {
             pesante del ruolo.
           </li>
           <li>
-            <b className="text-ink">I gol presi non entrano nel voto</b>: ogni gol preso è già −1
-            sul fantavoto. Metterlo anche nel voto puro sarebbe contarlo due volte, e il portiere di
-            una squadra che perde 4-0 sarebbe condannato in partenza.
+            <b className="text-ink">Il gol preso non è una tacca in più</b>: ogni gol preso è già −1
+            sul fantavoto, e aggiungere una penalità fissa nel voto puro sarebbe contarlo due volte
+            — il portiere di una squadra che perde 4-0 sarebbe condannato in partenza. Nel voto
+            entra soltanto dentro il saldo qui sopra, cioè per{' '}
+            <b className="text-ink">quanto era parabile</b> il pallone che è entrato. E, come il gol
+            fatto, per <b className="text-ink">quanto ha cambiato la partita</b>: il gol che decide
+            all'ultimo minuto pesa più del quarto di una goleada, esattamente come pesa in più a chi
+            l'ha segnato.
           </li>
           <li>
             <b className="text-ink">L'autogol di un compagno pesa per quanto era parabile.</b> Un
@@ -379,21 +393,21 @@ export default function VotoPuroPage() {
           <Caso
             partita="Cremonese–Genoa 0-0 · 25ª giornata"
             chi="Bijlow"
-            righe={[{ chi: '', noi: 8.0, red: 6.5, stat: 6.5, sofa: 10 }]}
+            righe={[{ chi: '', noi: 8.5, red: 6.5, stat: 6.5, sofa: 10 }]}
             compatto
             perche="Porta inviolata con otto parate, sette dentro l'area, in una partita in cui il pareggio è merito suo. Le due colonne di fantacalcio.it lo mettono a 6,5: uno 0-0 non fa notizia."
           />
           <Caso
             partita="Torino–Cagliari 1-2 · 17ª giornata"
             chi="Caprile"
-            righe={[{ chi: '', noi: 8.0, red: 6.5, stat: 7.0, sofa: 9.1 }]}
+            righe={[{ chi: '', noi: 8.5, red: 6.5, stat: 7.0, sofa: 9.1 }]}
             compatto
             perche="Nove parate, sei su tiri da dentro l'area, un gol preso: i tiri che ha affrontato valevano due gol e mezzo più di quello che gli è entrato."
           />
           <Caso
             partita="Inter–Verona 1-1 · 37ª giornata"
             chi="Montipò"
-            righe={[{ chi: '', noi: 6.5, red: 7.5, stat: 7.5, sofa: 7.4 }]}
+            righe={[{ chi: '', noi: 7.0, red: 7.5, stat: 7.5, sofa: 7.4 }]}
             compatto
             invertito
             perche="Cinque parate su sei tiri, e l'unico gol è l'autogol di un compagno — che gli addebitiamo solo per quanto era parabile, cioè quasi niente. Restiamo mezzo punto sotto perché i cinque palloni che ha parato valevano 0,64 gol in tutto: le pagelle contano gli interventi, noi quanto valevano. È la differenza di lettura, e qui il nostro conto è quello di minoranza."
@@ -407,10 +421,15 @@ export default function VotoPuroPage() {
           />
         </div>
         <p className="text-xs text-ink-faint">
-          Il portiere resta il ruolo in cui ci discostiamo di più, e lo diciamo volentieri: su una
-          stagione il nostro voto medio è 0,13 sotto quello delle pagelle. Il motivo è quello che si
-          vede negli esempi — noi paghiamo il saldo tra i tiri affrontati e i gol presi, loro
-          leggono anche lo spettacolo delle parate.
+          Il livello, adesso, è quello giusto: su tutta la stagione {VOTO.stagione} il nostro voto
+          medio ai portieri sta <b className="text-ink">due centesimi e mezzo</b> sotto quello della
+          Redazione — fino al 30 agosto 2026 erano tredici centesimi, e li abbiamo corretti. Quello
+          che resta è la differenza di lettura che si vede negli esempi, e non si vede nella media
+          perché non è uno sbilanciamento: noi paghiamo il saldo tra quanto valevano i tiri
+          affrontati e i gol presi, le pagelle leggono anche lo spettacolo delle parate. Partita per
+          partita restiamo il ruolo su cui divergiamo di più — ed è anche quello su cui somigliamo
+          di più al rating indipendente ({VOTO.correlazione[0].noi} contro{' '}
+          {VOTO.correlazione[0].redazione}).
         </p>
       </Section>
 
@@ -468,16 +487,16 @@ export default function VotoPuroPage() {
             Nei voti usuali il gol è quasi un bonus extra sul voto puro: tra gli attaccanti che
             hanno segnato una volta, la Redazione di fantacalcio.it ha scritto{' '}
             <b className="text-ink">esattamente 7,0 in 261 casi su 357</b> (media 7,03, con
-            oscillazioni minime). Noi teniamo una media vicina — 6,86 — ma con il doppio della
-            dispersione (qualcuno prenderà 6, qualcuno prenderà 8), perché al di là del gol
-            continuiamo a valutare l'intera partita.
+            oscillazioni minime). Noi teniamo una media vicina — 6,79 — ma con una dispersione una
+            volta e mezzo la loro (qualcuno prenderà 6, qualcuno prenderà 8), perché al di là del
+            gol continuiamo a valutare l'intera partita.
           </p>
           <Caso
             partita="Juventus–Parma 2-0 · 1ª giornata"
             chi="Vlahović"
-            righe={[{ chi: '', noi: 6.0, red: 7.0, stat: 7.0, sofa: 7.2 }]}
+            righe={[{ chi: '', noi: 6.5, red: 7.0, stat: 7.0, sofa: 7.2 }]}
             compatto
-            perche="Entra e segna, in dieci minuti. Il gol vale +3 e il suo fantavoto è 9,0 come per tutti: ma di quei dieci minuti non sappiamo niente altro, e un voto puro di 7 sarebbe una prestazione che non abbiamo visto. Il voto puro resta 6."
+            perche="Entra e segna, in dieci minuti. Il gol vale +3 e il suo fantavoto è 9,0 come per tutti. Nel voto puro glielo paghiamo per quello che ha cambiato — è il 2-0 all'84', con la partita già decisa, e vale quattro decimi — più il merito di come l'ha calciato. Di quei dieci minuti non sappiamo altro, quindi ci fermiamo a 6,5 dove la pagella scrive 7."
           />
           <Caso
             partita="Pisa–Napoli 0-3 · 37ª giornata"
@@ -523,7 +542,7 @@ export default function VotoPuroPage() {
           <Caso
             partita="Verona–Inter 1-2 · 10ª giornata"
             chi="Bastoni"
-            righe={[{ chi: '', noi: 7.0, red: 5.5, stat: 5.5, sofa: 8.1 }]}
+            righe={[{ chi: '', noi: 6.5, red: 5.5, stat: 5.5, sofa: 8.1 }]}
             compatto
             perche="Centododici palloni giocati, settantadue passaggi riusciti su ottantatré, sei duelli aerei vinti, e il gol subito lontano dalla sua zona. Le pagelle lo tengono a 5,5 in una partita vinta ma sofferta."
           />
@@ -551,7 +570,7 @@ export default function VotoPuroPage() {
           <Caso
             partita="Inter–Pisa 6-2 · 22ª giornata"
             chi="Moreo"
-            righe={[{ chi: '', noi: 6.5, red: 7.5, stat: 7.5, sofa: 8.7 }]}
+            righe={[{ chi: '', noi: 6.0, red: 7.5, stat: 7.5, sofa: 8.7 }]}
             compatto
             invertito
             perche="Due gol nel 6-2 dell'Inter, e un nostro 6,5 di voto puro — con i due gol il fantavoto è 12,5, come per tutti. Nel voto pesano il pericolo passato dalla sua zona e i quattro gol di scarto che la sua squadra aveva mentre lui era in campo: per le pagelle e per il rating due gol valgono la serata, per noi la raccontano solo in parte."
@@ -576,10 +595,9 @@ export default function VotoPuroPage() {
         </div>
         <p>
           Lo scarto medio è {VOTO.scartoMedio} punti: siamo <i>vicini</i> alle pagelle, non
-          allineati. Per ruolo:
-          0,31 i portieri, 0,34 difensori e centrocampisti, 0,35 gli attaccanti. E la parte in cui
-          non siamo allineati è quella che ci interessa, perché è dove i dati dicono qualcosa che
-          l'impressione non aveva registrato.
+          allineati. Per ruolo: 0,35 i difensori, 0,34 i portieri, 0,32 i centrocampisti e 0,31 gli
+          attaccanti. E la parte in cui non siamo allineati è quella che ci interessa, perché è dove
+          i dati dicono qualcosa che l'impressione non aveva registrato.
         </p>
         <p>
           Chi ha ragione, quando divergiamo? Un metro indipendente è il{' '}
@@ -633,7 +651,7 @@ export default function VotoPuroPage() {
             >
               i nostri voti a fianco di quelli di fantacalcio.it
             </a>
-            , con l'elenco di dove ci allontaniamo da entrambe le loro letture. È l'intera stagione
+            , con l'elenco di dove ci allontaniamo da entrambe le loro letture. È l'intera stagione{' '}
             {VOTO.stagione}, senza scegliere gli esempi.
           </Callout>
         ) : null}
