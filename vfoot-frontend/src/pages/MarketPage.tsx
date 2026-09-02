@@ -429,6 +429,12 @@ function OfferPanel({
               Tetto: <b>{release ? price(maxAmount) : '—'}</b>
               {release && <span className="text-ink-faint"> ({available} disponibili + {release.recovery} di recupero)</span>}
               {target.leading && <span className="text-ink-faint"> · minimo rilancio {price(minAmount)}</span>}
+              {release && (
+                <div className="mt-0.5 text-xs text-ink-faint">
+                  Il recupero vale solo in questa offerta: se viene superata, {release.name} resta
+                  in rosa e quei crediti non si liberano per le altre.
+                </div>
+              )}
             </div>
           </div>
           <div className="flex gap-2">

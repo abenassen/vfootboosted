@@ -13,14 +13,24 @@ Credit model (decided with the user, see docs/offer_market_plan.md):
     roster size never changes: the auction's "keep 1 credit per empty slot" guard
     is inert here. The only binding constraint is cash.
   * Credits are RESERVED: every still-live offer (leading or accepted) a manager
-    holds commits its NET cost `amount - recovery`. A new offer is legal only if,
-    assuming ALL the manager's live offers win, his balance stays >= 0. So the
-    ceiling for a new offer releasing player p is
+    holds commits its NET cost `max(0, amount - recovery)`. A new offer is legal
+    only if, whatever SUBSET of the manager's live offers ends up winning, his
+    balance stays >= 0. So the ceiling for a new offer releasing player p is
 
-        max_amount = remaining - sum(net_i for other live offers) + recovery(p)
+        max_amount = remaining - sum(max(0, net_i) for other live offers) + recovery(p)
 
     which for a lone offer reduces to `remaining + recovery(p)` — the worked
     example (26 residui, Lautaro pagato 135, recupero 50% -> tetto 26+68 = 94).
+
+    The clamp at zero is the whole point (bug found in production, 02/09/2026).
+    A recovery counts ONLY inside the offer that pledges it, because that offer
+    is the one thing guaranteeing the release. A cheap offer on a free agent
+    releasing an expensive player has a NEGATIVE net (offer 1, recover 25 ->
+    -24); reserving the signed net handed those 24 credits to the manager's
+    OTHER offers, which could then win while the cheap one got outbid — the
+    release never happens, the 24 never arrive, the roster ends up in debt.
+    The old wording "assuming ALL live offers win" was the flaw: the worst case
+    is not every offer winning, it is every cash-positive offer LOSING.
 """
 
 from __future__ import annotations
@@ -106,7 +116,9 @@ class MarketTeamState:
     remaining: int  # initial_budget - spent (cash left after the settled roster)
     # active roster: player_id -> {"price": int, "role": str|None}
     roster: dict[int, dict] = field(default_factory=dict)
-    reserved_net: int = 0  # sum of (amount - recovery) over this team's live offers
+    # sum of max(0, amount - recovery) over this team's live offers: a swap that
+    # would BRING cash reserves nothing, and its surplus funds nothing else.
+    reserved_net: int = 0
     pledged_release_ids: set[int] = field(default_factory=set)
     live_target_ids: set[int] = field(default_factory=set)
 
@@ -153,7 +165,8 @@ def market_states(
             st = states.get(tid)
             if st is None:
                 continue
-            st.reserved_net += int(amount) - int(recovery)
+            # Clamped at zero: the recovery pays for THIS offer only (see module doc).
+            st.reserved_net += max(0, int(amount) - int(recovery))
             st.pledged_release_ids.add(release_id)
             st.live_target_ids.add(target_id)
     return states

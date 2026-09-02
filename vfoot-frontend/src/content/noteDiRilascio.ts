@@ -62,6 +62,21 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-9',
+    versione: '1.9',
+    data: '2 settembre 2026',
+    titolo: 'Il recupero di uno svincolo vale solo nella sua offerta',
+    voci: [
+      {
+        tipo: 'corretto',
+        testo:
+          'Nel mercato a offerte, i crediti che recuperi svincolando un giocatore contano solo nell’offerta che lo svincola. Prima, offrire poco per uno svincolato lasciando un giocatore pagato molto faceva salire i «disponibili» anche per le altre offerte: se quella veniva superata, il giocatore restava in rosa e quei crediti non arrivavano mai.',
+        caso:
+          'Una squadra con 47 disponibili offriva 1 per Jiménez svincolando Molina (recupero 25) e si ritrovava con 71 disponibili per Beto. Sulle 185 offerte della prima sessione, 8 superavano il tetto corretto.',
+      },
+    ],
+  },
+  {
     id: 'v-1-8',
     versione: '1.8',
     data: '1 settembre 2026',

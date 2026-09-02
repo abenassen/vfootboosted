@@ -2,7 +2,8 @@
 reservation, rebids resetting the 24h clock, deadline promotion, and admin apply.
 
 Economy under test: budget 1000, roster 3-8-8-6. An offer on a free agent pledges a
-same-role release; the ceiling is (remaining - reserved_net) + recovery(release).
+same-role release; the ceiling is (remaining - reserved_net) + recovery(release),
+where reserved_net sums max(0, amount - recovery) over the manager's live offers.
 """
 from __future__ import annotations
 
@@ -176,6 +177,35 @@ class ReservationTests(MarketBase):
         self.assertFalse(chk.ok)
         self.assertEqual(chk.max_amount, 2)
         self.assertTrue(me.check_offer(s, self.t2, fa2.id, d2.id, 2).ok)
+
+    def test_a_cheap_offer_with_a_big_recovery_does_not_fund_the_others(self):
+        # Il recupero dello svincolo vale SOLO nell'offerta che lo promette: se
+        # quella viene superata il giocatore resta in rosa e i crediti non arrivano.
+        # Mario: 10 residui. Offre 1 per FA1 svincolando D1 pagato 50 (recupero
+        # 50% = 25): netto -24. Prima quel -24 allargava i disponibili a 34, e
+        # un'altra offerta poteva spenderli; ora restano 10.
+        d1 = self._player("D1", "DIF", fieldable=False)
+        d2 = self._player("D2", "DIF", fieldable=False)
+        self._own(self.t2, d1, 50)
+        self._own(self.t2, d2, 5)
+        park = self._player("Park", "ATT", fieldable=False)
+        self._own(self.t2, park, 935)  # 1000 - 50 - 5 - 935 = 10 remaining
+        fa1 = self._player("FA1", "DIF")
+        fa2 = self._player("FA2", "DIF")
+        s = self._session(MarketSession.RECOVERY_FRAC50)
+
+        # La prima offerta da sola puo' salire fino a 10 + 25 = 35.
+        self.assertEqual(me.check_offer(s, self.t2, fa1.id, d1.id, 35).max_amount, 35)
+        me.place_offer(s, self.t2, fa1.id, d1.id, 1, actor=self.u2)
+
+        st = me.market_states(s.league, s)[self.t2.id]
+        self.assertEqual(st.reserved_net, 0)
+        self.assertEqual(st.available(), 10)
+        # Seconda offerta: 10 disponibili + recupero(D2) = ceil(2.5) = 3 -> tetto 13.
+        chk = me.check_offer(s, self.t2, fa2.id, d2.id, 14)
+        self.assertFalse(chk.ok)
+        self.assertEqual(chk.max_amount, 13)
+        self.assertTrue(me.check_offer(s, self.t2, fa2.id, d2.id, 13).ok)
 
     def test_cannot_pledge_same_release_twice(self):
         d1 = self._player("D1", "DIF", fieldable=False)
