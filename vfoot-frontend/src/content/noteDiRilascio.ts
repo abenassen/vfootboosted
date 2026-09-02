@@ -72,7 +72,7 @@ export const RILASCI: Rilascio[] = [
         testo:
           'Nel mercato a offerte, i crediti che recuperi svincolando un giocatore contano solo nell’offerta che lo svincola. Prima, offrire poco per uno svincolato lasciando un giocatore pagato molto faceva salire i «disponibili» anche per le altre offerte: se quella veniva superata, il giocatore restava in rosa e quei crediti non arrivavano mai.',
         caso:
-          'Una squadra con 47 disponibili offriva 1 per Jiménez svincolando Molina (recupero 25) e si ritrovava con 71 disponibili per Beto. Sulle 185 offerte della prima sessione, 8 superavano il tetto corretto.',
+          'Una squadra con 47 disponibili offriva 1 per Jiménez svincolando Molina (recupero 25) e si ritrovava con 71 disponibili per Beto. Sulle 185 offerte della prima sessione, 6 superavano il tetto corretto.',
       },
     ],
   },

@@ -127,7 +127,12 @@ class MarketTeamState:
         return self.remaining - self.reserved_net
 
     def max_amount_releasing(self, recovery: int) -> int:
-        return self.available() + int(recovery)
+        # A swap whose own recovery covers its price costs no external credit.
+        # Normally ``available`` is non-negative, so this is simply available +
+        # recovery. The clamp matters while repairing a legacy market that
+        # already contains an over-committed offer: that debt must not make a
+        # separate zero-net replacement impossible.
+        return max(0, self.available()) + int(recovery)
 
 
 def market_states(

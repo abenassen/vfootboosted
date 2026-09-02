@@ -207,6 +207,32 @@ class ReservationTests(MarketBase):
         self.assertEqual(chk.max_amount, 13)
         self.assertTrue(me.check_offer(s, self.t2, fa2.id, d2.id, 13).ok)
 
+    def test_zero_net_offer_survives_a_legacy_overcommitment(self):
+        # Se un vecchio bug ha gia' lasciato offerte vive oltre il saldo, uno
+        # scambio che si paga interamente con IL PROPRIO svincolo non peggiora
+        # quel debito e resta possibile.
+        d1 = self._player("D1", "DIF", fieldable=False)
+        d2 = self._player("D2", "DIF", fieldable=False)
+        self._own(self.t2, d1, 5)
+        self._own(self.t2, d2, 5)
+        park = self._player("Park", "ATT", fieldable=False)
+        self._own(self.t2, park, 980)  # 10 residui
+        fa1 = self._player("FA1", "DIF")
+        fa2 = self._player("FA2", "DIF")
+        s = self._session(MarketSession.RECOVERY_FIXED, fixed=1)
+
+        # Riga impossibile scritta prima della correzione: riserva 11 su 10.
+        MarketOffer.objects.create(
+            session=s, team=self.t2, target_player=fa1, release_player=d1,
+            amount=12, recovery_amount=1, role="DIF",
+            status=MarketOffer.STATUS_LEADING, deadline_at=timezone.now() + timedelta(hours=24),
+        )
+        # FA2 costa 1 e D2 ne recupera 1: netto zero, quindi e' legale.
+        chk = me.check_offer(s, self.t2, fa2.id, d2.id, 1)
+        self.assertTrue(chk.ok, chk.reason)
+        self.assertEqual(chk.max_amount, 1)
+        self.assertFalse(me.check_offer(s, self.t2, fa2.id, d2.id, 2).ok)
+
     def test_cannot_pledge_same_release_twice(self):
         d1 = self._player("D1", "DIF", fieldable=False)
         self._own(self.t2, d1, 5)
