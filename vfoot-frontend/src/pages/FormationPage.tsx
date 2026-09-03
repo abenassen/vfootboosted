@@ -1151,13 +1151,23 @@ export default function FormationPage() {
       noticeLater(clearBlock);
       return;
     }
+    // Svuotare l'undici non deve svuotare anche il modulo: i posti restano
+    // quelli della forma che l'allenatore aveva scelto, così il campo continua
+    // a mostrare, per esempio, un 4-4-2 e i nuovi giocatori possono riempire
+    // le linee corrette uno alla volta.
+    const moduleVacancies: PlayerRole[] = [
+      'GK',
+      ...Array.from({ length: currentModule[0] }, () => 'DEF' as PlayerRole),
+      ...Array.from({ length: currentModule[1] }, () => 'MID' as PlayerRole),
+      ...Array.from({ length: currentModule[2] }, () => 'ATT' as PlayerRole),
+    ];
     // Riporta gli undici davanti alla panchina: così chi riparte da zero trova
     // subito tutti i giocatori disponibili, senza perdere quelli che aveva già
     // ordinato come cambi.
     const nextBench = orderBench(ctx.roster, [], [...starterIds, ...benchIds]);
     setStarterIds([]);
     setBenchOrder(pinned(nextBench));
-    setVacancies([]);
+    setVacancies(moduleVacancies);
     setSelected(null);
     setPicking(null);
     setRefused(null);

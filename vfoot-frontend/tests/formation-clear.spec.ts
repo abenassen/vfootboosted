@@ -122,7 +122,8 @@ test('allows starting a formation from an empty pitch', async ({ page }) => {
   await clearButton.click();
 
   await expect(page.getByText('Titolari 0/11', { exact: true })).toBeVisible();
-  await expect(page.getByText('Nessun titolare selezionato.', { exact: true })).toBeVisible();
+  await expect(page.getByText('3-4-3', { exact: true })).toHaveCount(2);
+  await expect(page.getByText('Manca un portiere', { exact: true })).toBeVisible();
   await expect(page.getByRole('list').getByText('Servono esattamente 11 titolari (ne hai 0).', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Titolare', exact: true })).toHaveCount(15);
 });
