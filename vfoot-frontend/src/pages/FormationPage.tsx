@@ -1112,6 +1112,23 @@ export default function FormationPage() {
       ? 'La giornata è cominciata: rifare la formazione da capo sposterebbe giocatori che non puoi più muovere.'
       : null;
 
+  /** Ripartire da una squadra vuota è utile solo finché il campo è ancora
+   *  completamente modificabile. Se la giornata è iniziata, togliere i
+   *  giocatori congelati o cambiare il numero dei difensori produrrebbe una
+   *  formazione che il salvataggio rifiuterebbe. Il comando resta comunque
+   *  visibile: al tocco si spiega il motivo, come per «Suggerisci». */
+  const clearBlock = closed
+    ? closedReason
+    : defenceLocked
+      ? 'La giornata è cominciata: il numero dei difensori non si può più cambiare.'
+      : starterIds.some((id) => lockedIds.has(id))
+        ? 'La giornata è cominciata: alcuni titolari hanno già iniziato la partita e non si possono spostare.'
+        : starterIds.length === 0
+          ? 'Non ci sono titolari da svuotare.'
+          : saving
+            ? 'Attendi la fine del salvataggio prima di modificare la formazione.'
+            : null;
+
   const noticeLater = (msg: string) => {
     setNotice(msg);
     setTimeout(() => setNotice(null), 4200);
@@ -1127,6 +1144,24 @@ export default function FormationPage() {
     setStarterIds(fromSuggestion(ctx.suggested_lineup));
     setVacancies([]);
     setRefused(null);
+  };
+
+  const onClearStarters = () => {
+    if (clearBlock) {
+      noticeLater(clearBlock);
+      return;
+    }
+    // Riporta gli undici davanti alla panchina: così chi riparte da zero trova
+    // subito tutti i giocatori disponibili, senza perdere quelli che aveva già
+    // ordinato come cambi.
+    const nextBench = orderBench(ctx.roster, [], [...starterIds, ...benchIds]);
+    setStarterIds([]);
+    setBenchOrder(pinned(nextBench));
+    setVacancies([]);
+    setSelected(null);
+    setPicking(null);
+    setRefused(null);
+    setModuleNote(null);
   };
 
   const onSave = async () => {
@@ -1301,6 +1336,14 @@ export default function FormationPage() {
                 stanno nella barra in fondo (v. in coda al file) — qui erano fino a
                 2500px sopra il punto in cui si lavora. */}
             <div className="hidden items-center gap-2 lg:flex">
+              <Button
+                variant="secondary"
+                onClick={onClearStarters}
+                title={clearBlock ?? 'Svuota i titolari e riparti da zero.'}
+                className={clearBlock ? 'opacity-45' : undefined}
+              >
+                Svuota titolari
+              </Button>
               <Button
                 variant="secondary"
                 onClick={onSuggest}
@@ -1698,6 +1741,15 @@ export default function FormationPage() {
               </div>
             ) : null}
           </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onClearStarters}
+            title={clearBlock ?? 'Svuota i titolari e riparti da zero.'}
+            className={clsx('shrink-0', clearBlock && 'opacity-45')}
+          >
+            Svuota
+          </Button>
           <Button
             variant="secondary"
             size="sm"
