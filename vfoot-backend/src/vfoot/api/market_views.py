@@ -432,13 +432,12 @@ class MarketActiveView(APIView):
                 session=session, status=MarketOffer.STATUS_LEADING)
         }
         locked = set(MarketOffer.objects.filter(
-            session=session,
-            status__in=(MarketOffer.STATUS_ACCEPTED, MarketOffer.STATUS_SETTLED),
+            session__league=league,
+            status=MarketOffer.STATUS_ACCEPTED,
         ).values_list("target_player_id", flat=True))
-        # Anche chi e' in coda da una sessione PRECEDENTE: finche' l'admin non
-        # decide resta svincolato, e senza questo la sessione nuova lo rimetterebbe
-        # all'asta come se fosse libero.
-        locked |= {o.target_player_id for o in pending}
+        # Sono le offerte davvero da validare: un `settled` non e' un blocco.
+        # Finche' l'acquisto resta in rosa non entra comunque nel pool; quando
+        # viene svincolato torna offribile, senza ereditare il suo vecchio badge.
         # E chi se l'e' aggiudicato, in attesa che l'admin decida. Era pubblico un
         # istante prima — la stessa offerta stava in testa, con squadra e cifra a
         # schermo — e torna pubblico appena la validazione passa: sparire proprio

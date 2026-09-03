@@ -62,6 +62,21 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-10',
+    versione: '1.10',
+    data: '3 settembre 2026',
+    titolo: 'Uno svincolato torna davvero disponibile',
+    voci: [
+      {
+        tipo: 'corretto',
+        testo:
+          'Un giocatore acquistato dal mercato e poi svincolato poteva restare segnato come «in validazione», anche se non c’era più nulla da decidere. Ora torna subito tra gli svincolati e può ricevere nuove offerte.',
+        caso:
+          'La vecchia offerta conclusa restava nello storico e veniva scambiata per una validazione aperta.',
+      },
+    ],
+  },
+  {
     id: 'v-1-9',
     versione: '1.9',
     data: '2 settembre 2026',

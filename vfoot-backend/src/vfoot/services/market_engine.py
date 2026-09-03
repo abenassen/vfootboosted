@@ -196,19 +196,17 @@ def leading_offer_for(session: MarketSession, target_player_id: int) -> MarketOf
 
 
 def _target_locked(session: MarketSession, target_player_id: int) -> bool:
-    """A target being resolved (accepted awaiting apply, or already settled) no
-    longer accepts rebids.
+    """A target awaiting admin resolution no longer accepts bids.
 
-    Le `accepted` si cercano in tutta la LEGA, non solo in questa sessione:
-    un'offerta rimasta in coda alla chiusura tiene il giocatore impegnato anche
-    nella sessione successiva, finche' l'admin non decide. Le `settled` restano
-    per sessione — un acquisto di mesi fa puo' essere stato svincolato dopo, e
-    bloccherebbe per sempre un giocatore tornato libero."""
+    Le `accepted` si cercano in tutta la LEGA, non solo in questa sessione: un
+    giocatore in coda resta impegnato anche nella sessione successiva finche'
+    l'admin non decide. Un `settled`, invece, e' storia: finche' il giocatore
+    acquistato e' in rosa lo esclude gia' ``free_agent_ids``; se viene poi
+    svincolato deve tornare immediatamente offribile, anche nella stessa
+    sessione."""
     return MarketOffer.objects.filter(
-        Q(session=session,
-          status__in=(MarketOffer.STATUS_ACCEPTED, MarketOffer.STATUS_SETTLED))
-        | Q(session__league_id=session.league_id,
-            status=MarketOffer.STATUS_ACCEPTED),
+        session__league_id=session.league_id,
+        status=MarketOffer.STATUS_ACCEPTED,
         target_player_id=target_player_id,
     ).exists()
 

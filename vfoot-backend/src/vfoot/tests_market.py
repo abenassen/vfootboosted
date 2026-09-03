@@ -311,6 +311,35 @@ class PromotionAndApplyTests(MarketBase):
             team=self.t2, player=fa, released_at__isnull=True)
         self.assertEqual(acq.purchase_price, 30)
 
+    def test_released_settled_target_is_offerable_again_in_same_session(self):
+        """Uno `settled` racconta un acquisto passato, non una validazione
+        pendente: dopo lo svincolo il giocatore deve tornare nel mercato."""
+        mario_def = self._player("MarioDef", "DIF", fieldable=False)
+        luigi_def = self._player("LuigiDef", "DIF", fieldable=False)
+        self._own(self.t2, mario_def, 40)
+        self._own(self.t3, luigi_def, 40)
+        target = self._player("FreeDef", "DIF")
+        s = self._session(MarketSession.RECOVERY_FRAC50)
+
+        first = me.place_offer(s, self.t2, target.id, mario_def.id, 30, actor=self.u2)
+        me.promote_expired(s, now=first.deadline_at + timedelta(seconds=1))
+        me.apply_offer(first, actor=self.admin)
+        acquired = FantasyRosterSlot.objects.get(
+            team=self.t2, player=target, released_at__isnull=True)
+        acquired.released_at = timezone.now()
+        acquired.sale_price = 15
+        acquired.save(update_fields=["released_at", "sale_price"])
+
+        self.assertIn(target.id, me.free_agent_ids(self.league))
+        second = me.check_offer(s, self.t3, target.id, luigi_def.id, 1)
+        self.assertTrue(second.ok, second.reason)
+
+        body = self._as(self.u3).get(
+            f"/api/v1/leagues/{self.league.id}/market/active").json()
+        row = next(f for f in body["free_agents"] if f["player_id"] == target.id)
+        self.assertFalse(row["locked"])
+        self.assertIsNone(row["pending"])
+
     def test_suspended_session_does_not_promote(self):
         d2 = self._player("MarioDef", "DIF", fieldable=False)
         self._own(self.t2, d2, 5)
