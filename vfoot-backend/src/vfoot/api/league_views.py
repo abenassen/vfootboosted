@@ -119,7 +119,6 @@ from vfoot.services.classic_pagella import (
     pagella_for_match, save_detail, shot_detail, vote_ledger,
 )
 from vfoot.services.classic_rating import current_role_map
-from vfoot.services import league_decisions
 from vfoot.services.league_decisions import (
     accept_all_proposals, attention_count, cast_vote, market_blocked_reason,
     open_role_decisions, resolve as resolve_decision, unavailable_players,
@@ -470,7 +469,7 @@ _COMPETITION_END_DETAIL = {
 }
 
 # Above which a real transfer is NEWS to a fantasy league. Deliberately its own
-# number, and well above league_decisions.RELEVANCE_MIN_VALUE_EUR (€5M, "worth an
+# number, and well above league_decisions.RELEVANCE_MIN_VALUE_EUR (€3M, "worth an
 # admin ruling on his role"): leagues are drawn up in August with the real market
 # still running, so signings keep landing for weeks, and a floor that admitted
 # every squad filler would turn the home page into a transfer ticker and bury the
@@ -484,7 +483,12 @@ NEWS_MIN_VALUE_EUR = 10_000_000
 # altro ordine: gli arrivi piovono per settimane ad agosto, i trasferimenti fra
 # due squadre di Serie A sono una manciata per finestra, quindi la stessa soglia
 # alta li cancellerebbe quasi tutti senza guadagnare silenzio.
-NEWS_MIN_TRANSFER_VALUE_EUR = league_decisions.RELEVANCE_MIN_VALUE_EUR
+# Era un alias di ``league_decisions.RELEVANCE_MIN_VALUE_EUR``, ed e' stato sganciato
+# quando quella soglia e' scesa a 3M (2026-09-04): le due rispondono a domande
+# diverse -- «vale una domanda all'admin?» contro «vale una riga in home?» -- e
+# muovere la prima non deve allargare in silenzio il notiziario. Il numero resta
+# quello di prima, cioe' il comportamento visto finora.
+NEWS_MIN_TRANSFER_VALUE_EUR = 5_000_000
 
 
 def _eur_short(value: int) -> str:

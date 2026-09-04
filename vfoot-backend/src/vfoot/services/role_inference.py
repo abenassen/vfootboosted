@@ -86,7 +86,23 @@ TM_AMBIGUOUS = {"left winger", "right winger", "left midfield", "right midfield"
 # auction is most sensitive to (it would add ~40 attackers to a 660-man listone).
 # Midfield is the choice that costs least if it is wrong.
 TM_DEFAULT = {"left winger": Player.ROLE_MID, "right winger": Player.ROLE_MID,
-              "left midfield": Player.ROLE_DEF, "right midfield": Player.ROLE_DEF,
+              # ``left/right midfield`` defaulted to DIF until 2026-09-04. That was
+              # the MODAL measured answer -- 5 of the 8 we can cluster come out DIF
+              # -- and for exactly that reason the wrong rule: in Serie A the label
+              # covers two different jobs, the wing-back and the wide midfielder,
+              # and the mode describes only the STARTERS we could measure, while the
+              # default fires on everyone else. The split is visible on both sides.
+              # Inside the measured group we agree with the 26-27 listone on the
+              # three genuine wing-backs (Bellanova, Zappacosta, Bernasconi, all
+              # ``Dd;E``/``Ds;E`` there) and disagree on the wingers (Luis Henrique,
+              # Zerbin, both ``W``); among the six the default actually decided, the
+              # listone reads four wingers to one wing-back. So CEN is the same
+              # argument the wingers above already make -- the fallback must
+              # describe the marginal players it runs on, not the measured ones.
+              # A wrong DIF is also dearer than a wrong CEN: fielded as a defender
+              # he enters the defence modifier with a vote that is not a defender's.
+              # The only admin ever asked (Moreira, EUR 25M) answered CEN.
+              "left midfield": Player.ROLE_MID, "right midfield": Player.ROLE_MID,
               "second striker": Player.ROLE_FWD,
               # A trequartista with no usable play data remains CEN provisionally;
               # because the label is ambiguous, a relevant player is still sent to

@@ -62,6 +62,42 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-11',
+    versione: '1.11',
+    data: '4 settembre 2026',
+    titolo: 'Gli esterni non finiscono più in difesa',
+    sommario:
+      'Quando Transfermarkt dice soltanto «esterno di centrocampo» non si capisce se è un terzino d’ala o un’ala: sono due mestieri diversi con lo stesso nome. Finché non abbiamo abbastanza partite per misurarlo, ora scegliamo il centrocampo.',
+    voci: [
+      {
+        tipo: 'corretto',
+        testo:
+          'Un esterno di centrocampo senza partite sufficienti per misurarne il ruolo veniva messo tra i difensori. Ora va tra i centrocampisti.',
+        caso:
+          'Sui giocatori che abbiamo potuto misurare la voce «esterno» si spacca in due: tre terzini d’ala veri (Bellanova, Zappacosta, Bernasconi) e due ali (Luis Henrique, Zerbin). Sui sei che il ripiego decideva davvero, il listone ne legge quattro come ali e uno come terzino. E un difensore sbagliato costa più di un centrocampista sbagliato: schierato in difesa entra nel modificatore con un voto che non è quello di un difensore.',
+      },
+      {
+        tipo: 'migliorato',
+        testo:
+          'L’admin decide il ruolo di più giocatori: la soglia per chiederglielo scende da 5 a 3 milioni di valore. In una lega nuova sono 65 domande invece di 51.',
+        caso:
+          'Una domanda costa un clic — il modulo porta già la proposta e accettarla è il gesto di default — mentre un ruolo congelato male si scopre quando qualcuno l’ha già comprato, e a quel punto non si può più spostare senza togliere un difensore a chi l’aveva pagato.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Rigenerare il listone non sposta più il ruolo di un giocatore già in una rosa o con un’offerta in corso, e dice quanti ne ha lasciati fermi.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Se il ruolo di un giocatore cambia tra il momento in cui fai un’offerta e quello in cui viene accettata, l’offerta viene rifiutata invece di completarsi con l’abbinamento sbagliato.',
+        caso:
+          'L’offerta è un accordo su un difensore per un difensore: se quel difensore non è più tale, l’accordo non è più quello che era stato accettato.',
+      },
+    ],
+  },
+  {
     id: 'v-1-10',
     versione: '1.10',
     data: '3 settembre 2026',

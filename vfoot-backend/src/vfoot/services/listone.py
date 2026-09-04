@@ -92,7 +92,33 @@ def snapshot_league_listone(league, *, reset: bool = False,
 
     summary = {"roster": len(players), "created": 0, "reset": 0,
                "preserved_admin": 0, "kept_seed": 0, "skipped_no_role": 0,
-               "awaiting_decision": 0}
+               "awaiting_decision": 0, "locked": 0}
+
+    # Un `--reset` sposta ruoli GIA' congelati, ed e' l'ultima porta da cui un
+    # ruolo puo' muoversi sotto i piedi di qualcuno. L'altra — rimettere il ruolo
+    # in discussione — quei piedi li guarda gia' (``reopen_role_decision``: in
+    # rosa, asta in corso, offerta viva). Qui non li guardava nessuno, e il danno
+    # e' lo stesso: un difensore pagato che diventa centrocampista, o un'offerta
+    # in volo il cui abbinamento di ruolo non regge piu' all'accettazione.
+    # Quindi le stesse due condizioni, e la riga resta dov'e'. Le si CONTA
+    # (``locked``) invece di tacerle: un reset che non ha fatto quel che diceva
+    # deve dirlo. Calcolate solo con reset=True — senza, nessuna riga si muove e
+    # sarebbero due query per niente su un percorso che gira a ogni mutazione di
+    # mercato. In aura non c'e' nulla di tutto questo: i ruoli non esistono e il
+    # mercato a offerte non si apre.
+    locked: set[int] = set()
+    if reset:
+        from vfoot.models import FantasyRosterSlot, MarketOffer
+        locked = set(FantasyRosterSlot.objects
+                     .filter(team__league=league, released_at__isnull=True)
+                     .values_list("player_id", flat=True))
+        for tid, rid in (MarketOffer.objects
+                         .filter(session__league=league,
+                                 status__in=MarketOffer.LIVE_STATUSES)
+                         .values_list("target_player_id", "release_player_id")):
+            locked.add(tid)
+            if rid is not None:
+                locked.add(rid)
 
     for p in players:
         seed = seeded.get(p.id) or p.classic_role_seed
@@ -117,6 +143,8 @@ def snapshot_league_listone(league, *, reset: bool = False,
             # proporre una cosa e il listone a mostrarne un'altra, sotto una
             # consultazione già in corso.
             summary["awaiting_decision"] = summary.get("awaiting_decision", 0) + 1
+        elif reset and seed and row.role != seed and p.id in locked:
+            summary["locked"] += 1
         elif reset and seed and row.role != seed:
             row.role = seed
             row.save(update_fields=["role", "updated_at"])

@@ -750,3 +750,141 @@ class MatchdayFreezeTests(MarketBase):
         self.assertEqual(r.status_code, 200, r.content)
         offer.refresh_from_db()
         self.assertEqual(offer.status, MarketOffer.STATUS_REJECTED)
+
+
+class RoleMovedUnderTheOfferTests(MarketBase):
+    """Il ruolo che si sposta fra l'offerta e la sua validazione.
+
+    ``MarketOffer.role`` e' una fotografia presa da ``check_offer``, e tutto il
+    resto ci si appoggia: la riparazione della formazione infila l'acquistato
+    nella casella esatta del ceduto «stesso ruolo per costruzione». La
+    costruzione regge solo se nessuno ha mosso un ruolo nel frattempo, e finora
+    niente lo garantiva. Queste prove chiudono le due porte da cui poteva
+    succedere.
+    """
+
+    def _move_role(self, player, role):
+        LeaguePlayerRole.objects.filter(league=self.league, player=player).update(role=role)
+
+    def _accepted_offer(self):
+        d2 = self._player("MarioDef", "DIF", fieldable=False)
+        self._own(self.t2, d2, 40)
+        fa = self._player("FreeDef", "DIF")
+        s = self._session(MarketSession.RECOVERY_FRAC50)
+        offer = me.place_offer(s, self.t2, fa.id, d2.id, 30, actor=self.u2)
+        me.promote_expired(s, now=offer.deadline_at + timedelta(seconds=1))
+        offer.refresh_from_db()
+        return offer, fa, d2
+
+    def test_target_role_changed_blocks_apply(self):
+        offer, fa, d2 = self._accepted_offer()
+        self.assertEqual(offer.role, "DIF")
+        self._move_role(fa, "CEN")           # l'admin lo rettifica a centrocampista
+
+        with self.assertRaises(me.OfferApplyError) as ctx:
+            me.apply_offer(offer, actor=self.admin)
+        self.assertIn("ruolo e' cambiato", str(ctx.exception))
+
+        # E la rosa non si e' mossa di un millimetro: niente svincolo, niente acquisto.
+        offer.refresh_from_db()
+        self.assertNotEqual(offer.status, MarketOffer.STATUS_SETTLED)
+        self.assertTrue(FantasyRosterSlot.objects.filter(
+            team=self.t2, player=d2, released_at__isnull=True).exists())
+        self.assertFalse(FantasyRosterSlot.objects.filter(
+            team=self.t2, player=fa, released_at__isnull=True).exists())
+
+    def test_release_role_changed_blocks_apply(self):
+        """L'altra meta': non e' il bersaglio a spostarsi ma chi si svincola.
+        Fa lo stesso danno — la casella liberata non e' piu' quella che si riempie."""
+        offer, fa, d2 = self._accepted_offer()
+        self._move_role(d2, "CEN")
+
+        with self.assertRaises(me.OfferApplyError):
+            me.apply_offer(offer, actor=self.admin)
+        self.assertTrue(FantasyRosterSlot.objects.filter(
+            team=self.t2, player=d2, released_at__isnull=True).exists())
+
+    def test_unchanged_roles_still_apply(self):
+        """Il controllo deve fermare il caso rotto, non il mercato."""
+        offer, fa, d2 = self._accepted_offer()
+        me.apply_offer(offer, actor=self.admin)
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, MarketOffer.STATUS_SETTLED)
+
+
+class ListoneResetRespectsLiveGroundTests(MarketBase):
+    """L'altra porta da cui un ruolo congelato puo' muoversi: `--reset`.
+
+    Rimettere un ruolo in discussione guarda gia' chi sta in piedi sopra
+    (``reopen_role_decision``: in rosa, asta in corso, offerta viva). Un reset
+    del listone no, e sposta esattamente le stesse righe.
+    """
+
+    def _reseed(self, player, role):
+        """Il seme dell'inferenza dice una cosa, la riga congelata un'altra:
+        e' la condizione in cui un reset vorrebbe muovere il ruolo."""
+        from vfoot.models import CurrentPlayerRole
+        CurrentPlayerRole.objects.create(
+            player=player, role_data=role, role_mitigated=role,
+            method="default", tm_position="left midfield")
+
+    def _snapshot(self):
+        from vfoot.services.listone import snapshot_league_listone
+        return snapshot_league_listone(self.league, reset=True)
+
+    def test_reset_moves_a_free_player(self):
+        """Il controllo: senza nessuno sopra, il reset fa il suo mestiere."""
+        p = self._player("Libero", "DIF")
+        self._reseed(p, "CEN")
+        s = self._snapshot()
+        self.assertEqual(s["reset"], 1)
+        self.assertEqual(s["locked"], 0)
+        self.assertEqual(
+            LeaguePlayerRole.objects.get(league=self.league, player=p).role, "CEN")
+
+    def test_reset_leaves_a_rostered_player_alone(self):
+        p = self._player("Comprato", "DIF")
+        self._own(self.t2, p, 40)
+        self._reseed(p, "CEN")
+        s = self._snapshot()
+        self.assertEqual(s["locked"], 1)
+        self.assertEqual(s["reset"], 0)
+        self.assertEqual(
+            LeaguePlayerRole.objects.get(league=self.league, player=p).role, "DIF")
+
+    def test_reset_leaves_a_player_under_a_live_offer_alone(self):
+        """Il caso Monteiro: quattro rilanci in volo su di lui, e un reset che
+        lo facesse centrocampista renderebbe l'offerta invalidabile sotto chi
+        l'ha fatta."""
+        d2 = self._player("MarioDef", "DIF", fieldable=False)
+        self._own(self.t2, d2, 40)
+        target = self._player("Monteiro", "DIF")
+        s = self._session()
+        me.place_offer(s, self.t2, target.id, d2.id, 30, actor=self.u2)
+
+        self._reseed(target, "CEN")
+        summary = self._snapshot()
+        self.assertEqual(summary["locked"], 1)
+        self.assertEqual(
+            LeaguePlayerRole.objects.get(league=self.league, player=target).role, "DIF")
+
+    def test_reset_leaves_the_pledged_release_alone(self):
+        """Anche chi viene messo sul piatto per svincolo: spostare il SUO ruolo
+        rompe l'abbinamento dall'altro capo.
+
+        Qui a fermare il reset e' gia' la condizione «in rosa» — chi si svincola
+        e' per forza in rosa a chi offre — e l'offerta viva e' la seconda
+        mandata. Ma il giocatore dev'essere ancora tesserato in Serie A perche' il
+        reset lo guardi affatto: senza un contratto aperto non e' nel listone e il
+        giro non lo tocca comunque."""
+        d2 = self._player("MarioDef", "DIF")
+        self._own(self.t2, d2, 40)
+        target = self._player("FreeDef", "DIF")
+        s = self._session()
+        me.place_offer(s, self.t2, target.id, d2.id, 30, actor=self.u2)
+
+        self._reseed(d2, "CEN")
+        summary = self._snapshot()
+        self.assertEqual(summary["locked"], 1)
+        self.assertEqual(
+            LeaguePlayerRole.objects.get(league=self.league, player=d2).role, "DIF")

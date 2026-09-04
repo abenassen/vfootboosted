@@ -506,6 +506,32 @@ def apply_offer(offer: MarketOffer, actor=None, now=None) -> MarketOffer:
     if taken:
         raise OfferApplyError("Il giocatore offerto e' gia' stato acquisito.")
 
+    # Role re-check. ``MarketOffer.role`` is a SNAPSHOT taken by ``check_offer``
+    # when the offer was placed, and everything downstream trusts it: R2 below
+    # drops the acquisition into the released player's exact slot in every open
+    # lineup "same role by construction". That construction only holds if nobody
+    # moved a role in between, and nothing guaranteed it -- an admin rectification
+    # or a listone reseed can land at any moment. When it happens the damage is
+    # silent and shaped exactly wrong: a midfielder standing where a defender was,
+    # an XI whose module no longer adds up, and a roster one short in one pool and
+    # one over in another (the slot carries no role of its own, so nothing records
+    # that he was BOUGHT as a defender). Refusing is the only honest move -- the
+    # offer was an agreement about a defender, and that defender no longer exists.
+    #
+    # Classic only in practice: an offer market cannot be opened outside it
+    # (market_views.py, session creation), so this never runs for an aura league --
+    # where roles do not exist at all.
+    now_roles = league_role_map(league, [offer.target_player_id, offer.release_player_id])
+    target_role = now_roles.get(offer.target_player_id)
+    release_role = now_roles.get(offer.release_player_id)
+    if target_role != offer.role or release_role != offer.role:
+        raise OfferApplyError(
+            f"Il ruolo e' cambiato da quando l'offerta e' stata fatta: era un "
+            f"{offer.role} per un {offer.role}, ora "
+            f"{offer.target_player} e' {target_role or 'senza ruolo'} e "
+            f"{offer.release_player} e' {release_role or 'senza ruolo'}. "
+            "L'offerta non e' piu' quella che era stata accettata: va rifatta.")
+
     # Cash re-check, ignoring THIS offer's own reservation.
     states = market_states(league, session, exclude_offer_id=offer.id)
     st = states.get(offer.team_id)

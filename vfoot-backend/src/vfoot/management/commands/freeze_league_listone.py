@@ -33,6 +33,10 @@ class Command(BaseCommand):
         self.stdout.write(f"  roster players       : {s['roster']}")
         self.stdout.write(f"  created (new seed)   : {s['created']}")
         self.stdout.write(f"  reset from TM        : {s['reset']}")
+        # Un reset che si e' fermato deve dirlo, o sembra semplicemente riuscito.
+        if s.get("locked"):
+            self.stdout.write(self.style.WARNING(
+                f"  NON spostati (in rosa o con offerta viva): {s['locked']}"))
         self.stdout.write(f"  admin overrides kept : {s['preserved_admin']}")
         self.stdout.write(f"  seed rows kept frozen: {s['kept_seed']}")
         self.stdout.write(f"  skipped (no role)    : {s['skipped_no_role']}")

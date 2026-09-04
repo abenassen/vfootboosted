@@ -93,7 +93,15 @@ def decision_rationale(row) -> str:
 # decision: he barely features (young prospects, transient squad filler), so he
 # silently takes the system proposal (the SofaScore-derived role when he ever
 # lined up, the raw TM default otherwise). Only relevant players reach the queue.
-RELEVANCE_MIN_VALUE_EUR = 5_000_000
+#
+# Lowered from EUR 5M to EUR 3M (2026-09-04). The two costs are not symmetric, and
+# experience says the floor was set as if they were: a question costs the admin one
+# click, because the form already carries the system proposal and accepting it is
+# the default gesture, while a role frozen silently is discovered only once someone
+# has bought the player -- and by then it cannot be moved without taking a defender
+# away from a squad that paid for one. On the 26-27 roster this takes a fresh
+# league from 51 questions to 65.
+RELEVANCE_MIN_VALUE_EUR = 3_000_000
 
 
 def _roster_player_ids(league) -> set[int]:
