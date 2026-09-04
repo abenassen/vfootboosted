@@ -2736,7 +2736,7 @@ def _per_match_player_totals(match_ids):
     _fill_missing_xgot(out, sorted(covered))
     _merge_defensive_value(out, sorted(covered))
     _merge_own_goal_relief(out, sorted(covered))
-    _merge_keeper_moment(out, sorted(covered))
+    _merge_keeper_shot_credit(out, sorted(covered))
     _merge_assists(out, sorted(covered))
     return out
 
@@ -3073,7 +3073,46 @@ def _merge_own_goal_relief(out: dict, match_ids) -> None:
 # feature che le corrisponde.
 KEEPER_MOMENT_LAMBDA = 0.275
 
-def _merge_keeper_moment(out: dict, match_ids) -> None:
+# --- LA FRANCHIGIA SULLE PARATE ------------------------------------------------
+# I primi 0.06 di xGOT di ogni tiro affrontato non si pagano: quel pezzo di tiro il
+# portiere lo para comunque, e chiamarlo merito e' quello che produce il portiere
+# "fenomeno" che ha respinto dieci palloni fattibili.
+#
+# La forma e' una FRANCHIGIA, non una curva, e non e' un dettaglio: misurato sulla
+# 25-26, il nostro eccesso rispetto al giudice e' una quantita' COSTANTE per parata
+# sopra xGOT 0.30 (+0.119 fra 0.30 e 0.50, +0.123 sopra 0.50: indistinguibili) e
+# correla soprattutto col NUMERO di parate (+0.210), non con la loro facilita'
+# (+0.093). Una costante si toglie sottraendo. Una potenza — che era la prima idea —
+# toglie in proporzione, cioe' colpisce le parate deboli e lascia intatte le forti:
+# provata, taglia meno coda e costa piu' correlazione.
+#
+# SIMMETRICA, e per una ragione che vale la pena scrivere perche' e' controintuitiva.
+# Sottraendo min(xgot, c) si ottiene sia +max(0, xgot-c) per la parata sia
+# max(0, xgot-c) - 1 per il gol, cioe' anche la colpa cresce di c. Non serve a
+# punire la PAPERA — la colpa vale 1-xgot ed e' gia' quasi al tetto di 1 per un tiro
+# facile, e un malus esplicito sotto xGOT 0.20 e' stato provato e non cambia
+# NIENTE. Serve a punire il gol parabile-ma-non-banale, la fascia 0.2-0.5: se
+# pararla e' dovere, subirla e' colpa.
+#
+# Che cosa compra, sui 710 portieri della 25-26 con giudizio esterno:
+#   casi con piu' di un voto di scarto dal giudice   16 -> 9
+#   di cui in cui gonfiamo il portiere               11 -> 4
+#   correlazione                                 0.7180 -> 0.7167
+#   errore medio                                 0.3275 -> 0.3373
+# Un millesimo di correlazione e un centesimo di errore medio per dimezzare i casi
+# clamorosi. Il cambio conviene perche' i due errori non sono la stessa cosa: mezzo
+# punto di scarto e' un'altra lettura della stessa partita — i due giudici umani di
+# fantacalcio.it divergono fra loro di 0.146 in media — mentre un punto e mezzo e'
+# una lettura sbagliata, e fra loro non capita MAI (0 casi su 8408).
+#
+# 0.06 non e' su una punta: da 0.06 a 0.12 la coda resta a 9 casi, e tarando c e il
+# peso INSIEME su meta' stagione e misurando sull'altra si ottiene lo stesso
+# risultato dei valori fissi. Il peso della feature non si tocca: cambia la quarta
+# cifra.
+KEEPER_SAVE_DEDUCTIBLE = 0.06
+
+
+def _merge_keeper_shot_credit(out: dict, match_ids) -> None:
     """Pesa gli interventi del portiere per QUANTO CONTAVA il momento.
 
     ``gk_goals_prevented`` e' ``somma (xgot - gol)`` sui tiri affrontati: una parata
@@ -3102,7 +3141,7 @@ def _merge_keeper_moment(out: dict, match_ids) -> None:
     ``_merge_own_goal_relief``.
     """
     ids = list(match_ids)
-    if not ids or not KEEPER_MOMENT_LAMBDA:
+    if not ids or not (KEEPER_MOMENT_LAMBDA or KEEPER_SAVE_DEDUCTIBLE):
         return
     keepers = set(Player.objects.filter(is_goalkeeper=True).values_list("id", flat=True))
     lineup_keepers = match_lineup_keepers(ids)
@@ -3137,11 +3176,15 @@ def _merge_keeper_moment(out: dict, match_ids) -> None:
                         if g["team_side"] != against and g["minute"] < shot["minute"])
             peso = goal_impact.conceded_weight(
                 goal_impact.importance(xp, shot["minute"], subiti - fatti - 1), p95)
-            if peso == 1.0:
-                continue
             xgot = float(shot["xgot"] or 0.0)
-            firmato = xgot - (1.0 if shot["is_goal"] else 0.0)
-            delta = KEEPER_MOMENT_LAMBDA * (peso - 1.0) * firmato
+            # La franchigia si toglie SEMPRE, anche quando il momento non pesa: le
+            # due correzioni sono indipendenti. (Il vecchio ``if peso == 1.0:
+            # continue`` saltava il tiro intero, e con la franchigia dentro avrebbe
+            # saltato anche la detrazione.)
+            detrazione = min(xgot, KEEPER_SAVE_DEDUCTIBLE)
+            firmato = xgot - detrazione - (1.0 if shot["is_goal"] else 0.0)
+            delta = (-detrazione
+                     + KEEPER_MOMENT_LAMBDA * (peso - 1.0) * firmato)
             if not delta:
                 continue
             for (m2, pid), (side2, _starter) in apps.items():

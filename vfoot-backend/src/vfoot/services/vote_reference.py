@@ -82,6 +82,7 @@ def weights_fingerprint() -> str:
         # muoversi o la cache servirebbe un misto.
         "role_center": cr.ROLE_VOTE_CENTER,
         # Lo stadio finale della scala: cambia OGNI voto di movimento.
+        "keeper_save_deductible": cr.KEEPER_SAVE_DEDUCTIBLE,
         "saturation_t": cr.VOTE_SATURATION_T,
         "role_saturation": {k: list(v) for k, v in cr.ROLE_SATURATION.items()},
         "extrap_floor": cr.EXTRAP_FLOOR_MINUTES, "shrinkage": cr.SHRINKAGE_MINUTES,
@@ -198,8 +199,8 @@ def scoring_fingerprint() -> str:
                        cr.RESULT_MITIGATION_LOSS_ANCHOR, cr.RESULT_MITIGATION_LOSS_K,
                        cr.RESULT_MITIGATION_LOSS_BASE,
                        cr.RESULT_MITIGATION_LOSS_MAX_SHARE,
-                       cr.RED_CARD_K, sorted(cr.RED_CARD_SEVERITY.items()),
-                       sorted(cr.RED_CARD_FIXED.items()),
+                       cr.RED_CARD_BASE, cr.RED_CARD_SEV_BASE, cr.RED_CARD_K,
+                       sorted(cr.RED_CARD_SEVERITY.items()),
                        cr.OWN_GOAL_VOTE_DEFLECTION, cr.OWN_GOAL_VOTE_SOLO,
                        cr.OWN_GOAL_VOTE_FLAT,
                        cr.PENALTY_MISSED_VOTE_RELEVANT,
