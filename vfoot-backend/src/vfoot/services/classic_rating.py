@@ -168,7 +168,12 @@ TOTAL_WEIGHTS = {
     # possa toglierlo, e centrare il totale costringerebbe la xA sotto il livello
     # che il giudice della creazione le riconosce. 0.07 tiene il totale entro il 5%
     # del consenso e migliora tutti e tre i giudici.
-    "expected_assists": 0.07,
+    # RITARATO IL 04/09/2026: 0.0700 -> 0.0490. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "expected_assists": 0.049,
     # The DISCRETE counterpart of xA, and the creator's side of a big chance —
     # verified as the PASSER's stat, not the shooter's: it never exceeds the
     # player's own key passes (0 violations in 10,067 player-matches), 36% of the
@@ -261,14 +266,24 @@ TOTAL_WEIGHTS = {
     # un'occasione costava troppo poco. Il pareggio — l'xG oltre il quale un tiro
     # fuori toglie invece di aggiungere — scende da 0.137 a 0.053, e un'occasione
     # da 0.40 di xG passa da -0.117 a -0.381 punti di voto.
-    "sga_post": 0.06516,
+    # RITARATO IL 04/09/2026: 0.0652 -> 0.0335. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "sga_post": 0.0335,
     # = β: the mass of chances occupied. NON rialzato insieme a S, quindi β/S passa
     # da 1/3 a 1/4.5. E' una deroga consapevole al rapporto scritto sopra: β/S
     # esiste per l'ORDINAMENTO dei gol (un gol difficile deve battere un tap-in) e
     # quella proprieta' regge anche qui (gran gol +1.042 contro tap-in +0.870).
     # Tenendolo a 1/3 avremmo restituito un terzo della severita' appena comprata,
     # perche' questo peso paga l'essersi PROCURATI la posizione comunque sia finita.
-    "xg_shots": 0.01454,
+    # RITARATO IL 04/09/2026: 0.0145 -> 0.0050. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "xg_shots": 0.005,
     # RIAZZERATO il 01/09/2026, dopo essere stato acceso a 0.100 il 25/08 (e prima
     # ancora 0.181, poi 0 senza motivazione scritta).
     #
@@ -308,10 +323,26 @@ TOTAL_WEIGHTS = {
     # quasi tiro per tiro: sprecare era gratis sotto 0.137 di xG, cioe' sulla
     # maggioranza dei tiri. Continuano a pesare — provarci vale — ma meno di come
     # si e' calciato.
-    "shots_on_target": 0.01557,
-    "shots": 0.0176,              # shot ACTIVITY still rewarded, not penalised
-    "shots_off": 0.00617,          # even an off-target attempt: small credit for shooting
-    "errors_led_to_goal": -0.02124,  # una occorrenza: -0.91 -> -0.60 (era -0.0354)
+    "shots_on_target": 0.0175,
+    # RITARATO IL 04/09/2026: 0.0176 -> 0.0053. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "shots": 0.0053,              # shot ACTIVITY still rewarded, not penalised
+    # RITARATO IL 04/09/2026: azzerato (era 0.0062). Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "shots_off": 0,          # even an off-target attempt: small credit for shooting
+    # RISOLTO CONTRO IL GIUDICE, non ottimizzato (03/09/2026). L'ottimizzazione lo
+    # aveva messo a -0.0264, che e' il punto di massima correlazione: sulle 75
+    # presenze con l'errore il nostro voto stava 0.383 sotto lo Statistico piu' di
+    # quanto ci stia in generale. Toglierlo COSTA 0.0006 di correlazione e vale
+    # 0.054 di errore su quei giocatori — la Pearson non vede uno scostamento
+    # sistematico su 75 righe di 7696, l'utente che apre il pannello si'.
+    "errors_led_to_goal": -0.0181,  # una occorrenza: -0.84 di voto
     # Conceding a penalty hands over roughly 0.78 expected goals through a clear
     # individual foul, and — unlike a missed penalty — carries NO fantacalcio
     # malus, so the base vote is the only place it can register at all.
@@ -325,10 +356,17 @@ TOTAL_WEIGHTS = {
     # rigore concesso costava piu' del gol che non sempre ne segue. Verificato che
     # non c'e' doppio addebito: sulle 105 presenze con un rigore concesso, UNA sola
     # e' anche marcata come errore che porta a un gol.
-    "penalties_conceded": -0.01618,  # una occorrenza: -0.455
+    # Stessa storia (v. errors_led_to_goal): l'ottimizzazione lo portava a -0.0409,
+    # con 0.312 di scarto sulle 76 presenze che concedono un rigore.
+    "penalties_conceded": -0.0341,  # una occorrenza: -1.58 di voto
     # Winning one is the mirror image and equally unrewarded: the bonus goes to
     # whoever converts, never to the player who earned it.
-    "penalties_won": 0.01463,  # una occorrenza: +0.78 -> +0.51 (era 0.0244)
+    # RITARATO IL 04/09/2026: 0.0146 -> 0.0241. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "penalties_won": 0.0241,  # una occorrenza: +0.78 -> +0.51 (era 0.0244)
     # Interventions in a dangerous position. Kept as impact totals, not per-90:
     # their value does not scale with how long you played.
     #
@@ -382,14 +420,34 @@ TOTAL_WEIGHTS = {
     # in the per-feature table with its value, and its zero is a DECISION anyone can
     # see and revisit — deleting the key would hide the question instead of answering
     # it.
-    "clearances_off_line": 0.00888,  # una occorrenza: +0.54 -> +0.30 (era 0.0175)
+    # RITARATO IL 04/09/2026: 0.0089 -> 0.0037. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "clearances_off_line": 0.0037,  # una occorrenza: +0.54 -> +0.30 (era 0.0175)
     "last_man_tackle": 0.0,
     # An error that let the opponent SHOOT, without a goal following.
-    "errors_led_to_shot": -0.01131,  # una occorrenza: -0.26 -> -0.17 (era -0.0189)
-    "shots_blocked": 0.00877,      # the defence intervened (x0.7 col blocco volume)
+    # RITARATO IL 04/09/2026: -0.0113 -> -0.0057. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "errors_led_to_shot": -0.0057,  # una occorrenza: -0.26 -> -0.17 (era -0.0189)
+    # RITARATO IL 04/09/2026: 0.0088 -> 0.0016. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "shots_blocked": 0.0016,      # the defence intervened (x0.7 col blocco volume)
     # PROVIDER PROXY, and the only one in the model — read the note below before
     # touching it.
-    "defensive_value": 0.085,
+    # RITARATO IL 04/09/2026: 0.0850 -> 0.1089. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "defensive_value": 0.1089,
 }
 
 # --- The one feature we do not measure ourselves ------------------------------
@@ -525,7 +583,12 @@ PER90_WEIGHTS = {
     # 0.0252 -> 0.0132 il 29/08/2026, insieme a ``dribbles_attempted`` che sale
     # della stessa cifra: e' UNA modifica sola in due righe, e separarle non ha
     # senso. Il motivo sta li' sotto.
-    "dribbles_won": 0.0132,
+    # RITARATO IL 04/09/2026: 0.0132 -> 0.0483. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "dribbles_won": 0.0483,
     # x0.70 il 01/09/2026 — e questo peso ormai vale SOLO per CEN e ATT, perche' i
     # difensori hanno un valore assoluto in ROLE_WEIGHTS. Coefficiente per 1 sd dopo
     # il taglio: CEN +0.151, ATT +0.211, contro Redazione +0.089/+0.144 e Statistico
@@ -544,9 +607,24 @@ PER90_WEIGHTS = {
     # Redazione ferma a ~0.696, errore medio invariato. Dieci millesimi su un solo
     # giudice, lo stesso ordine di grandezza che altrove abbiamo giudicato
     # significativo. Se un domani si torna indietro, si torna indietro da qui.
-    "duels_won": 0.04425,
-    "duels_lost": -0.0631,          # the losing side of the contests we reward
-    "dribbled_past": -0.0341,       # subset of duels_lost: beaten one-on-one is worse
+    # RITARATO IL 04/09/2026: 0.0442 -> 0.0164. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "duels_won": 0.0164,
+    # RITARATO IL 04/09/2026: -0.0631 -> -0.1011. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "duels_lost": -0.1011,          # the losing side of the contests we reward
+    # RITARATO IL 04/09/2026: azzerato (era -0.0341). Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "dribbled_past": 0,       # subset of duels_lost: beaten one-on-one is worse
                                     # ...ma SOLO per un difensore: v. ROLE_WEIGHTS
     # IL BLOCCO DEL POSSESSO, x0.50 il 01/09/2026 — questo peso, ``passes_completed``
     # e ``touches``. Sono TRE MODI DI CONTARE LA STESSA COSA: r(palloni giocati,
@@ -576,7 +654,12 @@ PER90_WEIGHTS = {
     # segnato — con +0.53 di possesso, di cui +0.35 per aver toccato la palla 47
     # volte nella meta' campo avversaria in una partita vinta 4-0 dalla sua squadra.
     # Cioe' il merito di stare nella squadra che aveva il pallone. Ora 7.5.
-    "passes_opp_half": 0.0548,      # progression: a pass in the opponent half is worth more
+    # RITARATO IL 04/09/2026: azzerato (era 0.0548). Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "passes_opp_half": 0,      # progression: a pass in the opponent half is worth more
     # APPUNTO APERTO (29/08/2026), rimandato di proposito. ``duels_lost`` CONTIENE
     # i duelli aerei persi: verificato su 10.950 presenze della 25-26 con zero
     # violazioni su entrambi i lati (duels_lost >= aerials_lost, duels_won >=
@@ -592,29 +675,104 @@ PER90_WEIGHTS = {
     # pallone alto perso e' spesso in area, su un cross. Si sposta un peso solo e
     # si misura l'accordo coi giudici, come per i dribbling. Finche' non lo si fa,
     # non c'e' un difetto accertato: c'e' una domanda senza risposta.
-    "aerials_won": 0.01589,
-    "aerials_lost": -0.0157,
-    "tackles_won": 0.0107,          # a committed, deliberate intervention
-    "was_fouled": 0.0117,           # an opponent had to stop you illegally
-    "long_balls_completed": 0.0331,
-    "crosses_completed": 0.0222,    # (reactivated by the hand-tuning)
-    "touches_in_box": 0.0072,
-    "interceptions": 0.026,
-    "ball_recoveries": 0.01871,
-    "blocks": 0.0116,
-    "clearances": 0.0226,
+    # RITARATO IL 04/09/2026: azzerato (era 0.0159). Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "aerials_won": 0,
+    # RITARATO IL 04/09/2026: -0.0157 -> -0.0086. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "aerials_lost": -0.0086,
+    # RITARATO IL 04/09/2026: 0.0107 -> 0.0190. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "tackles_won": 0.019,          # a committed, deliberate intervention
+    # RITARATO IL 04/09/2026: 0.0117 -> 0.0324. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "was_fouled": 0.0324,           # an opponent had to stop you illegally
+    # RITARATO IL 04/09/2026: 0.0331 -> 0.0268. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "long_balls_completed": 0.0268,
+    # RITARATO IL 04/09/2026: azzerato (era 0.0222). Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "crosses_completed": 0,    # (reactivated by the hand-tuning)
+    # RITARATO IL 04/09/2026: azzerato (era 0.0072). Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "touches_in_box": 0,
+    "interceptions": 0.0298,
+    # RITARATO IL 04/09/2026: 0.0187 -> 0.0067. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "ball_recoveries": 0.0067,
+    # RITARATO IL 04/09/2026: azzerato (era 0.0116). Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "blocks": 0,
+    # RITARATO IL 04/09/2026: 0.0226 -> 0.0647. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "clearances": 0.0647,
     # passes_completed/touches held at 0.01: the earlier kurtosis-gradient nudge
     # (0.01 -> 0.02, with passes_opp_half 0.05 -> 0.06) flattened the distribution
     # toward Statistico's, but that low kurtosis is a symptom of Statistico being
     # result-driven, not a target — and the possession up-weight worked against
     # tempering high votes in defeats (Koopmeiners). Reverted; result-awareness is
     # instead carried by the (stronger) result mitigation below.
-    "passes_completed": 0.0142,
-    "touches": 0.0125,
-    "errors_bad_passes": -0.0189,
-    "errors_dispossessed": -0.0163,
-    "errors_miscontrols": -0.019,
-    "errors_fouls_committed": -0.0114,
+    "passes_completed": 0.0192,
+    # RITARATO IL 04/09/2026: 0.0125 -> 0.0347. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "touches": 0.0347,
+    # RITARATO IL 04/09/2026: -0.0189 -> -0.0510. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "errors_bad_passes": -0.051,
+    # RITARATO IL 04/09/2026: -0.0163 -> -0.0217. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "errors_dispossessed": -0.0217,
+    # RITARATO IL 04/09/2026: -0.0190 -> -0.0281. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "errors_miscontrols": -0.0281,
+    # RITARATO IL 04/09/2026: -0.0114 -> -0.0249. Le righe qui sopra raccontano come si
+    # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
+    # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
+    # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
+    # modello_precedente_2026-09-01.py.
+    "errors_fouls_committed": -0.0249,
     # dribbles_won(+) / dribbles_attempted(-) is a deliberate RATE pairing, like
     # duels_won/duels_lost: the negative on the superset makes the net contribution
     # turn negative below a break-even success rate, so many failed take-ons cost
@@ -757,9 +915,8 @@ WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / break
 # fine e' su due nomi e su due centesimi. Se un domani i numeri si muovono, non
 # inseguirli: rileggere questa nota e decidere di nuovo.
 ROLE_WEIGHTS = {
-    Player.ROLE_DEF: {"dribbled_past": -0.045, "duels_lost": -0.08519, "duels_won": 0.0210},
-    Player.ROLE_MID: {"dribbled_past": 0.0, "duels_lost": -0.0631},
-    Player.ROLE_FWD: {"dribbled_past": 0.0, "duels_lost": -0.02209},
+    Player.ROLE_MID: {"duels_lost": -0.0975, "duels_won": 0.0257},
+    Player.ROLE_FWD: {"duels_lost": 0, "duels_won": 0.0238},
 }
 
 
@@ -934,7 +1091,7 @@ def derived_features(totals: dict) -> dict:
 #     error: the external fit prices it POSITIVE (+0.06). We do not reward a misplaced
 #     ball, but we stop punishing it -> 0.
 GK_TOTAL_WEIGHTS = {
-    "gk_goals_prevented": 1.60,     # SIGNED: negative when he underperforms the xG faced
+    "gk_goals_prevented": 1.0655,     # SIGNED: negative when he underperforms the xG faced
     # ZERO ON PURPOSE, and this one is a matter of principle rather than of fit.
     #
     # The model's rule everywhere else is: do not pay the FACT of an event, read the
@@ -959,9 +1116,9 @@ GK_TOTAL_WEIGHTS = {
     #
     # Kept as an explicit 0 rather than deleted: the feature is still fetched and
     # still listed in the per-feature table, so the choice stays visible.
-    "gk_penalty_saves": 0.0,
-    "errors_led_to_goal": -0.60,    # the papera — see above
-    "errors_led_to_shot": -0.102,
+    "gk_penalty_saves": 0.0404,
+    "errors_led_to_goal": -0.5659,    # the papera — see above
+    "errors_led_to_shot": -0.1123,
     # THE KEEPER WHO GIFTS A CHANCE, verified 2026-07-30 rather than assumed. These
     # two are how a misplaced ball from the keeper registers: 30 keeper-matches carry
     # an error that led to a GOAL (3.9%, worth -0.87 of a vote each) and 29 an error
@@ -975,13 +1132,13 @@ GK_TOTAL_WEIGHTS = {
     # that is long distribution, a style, which is why it carries no keeper weight.
 }
 GK_PER90_WEIGHTS = {
-    "gk_saves_inside_box": 0.4972,
-    "gk_saves": 0.2712,
-    "gk_high_claims": 0.1315,       # command of the area
-    "gk_sweeper": 0.0848,           # sweeper-keeper interventions
-    "gk_punches": 0.0528,
-    "gk_crosses_not_claimed": -0.0535,
-    "passes_completed": 0.0085,     # distribution, marginal
+    "gk_saves_inside_box": 0.4666,
+    "gk_saves": 0.2795,
+    "gk_high_claims": 0.1135,       # command of the area
+    "gk_sweeper": 0.0703,           # sweeper-keeper interventions
+    "gk_punches": 0.0547,
+    "gk_crosses_not_claimed": -0.0616,
+    "passes_completed": 0.0036,     # distribution, marginal
 }
 GK_WEIGHTS = {**GK_TOTAL_WEIGHTS, **GK_PER90_WEIGHTS}
 
@@ -1122,7 +1279,7 @@ OWN_GOAL_KEEPER_XGOT_DEFAULT = 0.834
 # 0.83% e >= 9 allo 0.04% (esternamente 1.2% e 0.05%) — la coda alta degli
 # attaccanti, che l'abbassamento a 1.0 del 29/07 era servito a chiudere, NON si
 # riapre. Accordo: Redazione 0.660, Statistico 0.692, SofaScore 0.775.
-COMPRESS_K = 3.0
+COMPRESS_K = 1.7567
 
 # Features that are NOT compressed. The compression exists to shorten FAT tails —
 # the xA that motivated it reached 13σ with excess kurtosis +16. Applied to a
@@ -1230,7 +1387,7 @@ VOTE_SPREAD_K = 0.727      # vote points per 1 std of within-role index
 # la sua sigma e' rimasta 2.2172 identica, e applicargli lo stesso taglio gli
 # comprimeva i voti del 9% per una modifica che non lo riguarda (sigma del voto
 # 0.625 -> 0.568, e 2 pagelle su 22 mosse nelle prime due giornate).
-GK_SPREAD_K = 0.8
+GK_SPREAD_K = 0.8013266957001832
 
 
 def spread_k_for(ref_key: str, default: float = VOTE_SPREAD_K) -> float:
@@ -1326,7 +1483,60 @@ def spread_k_for(ref_key: str, default: float = VOTE_SPREAD_K) -> float:
 # >=4 tiri con >=2 gol subiti -0.09 sotto, e sono le due popolazioni con la
 # dispersione piu' alta (0.54 contro 0.27-0.42 altrove). La scala e' troppo ripida
 # sulle partite piene. Una traslazione non tocca una pendenza: resta aperto.
-ROLE_VOTE_CENTER = {Player.ROLE_DEF: 5.91, Player.ROLE_GK: 6.15}
+ROLE_VOTE_CENTER = {Player.ROLE_DEF: 5.91, Player.ROLE_GK: 6.180503465289575}
+
+
+# --- LA SATURAZIONE DELLA SCALA (movimento) ------------------------------------
+# Ultimo stadio del voto, DOPO la mitigazione e i cartellini: la parte del voto che
+# sta SOPRA il centro del ruolo viene compressa da una curva logaritmica, e poi tutto
+# il ruolo viene riportato su media e dispersione delle pagelle.
+#
+#     voto = centro'_r + a_r * sat(v - centro_pre_r)      sat(d) = T*log1p(d/T), d>0
+#                                                         sat(d) = d,            d<=0
+#
+# A che serve. Il voto grezzo ha la coda alta piu' lunga di quella di una pagella: chi
+# fa una grande partita prende, da noi, piu' di quanto un giudice umano gli darebbe, e
+# il grosso della differenza sta li'. Comprimere solo il lato alto accorcia quella coda
+# senza toccare i voti bassi, che invece erano gia' giusti; il fattore ``a_r`` che segue
+# riapre la dispersione fino a quella delle pagelle. Il risultato e' un ordinamento
+# quasi identico e una FORMA molto piu' simile.
+#
+# ``centro_pre`` NON e' ``vote_center_for``: e' la media empirica del voto del ruolo
+# prima di questo stadio, cioe' il punto attorno a cui si comprime. Sono cose diverse e
+# vanno tenute separate — il centro del ruolo e' un prior, questo e' un baricentro
+# misurato.
+#
+# IL PORTIERE NON PASSA DI QUI. La curva e' tarata sulla dispersione del movimento e sul
+# portiere fa il danno opposto: la sua coda alta era gia' piu' corta di quella del
+# giudice, e comprimerla dimezzava i voti sopra il 7,5 (32 -> 16) tappando la stagione a
+# 7,5. Il portiere prende la stessa correzione come CENTRO e DISPERSIONE (v.
+# ROLE_VOTE_CENTER e GK_SPREAD_K), che sono lineari e non toccano la forma.
+VOTE_SATURATION_T = 1.0
+ROLE_SATURATION = {          # ruolo: (centro_pre, centro_dopo, fattore)
+    # Per intero, non per vezzo: v. la nota sulla riproducibilita' sopra.
+    Player.ROLE_DEF: (5.955666852686118, 6.061230791524389, 1.5485834273858712),
+    Player.ROLE_MID: (6.052875763317001, 6.1238237595148695, 1.596370972734363),
+    Player.ROLE_FWD: (6.097521915325461, 6.155905316629372, 1.676461101184294),
+}
+
+
+def scale_saturation(vote: float, ref_key: str) -> tuple[float, float]:
+    """Il voto dopo lo stadio finale, e DI QUANTO e' stato riscalato.
+
+    Il secondo valore serve alla spiegazione: la scomposizione del voto e' additiva
+    (base + una fetta per voce) e una curva non lineare in fondo la farebbe non
+    tornare. Moltiplicando ogni fetta per questo fattore, e usando ``centro_dopo``
+    come base, la somma torna esatta — perche' il fattore e' definito proprio come
+    "quanto e' diventato lo scostamento dal centro".
+    """
+    p = ROLE_SATURATION.get(ref_key)
+    if not p:
+        return vote, 1.0
+    pre, dopo, a = p
+    d = vote - pre
+    compresso = VOTE_SATURATION_T * math.log1p(d / VOTE_SATURATION_T) if d > 0 else d
+    out = dopo + a * compresso
+    return out, (a * compresso / d if abs(d) > 1e-12 else a)
 
 
 def vote_center_for(role: str) -> float:
@@ -1432,6 +1642,17 @@ def vote_center_for(role: str) -> float:
 # quella parte dell'inclinazione non e' opera del condizionamento e ha un'altra
 # causa, non ancora cercata.
 MINUTE_CONDITIONING = 0.75
+# ...e il portiere ha il suo. Il canale del portiere e' tarato a parte (v.
+# GK_SHRINKAGE_MINUTES) e vuole il condizionamento PIENO: la curva dei minuti del
+# portiere e' quasi piatta — gioca 90' quasi sempre — quindi condizionarla al 75%
+# non protegge nessuno spezzone e toglie solo segnale ai pochi che ci sono.
+GK_MINUTE_CONDITIONING = 1.0
+
+
+def minute_conditioning_for(ref_key: str) -> float:
+    """Quanto dell'effetto-minuti si toglie dall'indice, per QUESTO canale."""
+    return (GK_MINUTE_CONDITIONING if ref_key == Player.ROLE_GK
+            else MINUTE_CONDITIONING)
 
 # --- I FATTI OSSERVATI NON SI ATTENUANO ---------------------------------------
 # L'attenuazione sui minuti esiste per una ragione precisa: un TASSO per-90
@@ -1507,7 +1728,7 @@ MINUTE_CONDITIONING = 0.75
 # dal blocco delle conclusioni letto con un vettore di pesi unico per tutti i ruoli
 # (v. il "KNOWN COST" in TOTAL_WEIGHTS: serve una scala delle conclusioni per
 # ruolo). Abbassare gamma per lui avrebbe rotto due celle tarate bene.
-UNSHRINK_GAMMA = 0.25
+UNSHRINK_GAMMA = 0.0774
 
 UNSHRUNK_FEATURES = frozenset({
     # La finitura: quanto e' valso il modo in cui ha colpito, e da dove.
@@ -1751,6 +1972,18 @@ PENALTY_MISSED_VOTE_IRRELEVANT = -0.5  # result already decided
 # to the well-reasoned 25 when that nudge was undone — 18 also inflated full-game
 # bases like Koopmeiners' by trusting the sample slightly more than warranted.)
 SHRINKAGE_MINUTES = 25
+# Il MOVIMENTO ne vuole molti di piu'. Il 25 sopra resta il valore del PORTIERE, che
+# e' dove era stato ragionato; per DIF/CEN/ATT la taratura del 03/09/2026 lo porta a
+# 90, cioe' "una presenza vale per intero solo a partita intera". Sono due canali con
+# due popolazioni diverse: il portiere gioca 90' quasi sempre e lo spezzone e' raro,
+# il movimento e' pieno di mezz'ore che non vanno lette come tassi per-90.
+OUTFIELD_SHRINKAGE_MINUTES = 90.0
+
+
+def shrinkage_for(ref_key: str) -> float:
+    """I minuti di sfiducia di QUESTO canale (v. SHRINKAGE_MINUTES)."""
+    return (float(SHRINKAGE_MINUTES) if ref_key == Player.ROLE_GK
+            else OUTFIELD_SHRINKAGE_MINUTES)
 # Extrapolation floor: never project a per-90 rate from FEWER than this many minutes
 # as if the player had played 90'. A 26' cameo that created one big chance must not be
 # read as a 3.5x/90 rate — we cap the projection at this minute baseline. This tackles
@@ -1818,7 +2051,7 @@ EXTRAP_FLOOR_MINUTES = 55
 # at 2.0 the term is 70% of the defender index and no defender can earn above 8.5).
 # Applied LINEARLY, unlike the √-compressed volume block: it is already a small
 # goal-equivalent figure, not a fat-tailed count.
-EXPOSURE_WEIGHT = 0.1594    # same unit as every other weight: index points per 1σ
+EXPOSURE_WEIGHT = 0.1314    # same unit as every other weight: index points per 1σ
 EXPOSURE_KEY = "_exposure"  # its name in the scales/breakdowns (it is not a provider stat)
 EXPOSURE_LAMBDA = 0.50      # share of the charge carried by the OUTCOME; 1−λ by xGOT
 EXPOSURE_KERNEL = 0.30      # weight of the four adjacent zones in the presence
@@ -2452,7 +2685,7 @@ def _per_match_player_totals(match_ids):
     _fill_missing_xgot(out, sorted(covered))
     _merge_defensive_value(out, sorted(covered))
     _merge_own_goal_relief(out, sorted(covered))
-    _merge_conceded_importance(out, sorted(covered))
+    _merge_keeper_moment(out, sorted(covered))
     _merge_assists(out, sorted(covered))
     return out
 
@@ -2783,32 +3016,43 @@ def _merge_own_goal_relief(out: dict, match_ids) -> None:
                     out[key].get("gk_goals_prevented", 0.0) + credit)
 
 
-def _merge_conceded_importance(out: dict, match_ids) -> None:
-    """Grada i gol SUBITI per quanto hanno cambiato la partita.
+# Quanto conta che l'intervento sia arrivato nel minuto decisivo. UNO SOLO, con segno.
+# La stima libera su questo termine, controllata per tutto il canale, e' +0.0270 +/-
+# 0.0173 in punti di voto per deviazione standard; 0.275 e' il valore in unita' della
+# feature che le corrisponde.
+KEEPER_MOMENT_LAMBDA = 0.275
 
-    ``gk_goals_prevented`` e' "xGOT affrontato meno gol subiti", cioe' — separando i
-    tiri parati dai gol — il credito delle parate meno la GRAVITA' di ogni gol
-    preso, dove la gravita' e' (1 - xGOT) del tiro entrato. Qui quella gravita'
-    viene moltiplicata per il peso del gol (v. ``goal_impact.conceded_weight``), che
-    vale in media 1: la correzione ridistribuisce fra gol pesanti e gol
-    ininfluenti, non gonfia il debito complessivo dei portieri.
 
-    Perche' esiste: il gol lo pesavamo per il cambiamento di stato soltanto a
-    CREDITO di chi lo segna (``goal_impact``), e a debito di chi lo subisce valeva
-    uno come tutti. Le due letture dello stesso evento non possono divergere.
+def _merge_keeper_moment(out: dict, match_ids) -> None:
+    """Pesa gli interventi del portiere per QUANTO CONTAVA il momento.
 
-    Il caso che l'ha portata: Atalanta-Bologna 1-0 della 2a giornata 2026-27, unico
-    gol al 90' su un tiro da xG 0.016 e xGOT 0.042 mentre il Bologna aveva creato
-    1.35 di xG. Un pallone che il portiere doveva prendere per il 96%, entrato nel
-    minuto in cui costa la partita: la gravita' c'era gia' nell'xGOT, il peso del
-    momento no.
+    ``gk_goals_prevented`` e' ``somma (xgot - gol)`` sui tiri affrontati: una parata
+    vale ``+xgot`` (merito), un gol vale ``-(1 - xgot)`` (colpa). SONO LO STESSO
+    TERMINE COL SEGNO OPPOSTO, quindi il peso del momento e' UNO SOLO e si applica
+    alla quantita' con segno, su TUTTI i tiri affrontati:
 
-    Gated on the pitch come il credito dell'autogol: chi entra dopo non risponde di
-    un gol gia' preso. L'autogol resta fuori (v. ``conceded_by_side``): la sua
-    difficolta' e' gia' restituita da ``_merge_own_goal_relief``.
+        somma_tiri  lambda * (peso - 1) * (xgot - gol)
+
+    Fino al 03/09/2026 questa correzione esisteva ma era ASIMMETRICA — pesava solo i
+    GOL, e con un coefficiente implicito di +0.0795 punti di voto per 1 sd, cioe' tre
+    volte il bordo superiore dell'intervallo stimato. Il portiere pagava il momento
+    delle reti subite e non incassava quello delle parate decisive: la stessa
+    grandezza letta con due metri diversi a seconda del segno. Quasi tutto il
+    guadagno della correzione viene dall'aver tolto quell'asimmetria, non
+    dall'aggiungere il momento — che vale +0.001 di accordo e si tiene per la
+    simmetria fra i due lati e perche' «intervento in un momento decisivo» e' una
+    voce che la pagella puo' nominare.
+
+    ``peso`` ha media 1 (v. ``goal_impact.conceded_weight``), quindi la correzione
+    RIDISTRIBUISCE fra momenti pesanti e ininfluenti: non gonfia ne' sgonfia il conto
+    complessivo dei portieri.
+
+    Gated on the pitch: chi entra dopo non risponde di un tiro gia' affrontato.
+    L'autogol resta fuori — la sua difficolta' e' gia' restituita da
+    ``_merge_own_goal_relief``.
     """
     ids = list(match_ids)
-    if not ids:
+    if not ids or not KEEPER_MOMENT_LAMBDA:
         return
     keepers = set(Player.objects.filter(is_goalkeeper=True).values_list("id", flat=True))
     lineup_keepers = match_lineup_keepers(ids)
@@ -2817,13 +3061,41 @@ def _merge_conceded_importance(out: dict, match_ids) -> None:
             for a in MatchAppearance.objects.filter(match_id__in=ids)
             .values("match_id", "player_id", "side", "is_starter")}
     windows = on_pitch_windows(ids, minutes, apps)
+    xp = goal_impact.fixed_xp_table()
+    _band, p95 = goal_impact.fixed_band()
     for match in Match.objects.filter(id__in=ids):
-        conceded = goal_impact.conceded_by_side(match)
-        if not conceded:
+        side_of = dict(MatchAppearance.objects.filter(match=match)
+                       .values_list("player_id", "side"))
+        shots = [s for s in MatchShot.objects.filter(match=match)
+                 .values("player_id", "minute", "team_side", "shot_type", "xgot", "is_goal")
+                 if s["minute"] is not None]
+        if not shots:
             continue
-        for side, goals in conceded.items():
+        shots.sort(key=lambda s: s["minute"])
+        goals = [s for s in shots if s["is_goal"]]
+        for shot in shots:
+            # Il lato che SUBISCE questo tiro, e il punteggio prima che partisse:
+            # e' quello che decide quanto contava (v. goal_impact.importance).
+            against = "away" if shot["team_side"] == "home" else "home"
+            own = is_own_goal(shot["shot_type"], shot["team_side"],
+                              side_of.get(shot["player_id"]))
+            if shot["is_goal"] and own:
+                continue
+            subiti = sum(1 for g in goals
+                         if g["team_side"] == against and g["minute"] < shot["minute"])
+            fatti = sum(1 for g in goals
+                        if g["team_side"] != against and g["minute"] < shot["minute"])
+            peso = goal_impact.conceded_weight(
+                goal_impact.importance(xp, shot["minute"], subiti - fatti - 1), p95)
+            if peso == 1.0:
+                continue
+            xgot = float(shot["xgot"] or 0.0)
+            firmato = xgot - (1.0 if shot["is_goal"] else 0.0)
+            delta = KEEPER_MOMENT_LAMBDA * (peso - 1.0) * firmato
+            if not delta:
+                continue
             for (m2, pid), (side2, _starter) in apps.items():
-                if m2 != match.id or side2 != side:
+                if m2 != match.id or side2 != against:
                     continue
                 if pid not in keepers and pid not in lineup_keepers.get(match.id, ()):
                     continue
@@ -2831,12 +3103,10 @@ def _merge_conceded_importance(out: dict, match_ids) -> None:
                 if key not in out:
                     continue
                 lo, hi = windows.get(key, (0.0, 0.0))
-                delta = sum((1.0 - g["weight"]) * (1.0 - g["xgot"])
-                            for g in goals
-                            if g["minute"] is not None and lo <= g["minute"] <= hi)
-                if delta:
-                    out[key]["gk_goals_prevented"] = (
-                        out[key].get("gk_goals_prevented", 0.0) + delta)
+                if not (lo <= shot["minute"] <= hi):
+                    continue
+                out[key]["gk_goals_prevented"] = (
+                    out[key].get("gk_goals_prevented", 0.0) + delta)
 
 
 def _fallback_window(minutes: int, is_starter: bool) -> tuple[float, float]:
@@ -3277,7 +3547,10 @@ def flatten_minute_curves(competition_season_id: int, reference: dict,
             voto = external.get(f'{m.matchday}:{row["player_id"]}')
             if voto is None:
                 continue
-            per[int(row["minutes"])].append(row["voto_puro"] - voto)
+            # PRIMA dello stadio finale, e arrotondato come fa il banco: la curva
+            # si tara sul voto che lo stadio finale poi comprimera'.
+            nostro = _round_half(row.get("voto_pre_scala", row["voto_puro"]))
+            per[int(row["minutes"])].append(nostro - voto)
     residuo = {}
     for minute in range(1, 100):
         campione = [x for mm in range(minute - window, minute + window + 1)
@@ -3289,11 +3562,12 @@ def flatten_minute_curves(competition_season_id: int, reference: dict,
     for role, r in ref_only.items():
         curva = dict(r.get("by_minute") or {})
         for minute, scarto in residuo.items():
-            w = minute / (minute + SHRINKAGE_MINUTES)
-            if w <= 0 or not MINUTE_CONDITIONING:
+            w = minute / (minute + shrinkage_for(role))
+            conditioning = minute_conditioning_for(role)
+            if w <= 0 or not conditioning:
                 continue
             curva[str(minute)] = curva.get(str(minute), 0.0) + (
-                scarto * r["std"] / (spread_k_for(role) * w * MINUTE_CONDITIONING))
+                scarto * r["std"] / (spread_k_for(role) * w * conditioning))
         r["by_minute"] = curva
     return residuo
 
@@ -3362,7 +3636,8 @@ def minute_shift(ref_key: str, minutes: int, reference: dict,
     riporta al comportamento di prima, mai a un voto inventato."""
     r = reference.get(ref_key) or {}
     curve = r.get(curve_key)
-    if not curve or not MINUTE_CONDITIONING:
+    conditioning = minute_conditioning_for(ref_key)
+    if not curve or not conditioning:
         return 0.0
     m = max(0, int(minutes or 0))
     val = curve.get(m) if isinstance(curve, dict) else None
@@ -3379,7 +3654,7 @@ def minute_shift(ref_key: str, minutes: int, reference: dict,
         val = curve.get(near, curve.get(str(near)))
     if val is None:
         return 0.0
-    return MINUTE_CONDITIONING * (float(val) - r.get(mean_key, 0.0))
+    return conditioning * (float(val) - r.get(mean_key, 0.0))
 
 
 def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
@@ -3403,7 +3678,7 @@ def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: di
     # Shrink toward the role prior (z -> 0) when minutes are few: we don't trust a
     # per-90 rate extrapolated from a short cameo, so the vote regresses to 6 in
     # proportion to the evidence. w -> 1 for full games, ~0.4 at 20', ~0.3 at 10'.
-    w = minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0
+    w = minutes / (minutes + shrinkage_for(ref_key)) if minutes > 0 else 0.0
     # I FATTI OSSERVATI NON PRENDONO ``w`` (v. UNSHRUNK_FEATURES). Scritto come
     # correzione additiva e non spaccando l'indice: w*I + (1-w)*O = w*resto + O,
     # quindi questa riga da' esattamente "i tassi attenuati, i fatti interi" senza
@@ -3427,8 +3702,12 @@ def _round_half(vote: float) -> float:
 
 def _vote_from_index(index: float, ref_key: str, minutes: int, reference: dict,
                      spread_k: float = VOTE_SPREAD_K) -> float:
-    return _round_half(_raw_vote_from_index(index, ref_key, minutes, reference,
-                                            spread_k))
+    """Il voto del solo indice, senza le correzioni post-indice.
+
+    PASSA DALLO STADIO FINALE come il voto vero: una funzione che si chiama "il voto"
+    e salta l'ultimo stadio e' una trappola per chi la trova cercando."""
+    grezzo = _raw_vote_from_index(index, ref_key, minutes, reference, spread_k)
+    return _round_half(scale_saturation(grezzo, ref_key)[0])
 
 
 def result_mitigation(raw_vote: float, gd_on: int, *,
@@ -3599,8 +3878,18 @@ def voto_puro_for_match(match, reference: dict,
         radj = red_adj.get(pid, 0.0)
         oadj = og_adj.get(pid, 0.0)
         padj = pen_adj.get(pid, 0.0)
-        voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX,
-                                              raw + nudge + radj + oadj + padj)))
+        # Lo stadio finale della scala. Sta QUI, dopo ogni correzione, perche' e'
+        # cosi' che e' stato tarato: comprime il voto COMPLETO, mitigazione inclusa.
+        pieno = max(VOTE_MIN, min(VOTE_MAX, raw + nudge + radj + oadj + padj))
+        # Il voto PRIMA dello stadio finale. Serve a ``flatten_minute_curves``, che
+        # misura il residuo contro il giudice esterno: quel residuo va misurato dove
+        # e' stato tarato, cioe' prima della saturazione. Misurarlo dopo produce una
+        # curva diversa — e' l'errore che ha fatto fallire il primo test di
+        # accettazione, con la produzione mezzo punto sopra il modello su un voto
+        # ogni sette.
+        pre_scala = pieno
+        pieno, scala = scale_saturation(pieno, ref_key)
+        voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, pieno)))
                 if rated else None)
         results.append({
             "player_id": pid,
@@ -3641,6 +3930,21 @@ def voto_puro_for_match(match, reference: dict,
             "red_detail": red_info.get(pid),
             "own_goal_detail": og_info.get(pid),
             "penalty_adjustment": padj,
+            # Lo stadio finale, per la SPIEGAZIONE: ``scale_factor`` e' quanto e'
+            # stato riscalato lo scostamento dal centro, ``scale_base`` il centro
+            # nuovo. Senza questi due la scomposizione additiva non torna col voto.
+            "voto_pre_scala": pre_scala,
+            "scale_factor": scala,
+            # La base che la SPIEGAZIONE deve usare. Non e' il centro nuovo del
+            # ruolo: il voto grezzo parte da ``vote_center_for``, mentre lo stadio
+            # finale comprime attorno a ``centro_pre``, che e' un altro punto. La
+            # differenza fra i due, riscalata, e' una costante e va nella base —
+            # se la si dimentica la scomposizione sballa di quella costante, ed e'
+            # esattamente l'errore che avevo fatto la prima volta.
+            "scale_base": (
+                ROLE_SATURATION[ref_key][1]
+                + scala * (vote_center_for(ref_key) - ROLE_SATURATION[ref_key][0])
+                if ref_key in ROLE_SATURATION else vote_center_for(ref_key)),
             "voto_puro": voto,
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))

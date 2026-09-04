@@ -6,6 +6,11 @@ from io import StringIO
 
 from django.contrib.auth.models import User
 from django.test import TestCase
+
+from vfoot.services.classic_rating import (
+    _raw_vote_from_index, _round_half, index_for_role, scale_saturation)
+from vfoot.services.goal_impact import (
+    role_mean_assist_credit, role_mean_credit)
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from realdata.models import (
@@ -271,8 +276,10 @@ class RealChampionshipTests(TestCase):
                     ["starters"] if l["player_id"] == self.df.id)
         self.assertEqual(line["events"]["missed_penalties"], 1)
         self.assertEqual(line["malus"], 3.0)
-        self.assertEqual(line["voto_puro"], 5.0)      # 6.0 centre - 1.0 drop
-        self.assertEqual(line["fantavoto"], 2.0)      # 5.0 - 3 malus
+        # 4.5, non 5.0: il calo di 1.0 e' in punti PRIMA dello stadio finale della
+        # scala, che sotto il centro moltiplica per ~1.6 (v. ROLE_SATURATION).
+        self.assertEqual(line["voto_puro"], 4.5)
+        self.assertEqual(line["fantavoto"], 1.5)      # 4.5 - 3 malus
 
     def test_saved_penalty_credited_to_the_keeper_on_pitch(self):
         """A saved penalty (+3 Rp) goes to the keeper defending it — the opposite
@@ -772,14 +779,30 @@ class LeagueRoleDoesNotRescoreTests(TestCase):
     def test_the_vote_is_scored_against_the_measured_role(self):
         """Not merely 'the same in both' — the same as the CEN one, by value.
 
-        His index sits on the CEN mean, so that bucket puts him at exactly 6.0.
-        The ATT bucket is a whole sigma above, which would drag the same index to
-        6 + 0.8 * (90/115) * (0 - 1) / 1 = 5.37, shown as 5.5. Asserting the 6.0
-        is therefore asserting WHICH mean was subtracted, not merely that two
-        calls agree — two calls would agree just as well if both were wrong."""
+        Il suo indice sta sulla media CEN. Il valore assoluto che ne esce dipende
+        dal fixture (qui ``std`` vale 1.0 contro lo 0.245 vero, quindi le costanti
+        dello stadio finale — tarate sulla scala vera — cadono in un punto che sui
+        dati veri non si presenta): quel che il test deve difendere non e' il
+        numero, e' QUALE MEDIA e' stata sottratta. Percio' si confronta col voto
+        che uscirebbe dal secchio ATT, che sta una sigma sopra, e si pretende che
+        siano diversi — due chiamate d'accordo fra loro lo sarebbero anche se
+        entrambe sbagliate."""
         in_league = self._line(league=self.league)
-        self.assertEqual(in_league["voto_puro"], 6.0)
-        self.assertNotEqual(in_league["voto_puro"], 5.5)
+
+        def ancora(secchio):
+            """Il voto che uscirebbe scoring l'indice di QUESTO giocatore contro
+            quel secchio, rifacendo la strada dello scorer: indice, voto grezzo,
+            media di ruolo del credito (non ha segnato), stadio finale."""
+            idx = index_for_role(secchio, {"touches": 60.0}, 90)
+            v = _raw_vote_from_index(idx, secchio, 90, self.reference)
+            v -= (role_mean_credit().get(secchio, 0.0)
+                  + role_mean_assist_credit().get(secchio, 0.0))
+            return _round_half(scale_saturation(v, secchio)[0])
+
+        self.assertNotEqual(ancora("CEN"), ancora("ATT"),
+                            "il fixture non distingue piu' i due secchi: il test "
+                            "non proverebbe nulla")
+        self.assertEqual(in_league["voto_puro"], ancora("CEN"))
 
 
 class ChampionshipWithoutALeagueTests(TestCase):

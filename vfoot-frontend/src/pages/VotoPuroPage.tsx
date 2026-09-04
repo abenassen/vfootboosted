@@ -422,8 +422,8 @@ export default function VotoPuroPage() {
         </div>
         <p className="text-xs text-ink-faint">
           Il livello, adesso, è quello giusto: su tutta la stagione {VOTO.stagione} il nostro voto
-          medio ai portieri sta <b className="text-ink">due centesimi e mezzo</b> sotto quello della
-          Redazione — fino al 30 agosto 2026 erano tredici centesimi, e li abbiamo corretti. Quello
+          medio ai portieri sta <b className="text-ink">un centesimo</b> sopra quello della
+          Redazione — fino al 30 agosto 2026 erano tredici centesimi sotto, e li abbiamo corretti. Quello
           che resta è la differenza di lettura che si vede negli esempi, e non si vede nella media
           perché non è uno sbilanciamento: noi paghiamo il saldo tra quanto valevano i tiri
           affrontati e i gol presi, le pagelle leggono anche lo spettacolo delle parate. Partita per
@@ -487,7 +487,7 @@ export default function VotoPuroPage() {
             Nei voti usuali il gol è quasi un bonus extra sul voto puro: tra gli attaccanti che
             hanno segnato una volta, la Redazione di fantacalcio.it ha scritto{' '}
             <b className="text-ink">esattamente 7,0 in 261 casi su 357</b> (media 7,03, con
-            oscillazioni minime). Noi teniamo una media vicina — 6,79 — ma con una dispersione una
+            oscillazioni minime). La nostra media è ora la stessa — 7,03 — ma con una dispersione quasi una
             volta e mezzo la loro (qualcuno prenderà 6, qualcuno prenderà 8), perché al di là del
             gol continuiamo a valutare l'intera partita.
           </p>
@@ -595,7 +595,7 @@ export default function VotoPuroPage() {
         </div>
         <p>
           Lo scarto medio è {VOTO.scartoMedio} punti: siamo <i>vicini</i> alle pagelle, non
-          allineati. Per ruolo: 0,35 i difensori, 0,34 i portieri, 0,32 i centrocampisti e 0,31 gli
+          allineati. Per ruolo: 0,33 i portieri, 0,31 i difensori, 0,30 i centrocampisti e 0,29 gli
           attaccanti. E la parte in cui non siamo allineati è quella che ci interessa, perché è dove
           i dati dicono qualcosa che l'impressione non aveva registrato.
         </p>

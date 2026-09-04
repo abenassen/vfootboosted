@@ -62,6 +62,7 @@ def weights_fingerprint() -> str:
         # voto: la frazione di scostamento condizionata ai minuti, e QUALI voci
         # sfuggono all'attenuazione (v. classic_rating.UNSHRUNK_FEATURES).
         "minute_conditioning": cr.MINUTE_CONDITIONING,
+        "gk_minute_conditioning": cr.GK_MINUTE_CONDITIONING,
         "unshrunk": sorted(cr.UNSHRUNK_FEATURES),
         # Stessa ragione del legno: e' un addendo della ricetta di sga_post, quindi
         # cambia i valori grezzi della feature e le sigma calibrate su di essi.
@@ -80,7 +81,11 @@ def weights_fingerprint() -> str:
         # calibrazione, ma cambia OGNI voto di quel ruolo, quindi l'impronta deve
         # muoversi o la cache servirebbe un misto.
         "role_center": cr.ROLE_VOTE_CENTER,
+        # Lo stadio finale della scala: cambia OGNI voto di movimento.
+        "saturation_t": cr.VOTE_SATURATION_T,
+        "role_saturation": {k: list(v) for k, v in cr.ROLE_SATURATION.items()},
         "extrap_floor": cr.EXTRAP_FLOOR_MINUTES, "shrinkage": cr.SHRINKAGE_MINUTES,
+        "outfield_shrinkage": cr.OUTFIELD_SHRINKAGE_MINUTES,
         "min_ref": cr.MIN_MINUTES_REFERENCE,
         # Changes what a keeper's goals-prevented IS when his side scored an own
         # goal, hence the mean and spread of the keeper index: a reference computed

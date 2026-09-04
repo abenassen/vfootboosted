@@ -722,11 +722,12 @@ def appiattisci(bench, W, ref, voti_arr) -> dict:
         r = ref[role]
         curva = dict(r.get("by_minute") or {})
         for minute, scarto in residuo.items():
-            w = minute / (minute + cr.SHRINKAGE_MINUTES)
-            if w <= 0 or not cr.MINUTE_CONDITIONING:
+            w = minute / (minute + cr.shrinkage_for(role))
+            cond = cr.minute_conditioning_for(role)
+            if w <= 0 or not cond:
                 continue
             curva[str(minute)] = curva.get(str(minute), 0.0) + (
-                scarto * r["std"] / (cr.spread_k_for(role) * w * cr.MINUTE_CONDITIONING))
+                scarto * r["std"] / (cr.spread_k_for(role) * w * cond))
         r["by_minute"] = curva
     return residuo
 

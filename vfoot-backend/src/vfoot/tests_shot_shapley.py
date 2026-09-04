@@ -132,10 +132,17 @@ class ShotSectionAddsUpTests(TestCase):
         self.assertEqual(len(d["shots"]), 1)
         self.assertAlmostEqual(d["shots"][0]["points"] + d["baseline"], d["total"],
                                places=2)
-        # il tiro aggiunge, la riga toglie: i due segni convivono e non si
-        # contraddicono, perché il metro spiega la differenza
-        self.assertGreater(d["shots"][0]["points"], 0.0)
+        # IL PAREGGIO SI È SPOSTATO (03/09/2026). Prima un tiro da 0.054 di xG
+        # aggiungeva; con la ritaratura le conclusioni pesano molto meno (shots
+        # x0.29, shots_off e touches_in_box a zero) e sotto ~0.1 di xG un tiro
+        # TOGLIE — è la stessa logica del tiro sprecato qui sotto, con la soglia
+        # più bassa. L'invariante che questo test difende resta l'altro: la somma
+        # della tabella È la riga.
+        self.assertLess(d["shots"][0]["points"], 0.0)
         self.assertLess(d["total"], 0.0)
+        # (che un tiro di valore continui ad aggiungere lo dice
+        # ``test_shapley_charges_a_wasteful_shot_that_loo_let_through``, che
+        # confronta i due lati della soglia)
 
     # -- il metro ----------------------------------------------------------
     def test_the_baseline_is_the_role_yardstick(self):
@@ -153,7 +160,12 @@ class ShotSectionAddsUpTests(TestCase):
         self._shots((30, "miss", 0.04, 0.0))
         d = shot_detail(self.match, self.player.id)
         self.assertLess(d["total"], 0.0)
-        self.assertLess(d["baseline"], d["total"])   # il metro è il pezzo grosso
+        # Il metro NON è più per forza il pezzo grosso: da quando le conclusioni
+        # pesano poco, un tiro sprecato può togliere più di quanto tolga il metro.
+        # Quel che resta vero — ed è la cosa che rendeva illeggibile la tabella — è
+        # che i due si sommano alla riga senza contraddirla.
+        self.assertAlmostEqual(sum(t["points"] for t in d["shots"]) + d["baseline"],
+                               d["total"], places=2)
 
     # -- perché Shapley e non leave-one-out --------------------------------
     def test_shapley_charges_a_wasteful_shot_that_loo_let_through(self):

@@ -8,6 +8,8 @@ from vfoot.services.vote_explanation import (
     readable_label, role_average_terms, to_sentence,
 )
 from vfoot.services.classic_rating import (
+    shrinkage_for,
+    scale_saturation,
     GK_SPREAD_K, VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K,
     SHRINKAGE_MINUTES,
     _raw_vote_from_index, _round_half,
@@ -173,9 +175,13 @@ class VoteExplanationTests(SimpleTestCase):
                 with self.subTest(role=role, minutes=minutes):
                     e = explain(role, feats, minutes, self.REFERENCE,
                                 self._averages(role, mean_feats))
-                    row = _round_half(_raw_vote_from_index(
+                    # Il voto "accanto al nome" PASSA DALLO STADIO FINALE della
+                    # scala (classic_rating.scale_saturation): confrontare il
+                    # pannello con la formula senza quello stadio confronterebbe
+                    # con un modello che non gira piu'.
+                    row = _round_half(scale_saturation(_raw_vote_from_index(
                         index_for_role(role, feats, minutes), role, minutes,
-                        self.REFERENCE))
+                        self.REFERENCE), role)[0])
                     self.assertEqual(e["voto"], row)
 
     def test_result_nudge_and_red_card_reconcile_and_are_named(self):
@@ -190,7 +196,11 @@ class VoteExplanationTests(SimpleTestCase):
         self.assertAlmostEqual(shown, e["subtotal"], places=2)
         # the sentence now carries the cost, and is matched on ``kind`` rather than
         # on its text (the label grew a minute and a reason)
-        self.assertIn("Espulsione (-1.00).", to_sentence(e))
+        # -1.55 e non -1.00: la costante e' in punti PRIMA dello stadio finale, e
+        # lo stadio la riscala. La cifra mostrata e' quella che l'espulsione e'
+        # costata nel voto scritto sopra, che e' l'unica che il pannello puo'
+        # esibire senza mentire sulla somma.
+        self.assertIn("Espulsione (-1.55).", to_sentence(e))
         self.assertEqual([c["kind"] for c in e["contributions"] if c.get("kind")],
                          ["result", "red"])
 
@@ -200,12 +210,12 @@ class VoteExplanationTests(SimpleTestCase):
         # a decisive miss (-1) reads "decisivo"; a dead-rubber miss (-0.5) does not
         dec = explain("DIF", feats, 90, self.REFERENCE, average, penalty_adjustment=-1.0)
         self.assertIn("rigore decisivo sbagliato", [c["label"] for c in dec["contributions"]])
-        self.assertIn("Rigore decisivo sbagliato (-1.00).", to_sentence(dec))
+        self.assertIn("Rigore decisivo sbagliato (-1.55).", to_sentence(dec))
         shown = dec["base"] + sum(c["points"] for c in dec["contributions"]) + dec["other_points"]
         self.assertAlmostEqual(shown, dec["subtotal"], places=2)
         dead = explain("DIF", feats, 90, self.REFERENCE, average, penalty_adjustment=-0.5)
         self.assertIn("rigore sbagliato", [c["label"] for c in dead["contributions"]])
-        self.assertIn("Rigore sbagliato (-0.50).", to_sentence(dead))
+        self.assertIn("Rigore sbagliato (-0.77).", to_sentence(dead))
         self.assertNotIn("decisivo", to_sentence(dead))
 
     # --- the full per-feature ledger -------------------------------------
@@ -237,7 +247,10 @@ class VoteExplanationTests(SimpleTestCase):
         total = sum(t["points"] for t in e["all_terms"])
         # the merit vote before the adjustments the summary lists separately
         # vote_center_for, non 6.0: il centro dipende dal ruolo (ROLE_VOTE_CENTER).
-        self.assertAlmostEqual(vote_center_for("DIF") + total, e["subtotal"], places=2)
+        # ``e["base"]``, non ``vote_center_for``: dallo stadio finale la base del
+        # pannello e' il centro RISCALATO (v. scale_base), e le voci sommano a
+        # quella.
+        self.assertAlmostEqual(e["base"] + total, e["subtotal"], places=2)
         # and it agrees with the summary's own accounting
         shown = sum(c["points"] for c in e["contributions"]) + e["other_points"]
         self.assertAlmostEqual(total, shown, places=2)
@@ -461,7 +474,13 @@ class VoteExplanationTests(SimpleTestCase):
         average = self._averages("ATT", {"shots": 2.0, "touches": 40.0})
         e = explain("ATT", {"shots": 5.0, "touches": 60.0}, 90, self.REFERENCE,
                     average, full=True)
-        expected = VOTE_SPREAD_K * (90 / (90 + SHRINKAGE_MINUTES)) / self.REFERENCE["ATT"]["std"]
+        # per_unit porta ANCHE il fattore dello stadio finale: e' cio' per cui la
+        # pagina moltiplica per arrivare al voto vero, non a quello intermedio.
+        _, fattore = scale_saturation(
+            _raw_vote_from_index(index_for_role("ATT", {"shots": 5.0, "touches": 60.0}, 90),
+                                 "ATT", 90, self.REFERENCE), "ATT")
+        expected = (fattore * VOTE_SPREAD_K * (90 / (90 + shrinkage_for("ATT")))
+                    / self.REFERENCE["ATT"]["std"])
         self.assertAlmostEqual(e["per_unit"], expected, places=5)
         # e il portiere, che ha una scala sua
         por = explain("POR", {"gk_saves": 1.0, "touches": 25.0}, 90, self.REFERENCE,

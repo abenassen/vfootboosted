@@ -593,6 +593,10 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
             why = explain(row.get("role") or roles.get(a.player_id, ""), feats[key],
                           mins.get(key, 0), reference, averages,
                           exposures.get(key, 0.0),
+                          # Lo stadio finale della scala: senza questi due la
+                          # scomposizione non torna col voto scritto sopra.
+                          scale_factor=row.get("scale_factor", 1.0),
+                          scale_base=row.get("scale_base"),
                           result_nudge=row.get("result_nudge", 0.0),
                           red_adjustment=row.get("red_adjustment", 0.0),
                           own_goal_adjustment=row.get("own_goal_adjustment", 0.0),
@@ -720,7 +724,7 @@ def shot_detail(match, player_id: int) -> dict:
     from math import factorial
 
     from vfoot.services.classic_rating import (
-        SHRINKAGE_MINUTES, appearance_sides, derived_features, feature_scales,
+        shrinkage_for, appearance_sides, derived_features, feature_scales,
         is_own_goal, scored_z, spread_k_for, weights_for_role,
     )
 
@@ -760,14 +764,19 @@ def shot_detail(match, player_id: int) -> dict:
     # La stessa conversione indice -> punti di voto che usa la spiegazione, e per la
     # stessa ragione per cui quella la prende da ``classic_rating``: due formule
     # copiate divergono, e qui il conto DEVE tornare con la riga scritta sopra.
-    weight = mins / (mins + SHRINKAGE_MINUTES)
-    per_unit = spread_k_for(role) * weight / reference[role]["std"]
+    weight = mins / (mins + shrinkage_for(role))
+    # ...e il fattore dello STADIO FINALE della scala, che la riga del voto porta
+    # con se'. Senza, questa sezione somma a un numero che non e' quello scritto
+    # sopra — che e' esattamente il difetto contro cui mette in guardia il commento
+    # qui accanto, ed e' successo lo stesso il 03/09/2026.
+    fattore = row.get("scale_factor", 1.0) or 1.0
+    per_unit = fattore * spread_k_for(role) * weight / reference[role]["std"]
     # LA FAMIGLIA DEI TIRI STA A CAVALLO DEI DUE GRUPPI: sga_post, xg_shots e
     # shots_on_target sono fatti osservati e il voto non li attenua (v.
     # classic_rating.UNSHRUNK_FEATURES), shots/shots_off/shots_blocked si'. Una
     # scala sola non basta piu', e va applicata DENTRO il sotto-indice: cosi' le
     # quote Shapley escono gia' in punti di voto e la sezione torna con la riga.
-    per_unit_obs = spread_k_for(role) / reference[role]["std"]
+    per_unit_obs = fattore * spread_k_for(role) / reference[role]["std"]
     unit_of = (lambda k: per_unit_obs if k in UNSHRUNK_FEATURES else per_unit)
 
     counted = [i for i, s in enumerate(shots) if not s["own_goal"]]
@@ -955,7 +964,7 @@ def save_detail(match, player_id: int) -> dict:
     from math import factorial
 
     from vfoot.services.classic_rating import (
-        OWN_GOAL_KEEPER_XGOT_DEFAULT, SHRINKAGE_MINUTES, appearance_sides,
+        OWN_GOAL_KEEPER_XGOT_DEFAULT, shrinkage_for, appearance_sides,
         feature_scales, is_own_goal, raw_feature_values, scored_z, spread_k_for,
         weights_for_role,
     )
@@ -1021,7 +1030,12 @@ def save_detail(match, player_id: int) -> dict:
 
     scales = feature_scales(gk=True)
     weights = weights_for_role(role)
-    weight = mins / (mins + SHRINKAGE_MINUTES)
+    weight = mins / (mins + shrinkage_for(role))
+    # NIENTE fattore dello stadio finale qui, a differenza della sezione dei tiri
+    # dei giocatori di movimento: il canale del portiere non passa dalla
+    # saturazione (v. classic_rating.ROLE_SATURATION, che non ha una voce POR),
+    # la sua correzione e' gia' dentro centro e dispersione. Aggiungerlo qui
+    # sballerebbe la sezione di ~1.6.
     per_unit = spread_k_for(role) * weight / reference[role]["std"]
     n = len(faced)
 

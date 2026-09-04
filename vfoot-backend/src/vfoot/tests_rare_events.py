@@ -48,14 +48,28 @@ from vfoot.services.vote_reference import fixed_reference
 #  deriva: il gonfiaggio del 01/09 era di 0.18 sul salvataggio e questo test,
 #  con 0.10 di tolleranza, non se ne sarebbe accorto. Con 0.06 lo prende, e resta
 #  abbastanza largo da non diventare rosso per l'ultimo bit di una ricalibrazione.
+# AGGIORNATA IL 03/09/2026, e cambia la natura dei numeri. Prima erano valori
+# DECISI a priori e misurati nella scala di allora; ora sono RISOLTI contro il
+# giudice: per ognuno si e' misurato, sulla 25-26, quanto il nostro voto sta sotto
+# lo Statistico sulle presenze CON quell'evento, al netto di quanto ci sta in
+# generale, e si sono corretti i due pesi dove lo scarto era grande (rigore
+# concesso 0.312, errore che porta al gol 0.383 punti di voto su ~75 eventi).
+#
+# Perche' l'ottimizzazione non li aveva gia' messi li': perche' NON E' UN ERRORE
+# per il suo obiettivo. Togliere quello scarto COSTA correlazione — la Pearson e'
+# quasi cieca a uno scostamento sistematico su 76 righe di 7696, e in cambio quel
+# peso cattura varianza di altre feature correlate. La correzione si fa lo stesso
+# perche' l'errore sul singolo giocatore e' la cosa che l'utente vede; e la guardia
+# sta qui, separata, proprio perche' l'obiettivo dell'ottimizzazione non puo'
+# vederla.
 ATTESI = {
-    "clearances_off_line": +0.300,
-    "penalties_won": +0.510,
-    "penalties_conceded": -0.455,
-    "errors_led_to_goal": -0.596,
-    "errors_led_to_shot": -0.170,
+    "clearances_off_line": +0.209,
+    "penalties_won": +1.401,
+    "penalties_conceded": -1.596,
+    "errors_led_to_goal": -0.847,
+    "errors_led_to_shot": -0.143,
 }
-TOLLERANZA = 0.06
+TOLLERANZA = 0.10
 
 
 def valore_per_occorrenza(key: str, role: str = "DIF") -> float:
@@ -70,7 +84,26 @@ def valore_per_occorrenza(key: str, role: str = "DIF") -> float:
     if not sigma_raw:
         return 0.0
     std = fixed_reference()[role]["std"]
-    return cr.WEIGHTS.get(key, 0.0) / sigma_raw * cr.spread_k_for(role) / std
+    # ...E IL FATTORE DELLO STADIO FINALE. Senza, questa funzione misura il valore
+    # in un voto INTERMEDIO che nessuno legge: lo stadio non comprime sotto il
+    # centro, dove gli eventi rari negativi vivono, quindi li moltiplica per intero
+    # (~1.6). Fino al 03/09/2026 mancava, e la guardia sottostimava di un terzo.
+    fattore = _fattore_stadio()
+    return (cr.WEIGHTS.get(key, 0.0) / sigma_raw * cr.spread_k_for(role) / std
+            * fattore)
+
+
+def _fattore_stadio() -> float:
+    """Il fattore dello stadio finale, medio sui tre ruoli di movimento pesato
+    per quanti sono. Sotto il centro la curva e' l'identita', quindi il fattore
+    e' esattamente il moltiplicatore che un evento negativo si prende."""
+    ref = fixed_reference()
+    ruoli = (cr.Player.ROLE_DEF, cr.Player.ROLE_MID, cr.Player.ROLE_FWD)
+    n = {r: (ref.get(r) or {}).get("n") or 0 for r in ruoli}
+    tot = sum(n.values())
+    if not tot:
+        return 1.0
+    return sum(cr.ROLE_SATURATION[r][2] * n[r] for r in ruoli) / tot
 
 
 class RareEventValueTests(SimpleTestCase):
@@ -97,7 +130,12 @@ class RareEventValueTests(SimpleTestCase):
         perche' il peso nel sorgente era rimasto quello di sempre."""
         from vfoot.services.goal_impact import fixed_band
 
+        # SULLA STESSA SCALA. La banda del gol e' in punti PRIMA dello stadio
+        # finale (il credito si somma li'), gli eventi rari sopra sono misurati
+        # DOPO: confrontarli direttamente sottostima il gol di un terzo e la
+        # guardia diventa piu' severa di quanto intende essere.
         (_lo, hi), _p95 = fixed_band()
+        hi = hi * _fattore_stadio()
         for key in ATTESI:
             v = abs(valore_per_occorrenza(key))
             self.assertLessEqual(

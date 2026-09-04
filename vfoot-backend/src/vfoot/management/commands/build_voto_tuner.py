@@ -40,6 +40,7 @@ from realdata.models import Match, MatchAppearance, Player, Team
 from vfoot.management.commands.voto_puro_discrepancies import Command as DiscCmd
 
 OUT_ROLES = ["DIF", "CEN", "ATT"]
+GK_ROLES = ["POR"]
 SHOTMAP = {"post": "shots_post", "goal": "shots_goal", "save": "shots_saved",
            "miss": "shots_off", "block": "shots_blocked"}
 # Provider stats we ingest but do not weight — shown at weight 0 for inspection.
@@ -83,6 +84,9 @@ class Command(BaseCommand):
                             help="Folder with the external fantacalcio .xlsx sheets.")
         parser.add_argument("--out", default=None,
                             help="Output path (default <repo>/voto_puro_tuner.xlsx).")
+        parser.add_argument("--role", choices=["movimento", "POR"], default="movimento",
+                            help="Canale da revisionare: movimento (default) oppure POR. "
+                                 "POR usa esclusivamente il vettore del portiere.")
 
     def handle(self, *args, **o):
         cs = o["season"]
@@ -93,17 +97,23 @@ class Command(BaseCommand):
             raise CommandError(f"No fantacalcio .xlsx in {ddir}")
 
         # ---- feature set (exactly the deployed vector) ----
+        # The keeper is deliberately a separate tuning run.  Mixing its covariance
+        # matrix with the outfield one would recreate the scoring bug that the two
+        # channels were introduced to prevent: the GK index has a much wider scale.
+        gk = o["role"] == "POR"
+        tune_roles = GK_ROLES if gk else OUT_ROLES
         # Since the standardisation, a case column holds the STANDARDISED value of
         # each feature, so the index is a plain SUMPRODUCT of weights and column:
         # no RAW/SQRT duality to reconstruct in the sheet, and a weight in column C
         # means the same thing as in the code — index points per 1σ.
-        TOTAL = list(cr.TOTAL_WEIGHTS)
-        PER90 = list(cr.PER90_WEIGHTS)
-        FEATS = TOTAL + PER90 + [cr.EXPOSURE_KEY]
+        TOTAL = list(cr.GK_TOTAL_WEIGHTS if gk else cr.TOTAL_WEIGHTS)
+        PER90 = list(cr.GK_PER90_WEIGHTS if gk else cr.PER90_WEIGHTS)
+        FEATS = TOTAL + PER90 + ([] if gk else [cr.EXPOSURE_KEY])
         nF = len(FEATS)
         is_p90 = {f: (f in PER90) for f in FEATS}
-        curw = {**cr.TOTAL_WEIGHTS, **cr.PER90_WEIGHTS}
-        SCALES = cr.feature_scales(gk=False)
+        curw = {**(cr.GK_TOTAL_WEIGHTS if gk else cr.TOTAL_WEIGHTS),
+                **(cr.GK_PER90_WEIGHTS if gk else cr.PER90_WEIGHTS)}
+        SCALES = cr.feature_scales(gk=gk)
 
         def w_of(f):
             return -cr.EXPOSURE_WEIGHT if f == cr.EXPOSURE_KEY else curw.get(f, 0.0)
@@ -150,12 +160,12 @@ class Command(BaseCommand):
 
         def rawvec(tot, m, ex):
             """the feature values in provider units — for the readable sheets"""
-            v = cr.raw_feature_values(tot, m, ex, gk=False)
+            v = cr.raw_feature_values(tot, m, ex, gk=gk)
             return np.array([v.get(f, 0.0) for f in FEATS])
 
         def zvec(tot, m, ex):
             """the STANDARDISED values the index is actually built from"""
-            v = cr.raw_feature_values(tot, m, ex, gk=False)
+            v = cr.raw_feature_values(tot, m, ex, gk=gk)
             return np.array([cr._feature_z(f, v.get(f, 0.0), SCALES) for f in FEATS])
 
         # ---- population -> per-role mean/cov of the STANDARDISED vector ----
@@ -163,7 +173,7 @@ class Command(BaseCommand):
         gp2mp = {}
         for (mid, pid), tot in totals.items():
             role = roles.get(pid)
-            if role not in OUT_ROLES:
+            if role not in tune_roles:
                 continue
             m = minutes.get((mid, pid), 0)
             gp2mp[(md_of.get(mid), pid)] = (mid, pid)
@@ -173,7 +183,7 @@ class Command(BaseCommand):
             pop[role].append(zvec(tot, m, ex))
             popraw[role].append(rawvec(tot, m, ex))
         STATS = {}
-        for role in OUT_ROLES:
+        for role in tune_roles:
             Z = np.array(pop[role]); R = np.array(popraw[role])
             # ddof=0: build_reference computes the POPULATION std, and a sheet
             # that used the sample one would disagree with the deployed vote by a
@@ -187,8 +197,8 @@ class Command(BaseCommand):
         # each role's residuals are already centred on its own mean, so pooling
         # them is exactly this average. Stored as an extra block so the sheet's
         # live sigma keeps matching the deployed one whatever the weights.
-        _n = sum(STATS[r]["n"] for r in OUT_ROLES)
-        COV_POOLED = sum(STATS[r]["n"] * STATS[r]["cov_z"] for r in OUT_ROLES) / _n
+        _n = sum(STATS[r]["n"] for r in tune_roles)
+        COV_POOLED = sum(STATS[r]["n"] * STATS[r]["cov_z"] for r in tune_roles) / _n
 
         # ---- discrepancy rows (reuses the external-sheet parsing) ----
         rows = DiscCmd().discrepancy_rows(cs, files)
@@ -204,7 +214,7 @@ class Command(BaseCommand):
 
         cand = []
         for r in rows:
-            if (r["minutes"] or 0) < 60 or r["role"] not in OUT_ROLES:
+            if (r["minutes"] or 0) < 60 or r["role"] not in tune_roles:
                 continue
             # need our vote and at least one external benchmark to compare against
             if (r["gd"], r["pid"]) not in gp2mp or r["our"] is None:
@@ -227,21 +237,23 @@ class Command(BaseCommand):
             sel.append({**r, "tipo": tipo}); seen.add(r["pid"]); return True
 
         by_key = {(r["gd"], r["pid"]): r for r in cand}
-        for pid, gd, tag in FORCED:                              # emblematic cases
-            r = by_key.get((gd, pid))
-            if r:
-                take(r, tag)
+        if not gk:
+            for pid, gd, tag in FORCED:                          # emblematic cases
+                r = by_key.get((gd, pid))
+                if r:
+                    take(r, tag)
         # THE EXTREMES OF THE DEFENDER SCALE. A defender reaching 9 (or dropping to
         # 3) is where the model is least constrained by the reference and most
         # likely to be caught out, so those cases belong in the sheet BY RULE rather
         # than by remembering to add them: they are re-picked automatically on every
         # rebuild, including after a reweighting that creates new ones. Both ends —
         # the exposure term can push a defender down as hard as a goal lifts him up.
-        defenders = [x for x in cand if x["role"] == "DIF"]
-        for r in sorted(defenders, key=lambda x: -x["our"])[:2]:
-            take(r, "ESTREMO alto")
-        for r in sorted(defenders, key=lambda x: x["our"])[:2]:
-            take(r, "ESTREMO basso")
+        if not gk:
+            defenders = [x for x in cand if x["role"] == "DIF"]
+            for r in sorted(defenders, key=lambda x: -x["our"])[:2]:
+                take(r, "ESTREMO alto")
+            for r in sorted(defenders, key=lambda x: x["our"])[:2]:
+                take(r, "ESTREMO basso")
         # THE STRANGE-VOTE HUNT: biggest gaps vs the Statistico base vote. Statistico
         # is the goal-stripped algorithmic grade, so a large gap here is a pure
         # performance-read disagreement — exactly the votes to sanity-check.
@@ -268,7 +280,7 @@ class Command(BaseCommand):
             if n >= 4:
                 break
         # top discrepancy per role
-        for role in OUT_ROLES:
+        for role in tune_roles:
             n = 0
             for r in sorted([x for x in cand if x["role"] == role], key=lambda x: -x["absd"]):
                 if take(r, "OUTLIER"):
@@ -276,7 +288,7 @@ class Command(BaseCommand):
                 if n >= 2:
                     break
         # a couple of good-agreement anchors per role (sanity)
-        for role in OUT_ROLES:
+        for role in tune_roles:
             n = 0
             for r in sorted([x for x in cand if x["role"] == role and x["absd"] <= 0.3
                              and 5.6 <= x["our"] <= 7.6], key=lambda x: x["absd"]):
@@ -306,7 +318,7 @@ class Command(BaseCommand):
                              "red_adj": round(cr.red_card_adjustments(mid).get(pid, 0.0)
                                               + cr.own_goal_adjustments(mid).get(pid, 0.0)
                                               + cr.penalty_missed_adjustments(mid).get(pid, 0.0), 3)})
-        casedata.sort(key=lambda c: (OUT_ROLES.index(c["role"]), c["tipo"], c["name"]))
+        casedata.sort(key=lambda c: (tune_roles.index(c["role"]), c["tipo"], c["name"]))
 
         # ---- the discrepancy ledger: top gaps vs Statistico, with our text ----
         expl_rows, seen_e = [], set()
@@ -329,7 +341,8 @@ class Command(BaseCommand):
                 break
 
         self._build_xlsx(out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows,
-                         cov_pooled=COV_POOLED, is_event=is_event, z_one=z_one)
+                         cov_pooled=COV_POOLED, is_event=is_event, z_one=z_one,
+                         tune_roles=tune_roles, gk=gk)
         self.stdout.write(self.style.SUCCESS(
             f"scritto {out} | casi: {len(casedata)} "
             f"(gol: {sum(1 for c in casedata if c['goals'])}, "
@@ -337,7 +350,8 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------
     def _build_xlsx(self, out, FEATS, nF, is_p90, w_of, STATS, casedata, expl_rows=(),
-                    cov_pooled=None, is_event=None, z_one=None):
+                    cov_pooled=None, is_event=None, z_one=None, tune_roles=OUT_ROLES,
+                    gk=False):
         is_event = is_event or {}
         z_one = z_one or {}
         wb = openpyxl.Workbook()
@@ -346,13 +360,14 @@ class Command(BaseCommand):
         # ---- ref: means as COLUMNS + covariance blocks ----
         ref = wb.create_sheet("ref")
         meancol = {}
-        for ci, role in enumerate(OUT_ROLES):
+        for ci, role in enumerate(tune_roles):
             c = 2 + ci; meancol[role] = col(c)
             ref.cell(1, c, f"{role}_z")
             for i, v in enumerate(STATS[role]["mean_z"]):
                 ref.cell(2 + i, c, float(v))
         covpos = {}; rr = nF + 4
-        for role in list(OUT_ROLES) + ["_POOLED"]:
+        ref_roles = list(tune_roles) + ([] if gk else ["_POOLED"])
+        for role in ref_roles:
             C = STATS[role]["cov_z"] if role in STATS else cov_pooled
             covpos[role] = rr
             for i in range(nF):
@@ -374,9 +389,9 @@ class Command(BaseCommand):
             for j in range(nF):
                 calc.cell(2 + i, 2 + j, f"=Tuner!$C${7+i}*Tuner!$C${7+j}")
         wouter = f"calc!$B$2:${col(1+nF)}${1+nF}"; wvec = f"Tuner!$C$7:$C${6+nF}"
-        sigma_src = "_POOLED" if cr.POOLED_ROLE_SPREAD else None
+        sigma_src = "_POOLED" if (not gk and cr.POOLED_ROLE_SPREAD) else None
         murow = {}; rr = nF + 4
-        for role in OUT_ROLES:
+        for role in tune_roles:
             calc.cell(rr, 1, role)
             calc.cell(rr, 2, f"=SUMPRODUCT({wvec},{meanrng(role)})")
             # sigma dalla covarianza CONDIVISA (POOLED_ROLE_SPREAD): il centro
@@ -418,7 +433,7 @@ class Command(BaseCommand):
             cs.cell(1, 2 + ci, c["name"]).font = Font(bold=True)
             cs.cell(nF + 3, 2 + ci, c["name"]).font = Font(bold=True)
         base = 2 + len(casedata) + 1
-        for j, role in enumerate(OUT_ROLES):
+        for j, role in enumerate(tune_roles):
             mc = base + 3 * j; vc = mc + 1; sc = mc + 2
             for hr in (1, nF + 3):
                 cs.cell(hr, mc, f"{role} media").font = Font(bold=True, color=TEAL)
@@ -462,11 +477,22 @@ class Command(BaseCommand):
 
         # ---- Tuner ----
         tun = wb.create_sheet("Tuner"); wb.move_sheet("Tuner", -(len(wb.sheetnames) - 1))
-        tun["A1"] = "VOTO PURO — tuner dei pesi"; tun["A1"].font = Font(bold=True, size=14)
-        tun["A2"] = ("Edita i PESI (col C, celle gialle) e le costanti della mitigazione "
-                     "(riga 5). Interruttore RAW/SQRT in B4. Il VOTO FINALE (riga 24) si "
-                     "colora: verde=accordo, giallo=borderline, rosso=outlier.")
-        tun["A3"] = ("Pipeline: voto base = 6+0.8·(min/(min+25))·(indice−media)/σ in [3,10]; "
+        channel_label = "PORTIERI" if gk else "GIOCATORI DI MOVIMENTO"
+        spread_k = cr.GK_SPREAD_K if gk else cr.VOTE_SPREAD_K
+        centre = cr.vote_center_for("POR") if gk else cr.VOTE_CENTER
+        tun["A1"] = f"VOTO PURO — tuner dei pesi ({channel_label})"; tun["A1"].font = Font(bold=True, size=14)
+        tun["A2"] = ("Edita i PESI (col C, celle gialle). Il VOTO FINALE (riga 24) si "
+                     "colora: verde=accordo, giallo=borderline, rosso=outlier."
+                     if gk else
+                     "Edita i PESI (col C, celle gialle) e le costanti della mitigazione "
+                     "(riga 5). Il VOTO FINALE (riga 24) si colora: verde=accordo, "
+                     "giallo=borderline, rosso=outlier.")
+        tun["A3"] = (f"Pipeline: voto base = {centre:g}+{spread_k:g}·(min/(min+{cr.SHRINKAGE_MINUTES}))"
+                     "·(indice−media)/σ in [3,10]; poi + red/autogol/rigore; poi clamp "
+                     "[3,10] e arrotondamento 0.5. Il canale POR non ha mitigazione del "
+                     "risultato: il suo indice legge già tiri affrontati e gol evitati."
+                     if gk else
+                     "Pipeline: voto base = 6+0.8·(min/(min+25))·(indice−media)/σ in [3,10]; "
                      "poi + mitigazione risultato (solo divergenze, cap ±1) + red/autogol; "
                      "poi clamp [3,10] e arrotondamento 0.5. gd_on e red/autogol sono FISSI "
                      "(non dipendono dai pesi).")
@@ -479,15 +505,16 @@ class Command(BaseCommand):
         # I due lati della mitigazione hanno costanti diverse dal 30/08/2026, quindi
         # anche le manopole sono due gruppi: la sconfitta ha in piu' l'ANCORA, cioe'
         # di quanto scende il bersaglio della tirata sotto il centro.
-        tun["A5"] = "vittoria K:"; tun["B5"] = cr.RESULT_MITIGATION_K
-        tun["C5"] = "base:"; tun["D5"] = cr.RESULT_MITIGATION_BASE
-        tun["E5"] = "sconfitta K:"; tun["F5"] = cr.RESULT_MITIGATION_LOSS_K
-        tun["G5"] = "base:"; tun["H5"] = cr.RESULT_MITIGATION_LOSS_BASE
-        tun["I5"] = "ancora:"; tun["J5"] = cr.RESULT_MITIGATION_LOSS_ANCHOR
-        for cell in ("B5", "D5", "F5", "H5", "J5"):
-            tun[cell].font = Font(bold=True); tun[cell].fill = yel
-            tun[cell].number_format = "0.00"
-        murow_dif = murow["DIF"]
+        if not gk:
+            tun["A5"] = "vittoria K:"; tun["B5"] = cr.RESULT_MITIGATION_K
+            tun["C5"] = "base:"; tun["D5"] = cr.RESULT_MITIGATION_BASE
+            tun["E5"] = "sconfitta K:"; tun["F5"] = cr.RESULT_MITIGATION_LOSS_K
+            tun["G5"] = "base:"; tun["H5"] = cr.RESULT_MITIGATION_LOSS_BASE
+            tun["I5"] = "ancora:"; tun["J5"] = cr.RESULT_MITIGATION_LOSS_ANCHOR
+            for cell in ("B5", "D5", "F5", "H5", "J5"):
+                tun[cell].font = Font(bold=True); tun[cell].fill = yel
+                tun[cell].number_format = "0.00"
+        murow_role = murow[tune_roles[0]]
         tun["A6"] = "feature"; tun["B6"] = "tipo"; tun["C6"] = "PESO"
         # Column D answers the question the sheet used to hide: a case column holds
         # STANDARDISED values, so a 1.36 next to a 0.00 looks big — but what reaches
@@ -510,7 +537,7 @@ class Command(BaseCommand):
             # |peso| / sigma dell'indice x K x shrinkage a 90' = punti di voto che
             # vale UNA sigma di quella feature. Live: segue i pesi che editi.
             dc = tun.cell(7 + i, 4,
-                          f"=ABS(C{7+i})/calc!$C${murow_dif}*{cr.VOTE_SPREAD_K}"
+                          f"=ABS(C{7+i})/calc!$C${murow_role}*{spread_k}"
                           f"*90/(90+{cr.SHRINKAGE_MINUTES})")
             dc.number_format = "0.00"
             # SIGNED, unlike D: an error that costs half a vote should read -0.50,
@@ -518,8 +545,8 @@ class Command(BaseCommand):
             # xA or of conceded danger means nothing.
             if is_event.get(f):
                 ec = tun.cell(7 + i, 5,
-                              f"={z_one[f]:.6f}*C{7+i}/calc!$C${murow_dif}"
-                              f"*{cr.VOTE_SPREAD_K}*90/(90+{cr.SHRINKAGE_MINUTES})")
+                              f"={z_one[f]:.6f}*C{7+i}/calc!$C${murow_role}"
+                              f"*{spread_k}*90/(90+{cr.SHRINKAGE_MINUTES})")
                 ec.number_format = "+0.00;-0.00"
             else:
                 tun.cell(7 + i, 5, "—")
@@ -550,19 +577,24 @@ class Command(BaseCommand):
             tun.cell(19, cc, c["gd_on"])
             tun.cell(20, cc, c["red_adj"])
             # voto base (clamp [3,10], pre-arrotondamento)
-            tun.cell(21, cc, f'=MAX(3,MIN(10,6+0.8*({L}11/({L}11+25))*(({L}16-{L}17)/{L}18)))')
+            tun.cell(21, cc,
+                     f'=MAX(3,MIN(10,{centre}+{spread_k}*({L}11/({L}11+{cr.SHRINKAGE_MINUTES}))'
+                     f'*(({L}16-{L}17)/{L}18)))')
             # mitigazione: solo divergenze, gravità = MIN(quota, base + K·|gd_on|),
             # cap ±1. I due lati hanno bersagli diversi (v. classic_rating):
             #   sconfitta (gd_on<0): voto sopra 6−ancora scende verso 6−ancora
             #   vittoria  (gd_on>0): voto sotto 6 sale verso 6, mai oltre
             # La quota c'e' anche qui: senza, il foglio smetteva di somigliare al
             # deployato da due gol di scarto in su (0.85 contro 0.70 a tre).
-            tun.cell(22, cc,
-                     f'=MAX(-1,MIN(1,IF({L}19<0,'
-                     f'-MAX(0,{L}21-(6-{AN}))*MIN({cr.RESULT_MITIGATION_LOSS_MAX_SHARE},'
-                     f'{BL}+{KL}*(-{L}19)),'
-                     f'IF({L}19>0,MAX(0,6-{L}21)*MIN({cr.RESULT_MITIGATION_MAX_SHARE},'
-                     f'{BB}+{KM}*{L}19),0))))')
+            if gk:
+                tun.cell(22, cc, 0)
+            else:
+                tun.cell(22, cc,
+                         f'=MAX(-1,MIN(1,IF({L}19<0,'
+                         f'-MAX(0,{L}21-(6-{AN}))*MIN({cr.RESULT_MITIGATION_LOSS_MAX_SHARE},'
+                         f'{BL}+{KL}*(-{L}19)),'
+                         f'IF({L}19>0,MAX(0,6-{L}21)*MIN({cr.RESULT_MITIGATION_MAX_SHARE},'
+                         f'{BB}+{KM}*{L}19),0))))')
             # voto finale = clamp(base + mitigazione + red_adj), arrotondato a 0.5
             tun.cell(24, cc, f'=ROUND(MAX(3,MIN(10,{L}21+{L}22+{L}20))*2)/2')
             tun.cell(24, cc).font = Font(bold=True, size=12)
@@ -590,7 +622,9 @@ class Command(BaseCommand):
                       "GOL=marcatore, 'KO netto'=sconfitta ≥3 gol, OUTLIER, buono=accordo; "
                       "'ESTREMO alto/basso'=i voti difensori più alti e più bassi della "
                       "stagione, ripescati a ogni rebuild (lì il modello è meno vincolato).")
-        tun["F28"] = (
+        tun["F28"] = ("PORTIERI: nessuna mitigazione di risultato. I gol subiti e i tiri "
+                       "fermati sono già nel canale gk_goals_prevented; applicarne una seconda "
+                       "volta ricreerebbe il doppio conteggio." if gk else
             "Mitigazione: solo divergenze, gravità = MIN(quota, base + K·|gd_on|), cap ±1, "
             "ma i due lati NON sono simmetrici (30/08/2026). SCONFITTA: il bersaglio è "
             f"6−ancora ({cr.RESULT_MITIGATION_LOSS_ANCHOR}), quota "
@@ -600,7 +634,10 @@ class Command(BaseCommand):
             "non oltre. NB: qui il centro è 6 fisso, mentre il modello usa quello di RUOLO "
             "(difensore 5.91), quindi sui difensori il foglio approssima. "
             "SGA_Pali: xgOT−xg + palo.")
-        tun["F29"] = (
+        tun["F29"] = ("PORTIERI: gk_goals_prevented = xGOT affrontato − gol subiti; le parate "
+                       "dentro area, uscite, pugni e gioco da libero sono tassi per 90'. "
+                       "Nessuna esposizione di zona: quella è imputata soltanto ai giocatori di movimento."
+                       if gk else
             f"EXPOSURE (_exposure, peso {-cr.EXPOSURE_WEIGHT:.2f}): pericolo SUBITO addebitato "
             f"a chi era in quella zona. Per ogni tiro avversario (rigori esclusi, solo minuti "
             f"in campo) l'addebito è λ·esito + (1−λ)·xGOT con λ={cr.EXPOSURE_LAMBDA:.2f}; "
@@ -620,14 +657,16 @@ class Command(BaseCommand):
         # ---- medie (readable per-feature role means) ----
         med = wb.create_sheet("medie")
         med["A1"] = "Medie per-FEATURE per ruolo (FISSE)."; med["A1"].font = Font(bold=True)
-        for j, h in enumerate(["feature", "DIF grezza", "CEN grezza", "ATT grezza",
-                               "DIF σ grezza", "CEN σ grezza", "ATT σ grezza"]):
+        med_heads = (["feature"] + [f"{r} grezza" for r in tune_roles]
+                     + [f"{r} σ grezza" for r in tune_roles])
+        for j, h in enumerate(med_heads):
             hc = med.cell(3, 1 + j, h); hc.font = Font(bold=True, color="FFFFFF"); hc.fill = fillh
         for i, f in enumerate(FEATS):
             med.cell(4 + i, 1, f)
-            for jr, role in enumerate(OUT_ROLES):
+            for jr, role in enumerate(tune_roles):
                 med.cell(4 + i, 2 + jr, round(float(STATS[role]["mean_raw"][i]), 3))
-                med.cell(4 + i, 5 + jr, round(float(STATS[role]["sd_raw"][i]), 3))
+                med.cell(4 + i, 2 + len(tune_roles) + jr,
+                         round(float(STATS[role]["sd_raw"][i]), 3))
         med.column_dimensions["A"].width = 21
 
         # ---- spiegazioni: the strange-vote ledger with our generated text ----

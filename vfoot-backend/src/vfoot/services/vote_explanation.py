@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from vfoot.services.classic_rating import (
     DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
-    GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, SHRINKAGE_MINUTES, TOTAL_WEIGHTS,
+    GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, scale_saturation,
+    shrinkage_for, TOTAL_WEIGHTS,
     UNSHRUNK_FEATURES, VOTE_CENTER, VOTE_MAX, VOTE_MIN, WEIGHTS, vote_center_for,
     _feature_z, _raw_vote_from_index, exposure_z, scored_z, feature_scales,
     index_for_role, minute_shift, observed_index, raw_feature_values, spread_k_for,
@@ -784,12 +785,21 @@ def role_average_terms(rows, scales: dict | None = None) -> dict:
             for role, bucket in sums.items()}
 
 
+# Sotto quanti minuti il pannello avverte "con pochi minuti giocati ogni voce pesa
+# meno". Era ``SHRINKAGE_MINUTES * 2``, cioe' 50; dal 03/09/2026 lo shrinkage del
+# movimento e' 90 e quella formula avrebbe messo l'avvertenza sotto i 180 minuti,
+# cioe' SEMPRE. La soglia e' una scelta di prodotto — "quando vale la pena avvisare"
+# — e non ha ragione di seguire una costante del modello: sta qui, per conto suo.
+SHORT_APPEARANCE_MINUTES = 50
+
+
 def explain(role: str, totals: dict, minutes: int, reference: dict,
             averages: dict, exposure: float = 0.0, *, top: int = 3,
             result_nudge: float = 0.0, red_adjustment: float = 0.0,
             own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
             goal_adjustment: float = 0.0, goal_detail: list | None = None,
             assist_adjustment: float = 0.0, assist_detail: list | None = None,
+            scale_factor: float = 1.0, scale_base: float | None = None,
             full: bool = False,
             ledger: bool = False,
             red_detail: dict | None = None, own_goal_detail: dict | None = None,
@@ -816,25 +826,47 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         return {"positives": [], "negatives": [], "contributions": [],
                 "all_terms": [], "other_terms": [],
                 "other_tiny": {"count": 0, "points": 0.0},
-                "assist_note": "", "base": vote_center_for(role),
+                "assist_note": "", "base": (scale_base if scale_base is not None
+                                            else vote_center_for(role)),
                 "other_points": 0.0, "other_count": 0, "minutes": minutes,
                 "low_minutes": False, "flat": False, "note": ""}
 
     mean_terms = averages.get(role, {})
     # Lo stesso restringimento che applica il voto: quanto ha giocato. Scala ogni
     # fetta, cosi' la scomposizione continua a tornare col voto scritto sopra.
-    weight = (minutes / (minutes + SHRINKAGE_MINUTES) if minutes > 0 else 0.0)
+    weight = (minutes / (minutes + shrinkage_for(role)) if minutes > 0 else 0.0)
     # spread_k_for, non VOTE_SPREAD_K: dal 29/08/2026 il portiere ha la sua scala
     # (GK_SPREAD_K 0.8 contro 0.727), e una spiegazione costruita sulla scala di
     # movimento comprimeva ogni fetta del 9,1% — cioe' raccontava a un portiere un
     # voto piu' vicino al 6 di quello scritto accanto al suo nome.
-    per_unit = spread_k_for(role) * weight / ref["std"]
+    # LO STADIO FINALE, RICAVATO QUI se il chiamante non l'ha passato. Era un
+    # parametro con default 1.0, e il default produceva un pannello incoerente col
+    # proprio totale: le fette non riscalate sotto un voto che invece lo era. Il
+    # fattore non e' un'opzione, e' una proprieta' della presenza — quindi si
+    # calcola, e il parametro serve solo a riusare quello gia' calcolato dallo
+    # scorer (stesso numero, una moltiplicazione in meno).
+    if scale_base is None:
+        _pre = _raw_vote_from_index(
+            index_for_role(role, totals, minutes, exposure), role, minutes, reference,
+            observed=observed_index(role, totals, minutes, exposure))
+        _pre = max(VOTE_MIN, min(VOTE_MAX, _pre + goal_adjustment + assist_adjustment))
+        _pre = max(VOTE_MIN, min(VOTE_MAX, _pre + result_nudge + red_adjustment
+                                 + own_goal_adjustment + penalty_adjustment))
+        _fin, scale_factor = scale_saturation(_pre, role)
+        scale_base = _fin - scale_factor * (_pre - vote_center_for(role))
+    # ``scale_factor``: lo stadio finale del voto (classic_rating.scale_saturation)
+    # comprime il lato alto e riapre la dispersione, e lo fa DOPO che le voci sono
+    # state sommate. Una scomposizione additiva non lo puo' rappresentare come una
+    # voce a se': o si riscala ogni fetta, o la somma non torna col voto scritto
+    # sopra. Riscalando, l'utente legge direttamente i valori giusti e non c'e'
+    # nessuna riga misteriosa in fondo da spiegare.
+    per_unit = scale_factor * spread_k_for(role) * weight / ref["std"]
     # I FATTI OSSERVATI HANNO LA LORO SCALA, perche' il voto non li attenua (v.
     # classic_rating.UNSHRUNK_FEATURES): un gol segnato entrando all'85' pesa
     # nel pannello quanto pesa nel voto, non un terzo. Senza questa riga la fetta
     # mostrata sarebbe piu' piccola del suo effetto e la differenza finirebbe,
     # muta, dentro «altre N voci».
-    per_unit_obs = spread_k_for(role) / ref["std"]
+    per_unit_obs = scale_factor * spread_k_for(role) / ref["std"]
     unit_of = (lambda key: per_unit_obs if key in UNSHRUNK_FEATURES else per_unit)
 
     points_by_key = {key: (terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * unit_of(key)
@@ -875,7 +907,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # proprio quando quel numero non era gia' scritto una riga piu' su.
     #
     # Le occasioni nitide restano: quelle una riga loro non ce l'hanno.
-    assist_line = abs(assist_adjustment) >= 0.005 and bool(assist_detail)
+    assist_line = abs(assist_adjustment * scale_factor) >= 0.005 and bool(assist_detail)
 
     scored = []
     # Collapse the overlapping feature families (see MERGES) into one net line each.
@@ -926,6 +958,13 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         + (1.0 - weight) * minute_shift(role, minutes, reference,
                                         "observed_by_minute", "observed_mean")
     ) / ref["std"]
+    # La base nella scala finale. Il voto grezzo parte da ``vote_center_for``, ma lo
+    # stadio finale comprime attorno a un ALTRO punto (il baricentro misurato del
+    # ruolo): la differenza fra i due, riscalata, e' una costante che appartiene alla
+    # base. Dimenticarla sposta la scomposizione di quella costante, e le voci
+    # sembrano non tornare col voto senza che si capisca perche'.
+    centre = ((scale_base if scale_base is not None else vote_center_for(role))
+              + scale_factor * (centre - vote_center_for(role)))
     raw = _raw_vote_from_index(
         index_for_role(role, totals, minutes, exposure), role, minutes, reference,
         observed=observed_index(role, totals, minutes, exposure))
@@ -937,7 +976,19 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     subtotal = max(VOTE_MIN, min(VOTE_MAX,
                    raw + result_nudge + red_adjustment + own_goal_adjustment
                    + penalty_adjustment))
+    # ...e poi lo stadio finale, esattamente dove lo mette lo scorer.
+    subtotal = max(VOTE_MIN, min(VOTE_MAX, scale_saturation(subtotal, role)[0]))
     voto = round(subtotal * 2) / 2
+    # Le correzioni post-indice, nella scala in cui si MOSTRANO: sono state sommate
+    # prima dello stadio finale, quindi nel voto finito valgono ``scale_factor``
+    # volte tanto. I nomi originali restano quelli non riscalati, che servono al
+    # conto qui sopra.
+    p_goal = goal_adjustment * scale_factor
+    p_assist = assist_adjustment * scale_factor
+    p_nudge = result_nudge * scale_factor
+    p_red = red_adjustment * scale_factor
+    p_og = own_goal_adjustment * scale_factor
+    p_pen = penalty_adjustment * scale_factor
 
     # The key travels with the line (it used to be dropped here): the ledger below
     # lists the entries that did NOT make it into the summary, and without an
@@ -1007,34 +1058,39 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # dell'indice ma una voce a livello di voto, graduata da quanto il gol ha
     # cambiato la partita: e' quasi sempre la voce piu' grande del tabellino di chi
     # segna, quindi apre l'elenco invece di accodarsi alle correzioni.
-    if abs(goal_adjustment) >= 0.005 and goal_detail:
-        contributions.insert(0, entry(goal_adjustment,
+    if abs(p_goal) >= 0.005 and goal_detail:
+        contributions.insert(0, entry(p_goal,
                                       goal_impact.goal_phrase(goal_detail),
                                       kind="goal"))
     # L'ASSIST subito dopo il gol, e con la stessa forma: e' lo stesso evento visto
     # dall'altro lato del passaggio, e dal 29/08/2026 vale quanto quel gol pesava.
-    if abs(assist_adjustment) >= 0.005 and assist_detail:
+    if abs(p_assist) >= 0.005 and assist_detail:
         contributions.insert(1 if any(c.get("kind") == "goal" for c in contributions) else 0,
-                             entry(assist_adjustment,
+                             entry(p_assist,
                                    goal_impact.assist_phrase(assist_detail),
                                    kind="assist"))
-    if abs(result_nudge) >= 0.005:
-        contributions.append(entry(result_nudge,
+    if abs(p_nudge) >= 0.005:
+        contributions.append(entry(p_nudge,
                                    "adeguamento al risultato di squadra",
                                    kind="result"))
-    if abs(red_adjustment) >= 0.005:
-        contributions.append(entry(red_adjustment, red_card_phrase(red_detail),
+    if abs(p_red) >= 0.005:
+        contributions.append(entry(p_red, red_card_phrase(red_detail),
                                    kind="red"))
-    if abs(own_goal_adjustment) >= 0.005:
-        contributions.append(entry(own_goal_adjustment,
+    if abs(p_og) >= 0.005:
+        contributions.append(entry(p_og,
                                    own_goal_phrase(own_goal_detail),
                                    kind="own_goal"))
-    if abs(penalty_adjustment) >= 0.005:
+    if abs(p_pen) >= 0.005:
         # "decisivo" when converting it would have flipped the result (the larger
         # drop); a plain miss when the result was already decided.
+        # LA PAROLA SI DECIDE SUL VALORE NON RISCALATO. La soglia distingue le due
+        # costanti dello scorer (-1.0 decisivo, -0.5 ininfluente), che stanno in
+        # punti PRIMA dello stadio finale; applicarla al valore riscalato faceva
+        # chiamare "decisivo" un rigore da -0.5, perche' 0.5 x 1.55 supera 0.75.
+        # Il numero mostrato resta quello riscalato: e' quanto e' costato davvero.
         pen_label = ("rigore decisivo sbagliato" if penalty_adjustment <= -0.75
                      else "rigore sbagliato")
-        contributions.append(entry(penalty_adjustment, pen_label, kind="penalty"))
+        contributions.append(entry(p_pen, pen_label, kind="penalty"))
     shown_rounded = sum(c["points"] for c in contributions)
     other_points = round(subtotal - centre - shown_rounded, 2)
 
@@ -1098,7 +1154,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # entries AND the rounding of everything above them. It is carried as one line
     # so the open ledger still adds up to the fold it opened.
     tiny_points = round(other_points - sum(r["points"] for r in other_terms), 2)
-    low = minutes < SHRINKAGE_MINUTES * 2
+    low = minutes < SHORT_APPEARANCE_MINUTES
     note = ("Con pochi minuti giocati ogni voce pesa meno: il voto resta piu' "
             "vicino al 6.") if low else ""
     if flat:

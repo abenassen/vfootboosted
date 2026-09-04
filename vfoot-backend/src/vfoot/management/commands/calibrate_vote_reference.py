@@ -34,6 +34,20 @@ class Command(BaseCommand):
     help = "Freeze the per-role voto-puro reference from a completed season."
 
     def add_arguments(self, parser):
+        # QUALE GIUDICE TARA LA CURVA DEI MINUTI. Era "Fantacalcio" (la Redazione)
+        # e non per una scelta: era scritto nel codice. Misurato il 02/09/2026, lo
+        # STATISTICO fa meglio — +0.005 fuori campione, a pesi invariati, e niente
+        # peggiora. La curva dice "quanto del voto e' spiegato dai soli minuti", e
+        # lo Statistico e' il giudice piu' regolare dei due su quella domanda.
+        parser.add_argument("--external-judge", default="Statistico",
+                            choices=["Statistico", "Fantacalcio"],
+                            help="colonna del foglio su cui tarare la curva dei "
+                                 "minuti (default: Statistico).")
+        parser.add_argument(
+            "--goal-impact-from", metavar="FILE",
+            help="JSON con band/assist_band/role_mean_credit/role_mean_assist_credit "
+                 "da usare al posto di quelli risolti qui (v. il commento nel codice: "
+                 "dal 03/09/2026 la banda viene dalla taratura dei pesi).")
         parser.add_argument("--season", type=int, required=True,
                             help="CompetitionSeason to calibrate on (a COMPLETED one).")
         parser.add_argument("--dry-run", action="store_true")
@@ -44,7 +58,7 @@ class Command(BaseCommand):
                             help="cartella degli xlsx del giudice; default: "
                                  "data_fantacalcio/<stagione>")
 
-    def _external_votes(self, cs, directory=None) -> dict:
+    def _external_votes(self, cs, directory=None, judge: str = "Statistico") -> dict:
         """{"<giornata>:<player_id>": voto} dal foglio del giudice.
 
         Riusa il lettore di ``compare_external_votes`` invece di riscriverlo: il
@@ -74,7 +88,7 @@ class Command(BaseCommand):
             if not mm:
                 continue
             gd = int(mm.group(1))
-            for e in ext._parse_file(f, "Fantacalcio"):
+            for e in ext._parse_file(f, judge):
                 team = team_map.get(_club_key(e["team"] or ""))
                 if not team or e["voto"] is None:
                     continue
@@ -126,7 +140,8 @@ class Command(BaseCommand):
         # cosa che merito non e': quanto pesi aver giocato sessanta minuti invece di
         # novanta.
         if not o["no_flatten"]:
-            external = self._external_votes(cs, o["external_dir"])
+            external = self._external_votes(cs, o["external_dir"],
+                                            o["external_judge"])
             if not external:
                 self.stdout.write(self.style.WARNING(
                     "   curve dei minuti NON corrette: nessun voto esterno trovato. "
@@ -187,6 +202,31 @@ class Command(BaseCommand):
                        "role_mean_assist_credit": a_means,
                        # per la ricaduta degli assist non agganciati
                        "mean_importance": mean_imp}
+        # --- BANDE FISSATE DA FUORI -----------------------------------------
+        # ``solve_band`` risolve la banda contro il residuo della stagione. Dal
+        # 03/09/2026 la banda non e' piu' risolta cosi': viene dalla taratura dei
+        # pesi, che la ottimizza insieme a loro. Il comando continua a risolverla
+        # (il numero e' utile da vedere) ma poi la SOSTITUISCE con quella fissata.
+        #
+        # E le MEDIE DI RUOLO restano quelle del file, non si ricalcolano dalla
+        # banda nuova. E' un'incoerenza vera — il credito non e' piu' a media zero
+        # come promette il suo docstring — ed e' deliberata: renderlo coerente e'
+        # stato misurato il 03/09/2026 e PEGGIORA l'accordo con tutti e quattro i
+        # giudici (Statistico -0.0003, WhoScored -0.0048). Quello che la media
+        # stantia fa, in pratica, e' aggiungere uno scostamento uniforme per ruolo
+        # PRIMA della mitigazione, che la mitigazione poi vede; e quello
+        # scostamento e' finito su un valore utile per caso. La correzione giusta
+        # non e' toglierlo: e' renderlo un parametro esplicito e tararlo, alla
+        # prossima ritaratura, dove si puo' validare.
+        if o.get("goal_impact_from"):
+            import json as _json
+            from pathlib import Path
+            fissato = _json.loads(Path(o["goal_impact_from"]).read_text())
+            for chiave in ("band", "assist_band", "role_mean_credit",
+                           "role_mean_assist_credit"):
+                if chiave in fissato:
+                    goal_impact[chiave] = fissato[chiave]
+                    self.stdout.write(f"   FISSATO {chiave}: {fissato[chiave]}")
 
         self.stdout.write(f"fingerprint pesi: {weights_fingerprint()}")
 
