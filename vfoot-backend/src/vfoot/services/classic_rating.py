@@ -3112,6 +3112,24 @@ KEEPER_MOMENT_LAMBDA = 0.275
 KEEPER_SAVE_DEDUCTIBLE = 0.06
 
 
+def keeper_shot_value(xgot: float, is_goal: bool, weight: float = 1.0) -> float:
+    """Quanto vale, in ``gk_goals_prevented``, UN tiro affrontato dal portiere.
+
+        (xgot - gol) - min(xgot, FRANCHIGIA) + lambda*(peso-1)*(xgot - min(...) - gol)
+
+    UNA FONTE SOLA, e non e' pedanteria: questa quantita' serve al CALCOLO (che la
+    somma dentro la feature) e alla SPIEGAZIONE (che la sottrae per dire quanto ha
+    pesato ogni tiro). Fino al 04/09/2026 la spiegazione se la ricalcolava per conto
+    proprio come ``xgot - gol`` secco: non vedeva ne' la franchigia ne' il momento, e
+    la differenza finiva muta dentro la riga del metro. Il pannello tornava col voto
+    e raccontava un modello che non gira piu'.
+    """
+    deducibile = min(xgot, KEEPER_SAVE_DEDUCTIBLE)
+    firmato = xgot - deducibile - (1.0 if is_goal else 0.0)
+    return (xgot - (1.0 if is_goal else 0.0)) - deducibile + (
+        KEEPER_MOMENT_LAMBDA * (weight - 1.0) * firmato)
+
+
 def _merge_keeper_shot_credit(out: dict, match_ids) -> None:
     """Pesa gli interventi del portiere per QUANTO CONTAVA il momento.
 
@@ -3177,14 +3195,12 @@ def _merge_keeper_shot_credit(out: dict, match_ids) -> None:
             peso = goal_impact.conceded_weight(
                 goal_impact.importance(xp, shot["minute"], subiti - fatti - 1), p95)
             xgot = float(shot["xgot"] or 0.0)
-            # La franchigia si toglie SEMPRE, anche quando il momento non pesa: le
-            # due correzioni sono indipendenti. (Il vecchio ``if peso == 1.0:
-            # continue`` saltava il tiro intero, e con la franchigia dentro avrebbe
-            # saltato anche la detrazione.)
-            detrazione = min(xgot, KEEPER_SAVE_DEDUCTIBLE)
-            firmato = xgot - detrazione - (1.0 if shot["is_goal"] else 0.0)
-            delta = (-detrazione
-                     + KEEPER_MOMENT_LAMBDA * (peso - 1.0) * firmato)
+            # ``gk_goals_prevented`` arriva dal fornitore gia' con dentro il termine
+            # grezzo ``xgot - gol``: qui si somma solo la DIFFERENZA fra quel che il
+            # tiro vale per noi e quel che il fornitore gli ha gia' dato. La
+            # franchigia si toglie SEMPRE, anche quando il momento non pesa.
+            grezzo = xgot - (1.0 if shot["is_goal"] else 0.0)
+            delta = keeper_shot_value(xgot, bool(shot["is_goal"]), peso) - grezzo
             if not delta:
                 continue
             for (m2, pid), (side2, _starter) in apps.items():

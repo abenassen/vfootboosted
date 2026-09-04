@@ -35,6 +35,7 @@ from realdata.models import (
     Player,
 )
 from vfoot.models import LeaguePlayerRole
+from vfoot.services import goal_impact
 from vfoot.services.classic_rating import (
     UNSHRUNK_FEATURES,
     build_reference, defensive_exposure, current_role_map, voto_puro_for_match,
@@ -964,7 +965,8 @@ def save_detail(match, player_id: int) -> dict:
     from math import factorial
 
     from vfoot.services.classic_rating import (
-        OWN_GOAL_KEEPER_XGOT_DEFAULT, shrinkage_for, appearance_sides,
+        OWN_GOAL_KEEPER_XGOT_DEFAULT, keeper_shot_value, shrinkage_for,
+        appearance_sides,
         feature_scales, is_own_goal, raw_feature_values, scored_z, spread_k_for,
         weights_for_role,
     )
@@ -1039,15 +1041,42 @@ def save_detail(match, player_id: int) -> dict:
     per_unit = spread_k_for(role) * weight / reference[role]["std"]
     n = len(faced)
 
+    # IL PESO DEL MOMENTO, tiro per tiro: serve a togliere da ``gk_goals_prevented``
+    # esattamente quello che il calcolo ci ha messo. Ricostruito qui dallo stesso
+    # stato di punteggio che usa ``_merge_keeper_shot_credit``.
+    _xp = goal_impact.fixed_xp_table()
+    _band, _p95 = goal_impact.fixed_band()
+    _gol = [g for g in (MatchShot.objects.filter(match=match, is_goal=True)
+                        .values("minute", "team_side"))
+            if g["minute"] is not None]
+
+    def _peso(minute):
+        propri = sum(1 for g in _gol if g["team_side"] == side and g["minute"] < minute)
+        altrui = sum(1 for g in _gol if g["team_side"] != side and g["minute"] < minute)
+        return goal_impact.conceded_weight(
+            goal_impact.importance(_xp, minute, propri - altrui - 1), _p95)
+
     def _removed(mask):
         """Quanto tolgono, in totale, i tiri SPENTI in ``mask``."""
         gone = defaultdict(float)
         for bit, s in enumerate(faced):
             if mask >> bit & 1:
                 continue
-            # gol evitati = somma degli xGOT affrontati MENO i gol: togliere un tiro
-            # toglie il suo xGOT, e se era gol restituisce l'unità che aveva sottratto.
-            gone["gk_goals_prevented"] += (s["xgot"] or 0.0) - (1.0 if s["is_goal"] else 0.0)
+            # QUANTO VALE QUEL TIRO lo dice ``classic_rating.keeper_shot_value``, la
+            # stessa funzione che lo somma dentro la feature: franchigia e momento
+            # inclusi. Ricalcolarlo qui come ``xgot - gol`` secco — che è quel che
+            # faceva fino al 04/09/2026 — lasciava entrambe le correzioni fuori dalle
+            # righe e mute dentro la riga del metro: la sezione tornava col voto e
+            # mostrava un modello che non gira più.
+            #
+            # L'AUTOGOL RESTA GREZZO, come nel calcolo: ``_merge_keeper_shot_credit``
+            # lo salta (la sua difficoltà la restituisce ``_merge_own_goal_relief``),
+            # quindi qui non gli si può togliere una correzione che non ha ricevuto.
+            if s.get("own_goal"):
+                gone["gk_goals_prevented"] += (s["xgot"] or 0.0) - 1.0
+            else:
+                gone["gk_goals_prevented"] += keeper_shot_value(
+                    s["xgot"] or 0.0, bool(s["is_goal"]), _peso(s["minute"]))
             if not s["is_goal"]:
                 gone["gk_saves"] += 1.0
         return gone
