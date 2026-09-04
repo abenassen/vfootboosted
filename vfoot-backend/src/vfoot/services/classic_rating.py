@@ -1906,16 +1906,54 @@ RESULT_MITIGATION_LOSS_MAX_SHARE = 0.85
 # --- Red-card performance adjustment (v2 stage 3) ----------------------------
 # A sending-off is a PERFORMANCE fact the base vote must reflect, over and above
 # the flat -1 fantacalcio malus in the bonus layer (which stays — real pagelle both
-# drop the vote AND the malus applies). Two graded parts:
-#   * severity × man-down: how justifiable the offence was, scaled by how long the
-#     team then played a man short (match_end - red_minute)/90. A DOGSO ("last man")
-#     is a tactical foul, the least culpable; a straight foul mid; violent conduct /
-#     argument / bad behaviour the worst.
-#   * a fixed extra for the indefensible reasons (violent conduct, argument, bad
-#     behaviour) — those are not football and cost regardless of the timing.
-# BOTH are gated ON THE PITCH: a post-match/bench card (minute < 0 or outside the
-# player's window) had no in-game impact and adds nothing. red_adj = -(K·sev·down + fixed).
-RED_CARD_K = 2.0
+# drop the vote AND the malus applies). Two parts:
+#   * a BASELINE that a sending-off always costs, itself graded by how justifiable
+#     the offence was: RED_CARD_BASE + RED_CARD_SEV_BASE·sev. Being sent off is a
+#     ruined performance whatever the clock says, and a violent conduct is a worse
+#     one than a DOGSO.
+#   * severity × man-down on top: how long the team then played a man short,
+#     (match_end - red_minute)/90 — the part that reads the damage done.
+# Gated ON THE PITCH: a post-match/bench card (minute < 0 or outside the player's
+# window) had no in-game impact and adds nothing.
+#     red_adj = -(BASE + SEV_BASE·sev + K·sev·down/90)
+#
+# LE COSTANTI SONO IN PUNTI DI VOTO, e ``voto_puro_for_match`` le divide per il
+# fattore dello stadio finale prima di applicarle (v. ROLE_SATURATION). Senza quella
+# divisione una correzione post-indice vale ~1,6 volte la sua costante sul movimento
+# e 1,0 sul portiere: due significati diversi per lo stesso numero, e una ritaratura
+# della scala che le sposta tutte in silenzio.
+#
+# PERCHE' QUESTA FORMA E QUESTI NUMERI (misurato il 04/09/2026 sui 64 espulsi in
+# campo della 25-26, contro lo Statistico, col contro-fattuale senza il malus come
+# stima della prestazione). La forma precedente — K·sev·down/90 + un fisso sui motivi
+# indifendibili — non aveva BASELINE: un rosso al 90' costava 0,13 punti, cioe'
+# praticamente si annullava, mentre il giudice ne toglie comunque ~0,9. Di li' veniva
+# quasi tutto l'errore: nella fascia 85'+ eravamo +0,53 sopra di lui, e nel complesso
+# 20 espulsi su 64 fuori di un punto pieno. Il vecchio RED_CARD_K = 2.0 NON era
+# sbagliato: rifacendo la ricerca dentro la sua stessa forma riesce di nuovo 2.0. Era
+# la forma a mancare di un pezzo.
+# La punizione implicita del giudice, regredita sugli stessi 64:
+#     -0,598(±0,245) - 0,885(±0,242)·(down/90) - 0,288(±0,273)·sev
+# cioe' una baseline che noi non avevamo, meta' della nostra pendenza sul minuto, e
+# una gravita' che LUI non legge affatto (per gruppo toglie -1,12 / -1,11 / -1,12 a
+# DOGSO, fallo e condotta violenta). La gravita' resta comunque nostra, e resta di
+# proposito: il voto puro deve leggere il GESTO, non limitarsi a duplicare il malus
+# forfettario che il fantavoto aggiunge gia' per conto suo. Il prezzo di tenerla e'
+# misurato ed e' piccolo — v. sotto.
+# Il malus che ne esce, in punti di voto: 0,82 per un DOGSO al 90', 1,15 per un fallo
+# a meta' partita, 1,85 per una condotta violenta al 1'. Ampiezza 1,03 contro i 3,05
+# di prima; il rapporto fra il caso piu' lieve e il piu' grave passa da 30:1 a 2,3:1.
+# Fuori campione (tarato sulle giornate dispari, verificato sulle pari, n=35):
+# espulsi fuori di un punto 13 -> 7, fuori di un punto e mezzo 8 -> 0, divergenze
+# (fuori da ENTRAMBE le letture) 12 -> 2.
+# L'AMPIEZZA E' GRATIS FINO A ~1,0 E POI COSTA: tenendone 1,6 invece di 1,03 riporta
+# gli errori da un punto e mezzo da 0 a 2 su 35. Non allargarla senza rimisurare.
+# RED_CARD_FIXED e' stato tolto e non va rimesso: la gravita' e' gia' dentro la
+# baseline via RED_CARD_SEV_BASE, e la ricerca lo azzera da sola ogni volta che lo si
+# lascia libero.
+RED_CARD_BASE = 0.7        # quanto costa un'espulsione comunque
+RED_CARD_SEV_BASE = 0.35   # quanto di quella baseline dipende dalla gravita'
+RED_CARD_K = 0.8           # e quanto si aggiunge per il tempo giocati in dieci
 RED_CARD_SEVERITY = {
     "Professional foul last man": 0.3,   # DOGSO: tactical, least culpable
     "Foul": 0.6,
@@ -1925,7 +1963,6 @@ RED_CARD_SEVERITY = {
     "Argument": 1.0,
 }
 RED_CARD_SEVERITY_DEFAULT = 0.6
-RED_CARD_FIXED = {"Violent conduct": 0.3, "Argument": 0.3, "Bad Behaviour": 0.3}
 
 # --- Own-goal performance adjustment -----------------------------------------
 # An own goal is a negative performance event a real pagella reflects in the vote.
@@ -1951,9 +1988,17 @@ RED_CARD_FIXED = {"Violent conduct": 0.3, "Argument": 0.3, "Bad Behaviour": 0.3}
 # at all we land at 5.73 against their 5.30 (+0.41), so the pagelle do read the own
 # goal in the base vote — about 0.7 below their own average — they simply do not
 # read it as the catastrophe we did.
-OWN_GOAL_VOTE_DEFLECTION = -0.20
-OWN_GOAL_VOTE_SOLO = -0.50
-OWN_GOAL_VOTE_FLAT = -0.30         # when sub-minute timing is unavailable
+# In punti di VOTO (v. RED_CARD_BASE). La taratura del 30/07/2026 qui sotto resta
+# valida — sono gli stessi numeri, riportati sulla scala su cui erano stati misurati:
+# lo stadio finale della scala (ROLE_SATURATION, 04/09/2026) li aveva portati a
+# -0.78/-0.31 senza che nessuno li toccasse, e su quella scala lo scostamento contro
+# lo Statistico era tornato a -0,341 (-0,597 sui soli autogol in solitaria). Il
+# rapporto 2,5:1 fra errore in solitaria e deviazione e' conservato esattamente.
+# Misurato sui 22 autogol della 25-26: fuori di un punto 5 -> 2, scostamento -0,341
+# -> -0,136.
+OWN_GOAL_VOTE_DEFLECTION = -0.16
+OWN_GOAL_VOTE_SOLO = -0.40
+OWN_GOAL_VOTE_FLAT = -0.24         # when sub-minute timing is unavailable
 OWN_GOAL_DEFLECTION_WINDOW_S = 3   # seconds between the OG and the shot it deflected;
 # kept tight (deflections sit at Δ1-2s, solo errors at Δ40s+) so a hectic sequence
 # with an unrelated close-by shot is not mistaken for a deflection.
@@ -1962,8 +2007,13 @@ OWN_GOAL_DEFLECTION_WINDOW_S = 3   # seconds between the OG and the shot it defl
 # small because the voto puro already reads the penalty as a good on-target shot via
 # the SGA and we deliberately keep that (the strike itself was well hit). Scaled by
 # whether converting it would have changed the result — see penalty_missed_adjustments.
-PENALTY_MISSED_VOTE_RELEVANT = -1.0    # +1 goal would have flipped the final result
-PENALTY_MISSED_VOTE_IRRELEVANT = -0.5  # result already decided
+# In punti di VOTO, come le altre correzioni post-indice (v. RED_CARD_BASE): erano
+# -1.0/-0.5 PRIMA della saturazione, che sul movimento le portava a -1.65/-0.83 —
+# contro il -1.07/-0.77 del giudice. Il rapporto 2:1 fra i due casi non era il
+# problema e resta quasi intatto (1,86:1); era il livello. Misurato sui 24 rigori
+# sbagliati della 25-26: fuori di un punto 6 -> 2, scostamento -0,229 -> 0,000.
+PENALTY_MISSED_VOTE_RELEVANT = -1.3    # +1 goal would have flipped the final result
+PENALTY_MISSED_VOTE_IRRELEVANT = -0.7  # result already decided
 # Bayesian shrinkage strength: a per-90 rate from few minutes is noisy and fat-tailed
 # low-count features (xG, key passes) explode when extrapolated to 90'. The evidence
 # weight minutes/(minutes+this) pulls short cameos toward the role prior (vote 6); a
@@ -2365,7 +2415,7 @@ def rating_forcing_event_players(match_id: int) -> set:
 
 
 def red_card_details(match_id: int) -> dict:
-    """{player_id: {reason, minute, man_down, severity, fixed, penalty}} for a
+    """{player_id: {reason, minute, man_down, severity, base, penalty}} for a
     sending-off taken ON THE PITCH.
 
     The ingredients, not just the number: a vote dropped by 1.2 for a sending-off
@@ -2397,7 +2447,8 @@ def red_card_details(match_id: int) -> dict:
             "minute": minute,
             "man_down": max(0.0, match_end - minute),
             "severity": RED_CARD_SEVERITY.get(reason, RED_CARD_SEVERITY_DEFAULT),
-            "fixed": RED_CARD_FIXED.get(reason, 0.0),
+            "base": (RED_CARD_BASE + RED_CARD_SEV_BASE
+                     * RED_CARD_SEVERITY.get(reason, RED_CARD_SEVERITY_DEFAULT)),
             "penalty": red_card_penalty(reason, minute, match_end),
         }
     return out
@@ -2406,9 +2457,8 @@ def red_card_details(match_id: int) -> dict:
 def red_card_adjustments(match_id: int) -> dict:
     """{player_id: voto-puro adjustment (<= 0) for a sending-off taken on the pitch}.
 
-    Grades the sending-off by severity (how justifiable the reason) times how long
-    it left the team a man down, plus a fixed extra for the indefensible reasons
-    (see RED_CARD_*). This is separate from and additive to the flat fantacalcio red
+    A baseline every sending-off costs, graded by how justifiable the reason was,
+    plus severity times how long it left the team a man down (see RED_CARD_*). This is separate from and additive to the flat fantacalcio red
     malus applied in the bonus layer. The reasoning behind each number is in
     ``red_card_details``, which this delegates to so the two cannot diverge."""
     return {pid: -d["penalty"] for pid, d in red_card_details(match_id).items()}
@@ -2490,14 +2540,15 @@ def penalty_missed_adjustments(match_id: int) -> dict:
 
 
 def red_card_penalty(reason: str, minute: float, match_end: float) -> float:
-    """Positive magnitude of a sending-off's voto-puro drop: severity (how
-    justifiable the reason) times the man-down fraction (match_end - minute)/90,
-    plus a fixed extra for the indefensible reasons. Pure — the on-pitch gating and
-    sign live in ``red_card_adjustments``."""
+    """Positive magnitude of a sending-off's voto-puro drop, IN VOTE POINTS: a
+    baseline every sending-off costs (itself graded by how justifiable the reason
+    was) plus severity times the man-down fraction (match_end - minute)/90. Pure —
+    the on-pitch gating and sign live in ``red_card_adjustments``, and the division
+    by the final-stage factor in ``voto_puro_for_match`` (see RED_CARD_BASE)."""
     minutes_down = max(0.0, match_end - minute)
     sev = RED_CARD_SEVERITY.get(reason, RED_CARD_SEVERITY_DEFAULT)
-    fixed = RED_CARD_FIXED.get(reason, 0.0)
-    return RED_CARD_K * sev * (minutes_down / 90.0) + fixed
+    return (RED_CARD_BASE + RED_CARD_SEV_BASE * sev
+            + RED_CARD_K * sev * (minutes_down / 90.0))
 
 
 def _compress(u: float) -> float:
@@ -3021,7 +3072,6 @@ def _merge_own_goal_relief(out: dict, match_ids) -> None:
 # 0.0173 in punti di voto per deviazione standard; 0.275 e' il valore in unita' della
 # feature che le corrisponde.
 KEEPER_MOMENT_LAMBDA = 0.275
-
 
 def _merge_keeper_moment(out: dict, match_ids) -> None:
     """Pesa gli interventi del portiere per QUANTO CONTAVA il momento.
@@ -3875,9 +3925,18 @@ def voto_puro_for_match(match, reference: dict,
         # Red-card + own-goal + missed-penalty performance drops (post-adjustments,
         # any role; the missed penalty stays a good shot in the index, this is the
         # added drop for the miss — see penalty_missed_adjustments).
-        radj = red_adj.get(pid, 0.0)
-        oadj = og_adj.get(pid, 0.0)
-        padj = pen_adj.get(pid, 0.0)
+        # Le tre correzioni sono in punti di VOTO, ma qui siamo PRIMA dello stadio
+        # finale, che riapre lo scostamento dal centro di un fattore ~1,6 sul
+        # movimento (e di 1,0 sul portiere, che non ci passa). Dividerle per quel
+        # fattore e' l'unico modo perche' "-0,40 per un autogol" voglia dire la
+        # stessa cosa per un difensore e per un portiere, e perche' una ritaratura
+        # della scala non le sposti tutte in silenzio. Sotto il centro la
+        # saturazione e' l'identita', quindi il fattore e' esattamente questo.
+        fattore_scala = (ROLE_SATURATION[ref_key][2]
+                         if ref_key in ROLE_SATURATION else 1.0)
+        radj = red_adj.get(pid, 0.0) / fattore_scala
+        oadj = og_adj.get(pid, 0.0) / fattore_scala
+        padj = pen_adj.get(pid, 0.0) / fattore_scala
         # Lo stadio finale della scala. Sta QUI, dopo ogni correzione, perche' e'
         # cosi' che e' stato tarato: comprime il voto COMPLETO, mitigazione inclusa.
         pieno = max(VOTE_MIN, min(VOTE_MAX, raw + nudge + radj + oadj + padj))

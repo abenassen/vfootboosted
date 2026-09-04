@@ -167,11 +167,26 @@ class RedCardPenaltyTests(SimpleTestCase):
         self.assertLess(dogso, foul)
         self.assertLess(foul, violent)
 
-    def test_indefensible_reasons_carry_a_fixed_floor(self):
-        # A violent conduct at the final whistle still costs the fixed 0.3, unlike a
-        # last-second foul which fades to ~0.
-        self.assertAlmostEqual(red_card_penalty("Violent conduct", 95, 95), 0.3)
-        self.assertAlmostEqual(red_card_penalty("Foul", 95, 95), 0.0)
+    def test_a_sending_off_at_the_final_whistle_still_costs_a_baseline(self):
+        """L'espulsione non si annulla mai col passare del tempo, ed è la ragione per
+        cui la baseline esiste: senza, un rosso al 90' costava 0,13 punti contro gli
+        ~0,9 che il giudice toglie comunque, e 20 espulsi su 64 finivano fuori di un
+        punto pieno (v. RED_CARD_BASE). La gravità resta dentro la baseline: al
+        fischio finale una condotta violenta costa più di un fallo."""
+        foul = red_card_penalty("Foul", 95, 95)
+        violent = red_card_penalty("Violent conduct", 95, 95)
+        self.assertGreater(foul, 0.5)
+        self.assertGreater(violent, foul)
+
+    def test_the_baseline_does_not_swallow_the_graded_part(self):
+        """Il voto puro deve leggere il GESTO, non duplicare il malus forfettario che
+        il fantavoto aggiunge già per conto suo: fra il caso più lieve (DOGSO al 90')
+        e il più grave (condotta violenta al 1') deve restare almeno un punto pieno
+        di differenza. L'ampiezza misurata è 1,03 e oltre ~1,0 comincia a costare in
+        letture completamente sbagliate — non allargarla senza rimisurare."""
+        lieve = red_card_penalty("Professional foul last man", 90, 95)
+        grave = red_card_penalty("Violent conduct", 1, 95)
+        self.assertGreaterEqual(grave - lieve, 1.0)
 
     def test_an_unknown_reason_uses_the_default_severity(self):
         self.assertAlmostEqual(red_card_penalty("Unheard of", 20, 95),
