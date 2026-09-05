@@ -2734,6 +2734,10 @@ def _per_match_player_totals(match_ids):
     _merge_shot_detail(out, sorted(covered))
     _drop_own_goal_shots(out, sorted(covered))
     _fill_missing_xgot(out, sorted(covered))
+    # DOPO la riparazione degli aggregati assenti, che somma gli xGOT della
+    # mappa: questa aggiunge un valore d'ufficio DOVE LA MAPPA DICE ZERO, e
+    # invertirle lo farebbe cancellare dal riempimento.
+    _credit_goal_line_saves(out, sorted(covered))
     _merge_defensive_value(out, sorted(covered))
     _merge_own_goal_relief(out, sorted(covered))
     _merge_keeper_shot_credit(out, sorted(covered))
@@ -3824,6 +3828,76 @@ def unshrunk_weight(ref_key: str, minutes: int, reference: dict) -> float:
     if ref_key == Player.ROLE_GK or w >= 1.0 or r.get("observed_mean") is None:
         return w
     return w + UNSHRINK_GAMMA * (1.0 - w)
+
+
+def effective_xgot(shot_type: str, xgot, xg) -> float:
+    """L'xGOT che il modello CONSUMA, che non sempre e' quello che arriva.
+
+    IL TIRO SALVATO SULLA LINEA. Un tiro nello specchio fermato da un uomo di
+    movimento non ha un xGOT, e non per una dimenticanza del fornitore: l'xGOT si
+    calcola dalla collocazione in porta, e quella si registra solo se il pallone al
+    piano della porta ci arriva senza che nessuno lo intercetti. Su Opta la quota
+    (``GoalMouthZ``) e' misurata nel 98-100% dei tiri non intercettati — parate del
+    portiere comprese, che infatti l'xGOT ce l'hanno — e nel 5% di quelli murati.
+    Nessun archivio puo' restituirla: e' una grandezza che nessuno ha misurato.
+
+    SofaScore etichetta ``save`` (non ``block``) i tiri fermati dall'ULTIMO UOMO
+    SULLA LINEA, e li conta nello specchio: giusto, quel tiro aveva battuto il
+    portiere. Sono 72 righe su 2166 parati della 25-26, e l'incrocio con Opta dice
+    che a fermarli e' un uomo di movimento nell'83% dei casi, a 1,6 dalla propria
+    linea di porta (i muri normali a 12,4) e col qualificatore ``LastMan`` nel 98%
+    contro lo 0% dei muri; nel 92% di quelle partite SofaScore stesso registra un
+    ``clearances_off_line``, contro il 15% delle partite in generale.
+
+    Senza questa riga lo zero entra in ``sga_post`` (= xg_on_target − xg_shots) come
+    ESECUZIONE NULLA: −xg al tiratore, mediana 0.182, e il pannello gli scrive «una
+    o piu' occasioni fallite» a chi ha fatto la cosa migliore possibile a parte
+    segnare. Il valore d'ufficio e' ``xg``, cioe' il tiro non aggiunge e non toglie
+    niente alla palla che aveva: e' conservativo — quel pallone stava entrando,
+    quindi il suo xGOT vero e' piu' alto — ma alzarlo sarebbe inventare un numero.
+    Vale +0.067 di voto grezzo sulle 72 presenze, 11 delle quali cambiano casella.
+
+    E' conservativo anche sui FALSI POSITIVI della firma (il 5% sono parate vere del
+    portiere a cui manca l'xGOT): non premia nessuno, si limita a non punire.
+    """
+    if shot_type == "save" and not (xgot or 0.0):
+        return float(xg or 0.0)
+    return float(xgot or 0.0)
+
+
+def _credit_goal_line_saves(out: dict, match_ids) -> None:
+    """L'xGOT d'ufficio dei tiri salvati sulla linea (v. ``effective_xgot``).
+
+    Si somma ai totali invece di correggere ``MatchShot``: la riga del fornitore
+    resta quella che e' arrivata — il dato grezzo non si riscrive — e la lettura
+    del modello sta in una funzione sola, che la mappa dei tiri chiama a sua volta.
+    """
+    sides = appearance_sides(match_ids)
+    credited = 0.0
+    for mid, pid, st, ts, xg, xgot in (MatchShot.objects
+                                       .filter(match_id__in=match_ids,
+                                               shot_type="save", xgot=0,
+                                               player_id__isnull=False)
+                                       .values_list("match_id", "player_id",
+                                                    "shot_type", "team_side",
+                                                    "xg", "xgot")):
+        if is_own_goal(st, ts, sides.get((mid, pid))):
+            continue
+        row = out.get((mid, pid))
+        if row is None:
+            continue
+        credit = effective_xgot(st, xgot, xg)
+        if not credit:
+            continue
+        row["xg_on_target"] = _round_sum((row.get("xg_on_target") or 0.0) + credit)
+        credited += credit
+    if credited:
+        # DEBUG e non INFO, al contrario di ``_fill_missing_xgot``: quella ripara due
+        # righe in una stagione ed e' giusto che si faccia sentire, questa tocca il
+        # 19% delle partite e a ogni giro del tick riempirebbe il registro di se'.
+        log.debug("goal-line saves: %.3f of office xGOT credited — shots stopped on "
+                  "the line carry no measured post-shot xG and would otherwise read "
+                  "as wasted chances.", credited)
 
 
 def _round_half(vote: float) -> float:

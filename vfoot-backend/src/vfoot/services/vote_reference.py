@@ -167,7 +167,18 @@ def weights_fingerprint() -> str:
 #           conta nello specchio per esito e non per xGOT. Senza questo giro la
 #           produzione avrebbe servito per un'ora la scomposizione VECCHIA — cioe'
 #           esattamente il difetto appena corretto, al rallentatore.
-SCORING_CODE_VERSION = 10
+#  10 -> 11: l'xGOT D'UFFICIO DEL TIRO SALVATO SULLA LINEA. Un tiro nello specchio
+#           fermato da un uomo di movimento non ha un xGOT misurato — la
+#           collocazione in porta si registra solo se il pallone al piano della
+#           porta ci arriva senza che nessuno lo intercetti — e SofaScore manda uno
+#           zero. Quello zero entrava in ``sga_post`` come esecuzione nulla: −xg
+#           (mediana 0.182) a chi aveva battuto il portiere e s'era visto salvare
+#           sulla linea, col pannello che gli scriveva «una o piu' occasioni
+#           fallite». Ora vale ``xg``: il tiro non aggiunge e non toglie. Sono 72
+#           righe sulla 25-26, +0.067 di voto grezzo, 11 voti che cambiano casella —
+#           quindi QUI i voti si muovono davvero e la cache su file li servirebbe
+#           vecchi. Chi rilegge: classic_rating.effective_xgot, che porta la misura.
+SCORING_CODE_VERSION = 11
 
 
 def scoring_fingerprint() -> str:

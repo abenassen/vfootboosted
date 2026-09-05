@@ -143,6 +143,31 @@ class ShotSectionAddsUpTests(TestCase):
         self.assertAlmostEqual(d["shots"][0]["points"] + d["baseline"], d["total"],
                                places=2)
 
+    def test_a_shot_stopped_on_the_line_gets_the_office_xgot(self):
+        """Un tiro nello specchio fermato prima della porta non ha un xGOT, e lo zero
+        del fornitore non vuol dire «esecuzione nulla» (v. classic_rating.effective_xgot).
+
+        Mostrarlo a zero accanto a «parato» era una contraddizione a schermo, e
+        peggio: entrava in ``sga_post`` come −xg, cioe' «occasione fallita» a chi
+        aveva battuto il portiere e s'era visto salvare sulla linea. La tabella ora
+        stampa il valore d'ufficio, lo dichiara, e il tiro non aggiunge ne' toglie."""
+        self._shots((2, "save", 0.14, 0.0))
+        riga = shot_detail(self.match, self.player.id)["shots"][0]
+        self.assertEqual(riga["xgot"], 0.14)
+        self.assertTrue(riga["xgot_office"])
+        self.assertEqual(riga["added"], 0.0)
+        # e su un parato MISURATO non si tocca niente
+        MatchShot.objects.filter(match=self.match).update(xgot=0.31)
+        PlayerZoneFeature.objects.filter(match=self.match,
+                                         feature_key="xg_on_target").delete()
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=self.player, provider="sofascore",
+            feature_key="xg_on_target", zone_key="Z_4_1", value=0.31,
+            team_side="home")
+        riga = shot_detail(self.match, self.player.id)["shots"][0]
+        self.assertEqual(riga["xgot"], 0.31)
+        self.assertFalse(riga["xgot_office"])
+
     def test_it_holds_for_a_single_shot_too(self):
         """Con un tiro solo Shapley e leave-one-out coincidono, ma il metro no:
         è il caso in cui la tabella sembrava contraddire la riga (Thuram)."""

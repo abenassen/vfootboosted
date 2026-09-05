@@ -83,6 +83,44 @@ class MissingXgotTests(TestCase):
         self._shot(5, "miss", 0.14136, 0.0)
         self._shot(49, "goal", 0.7386, 0.9945)
 
+    # -- il tiro salvato sulla linea ---------------------------------------
+    def test_a_shot_stopped_on_the_line_gets_the_office_xgot(self):
+        """Un tiro nello specchio fermato da un uomo di movimento non ha un xGOT, e
+        non per una dimenticanza: la collocazione in porta si registra solo se il
+        pallone al piano della porta ci arriva senza che nessuno lo intercetti (su
+        Opta e' misurata nel 98-100% dei tiri non intercettati e nel 5% dei murati).
+
+        SofaScore etichetta questi tiri ``save`` e li conta nello specchio — giusto,
+        avevano battuto il portiere — e sono 72 su 2166 parati della 25-26. Senza il
+        valore d'ufficio lo zero entra in ``sga_post`` come esecuzione nulla e
+        addebita −xg a chi ha fatto la cosa migliore possibile a parte segnare."""
+        self._zone("shots", 1.0)
+        self._zone("xg_shots", 0.38)
+        self._zone("shots_on_target", 1.0)
+        self._zone("xg_on_target", 0.0)     # il campo c'e' e vale zero
+        self._shot(79, "save", 0.38, 0.0)
+        t = self._totals()
+        self.assertAlmostEqual(t["xg_on_target"], 0.38, places=3)
+        # e la conclusione non e' piu' una palla buttata via
+        self.assertAlmostEqual(derived_features(t)["sga_post"], 0.0, places=3)
+
+    def test_a_measured_save_is_left_alone(self):
+        """Il confine: un parato CON xGOT e' un dato, e non si tocca."""
+        self._zone("shots", 1.0)
+        self._zone("xg_shots", 0.38)
+        self._zone("shots_on_target", 1.0)
+        self._zone("xg_on_target", 0.21)
+        self._shot(79, "save", 0.38, 0.21)
+        self.assertAlmostEqual(self._totals()["xg_on_target"], 0.21, places=3)
+
+    def test_a_blocked_shot_gets_nothing(self):
+        """Un muro a venti metri non ha battuto nessuno: il tiro nello specchio non
+        ce l'ha (il fornitore non glielo da'), e nemmeno l'xGOT d'ufficio."""
+        self._zone("shots", 1.0)
+        self._zone("xg_shots", 0.20)
+        self._shot(30, "block", 0.20, 0.0)
+        self.assertAlmostEqual(self._totals().get("xg_on_target", 0.0), 0.0, places=3)
+
     # -- il rilevatore -----------------------------------------------------
     def test_it_finds_the_row_whose_field_never_arrived(self):
         self._moro()

@@ -1417,7 +1417,16 @@ function ShotMap({
                 {s.situation ? <span className="text-ink-faint"> {s.situation}</span> : null}
               </td>
               <td className="py-0.5 pr-2 text-right text-ink-faint">{s.xg.toFixed(2)}</td>
-              <td className="py-0.5 pr-2 text-right text-ink-faint">{s.xgot.toFixed(2)}</td>
+              {/* L'ASTERISCO È L'xGOT D'UFFICIO. Un tiro nello specchio fermato da un
+                  uomo di movimento non ha un xGOT misurato — la collocazione in porta
+                  la si registra solo se il pallone al piano della porta ci arriva senza
+                  che nessuno lo intercetti — e quello che mostriamo è dichiarato, non
+                  misurato. Lo zero grezzo accanto a «parato» era una contraddizione che
+                  si leggeva a colpo d'occhio, ed è da lì che è partita questa riga. */}
+              <td className="py-0.5 pr-2 text-right text-ink-faint">
+                {s.xgot.toFixed(2)}
+                {s.xgot_office ? <span>*</span> : null}
+              </td>
               {/* Lo ZERO non è verde. Un autogol vale esattamente 0 nelle
                   conclusioni (v. shot_detail) e dipingerlo del colore del merito
                   rimetterebbe a schermo, in un'altra forma, il difetto appena
@@ -1439,6 +1448,13 @@ function ShotMap({
           </tr>
         </tbody>
       </table>
+      {shots.some((s) => s.xgot_office) ? (
+        <div className="mt-1 text-[10px] leading-snug text-ink-faint">
+          * xGOT d’ufficio: il tiro è stato fermato prima della porta, quindi quanto
+          valesse dopo il tocco non l’ha misurato nessuno. Gli diamo il valore della
+          palla che aveva, così non conta come occasione sprecata.
+        </div>
+      ) : null}
     </div>
   );
 }

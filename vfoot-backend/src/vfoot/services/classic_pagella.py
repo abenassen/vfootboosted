@@ -727,6 +727,7 @@ def shot_detail(match, player_id: int) -> dict:
     from vfoot.services.classic_rating import (
         shrinkage_for, appearance_sides, derived_features, feature_scales,
         is_own_goal, scored_z, spread_k_for, unshrunk_weight, weights_for_role,
+        effective_xgot,
     )
 
     empty = {"shots": [], "baseline": 0.0, "total": 0.0}
@@ -798,7 +799,10 @@ def shot_detail(match, player_id: int) -> dict:
             s = shots[i]
             gone["shots"] += 1
             gone["xg_shots"] += s["xg"] or 0.0
-            gone["xg_on_target"] += s["xgot"] or 0.0
+            # ``effective_xgot`` e non il campo grezzo: sul tiro salvato sulla linea
+            # i totali portano l'xGOT d'ufficio (v. classic_rating), e togliere il
+            # tiro deve togliere quello, o la sezione non torna piu' con la riga.
+            gone["xg_on_target"] += effective_xgot(s["shot_type"], s["xgot"], s["xg"])
             # NELLO SPECCHIO LO DICE L'ESITO, non l'xGOT. Il test era «xgot > 0», e
             # su un tiro parato a cui il fornitore non manda l'xGOT (86 parati su
             # 3414 nella 25-26) toglieva il tiro lasciando indietro il suo
@@ -903,11 +907,19 @@ def shot_detail(match, player_id: int) -> dict:
                         SHOT_OUTCOME_IT.get(s["shot_type"], s["shot_type"] or "tiro")),
             "situation": SHOT_SITUATION_IT.get(s["situation"] or "", ""),
             "xg": round(s["xg"] or 0.0, 3),
-            "xgot": round(s["xgot"] or 0.0, 3),
+            # L'xGOT COME LO LEGGE IL MODELLO. Sul tiro salvato sulla linea il
+            # fornitore non ne ha uno — non l'ha misurato nessuno — e il numero
+            # mostrato e' quello d'ufficio: si dichiara con ``xgot_office``, che la
+            # tabella stampa in nota. Mostrare lo zero grezzo accanto a «parato»
+            # era la contraddizione da cui e' partita tutta questa storia.
+            "xgot": round(effective_xgot(s["shot_type"], s["xgot"], s["xg"]), 3),
+            "xgot_office": (not own and s["shot_type"] == "save"
+                            and not (s["xgot"] or 0.0)),
             # xGOT − xG: quanto la conclusione ha aggiunto (o tolto) alla palla che
             # aveva. E' la grandezza su cui il modello giudica il tiro, quindi si
             # mostra invece di lasciarla ricavare a chi legge.
-            "added": round((s["xgot"] or 0.0) - (s["xg"] or 0.0), 3),
+            "added": round(effective_xgot(s["shot_type"], s["xgot"], s["xg"])
+                           - (s["xg"] or 0.0), 3),
             "points": 0.0 if own else round(points.get(i, 0.0), 3),
         })
 

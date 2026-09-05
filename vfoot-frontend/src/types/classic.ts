@@ -162,6 +162,10 @@ export interface ShotDetail {
   situation: string;
   xg: number;
   xgot: number;
+  /** Vero quando l'xGOT non è misurato ma DICHIARATO: un tiro nello specchio
+   *  fermato prima della porta non ne ha uno, e gli diamo il valore della palla
+   *  che aveva. La tabella lo marca con un asterisco. */
+  xgot_office?: boolean;
   /** xGOT − xG: quanto la conclusione ha aggiunto alla palla che aveva. È la
    *  grandezza su cui il modello giudica il tiro, quindi si mostra invece di
    *  lasciarla ricavare. */
