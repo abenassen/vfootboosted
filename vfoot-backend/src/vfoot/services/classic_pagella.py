@@ -726,7 +726,7 @@ def shot_detail(match, player_id: int) -> dict:
 
     from vfoot.services.classic_rating import (
         shrinkage_for, appearance_sides, derived_features, feature_scales,
-        is_own_goal, scored_z, spread_k_for, weights_for_role,
+        is_own_goal, scored_z, spread_k_for, unshrunk_weight, weights_for_role,
     )
 
     empty = {"shots": [], "baseline": 0.0, "total": 0.0}
@@ -777,7 +777,13 @@ def shot_detail(match, player_id: int) -> dict:
     # classic_rating.UNSHRUNK_FEATURES), shots/shots_off/shots_blocked si'. Una
     # scala sola non basta piu', e va applicata DENTRO il sotto-indice: cosi' le
     # quote Shapley escono gia' in punti di voto e la sezione torna con la riga.
-    per_unit_obs = fattore * spread_k_for(role) / reference[role]["std"]
+    # ...e con l'attenuazione che il voto applica DAVVERO a un fatto osservato: e'
+    # ``w + gamma*(1-w)``, non 1 (v. classic_rating.unshrunk_weight). Il numero
+    # viene da li' e non da una formula ricopiata: e' la terza volta che questa
+    # riga resta indietro rispetto allo scorer, e le prime due la sezione ha
+    # smesso di quadrare in silenzio.
+    per_unit_obs = (fattore * spread_k_for(role)
+                    * unshrunk_weight(role, mins, reference) / reference[role]["std"])
     unit_of = (lambda k: per_unit_obs if k in UNSHRUNK_FEATURES else per_unit)
 
     counted = [i for i, s in enumerate(shots) if not s["own_goal"]]
@@ -793,7 +799,16 @@ def shot_detail(match, player_id: int) -> dict:
             gone["shots"] += 1
             gone["xg_shots"] += s["xg"] or 0.0
             gone["xg_on_target"] += s["xgot"] or 0.0
-            if s["is_goal"] or (s["xgot"] or 0.0) > 0:
+            # NELLO SPECCHIO LO DICE L'ESITO, non l'xGOT. Il test era «xgot > 0», e
+            # su un tiro parato a cui il fornitore non manda l'xGOT (86 parati su
+            # 3414 nella 25-26) toglieva il tiro lasciando indietro il suo
+            # ``shots_on_target``: la simulazione «se non avesse tirato» conservava
+            # un tiro nello specchio che nessun tiro aveva prodotto, e il metro di
+            # chi non conclude usciva POSITIVO (+0.12 su Muharemovic) dove
+            # strutturalmente vale -0.14. L'esito e' anche la definizione del
+            # fornitore: su 1721 righe della 25-26 goal+save coincide col suo
+            # ``onTargetScoringAttempt`` 1715 volte, contro 1689 di «xgot > 0».
+            if s["is_goal"] or s["shot_type"] == "save":
                 gone["shots_on_target"] += 1
             feat = _SHOT_TYPE_FEATURE.get(s["shot_type"])
             if feat:

@@ -8,6 +8,7 @@ from vfoot.services.vote_explanation import (
     readable_label, role_average_terms, to_sentence,
 )
 from vfoot.services.classic_rating import (
+    UNSHRUNK_FEATURES,
     shrinkage_for,
     scale_saturation,
     GK_SPREAD_K, VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K,
@@ -254,6 +255,76 @@ class VoteExplanationTests(SimpleTestCase):
         # and it agrees with the summary's own accounting
         shown = sum(c["points"] for c in e["contributions"]) + e["other_points"]
         self.assertAlmostEqual(total, shown, places=2)
+
+    # --- cio' che il pannello NON diceva ---------------------------------
+    def test_the_goal_credit_has_a_line_even_when_there_is_no_goal(self):
+        """Il credito del gol e' centrato sulla media di ruolo, quindi chi non
+        segna non porta zero: porta un negativo costante (-0.23 per un attaccante).
+        Senza una riga sua finiva dentro «altre N voci», e la riga di chiusura di
+        quel gruppo lo presentava come «altre 4 voci sotto un centesimo»: un quarto
+        di voto spacciato per briciole di arrotondamento."""
+        average = self._averages("ATT", {"touches": 60.0, "shots": 2.0})
+        # stessa condizione dell'identita' qui sopra: la media dell'indice e le
+        # medie per voce devono descrivere la stessa popolazione, o «altre N voci»
+        # assorbe lo scarto fra le due e il fissante misura quello
+        reference = {**self.REFERENCE,
+                     "ATT": {**self.REFERENCE["ATT"],
+                             "mean": sum(average["ATT"].values())}}
+        feats = {"touches": 55.0, "shots": 1.0}
+        e = explain("ATT", feats, 90, reference, average, ledger=True,
+                    goal_adjustment=-0.135, assist_adjustment=-0.018)
+
+        labels = {c["label"]: c["points"] for c in e["contributions"]}
+        # una riga sola: due negativi per dire «non ha inciso» sono due righe per
+        # una cosa sola
+        self.assertIn("nessun gol né assist", labels)
+        self.assertNotIn("nessun gol", labels)
+        self.assertLess(labels["nessun gol né assist"], -0.13)
+        # e ora la riga di chiusura dice il vero
+        self.assertLess(abs(e["other_tiny"]["points"]), 0.05)
+
+    def test_a_scorer_keeps_the_goal_first_and_only_misses_the_assist(self):
+        """Chi ha segnato apre il pannello col gol; l'assist che non c'e' resta una
+        riga sua, in fondo, dov'e' il posto delle correzioni."""
+        average = self._averages("ATT", {"touches": 60.0, "shots": 2.0})
+        feats = {"touches": 55.0, "shots": 3.0}
+        e = explain("ATT", feats, 90, self.REFERENCE, average,
+                    goal_adjustment=+0.4, assist_adjustment=-0.018,
+                    goal_detail=[{"minute": 17, "own_after": 1, "opp_after": 0,
+                                  "importance": 1.2}])
+
+        kinds = [c.get("kind") for c in e["contributions"]]
+        self.assertEqual(kinds[0], "goal")
+        self.assertEqual(kinds[-1], "no_assist")
+        self.assertEqual(e["contributions"][-1]["label"], "nessun assist")
+
+    def test_an_observed_fact_is_shown_with_the_weight_the_vote_gives_it(self):
+        """I FATTI OSSERVATI sfuggono all'attenuazione sui minuti solo per
+        ``UNSHRINK_GAMMA``, non del tutto (v. classic_rating.unshrunk_weight).
+
+        Il pannello li mostrava a scala piena — cioe' come se gamma valesse 1, che
+        e' quanto valeva quando quella riga e' stata scritta — e su uno spezzone da
+        25' li disegnava quasi quattro volte piu' grandi del loro effetto. La
+        differenza non spariva: usciva in fondo, muta, nella riga delle voci sotto
+        il centesimo. Il fissante e' l'identita' di sempre — le fette sommano al
+        voto — ma su una reference che ha la media osservata, senza la quale lo
+        scorporo non esiste e il difetto non si vede."""
+        average = self._averages("ATT", {"touches": 60.0, "shots": 2.0,
+                                         "shots_on_target": 1.0, "xg_shots": 0.2})
+        reference = {**self.REFERENCE,
+                     "ATT": {**self.REFERENCE["ATT"],
+                             "mean": sum(average["ATT"].values()),
+                             "observed_mean": sum(
+                                 v for k, v in average["ATT"].items()
+                                 if k in UNSHRUNK_FEATURES)}}
+        feats = {"touches": 20.0, "shots": 3.0, "shots_on_target": 3.0,
+                 "xg_shots": 0.9}
+        e = explain("ATT", feats, 25, reference, average, full=True, ledger=True)
+
+        total = sum(t["points"] for t in e["all_terms"])
+        self.assertAlmostEqual(e["base"] + total, e["subtotal"], places=2)
+        # e il resto e' davvero il resto
+        self.assertLess(abs(e["other_tiny"]["points"]), 0.05)
 
     # --- the ledger behind "altre N voci" --------------------------------
     def test_the_ledger_names_every_unshown_entry_and_adds_up_to_the_fold(self):

@@ -3805,6 +3805,27 @@ def _raw_vote_from_index(index: float, ref_key: str, minutes: int, reference: di
     return max(VOTE_MIN, min(VOTE_MAX, raw))
 
 
+def unshrunk_weight(ref_key: str, minutes: int, reference: dict) -> float:
+    """Quanto pesa, nel voto, un FATTO OSSERVATO (v. UNSHRUNK_FEATURES).
+
+    L'attenuazione sui minuti vale ``w`` per i tassi; per i fatti il voto aggiunge
+    lo scorporo, che ne restituisce ``UNSHRINK_GAMMA`` della parte attenuata — v.
+    ``extra`` in ``_raw_vote_from_index``, di cui questa e' la lettura per fetta.
+    Vale ``w`` liscio dove il voto lo scorporo non lo applica: senza la media
+    osservata nella reference, a partita intera, e per il PORTIERE, che
+    ``observed_index`` conta zero.
+
+    Esiste perche' la spiegazione e la mappa dei tiri devono moltiplicare per lo
+    stesso numero che ha scritto il voto, e per due volte in due punti diversi la
+    formula ricopiata a mano e' rimasta indietro rispetto a questo file.
+    """
+    w = minutes / (minutes + shrinkage_for(ref_key)) if minutes > 0 else 0.0
+    r = reference.get(ref_key) or {}
+    if ref_key == Player.ROLE_GK or w >= 1.0 or r.get("observed_mean") is None:
+        return w
+    return w + UNSHRINK_GAMMA * (1.0 - w)
+
+
 def _round_half(vote: float) -> float:
     return round(vote * 2) / 2.0  # 0.5 grid
 

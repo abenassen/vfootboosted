@@ -159,7 +159,15 @@ def weights_fingerprint() -> str:
 #           continuato a servire quelli vecchi fino al primo dato nuovo di quella
 #           giornata. Chi rilegge: il perche' e la misura stanno nel blocco
 #           RESULT_MITIGATION_LOSS_ANCHOR di classic_rating.
-SCORING_CODE_VERSION = 9
+#   9 -> 10: NIENTE cambia nel voto — cambia la sua SPIEGAZIONE, e questa e' la
+#           chiave con cui il registro delle voci sta in cache (v. vote_ledger).
+#           Tre cose: il credito del gol ha una riga anche quando il gol non c'e'
+#           («nessun gol»), i fatti osservati sono mostrati con l'attenuazione che
+#           il voto applica davvero (UNSHRINK_GAMMA, non 1) e la mappa dei tiri
+#           conta nello specchio per esito e non per xGOT. Senza questo giro la
+#           produzione avrebbe servito per un'ora la scomposizione VECCHIA — cioe'
+#           esattamente il difetto appena corretto, al rallentatore.
+SCORING_CODE_VERSION = 10
 
 
 def scoring_fingerprint() -> str:

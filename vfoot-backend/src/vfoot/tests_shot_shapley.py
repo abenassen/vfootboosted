@@ -124,6 +124,25 @@ class ShotSectionAddsUpTests(TestCase):
         d = shot_detail(self.match, self.player.id)
         self.assertAlmostEqual(d["total"], self._summary_line(), places=2)
 
+    def test_a_save_without_xgot_still_takes_its_shot_on_target_away(self):
+        """Nello specchio lo dice l'ESITO, non l'xGOT.
+
+        Il fornitore non calcola l'xGOT dei tiri deviati per strada e manda uno
+        zero (86 parati su 3414 nella 25-26), ma nello specchio quel tiro ce lo
+        conta lo stesso — e' il suo ``onTargetScoringAttempt``, e coincide con
+        l'esito della mappa 1715 volte su 1721. Togliendo il tiro con la vecchia
+        prova (``xgot > 0``) restava indietro il suo ``shots_on_target``: la
+        simulazione «se non avesse tirato» conservava un tiro nello specchio che
+        nessun tiro aveva prodotto, e il metro di chi non conclude usciva POSITIVO
+        dove strutturalmente vale -0.14 — cioe' il pannello raccontava che non
+        tirare conviene."""
+        self._shots((2, "save", 0.14, 0.0))
+        d = shot_detail(self.match, self.player.id)
+        # non concludere COSTA, sempre: e' il metro, e non puo' essere un premio
+        self.assertLess(d["baseline"], 0.0)
+        self.assertAlmostEqual(d["shots"][0]["points"] + d["baseline"], d["total"],
+                               places=2)
+
     def test_it_holds_for_a_single_shot_too(self):
         """Con un tiro solo Shapley e leave-one-out coincidono, ma il metro no:
         è il caso in cui la tabella sembrava contraddire la riga (Thuram)."""

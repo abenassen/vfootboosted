@@ -24,7 +24,8 @@ from vfoot.services.classic_rating import (
     DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
     GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, scale_saturation,
     shrinkage_for, TOTAL_WEIGHTS,
-    UNSHRUNK_FEATURES, VOTE_CENTER, VOTE_MAX, VOTE_MIN, WEIGHTS, vote_center_for,
+    UNSHRUNK_FEATURES, VOTE_CENTER, VOTE_MAX, VOTE_MIN, WEIGHTS,
+    unshrunk_weight, vote_center_for,
     _feature_z, _raw_vote_from_index, exposure_z, scored_z, feature_scales,
     index_for_role, minute_shift, observed_index, raw_feature_values, spread_k_for,
     weights_for_role,
@@ -861,12 +862,23 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # sopra. Riscalando, l'utente legge direttamente i valori giusti e non c'e'
     # nessuna riga misteriosa in fondo da spiegare.
     per_unit = scale_factor * spread_k_for(role) * weight / ref["std"]
-    # I FATTI OSSERVATI HANNO LA LORO SCALA, perche' il voto non li attenua (v.
+    # I FATTI OSSERVATI HANNO LA LORO SCALA, perche' il voto li attenua MENO (v.
     # classic_rating.UNSHRUNK_FEATURES): un gol segnato entrando all'85' pesa
     # nel pannello quanto pesa nel voto, non un terzo. Senza questa riga la fetta
     # mostrata sarebbe piu' piccola del suo effetto e la differenza finirebbe,
     # muta, dentro «altre N voci».
-    per_unit_obs = scale_factor * spread_k_for(role) / ref["std"]
+    #
+    # «MENO», NON «PER NIENTE», ed e' la correzione del 05/09/2026. La scala era
+    # quella piena — cioe' UNSHRINK_GAMMA = 1 — e da quando gamma vale 0.0774 il
+    # voto di quelle voci ne applica solo w + gamma*(1-w): a 25' sono 0.278 contro
+    # 1.0, quindi il pannello le mostrava QUATTRO VOLTE piu' grandi del loro
+    # effetto e il resto scivolava, muto, in fondo. Lo scorporo si scrive come lo
+    # applica il voto (v. _raw_vote_from_index), e come il voto vale solo dove il
+    # voto lo applica: serve la media osservata nella reference, e serve che quelle
+    # voci stiano DENTRO ``observed_index``, che per il portiere torna zero — le
+    # sue due (errors_led_to_*) il voto le attenua come tutte le altre.
+    obs_weight = unshrunk_weight(role, minutes, reference)
+    per_unit_obs = scale_factor * spread_k_for(role) * obs_weight / ref["std"]
     unit_of = (lambda key: per_unit_obs if key in UNSHRUNK_FEATURES else per_unit)
 
     points_by_key = {key: (terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * unit_of(key)
@@ -953,10 +965,14 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # parte non e' merito di nessuno: sta qui dentro, cosi' le voci qui sotto
     # restano tutte e sole cio' che il giocatore ha aggiunto. E' anche il modo di
     # dirlo senza spiegarlo — il numero di partenza e' gia' quello giusto.
+    # LA CURVA DEI FATTI PESA QUANTO LA PESA IL VOTO, cioe' gamma*(1-w) e non (1-w)
+    # (stessa correzione di ``obs_weight`` qui sopra, e stessa data): questa meta'
+    # della base va tolta con l'esponente con cui lo scorporo la applica, o la
+    # partenza si sposta di una quantita' che nessuna voce puo' spiegare.
     centre = vote_center_for(role) - spread_k_for(role) * (
         weight * minute_shift(role, minutes, reference)
-        + (1.0 - weight) * minute_shift(role, minutes, reference,
-                                        "observed_by_minute", "observed_mean")
+        + (obs_weight - weight) * minute_shift(role, minutes, reference,
+                                               "observed_by_minute", "observed_mean")
     ) / ref["std"]
     # La base nella scala finale. Il voto grezzo parte da ``vote_center_for``, ma lo
     # stadio finale comprime attorno a un ALTRO punto (il baricentro misurato del
@@ -1069,6 +1085,30 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                              entry(p_assist,
                                    goal_impact.assist_phrase(assist_detail),
                                    kind="assist"))
+    # E CHI NON SEGNA NON PORTA ZERO. Il credito del gol e' centrato sulla media di
+    # ruolo (classic_rating: ``goal_credit - goal_mean``), quindi l'assenza di gol
+    # vale un negativo COSTANTE: -0.23 per un attaccante, -0.10 per un
+    # centrocampista, -0.04 per un difensore, in punti di voto gia' riscalati.
+    # Fino al 05/09/2026 quella riga si stampava solo col dettaglio del gol in mano
+    # — cioe' mai, per chi non aveva segnato — e il numero non spariva: finiva muto
+    # in «altre N voci», dove la riga di chiusura lo presentava come la somma di
+    # quattro voci sotto il centesimo. Su un attaccante erano -0.26 spacciati per
+    # briciole di arrotondamento.
+    #
+    # IN FONDO E NON IN CIMA, al contrario del gol: il gol e' il fatto del giorno,
+    # la sua assenza e' lo stato normale di quasi tutti, e aprirci il pannello di
+    # ventidue giocatori su ventitre' vorrebbe dire dare il primo posto al nulla.
+    # Le due si fondono quando mancano entrambe: «nessun gol -0.23» seguito da
+    # «nessun assist -0.03» sono due righe per dire una cosa sola.
+    missing_goal = p_goal if (abs(p_goal) >= 0.005 and not goal_detail) else 0.0
+    missing_assist = p_assist if (abs(p_assist) >= 0.005 and not assist_detail) else 0.0
+    if missing_goal and missing_assist:
+        contributions.append(entry(missing_goal + missing_assist,
+                                   "nessun gol né assist", kind="no_goal"))
+    elif missing_goal:
+        contributions.append(entry(missing_goal, "nessun gol", kind="no_goal"))
+    elif missing_assist:
+        contributions.append(entry(missing_assist, "nessun assist", kind="no_assist"))
     if abs(p_nudge) >= 0.005:
         contributions.append(entry(p_nudge,
                                    "adeguamento al risultato di squadra",

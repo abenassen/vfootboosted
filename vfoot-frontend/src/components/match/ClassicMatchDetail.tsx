@@ -1602,9 +1602,15 @@ function OtherVoices({
           )}
           {ledger.tiny.count > 0 || Math.abs(ledger.tiny.points) >= 0.005 ? (
             <div className="flex items-baseline justify-between gap-3 text-ink-faint">
+              {/* «e arrotondamenti» non è un dettaglio: questa riga porta anche il
+                  resto dell'arrotondamento di TUTTE le righe qui sopra, e senza
+                  dirlo attribuiva alle voci minuscole un numero che non è loro. È
+                  la stessa cosa che nascondeva il credito del gol mancato (v.
+                  vote_explanation: «nessun gol»), e ora che quello ha una riga sua
+                  qui resta solo quello che il nome promette. */}
               <span>
                 {ledger.tiny.count > 0
-                  ? `altre ${ledger.tiny.count} voci sotto un centesimo di voto`
+                  ? `altre ${ledger.tiny.count} voci sotto un centesimo, e arrotondamenti`
                   : 'arrotondamenti'}
               </span>
               <span className="shrink-0 font-mono text-[11px]">{fmtPts(ledger.tiny.points)}</span>
