@@ -62,6 +62,44 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-12',
+    versione: '1.12',
+    data: '5 settembre 2026',
+    titolo: 'Il tiro tolto dalla linea non è più un’occasione sprecata',
+    sommario:
+      'Quando un difensore ti spazza il pallone sulla riga, il tiro era dentro: il portiere l’avevi già battuto. Il modello invece lo leggeva come una conclusione buttata via, perché di quel pallone nessuno misura quanto valesse dopo il tocco. E il pannello che spiega il voto teneva nascosta la voce più grande di tutte.',
+    voci: [
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Un tiro nello specchio che un avversario ferma sulla linea non ti toglie più voto: prima contava come occasione fallita, adesso vale quanto la palla che avevi.',
+        caso:
+          'Il fornitore, di quei tiri, manda uno zero — non perché il tiro fosse debole, ma perché di un pallone fermato prima della porta non registra dove sarebbe arrivato. L’abbiamo verificato incrociando un secondo archivio: a fermarli è un difensore nell’83% dei casi, e sta a un metro e mezzo dalla propria porta contro i tredici di un muro normale. Sono 72 tiri in tutta la scorsa stagione e 6 in questa; Thierry Correia (Venezia-Lecce, 1ª) passa da 5,0 a 5,5.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Nel pannello «come nasce il voto puro» compare la riga «nessun gol né assist», che prima non c’era: è quanto pesa, per il tuo ruolo, non aver segnato.',
+        caso:
+          'Quella fetta esisteva già nel voto — vale 0,26 per un attaccante, 0,10 per un centrocampista — ma finiva in fondo, dentro «altre N voci», e la riga di chiusura la spacciava per la somma di quattro voci sotto il centesimo. Ora quella riga di chiusura vale al massimo quattro centesimi su 1972 presenze controllate, com’è giusto che sia.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Su chi gioca uno spezzone, le voci del pannello non sono più più grandi del loro effetto reale sul voto.',
+        caso:
+          'Un fatto isolato — un tiro nello specchio, un errore — su venticinque minuti veniva disegnato quasi quattro volte più grande di quanto muovesse davvero il voto. Il voto era giusto, era il suo racconto a non tornare.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Nella mappa dei tiri, il metro «per un pari ruolo che non conclude» non è più un premio quando non lo è.',
+        caso:
+          'Su chi aveva un tiro senza valore misurato usciva positivo — cioè diceva che non tirare conviene — mentre per un attaccante che gioca 79 minuti vale circa −0,14.',
+      },
+    ],
+  },
+  {
     id: 'v-1-11',
     versione: '1.11',
     data: '4 settembre 2026',
