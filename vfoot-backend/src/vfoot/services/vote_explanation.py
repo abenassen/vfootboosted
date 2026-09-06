@@ -268,7 +268,17 @@ MERGES = [
     # Il lato NEGATIVO e' None per la stessa ragione per cui lo era il SIGNAL da cui
     # viene: creare poco non e' una notizia da dire ad alta voce. Con phrase a None
     # la riga esce dal riassunto e resta nel registro col suo nome.
-    (("expected_assists", "assists"),
+    #
+    # DAL 06/09/2026 LA FAMIGLIA E' DI QUATTRO. ``key_passes`` e
+    # ``big_chance_created`` hanno un peso (v. TOTAL_WEIGHTS) e senza unirle
+    # avrebbero una riga propria accanto a questa: "un'occasione nitida creata
+    # +0.07" sopra "una o piu' occasioni create per i compagni (una nitida) +0.05"
+    # e' lo stesso gesto contato due volte a schermo, ed e' esattamente il difetto
+    # che questa tabella esiste per evitare. Il passaggio e' UNO: il suo valore
+    # atteso, il conteggio dei passaggi che hanno prodotto un tiro, quello delle
+    # palle-gol vere e l'esito. Una riga, e la parentesi porta i numeri del
+    # tabellino (v. ``creation_detail``).
+    (("expected_assists", "assists", "key_passes", "big_chance_created"),
      "una o più occasioni create per i compagni", None, "creazione", None),
     # LE PARATE: quanti tiri gli sono arrivati e come li ha gestiti sono lo stesso
     # gesto contato e pesato, e separate dicevano due volte la stessa cosa — "tanti
@@ -1157,10 +1167,21 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             # QUANTE volte l'ha fatto, come si conta nel tabellino — letto PRIMA
             # dell'etichetta, che ne ha bisogno per non dire "tanti" di uno solo.
             count = None if fam else observed(key)
-            row = {"key": key,
-                   "label": ledger_phrase(role, key, pts, raw_values.get(key, 0.0),
-                                          count),
-                   "points": round(pts, 2)}
+            # LA FRASE DI UNA FAMIGLIA E' GIA' STATA COSTRUITA, sopra, dal ciclo dei
+            # MERGES — parentesi compresa — e ricostruirla qui da ``group[0]`` la
+            # buttava via: il registro diceva "una o piu' occasioni create per i
+            # compagni" dove il riassunto avrebbe detto "(una nitida)". Non si notava
+            # perche' la riga della creazione quasi mai entra nei primi tre, cioe'
+            # proprio nel caso per cui la precisazione era stata scritta. Segnalato
+            # su Mora in Roma-Atalanta del 05/09/2026.
+            #
+            # ``_ph`` puo' essere vuota per scelta (il lato negativo della creazione
+            # non si dice ad alta voce): li' il ripiego di ``ledger_phrase`` e'
+            # giusto, perche' nel registro la riga un nome deve averlo.
+            label = (_ph if (fam and _ph)
+                     else ledger_phrase(role, key, pts,
+                                        raw_values.get(key, 0.0), count))
+            row = {"key": key, "label": label, "points": round(pts, 2)}
             if fam:
                 # A merged family is one row here too, as in the summary; the count
                 # says how many features it stands for.

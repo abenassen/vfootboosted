@@ -62,6 +62,44 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-14',
+    versione: '1.14',
+    data: '6 settembre 2026',
+    titolo: 'L’occasione che crei conta, anche se il tuo compagno la sbaglia',
+    sommario:
+      'Il pannello del voto nominava le palle-gol che avevi servito, ma nel voto pesavano zero: se mandavi solo in porta un compagno e lui la buttava fuori, per il modello non era successo niente. Adesso pesano — meno di un gol, come è giusto, ma non più niente.',
+    voci: [
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Servire una palla-gol e vedersela sprecare adesso ti alza il voto. Contano sia le occasioni nitide sia i passaggi che finiscono in un tiro, non solo il valore atteso del pallone che hai giocato.',
+        caso:
+          'Rodrigo Mora in Roma-Atalanta: apertura per Mancini, che si fa parare il tiro. Nel pannello quell’occasione era scritta e valeva 0,00 — il segnale più forte di tutta la sua partita, moltiplicato per zero. Sulla stagione scorsa il cambiamento toglie quattro valutazioni gravemente sbagliate su 5.317 (cinque escono, una entra), e fra chi ha creato almeno una palla-gol le porta da cinque a due: quel gruppo aveva quasi il doppio degli errori del resto del campo, adesso sta sotto la media.',
+      },
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Chi crea molto prende, da noi, un po’ più di quanto gli darebbe una pagella. È voluto: nessuna delle due redazioni paga il passaggio quando il gol non arriva, e questo è il punto per cui il voto puro esiste.',
+        caso:
+          'Su 617 partite con una palla-gol servita e nessun assist eravamo esattamente sulla pagella; adesso siamo un decimo di voto sopra. In cambio l’accordo complessivo con entrambe le redazioni migliora, e l’errore medio scende su tutte e due.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Nel pannello, la riga della creazione dice di nuovo quante palle-gol vere contiene: «una o più occasioni create per i compagni (una nitida)».',
+        caso:
+          'La precisazione veniva costruita e poi buttata via quando la riga finiva sotto «altre N voci» — cioè quasi sempre, perché la creazione di rado entra nei primi tre motivi di un voto. Era proprio il caso per cui era stata scritta.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Gli attaccanti erano nel complesso quasi due centesimi sotto la media delle pagelle. Adesso i tre reparti sono centrati.',
+        caso:
+          'L’ultimo passaggio del voto — quello che accorcia i voti alti e riapre la scala — era tarato su un banco di prova invece che sul calcolo vero, e si portava dietro quello scarto da inizio settembre.',
+      },
+    ],
+  },
+  {
     id: 'v-1-13',
     versione: '1.13',
     data: '11 settembre 2026',

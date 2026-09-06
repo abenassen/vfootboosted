@@ -197,11 +197,19 @@ class VoteExplanationTests(SimpleTestCase):
         self.assertAlmostEqual(shown, e["subtotal"], places=2)
         # the sentence now carries the cost, and is matched on ``kind`` rather than
         # on its text (the label grew a minute and a reason)
-        # -1.55 e non -1.00: la costante e' in punti PRIMA dello stadio finale, e
-        # lo stadio la riscala. La cifra mostrata e' quella che l'espulsione e'
-        # costata nel voto scritto sopra, che e' l'unica che il pannello puo'
-        # esibire senza mentire sulla somma.
-        self.assertIn("Espulsione (-1.55).", to_sentence(e))
+        # PIU' DI -1.00: la costante e' in punti PRIMA dello stadio finale, e lo
+        # stadio la riscala. La cifra mostrata e' quella che l'espulsione e' costata
+        # nel voto scritto sopra, che e' l'unica che il pannello puo' esibire senza
+        # mentire sulla somma.
+        #
+        # LETTA DALLA RIGA, non scritta a mano. Era "-1.55" e si e' rotta il
+        # 06/09/2026 su una ricalibrazione legittima: il fattore dello stadio
+        # dipende dai pesi (v. ROLE_SATURATION) e ogni ritaratura lo muove. Un test
+        # che inchioda quel numero verifica la calibrazione di ieri invece della
+        # proprieta' che gli interessa, cioe' che la FRASE porti il costo riscalato.
+        rosso = [c for c in e["contributions"] if c.get("kind") == "red"][0]
+        self.assertLess(rosso["points"], -1.0)
+        self.assertIn("Espulsione (%.2f)." % rosso["points"], to_sentence(e))
         self.assertEqual([c["kind"] for c in e["contributions"] if c.get("kind")],
                          ["result", "red"])
 
@@ -211,12 +219,21 @@ class VoteExplanationTests(SimpleTestCase):
         # a decisive miss (-1) reads "decisivo"; a dead-rubber miss (-0.5) does not
         dec = explain("DIF", feats, 90, self.REFERENCE, average, penalty_adjustment=-1.0)
         self.assertIn("rigore decisivo sbagliato", [c["label"] for c in dec["contributions"]])
-        self.assertIn("Rigore decisivo sbagliato (-1.55).", to_sentence(dec))
+        # il costo riscalato, letto dalla riga: v. la nota nel test dell'espulsione
+        rig = [c for c in dec["contributions"] if c.get("kind") == "penalty"][0]
+        self.assertLess(rig["points"], -1.0)
+        self.assertIn("Rigore decisivo sbagliato (%.2f)." % rig["points"],
+                      to_sentence(dec))
         shown = dec["base"] + sum(c["points"] for c in dec["contributions"]) + dec["other_points"]
         self.assertAlmostEqual(shown, dec["subtotal"], places=2)
         dead = explain("DIF", feats, 90, self.REFERENCE, average, penalty_adjustment=-0.5)
         self.assertIn("rigore sbagliato", [c["label"] for c in dead["contributions"]])
-        self.assertIn("Rigore sbagliato (-0.77).", to_sentence(dead))
+        morto = [c for c in dead["contributions"] if c.get("kind") == "penalty"][0]
+        self.assertIn("Rigore sbagliato (%.2f)." % morto["points"], to_sentence(dead))
+        # e il rigore ININFLUENTE costa circa META' di quello decisivo: e' la
+        # differenza fra le due costanti dello scorer, ed e' quella la proprieta'
+        # da tenere ferma, non i due numeri riscalati
+        self.assertAlmostEqual(morto["points"] / rig["points"], 0.5, places=2)
         self.assertNotIn("decisivo", to_sentence(dead))
 
     # --- the full per-feature ledger -------------------------------------

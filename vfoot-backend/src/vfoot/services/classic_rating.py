@@ -224,16 +224,63 @@ TOTAL_WEIGHTS = {
     # prefers the OLD 0.11 (r 0.7718 against 0.7676 here). Lowering xA is justified
     # by the coherence argument, not by that judge, and 0.07 would have kept the
     # pair under a goal at a third of the cost. 0.05 is the user's call.
-    # AZZERATO il 25/08/2026. Misurato: due terzi di quel che le pagelle sembrano
+    # RIACCESO il 06/09/2026 a 0.020, dopo essere stato azzerato il 25/08 (le
+    # ragioni di allora sono qui sotto e restano vere PER IL MODELLO DI ALLORA).
+    #
+    # PERCHE' SI TORNA INDIETRO. Lo zero del 25/08 e quello di ``key_passes`` non
+    # sono mai stati messi alla prova dalla ricerca: ``vote_tuning.proietta`` tiene
+    # a zero ogni peso che parte da zero, e il termine di minimo cambiamento
+    # dell'obiettivo divide per un pavimento di 1e-3, quindi svegliare uno zero
+    # costa ~4.6 di perdita per feature. L'ottimizzatore non li ha provati e
+    # scartati: non poteva. Il modello cercato del 04/09 e' stato costruito con
+    # questi due spenti a priori, contro pesi e sigma che oggi non ci sono piu'.
+    #
+    # NON SONO RIDONDANTI, e questa era la prima cosa da escludere: sulla base delle
+    # 29 colonne accese, R^2 = 0.336 (66% di varianza propria) e l'autovalore minimo
+    # della matrice di correlazione non si muove (0.03176 -> 0.03173). Non
+    # appartengono alla famiglia degli zeri per dipendenza algebrica.
+    #
+    # IL GIUDICE VEDE LA PARTE CHE BUTTAVAMO VIA. Correlazione fra il residuo del
+    # giudice e la parte di questa colonna ortogonale a tutte le altre: Statistico
+    # +0.048, Redazione +0.049, WhoScored +0.136 (key_passes: +0.079/+0.036/+0.236).
+    #
+    # DECISO SULLA CODA, NON SULLA CORRELAZIONE, ed e' il punto. Fra 0.005 e 0.040 la
+    # Pearson collo Statistico e' piatta entro il rumore — quattro ricerche da semi
+    # diversi restano dove partono, l'obiettivo non ha pendenza li'. Gli ERRORI GRAVI
+    # (|noi - Statistico| >= 1.5) invece ordinano, sulla meta' di stagione mai vista
+    # dalla taratura (giornate pari, 2645 presenze), muovendo SOLO questi due pesi:
+    #
+    #   peso (entrambi)   0     0.010  0.015  0.020  0.030  0.040
+    #   errori gravi     13      12     10      9      9     10
+    #   MAE          0.3132  0.3093 0.3078 0.3083 0.3113 0.3110
+    #
+    # e nella regione 0.015-0.030 nessuna presenza ENTRA nella coda: 4 escono, 0
+    # entrano (segno-test p=0.125 — coerente, non significativo). Sui CREATORI, che
+    # e' dove il peso agisce, gli errori gravi passano da 5 a 2 su 583 presenze:
+    # oggi quel gruppo ha quasi il doppio del tasso della popolazione (0.86% contro
+    # 0.49%), dopo sta sotto la media.
+    #
+    # IL PREZZO, accettato: sulle 617 presenze con un'occasione nitida creata e
+    # nessun assist lo scostamento medio dallo Statistico passa da +0.009 a +0.124.
+    # Oggi siamo esattamente sul giudice, dopo lo paghiamo un decimo di voto piu' di
+    # lui. E' la divergenza che questo modello esiste per avere — nessuna delle due
+    # pagelle paga la creazione che l'attaccante spreca (v. la nota sulla xA sopra) —
+    # ma e' una divergenza in piu', deliberata, non un miglioramento su ogni fronte.
+    #
+    # IL CASO CHE L'HA APERTA: Mora in Roma-Atalanta del 05/09/2026, occasione nitida
+    # servita a Mancini e sprecata. Nel voto valeva zero, e nel pannello la riga non
+    # c'era: a peso nullo ``_terms`` non la produce affatto.
+    #
+    # --- le ragioni dell'azzeramento del 25/08/2026, per il modello di allora ---
+    # Misurato: due terzi di quel che le pagelle sembrano
     # pagare per un'occasione creata e' il bonus ASSIST che passa attraverso il
     # flag — a parita' di xA scatta ~3 volte piu' spesso quando l'assist e' arrivato
     # (20%->63% nella banda xA [0.10,0.20)). Il peso era stato tarato contro giudici
     # che l'assist lo pagano, e il risultato era un'inversione: a parita' di xA E di
     # assist pagavamo il flag +0.133 contro +0.080 della Redazione, +0.093 dello
-    # Statistico e +0.015 di SofaScore — il piu' alto del panel. Tenuto a zero e non
-    # cancellato: la feature si legge ancora e lo zero e' una decisione visibile.
+    # Statistico e +0.015 di SofaScore — il piu' alto del panel.
     # Tabelle in docs/voto_questioni_aperte.md §2.
-    "big_chance_created": 0.0,
+    "big_chance_created": 0.020,
     # L'ASSIST, come il gol. La simmetria mancava: ``shots_goal`` sta qui col suo
     # peso "on top of +3 bonus", quindi l'esito di una CONCLUSIONE il voto base lo
     # pagava gia', quello di un PASSAGGIO no — e non c'era una ragione scritta per la
@@ -315,9 +362,21 @@ TOTAL_WEIGHTS = {
     # coefficiente cala del 42% (+0.127 -> +0.074). Il PAVIMENTO resta sopra il
     # +0.034 di SofaScore: se un giorno va tolto, si interviene li', non qui.
     #
-    # Lasciato a zero e non cancellato: la feature si legge ancora nel registro e
-    # nel tuner, e lo zero e' una decisione visibile.
-    "key_passes": 0.0,
+    # RIACCESO il 06/09/2026 a 0.020, insieme a ``big_chance_created`` e per le
+    # stesse misure (le tabelle stanno li', non si ripetono). L'argomento del doppio
+    # conteggio qui sopra resta vero ma non e' completo: la xA spiega il 45% della
+    # varianza di questa colonna, non il 100%, e il 55% che resta il giudice lo vede
+    # — la correlazione fra il residuo dello Statistico e la parte di questa colonna
+    # ortogonale a TUTTE le altre e' +0.079, quella di WhoScored +0.236, la piu' alta
+    # di ogni feature provata. La conclusione del 01/09 ("e' la xA contata due
+    # volte") era giusta sul PESO DI ALLORA (0.100, cinque volte SofaScore) e
+    # sbagliata come affermazione sulla feature.
+    #
+    # E LA RIDONDANZA SI PAGA DOVE VA PAGATA: a peso acceso la ricerca senza vincoli
+    # riduce la xA da 0.049 a 0.024 e sposta credito su ``passes_completed``. Qui la
+    # xA NON si tocca, perche' la coda peggiora a toccarla e perche' un solo cambio
+    # per volta si sa da dove viene.
+    "key_passes": 0.020,
     # IL BLOCCO DEL VOLUME, x0.7 il 29/08/2026 (v. la nota su sga_post). Tirare
     # tanto restava creditato quanto l'esecuzione, e le due cose si compensavano
     # quasi tiro per tiro: sprecare era gratis sotto 0.137 di xG, cioe' sulla
@@ -342,7 +401,7 @@ TOTAL_WEIGHTS = {
     # quanto ci stia in generale. Toglierlo COSTA 0.0006 di correlazione e vale
     # 0.054 di errore su quei giocatori — la Pearson non vede uno scostamento
     # sistematico su 75 righe di 7696, l'utente che apre il pannello si'.
-    "errors_led_to_goal": -0.0181,  # una occorrenza: -0.84 di voto
+    "errors_led_to_goal": -0.0188,  # una occorrenza: -0.85 di voto
     # Conceding a penalty hands over roughly 0.78 expected goals through a clear
     # individual foul, and — unlike a missed penalty — carries NO fantacalcio
     # malus, so the base vote is the only place it can register at all.
@@ -358,7 +417,7 @@ TOTAL_WEIGHTS = {
     # e' anche marcata come errore che porta a un gol.
     # Stessa storia (v. errors_led_to_goal): l'ottimizzazione lo portava a -0.0409,
     # con 0.312 di scarto sulle 76 presenze che concedono un rigore.
-    "penalties_conceded": -0.0341,  # una occorrenza: -1.58 di voto
+    "penalties_conceded": -0.0355,  # una occorrenza: -1.60 di voto
     # Winning one is the mirror image and equally unrewarded: the bonus goes to
     # whoever converts, never to the player who earned it.
     # RITARATO IL 04/09/2026: 0.0146 -> 0.0241. Le righe qui sopra raccontano come si
@@ -366,7 +425,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "penalties_won": 0.0241,  # una occorrenza: +0.78 -> +0.51 (era 0.0244)
+    "penalties_won": 0.0251,  # una occorrenza: +1.40 (v. tests_rare_events)
     # Interventions in a dangerous position. Kept as impact totals, not per-90:
     # their value does not scale with how long you played.
     #
@@ -425,7 +484,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "clearances_off_line": 0.0037,  # una occorrenza: +0.54 -> +0.30 (era 0.0175)
+    "clearances_off_line": 0.0039,  # una occorrenza: +0.21 (v. tests_rare_events)
     "last_man_tackle": 0.0,
     # An error that let the opponent SHOOT, without a goal following.
     # RITARATO IL 04/09/2026: -0.0113 -> -0.0057. Le righe qui sopra raccontano come si
@@ -433,7 +492,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "errors_led_to_shot": -0.0057,  # una occorrenza: -0.26 -> -0.17 (era -0.0189)
+    "errors_led_to_shot": -0.0059,  # una occorrenza: -0.14 (v. tests_rare_events)
     # RITARATO IL 04/09/2026: 0.0088 -> 0.0016. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
@@ -1512,11 +1571,25 @@ ROLE_VOTE_CENTER = {Player.ROLE_DEF: 5.91, Player.ROLE_GK: 6.180503465289575}
 # 7,5. Il portiere prende la stessa correzione come CENTRO e DISPERSIONE (v.
 # ROLE_VOTE_CENTER e GK_SPREAD_K), che sono lineari e non toccano la forma.
 VOTE_SATURATION_T = 1.0
+# COME SI RIFANNO, perche' vanno rifatti a ogni cambio di pesi e nessun comando lo
+# fa: ``experiments-scrape-whoscored/saturazione.py``. La forma e' chiusa —
+# ``pre`` e' la media del voto pre-stadio del ruolo, ``a`` = sd(pagella)/sd(compresso),
+# ``dopo`` = media(pagella) + (pre - media(compresso)) * a — e si itera tre volte
+# perche' il voto pre-stadio contiene rosso, autogol e rigore sbagliato gia' divisi
+# per il fattore, quindi la partenza dipende dall'arrivo.
+#
+# RIFATTI IL 06/09/2026 per l'accensione della creazione (v. big_chance_created).
+# Ri-derivandoli si e' scoperto che i PRECEDENTI non centravano il bersaglio che
+# promettono: sulla configurazione vecchia lasciavano gli attaccanti 0.018 sotto la
+# media della pagella e le dispersioni fuori di 0.016 in totale. Erano stati
+# derivati sul BANCO dei pesi (vote_tuning), che riproduce il voto a 0.002 ma non e'
+# la pipeline, e quel piccolo scarto era rimasto. I valori qui sotto sono derivati
+# sulla pipeline vera e centrano media e dispersione di ogni ruolo a zero.
 ROLE_SATURATION = {          # ruolo: (centro_pre, centro_dopo, fattore)
     # Per intero, non per vezzo: v. la nota sulla riproducibilita' sopra.
-    Player.ROLE_DEF: (5.955666852686118, 6.061230791524389, 1.5485834273858712),
-    Player.ROLE_MID: (6.052875763317001, 6.1238237595148695, 1.596370972734363),
-    Player.ROLE_FWD: (6.097521915325461, 6.155905316629372, 1.676461101184294),
+    Player.ROLE_DEF: (5.9555126399707925, 6.062612844212648, 1.5741175661583577),
+    Player.ROLE_MID: (6.047340997248938, 6.107976399551081, 1.576194793569985),
+    Player.ROLE_FWD: (6.101973810718524, 6.181583308706752, 1.6604646283704683),
 }
 
 
