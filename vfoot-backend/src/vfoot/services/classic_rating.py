@@ -1607,13 +1607,13 @@ ROLE_SATURATION = {          # ruolo: (centro_pre, centro_dopo, fattore)
 def scale_saturation(vote: float, ref_key: str) -> tuple[float, float]:
     """Il voto dopo lo stadio finale, e DI QUANTO e' stato riscalato.
 
-    Il secondo valore e' il rapporto secante "quanto e' diventato lo scostamento dal
-    centro", compressione inclusa. Dall'11/09/2026 la SPIEGAZIONE non lo usa piu':
-    riscalare ogni fetta col rapporto e spostare la base di conseguenza faceva
-    dipendere il «voto di partenza» dal voto stesso, e nessuno capiva perche'. Il
-    pannello usa la parte lineare (v. ``saturation_linear``) e mostra la
-    compressione come voce a se' (v. ``saturation_compression``). Il rapporto resta
-    per chi misura la scala nel suo insieme.
+    Il secondo valore serve alla spiegazione: la scomposizione del voto e' additiva
+    (base + una fetta per voce) e una curva non lineare in fondo la farebbe non
+    tornare. Moltiplicando ogni fetta per questo fattore, e usando ``centro_dopo``
+    come base, la somma torna esatta — perche' il fattore e' definito proprio come
+    "quanto e' diventato lo scostamento dal centro". (``saturation_linear`` e
+    ``saturation_compression`` separano la retta dalla curva: servono ai test degli
+    eventi rari; la riga «compressione» nel pannello e' stata respinta.)
     """
     p = ROLE_SATURATION.get(ref_key)
     if not p:
@@ -4248,7 +4248,7 @@ def voto_puro_for_match(match, reference: dict,
         # accettazione, con la produzione mezzo punto sopra il modello su un voto
         # ogni sette.
         pre_scala = pieno
-        pieno, _rapporto = scale_saturation(pieno, ref_key)
+        pieno, scala = scale_saturation(pieno, ref_key)
         voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, pieno)))
                 if rated else None)
         results.append({
@@ -4290,19 +4290,18 @@ def voto_puro_for_match(match, reference: dict,
             "red_detail": red_info.get(pid),
             "own_goal_detail": og_info.get(pid),
             "penalty_adjustment": padj,
-            # Lo stadio finale, per la SPIEGAZIONE e per la mappa dei tiri, nelle
-            # sue due parti. ``scale_factor`` e ``scale_base`` sono la RETTA del
-            # ruolo (v. saturation_linear): costanti, uguali per ogni presenza di
-            # quel ruolo, e sono la scala su cui si mostra ogni voce.
-            # ``scale_compression`` e' quel che la curva ha tolto in piu' sopra il
-            # centro: una riga a se' nel pannello. Fino all'11/09/2026 il fattore
-            # era il rapporto secante e la base lo assorbiva presenza per presenza:
-            # il «voto di partenza» cambiava da un giocatore all'altro e nessuno
-            # capiva perche'.
+            # Lo stadio finale, per la SPIEGAZIONE e per la mappa dei tiri:
+            # ``scale_factor`` e' quanto e' stato riscalato lo scostamento dal
+            # centro (rapporto secante, compressione inclusa), ``scale_base`` il
+            # centro riscalato. La curva ripartita proporzionalmente su ogni voce:
+            # mostrarla come riga a se' (provato l'11/09/2026) faceva leggere una
+            # doppietta come «+2,86» e una tassa «−1,45», ed e' stato respinto.
             "voto_pre_scala": pre_scala,
-            "scale_factor": saturation_linear(ref_key)[0],
-            "scale_base": saturation_linear(ref_key)[1],
-            "scale_compression": saturation_compression(pre_scala, ref_key),
+            "scale_factor": scala,
+            "scale_base": (
+                ROLE_SATURATION[ref_key][1]
+                + scala * (vote_center_for(ref_key) - ROLE_SATURATION[ref_key][0])
+                if ref_key in ROLE_SATURATION else vote_center_for(ref_key)),
             "voto_puro": voto,
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))

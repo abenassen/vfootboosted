@@ -767,9 +767,7 @@ def shot_detail(match, player_id: int) -> dict:
     # ...e il fattore dello STADIO FINALE della scala, che la riga del voto porta
     # con se'. Senza, questa sezione somma a un numero che non e' quello scritto
     # sopra — che e' esattamente il difetto contro cui mette in guardia il commento
-    # qui accanto, ed e' successo lo stesso il 03/09/2026. Dall'11/09/2026 e' la
-    # parte LINEARE (v. saturation_linear), la stessa con cui il pannello mostra la
-    # riga delle conclusioni: la compressione sta in una riga sua e non tocca i tiri.
+    # qui accanto, ed e' successo lo stesso il 03/09/2026.
     fattore = row.get("scale_factor", 1.0) or 1.0
     per_unit = fattore * spread_k_for(role) * weight / reference[role]["std"]
     # LA FAMIGLIA DEI TIRI STA A CAVALLO DEI DUE GRUPPI: sga_post, xg_shots e

@@ -576,12 +576,13 @@ class VoteExplanationTests(SimpleTestCase):
         missing = sorted(k for k in every if not readable_label(k))
         self.assertEqual(missing, [])
 
-    def test_the_compression_is_a_line_of_its_own(self):
-        """Lo stadio finale schiaccia i voti alti. Fino all'11/09/2026 il pannello lo
-        nascondeva riscalando ogni voce col rapporto secante e spostando il «voto di
-        partenza» di conseguenza: due giocatori dello stesso ruolo partivano da
-        numeri diversi e nessuna riga diceva perche'. Ora la base e' la costante del
-        ruolo, le voci stanno sulla retta della scala, e la curva e' una riga sua."""
+    def test_the_compression_is_spread_over_the_slices(self):
+        """Lo stadio finale schiaccia i voti alti, e il pannello lo ripartisce
+        PROPORZIONALMENTE su ogni voce (rapporto secante) invece di mostrarlo come
+        riga a se': quella riga, provata l'11/09/2026, faceva leggere una doppietta
+        come «+2,86» seguita da «compressione −1,45», ed e' stata respinta. Quindi:
+        nessuna voce ``compression``, e le voci di una partita alta valgono MENO per
+        unita' di quelle di una partita bassa dello stesso ruolo."""
         average = self._averages("ATT", {"shots": 2.0, "touches": 40.0,
                                          "expected_assists": 0.1})
         a, base = saturation_linear("ATT")
@@ -589,13 +590,7 @@ class VoteExplanationTests(SimpleTestCase):
                                "expected_assists": 1.2, "xg_shots": 1.5}, 90,
                        self.REFERENCE, average, goal_adjustment=0.9)
         self.assertGreaterEqual(alto["voto"], 6.5)
-        comp = [c for c in alto["contributions"] if c.get("kind") == "compression"]
-        self.assertEqual(len(comp), 1)
-        self.assertEqual(comp[0]["label"], "compressione dei valori estremi")
-        self.assertLess(comp[0]["points"], -0.05)
-        self.assertEqual(comp[0], alto["contributions"][-1])   # chiude l'elenco
-        # La base non dipende dal voto: a parita' di ruolo, minuti e metro e' la
-        # stessa per la partita alta e per quella bassa.
+        self.assertFalse([c for c in alto["contributions"] if c.get("kind") == "compression"])
         del base
         shown = alto["base"] + sum(c["points"] for c in alto["contributions"]) + alto["other_points"]
         # le voci sono arrotondate al centesimo una per una: fino a un centesimo di scarto
@@ -605,7 +600,9 @@ class VoteExplanationTests(SimpleTestCase):
                         average, goal_adjustment=-0.2)
         self.assertLess(basso["voto"], 6.0)
         self.assertFalse([c for c in basso["contributions"] if c.get("kind") == "compression"])
-        self.assertAlmostEqual(basso["base"], alto["base"], places=6)
+        # sopra il centro la curva morde: la stessa unita' di indice vale meno nel
+        # pannello della partita alta che in quello della partita bassa
+        self.assertLess(alto["per_unit"], basso["per_unit"])
         shown = basso["base"] + sum(c["points"] for c in basso["contributions"]) + basso["other_points"]
         self.assertAlmostEqual(shown, basso["subtotal"], places=2)
         # e il portiere, che dallo stadio non passa: base = centro del ruolo, fattore 1
@@ -627,11 +624,12 @@ class VoteExplanationTests(SimpleTestCase):
         average = self._averages("ATT", {"shots": 2.0, "touches": 40.0})
         e = explain("ATT", {"shots": 5.0, "touches": 60.0}, 90, self.REFERENCE,
                     average, full=True)
-        # per_unit porta il fattore LINEARE dello stadio finale (la compressione e'
-        # una riga a se'), la scala del ruolo del completamento bayesiano e la
-        # scala di partita intera dei tassi: e' cio' per cui la pagina moltiplica.
+        # per_unit porta il rapporto dello stadio finale (compressione inclusa), la
+        # scala del ruolo del completamento bayesiano e la scala di partita intera
+        # dei tassi: e' cio' per cui la pagina moltiplica per arrivare al voto vero.
         from vfoot.services import bayesian_completion as bayes
-        fattore = ROLE_SATURATION["ATT"][2]
+        _, fattore = scale_saturation(merit_vote("ATT", {"shots": 5.0, "touches": 60.0}, 90,
+                                                 self.REFERENCE), "ATT")
         expected = (fattore * bayes.calibration("ATT")[1]
                     * bayes.rate_unit("ATT", self.REFERENCE))
         self.assertAlmostEqual(e["per_unit"], expected, places=5)
@@ -728,7 +726,8 @@ class VoteExplanationTests(SimpleTestCase):
         self.assertEqual(e["negatives"], [])
         self.assertNotIn("Male", to_sentence(e))
         shown = e["base"] + sum(c["points"] for c in e["contributions"]) + e["other_points"]
-        self.assertAlmostEqual(shown, e["subtotal"], places=2)
+        # le voci sono arrotondate al centesimo una per una: fino a un centesimo di scarto
+        self.assertAlmostEqual(shown, e["subtotal"], delta=0.011)
 
     # --- housekeeping ----------------------------------------------------
     def test_reports_minutes_played(self):

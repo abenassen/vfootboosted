@@ -1680,9 +1680,9 @@ function WhyThisVote({
             classic_rating.MINUTE_CONDITIONING), quindi non e' piu' la media secca
             del ruolo. Detto cosi', senza spiegare il meccanismo: il numero di
             partenza e' gia' quello giusto e le voci sotto sono tutte e sole cio'
-            che il giocatore ha aggiunto. Dall'11/09/2026 NON assorbe piu' la
-            compressione dei voti alti, che ha una riga sua in fondo all'elenco:
-            a parita' di ruolo e minuti la partenza e' la stessa per tutti. */}
+            che il giocatore ha aggiunto. La compressione dei voti alti e'
+            ripartita in proporzione su tutte le voci (la riga a se', provata
+            l'11/09/2026, faceva leggere una doppietta come +2,86 e -1,45). */}
         <div className="flex items-baseline justify-between gap-3 text-ink-faint">
           <span>Voto di partenza</span>
           <span className="shrink-0 font-mono text-[11px] font-semibold">{why.base.toFixed(1)}</span>

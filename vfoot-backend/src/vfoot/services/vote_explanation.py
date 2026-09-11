@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from vfoot.services.classic_rating import (
     DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
-    GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, saturation_compression,
-    saturation_linear, scale_saturation, shrinkage_for, TOTAL_WEIGHTS,
+    GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, scale_saturation,
+    shrinkage_for, TOTAL_WEIGHTS,
     UNSHRUNK_FEATURES, VOTE_CENTER, VOTE_MAX, VOTE_MIN, WEIGHTS,
     unshrunk_weight, vote_center_for,
     _feature_z, _raw_vote_from_index, exposure_z, scored_z, feature_scales,
@@ -849,14 +849,14 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     VISTI hanno aggiunto rispetto a chi non ha giocato, e uno spezzone breve ha voci
     piccole perche' gran parte della partita e' completata con la media del ruolo.
 
-    LO STADIO FINALE DELLA SCALA (classic_rating.scale_saturation) e' mostrato in
-    due parti, dall'11/09/2026. La sua RETTA — il fattore che riapre la
-    dispersione e la base del ruolo — moltiplica ogni voce ed e' la stessa per
-    ogni presenza del ruolo; la CURVA, che schiaccia i voti sopra il centro, e' una
-    riga a se' («compressione dei valori estremi», kind ``compression``). Prima si
-    riscalava ogni fetta col rapporto secante e la base assorbiva il resto: il
-    «voto di partenza» cambiava da un giocatore all'altro senza che nulla nel
-    pannello dicesse perche'.
+    LO STADIO FINALE DELLA SCALA (classic_rating.scale_saturation) e' ridistribuito
+    su ogni voce: ogni fetta e' moltiplicata per il rapporto «quanto e' diventato lo
+    scostamento dal centro» (compressione inclusa) e la base assorbe la costante.
+    L'11/09/2026 la curva e' stata mostrata per qualche ora come riga a se'
+    («compressione dei valori estremi»): su una doppietta il pannello diceva
+    «2 gol +2,86» e subito sotto «compressione −1,45», e il lettore vedeva un gol
+    enorme e una tassa misteriosa. RESPINTA dall'utente: la ripartizione
+    proporzionale, che qui torna, e' quella che si legge.
     """
     terms = _terms(role, totals, minutes, exposure)
     ref = reference.get(role)
@@ -864,7 +864,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         return {"positives": [], "negatives": [], "contributions": [],
                 "all_terms": [], "other_terms": [],
                 "other_tiny": {"count": 0, "points": 0.0},
-                "assist_note": "", "base": saturation_linear(role)[1],
+                "assist_note": "", "base": vote_center_for(role),
                 "other_points": 0.0, "other_count": 0, "minutes": minutes,
                 "low_minutes": False, "flat": False, "note": ""}
 
@@ -888,22 +888,21 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # (GK_SPREAD_K 0.8 contro 0.727), e una spiegazione costruita sulla scala di
     # movimento comprimeva ogni fetta del 9,1% — cioe' raccontava a un portiere un
     # voto piu' vicino al 6 di quello scritto accanto al suo nome.
-    # LO STADIO FINALE, IN DUE PARTI. La retta del ruolo (fattore e base, costanti:
-    # v. classic_rating.saturation_linear) e' la scala su cui si mostra ogni voce.
-    # La curva, che sopra il centro schiaccia il voto, e' calcolata sul voto COMPLETO
-    # prima dello stadio — esattamente dove lo scorer la applica — e diventa la riga
-    # «compressione dei valori estremi» in fondo all'elenco. Cosi' un 7,8 mostra
-    # voci che sommano a piu' di 7,8 e una riga negativa che dice di quanto la
-    # scala l'ha accorciato; prima quelle voci apparivano rimpicciolite e il voto di
-    # partenza si spostava, e la cosa non aveva un nome.
-    scale_factor, base_role = saturation_linear(role)
+    # LO STADIO FINALE, RICAVATO QUI: il rapporto secante «quanto e' diventato lo
+    # scostamento dal centro» sul voto COMPLETO prima dello stadio, esattamente
+    # dove lo scorer lo applica. Comprime il lato alto e riapre la dispersione
+    # DOPO che le voci sono state sommate: una scomposizione additiva lo rappresenta
+    # riscalando ogni fetta con quel rapporto e usando come base il centro
+    # riscalato (``scale_base``). Il fattore non e' un'opzione, e' una proprieta'
+    # della presenza — quindi si calcola, sempre.
     merit = (bd["vote"] if bayesian else _raw_vote_from_index(
         index_for_role(role, totals, minutes, exposure), role, minutes, reference,
         observed=observed_index(role, totals, minutes, exposure)))
     _pre = max(VOTE_MIN, min(VOTE_MAX, merit + goal_adjustment + assist_adjustment))
     _pre = max(VOTE_MIN, min(VOTE_MAX, _pre + result_nudge + red_adjustment
                              + own_goal_adjustment + penalty_adjustment))
-    compression = saturation_compression(_pre, role)
+    _fin, scale_factor = scale_saturation(_pre, role)
+    scale_base = _fin - scale_factor * (_pre - vote_center_for(role))
     per_unit = scale_factor * spread_k_for(role) * weight / ref["std"]
     # I FATTI OSSERVATI HANNO LA LORO SCALA, perche' il voto li attenua MENO (v.
     # classic_rating.UNSHRUNK_FEATURES): un gol segnato entrando all'85' pesa
@@ -1032,9 +1031,12 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         centre = (bd["anchor"] + bd["shift"] + bd["scale"] * (
             bd["base_index"] + sum(v * bayes.unit_for(role, k, reference) for k, v in mean_terms.items())
             - bd["anchor"]))
-    # La base nella scala finale: dove la retta del ruolo porta ``vote_center_for``
-    # (costante per ruolo), piu' la parte dei minuti riscalata dallo stesso fattore.
-    centre = base_role + scale_factor * (centre - vote_center_for(role))
+    # La base nella scala finale. Il voto grezzo parte da ``vote_center_for``, ma lo
+    # stadio finale comprime attorno a un ALTRO punto (il baricentro misurato del
+    # ruolo): la differenza fra i due, riscalata, e' una costante che appartiene alla
+    # base. Dimenticarla sposta la scomposizione di quella costante, e le voci
+    # sembrano non tornare col voto senza che si capisca perche'.
+    centre = scale_base + scale_factor * (centre - vote_center_for(role))
     raw = merit
     # Same order as the scorer: clamp the merit vote, add the (divergence-only)
     # result nudge, the red-card drop and the own-goal drop, then clamp back.
@@ -1190,12 +1192,6 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         pen_label = ("rigore decisivo sbagliato" if penalty_adjustment <= -0.75
                      else "rigore sbagliato")
         contributions.append(entry(p_pen, pen_label, kind="penalty"))
-    # LA COMPRESSIONE, PER ULTIMA: e' l'unica riga che non racconta nulla del
-    # giocatore ma della scala — sopra il centro la curva accorcia lo scostamento,
-    # e qui sta scritto di quanto. Sotto il centro vale zero e non compare.
-    if abs(compression) >= 0.005:
-        contributions.append(entry(compression, "compressione dei valori estremi",
-                                   kind="compression"))
     shown_rounded = sum(c["points"] for c in contributions)
     other_points = round(subtotal - centre - shown_rounded, 2)
 

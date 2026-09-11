@@ -181,9 +181,9 @@ export default function VotoPuroPage() {
             confrontato con il suo ruolo: la media di ogni ruolo è <b className="text-ink">6</b>, e
             da lì si sale o si scende in proporzione a quanto la partita si stacca dalla norma. Le
             prestazioni eccezionali vengono poi <b className="text-ink">compresse</b>: sopra la media
-            la scala si accorcia, così un 8 resta raro e un 9 rarissimo. Nel conto di ogni voto questo
-            passaggio ha una riga sua, «compressione dei valori estremi», e compare solo nei voti
-            alti. Il risultato viene arrotondato al mezzo voto, come una pagella, e sta tra 3 e 10.
+            la scala si accorcia, così un 8 resta raro e un 9 rarissimo. Nel conto di ogni voto la
+            compressione è ripartita su tutte le voci in proporzione. Il risultato viene arrotondato
+            al mezzo voto, come una pagella, e sta tra 3 e 10.
           </Step>
           <Step n={4} title="Le ultime correzioni">
             Chi ha giocato pochi minuti viene completato da un modello statistico: per ogni cosa

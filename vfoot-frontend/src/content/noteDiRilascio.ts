@@ -79,7 +79,7 @@ export const RILASCI: Rilascio[] = [
       {
         tipo: 'bilanciamento',
         testo:
-          'Il pannello del voto racconta il cambiamento: il voto di partenza è lo stesso per tutti i giocatori del tuo ruolo, ogni voce dice quanto i minuti visti hanno aggiunto, e per chi ha segnato o servito un assist in uno spezzone compare «attesa sui minuti non giocati».',
+          'Il pannello del voto racconta il cambiamento: ogni voce dice quanto i minuti visti hanno aggiunto rispetto a chi non ha giocato, e per chi ha segnato o servito un assist in uno spezzone compare «attesa sui minuti non giocati».',
       },
       {
         tipo: 'bilanciamento',
