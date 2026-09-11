@@ -62,6 +62,38 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-13',
+    versione: '1.13',
+    data: '11 settembre 2026',
+    titolo: 'La panchina si riordina come si sposta un oggetto',
+    sommario:
+      'L’ordine della panchina è la priorità con cui entrano le riserve, e si decide guardandolo tutto insieme. Il gesto per cambiarlo era rigido: la riga saltava di casella in casella sotto il dito, col mouse bisognava tenere premuto prima di poter muovere, e l’ultimo posto non si raggiungeva.',
+    voci: [
+      {
+        tipo: 'migliorato',
+        testo:
+          'Quando prendi una riga della panchina si solleva dal foglio e segue il dito con un filo di ritardo, come un oggetto che ha un peso; le altre le fanno posto scivolando e, al rilascio, si posa nella casella tratteggiata che la aspettava.',
+      },
+      {
+        tipo: 'migliorato',
+        testo:
+          'Da computer si trascina e basta: il cursore diventa una mano sopra le righe, e la presa parte al primo movimento senza dover tenere premuto. Sul telefono resta la pressione lunga, perché un dito che si muove subito sta scorrendo la pagina.',
+      },
+      {
+        tipo: 'migliorato',
+        testo:
+          'Trascinando verso il bordo dello schermo la pagina scorre da sola, così arrivi anche alle righe che non si vedono.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Una riga trascinata in fondo alla panchina arriva davvero all’ultimo posto: prima si fermava al penultimo e bisognava spostarle sopra l’ultimo.',
+        caso:
+          'Il calcolo contava le righe «sopra quella puntata», e sotto l’ultima non c’è nessuna riga da puntare: la posizione oltre la fine non esisteva.',
+      },
+    ],
+  },
+  {
     id: 'v-1-12',
     versione: '1.12',
     data: '5 settembre 2026',

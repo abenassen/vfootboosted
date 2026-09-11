@@ -255,6 +255,36 @@ function fmtKickoff(nm: { kickoff: string | null; kickoff_provisional: boolean }
  *  nel caso che va letto a colpo d'occhio. */
 type StartingTone = 'bad' | 'warn' | 'good' | 'muted';
 
+/** Una riga della panchina in mano: tutto quello che il ciclo di animazione deve
+ *  sapere, misurato una volta alla presa. Coordinate di PAGINA, non di finestra,
+ *  così lo scorrimento automatico vicino al bordo non le sposta. */
+type Grip = {
+  id: number;
+  el: HTMLElement;
+  /** L'ordine del DOM, congelato alla presa. */
+  order: number[];
+  /** L'ordine come si vedrà: specchio dello stato, per il ciclo. */
+  preview: number[];
+  tops: Map<number, number>;
+  heights: Map<number, number>;
+  gap: number;
+  listTop: number;
+  containerTop: number;
+  /** Dove il dito ha preso la riga, dal suo bordo alto. */
+  grabDy: number;
+  /** Il tratto in cui la carta può muoversi: fra un chiodo e l'altro. */
+  minY: number;
+  maxY: number;
+  pointerClientY: number;
+  /** Spostamento corrente della carta (smussato) e quello che il dito chiede. */
+  y: number;
+  target: number;
+  lastT: number;
+  raf: number;
+  /** La carta sta scivolando nella casella: gli eventi non contano più. */
+  settling: boolean;
+};
+
 function startingTone(
   s: NonNullable<TeamLineupPlayer['starting']>,
   inXI: boolean,
@@ -433,9 +463,30 @@ export default function FormationPage() {
   // buio e si scopre dove è finito solo lasciando la presa.
   const [dragPreview, setDragPreview] = useState<number[] | null>(null);
   const benchRowEls = useRef(new Map<number, HTMLElement>());
+  const benchListEl = useRef<HTMLDivElement | null>(null);
   const pressTimer = useRef<number | null>(null);
-  const pressFrom = useRef<{ x: number; y: number; id: number } | null>(null);
+  const pressFrom = useRef<{ x: number; y: number; id: number; el: HTMLElement; pointerId: number } | null>(null);
+  // La presa in corso, letta dal ciclo di animazione: sta in un ref e non nello
+  // stato perché cambia sessanta volte al secondo, e non deve ridisegnare niente.
+  const grip = useRef<Grip | null>(null);
   const blockScroll = useRef((e: TouchEvent) => e.preventDefault()).current;
+  // Col mouse si trascina e basta; col dito si tiene premuto, perché un dito che
+  // si muove subito sta scorrendo la pagina. La scritta sotto la panchina dice
+  // il gesto giusto per il puntatore che c'è.
+  const [finePointer] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia?.('(pointer: fine)').matches,
+  );
+  // Se la pagina sparisce a carta in mano (cambio rotta), niente resta appeso
+  // al documento. Qui, PRIMA dei return anticipati: gli hook non li superano.
+  useEffect(
+    () => () => {
+      document.removeEventListener('touchmove', blockScroll);
+      document.documentElement.style.cursor = '';
+      document.documentElement.style.userSelect = '';
+      if (grip.current) cancelAnimationFrame(grip.current.raf);
+    },
+    [blockScroll],
+  );
 
   // Places left open by a demoted starter, in the order they were vacated. They
   // are what keeps the pitch at eleven while the module is still being decided.
@@ -772,26 +823,31 @@ export default function FormationPage() {
   // mouse, dito e pennino, quindi il comportamento è uno solo e non due scritti
   // due volte.
 
-  /** Sposta `id` alla riga `visibleIndex`, LASCIANDO FERMI I CONGELATI.
+  /** Mette `id` alla posizione `at` della lista visibile, LASCIANDO FERMI I CONGELATI.
    *
    *  Il posto di chi ha la partita in corso è suo e non si tocca: non scende di
    *  una perché qualcuno gli è passato davanti, e nessuno lo scavalca. Quindi il
    *  riordino avviene fra i soli liberi, che poi riempiono le caselle rimaste
    *  libere nell'ordine nuovo.
    *
+   *  `at` è l'indice che `id` avrà nella lista intera (congelati compresi), non
+   *  «la riga puntata»: così «in fondo» è `length - 1` e non ha bisogno di un
+   *  posto oltre l'ultimo — era la ragione per cui l'ultimo posto non si
+   *  raggiungeva, si restava penultimi.
+   *
    *  Le posizioni dei congelati si rileggono DALL'ORDINE CORRENTE e non dalla
    *  panchina salvata, che chi apre la pagina a giornata cominciata senza aver mai
    *  schierato non ha affatto: fidandosi di quella, il riordino perdeva per strada
    *  tutti i congelati — quindici righe diventavano due. E l'ordine corrente è già
    *  passato da `pinFrozen`, quindi i due tratti coincidono. */
-  const reorderBench = (order: number[], id: number, visibleIndex: number): number[] => {
+  const placeBench = (order: number[], id: number, at: number): number[] => {
     const free = order.filter((x) => !lockedIds.has(x));
     const from = free.indexOf(id);
     if (from < 0) return order;
-    // L'indice VISIBILE conta anche i congelati; quello che serve è quanti liberi
-    // stanno sopra la riga puntata.
-    const freeAbove = order.slice(0, Math.max(0, visibleIndex)).filter((x) => !lockedIds.has(x)).length;
-    let to = Math.max(0, Math.min(free.length - 1, freeAbove > from ? freeAbove - 1 : freeAbove));
+    // Quanti liberi stanno sopra la posizione voluta, `id` escluso: è il suo
+    // indice nella lista dei liberi senza di lui, cioè dove va reinserito.
+    const others = order.filter((x) => x !== id);
+    let to = others.slice(0, Math.max(0, Math.min(others.length, at))).filter((x) => !lockedIds.has(x)).length;
     // ...and never across a frozen man: the move stops at the edge of the
     // player's own stretch. `stretch` numbers the free players by how many
     // frozen ones stand above them; the target must carry the same number.
@@ -811,26 +867,147 @@ export default function FormationPage() {
     return order.map((x) => (lockedIds.has(x) ? x : moved[f++]));
   };
 
-  const dragMoveTo = (clientY: number) => {
-    if (dragId == null) return;
-    const current = dragPreview ?? benchIds;
-    // La riga sotto il dito: si confronta col CENTRO di ognuna, che è il punto in
-    // cui l'occhio decide che il giocatore sta «lì».
-    let target = current.length - 1;
-    for (let i = 0; i < current.length; i++) {
-      const el = benchRowEls.current.get(current[i]);
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      if (clientY < r.top + r.height / 2) {
-        target = i;
-        break;
-      }
+  /** LA CARTA IN MANO.
+   *
+   *  Mentre si trascina l'ordine del DOM NON cambia: la riga presa si stacca dal
+   *  foglio con un `transform` e le altre scivolano al posto nuovo con un
+   *  `transform` loro, animato. Riordinare il DOM sotto il dito — com'era — fa
+   *  saltare la riga di scatto da una casella all'altra, ed è quella la
+   *  sensazione che «segue il dito» invece di essere tenuta in mano.
+   *
+   *  Le posizioni si misurano UNA volta, alla presa, in coordinate di pagina, e
+   *  poi si ragiona solo su quelle: altezze diverse (una riga con la nota, una
+   *  selezionata) si sommano per davvero invece di supporre righe tutte uguali.
+   *  Il ciclo a `requestAnimationFrame` muove la carta verso il dito con un
+   *  ritardo breve — è il peso dell'oggetto — e decide gli scambi quando il suo
+   *  CENTRO supera il centro della vicina: la regola che l'occhio si aspetta e
+   *  che non oscilla, perché dopo lo scambio le due si sono allontanate. */
+  const stackTops = (g: Grip, order: number[]): number[] => {
+    const tops: number[] = [];
+    let y = g.listTop;
+    for (const x of order) {
+      tops.push(y);
+      y += (g.heights.get(x) ?? 0) + g.gap;
     }
-    const next = reorderBench(current, dragId, target);
-    if (next !== current) setDragPreview(next);
+    return tops;
   };
 
-  /** LA PRESSIONE LUNGA AL POSTO DELLE FRECCETTE.
+  const tick = (t: number) => {
+    const g = grip.current;
+    if (!g || g.settling) return;
+    const dt = Math.min(48, Math.max(1, t - g.lastT));
+    g.lastT = t;
+    // Vicino al bordo dello schermo la pagina scorre da sola: con lo scorrimento
+    // bloccato dal trascinamento è l'unico modo di arrivare a una riga che non si
+    // vede. Le coordinate di pagina restano buone, il puntatore si rilegge sotto.
+    const edge = 64;
+    const vh = window.innerHeight;
+    let dy = 0;
+    if (g.pointerClientY < edge) dy = -Math.ceil((edge - g.pointerClientY) / 5);
+    else if (g.pointerClientY > vh - edge) dy = Math.ceil((g.pointerClientY - (vh - edge)) / 5);
+    if (dy) window.scrollBy(0, dy);
+    const pointerY = g.pointerClientY + window.scrollY;
+    const top0 = g.tops.get(g.id) ?? 0;
+    const h = g.heights.get(g.id) ?? 0;
+    // Il dito può andare oltre il chiodo, la carta no: ci sbatte contro e resta lì
+    // finché il dito non torna. Il divieto si sente prima di leggerlo.
+    g.target = Math.max(g.minY, Math.min(g.maxY, pointerY - g.grabDy - top0));
+    // Il peso dell'oggetto: la carta insegue il dito con una costante di 50 ms
+    // (a 600 px/s resta indietro di ~30 px, meno di mezza riga) e si inclina di
+    // un niente nel verso del ritardo, tornando piatta quando lo raggiunge.
+    const k = 1 - Math.exp(-dt / 50);
+    g.y += (g.target - g.y) * k;
+    const lag = g.target - g.y;
+    const tilt = Math.max(-2, Math.min(2, lag * 0.04));
+    g.el.style.transform = `translate3d(0, ${g.y.toFixed(2)}px, 0) scale(1.02) rotate(${tilt.toFixed(2)}deg)`;
+
+    settleOrder(g, top0 + g.y + h / 2);
+    g.raf = requestAnimationFrame(tick);
+  };
+
+  /** Gli scambi: la carta col centro a `centre` prende il posto della vicina
+   *  quando ne supera il centro. Uno scambio per volta, finché serve — e mai
+   *  attraverso un chiodo. */
+  const settleOrder = (g: Grip, centre: number) => {
+    let preview = g.preview;
+    for (let guard = 0; guard < preview.length; guard++) {
+      const p = preview.indexOf(g.id);
+      const tops = stackTops(g, preview);
+      let want = p;
+      // Un pixel di tolleranza: la carta ferma contro il fondo (o un chiodo) ha
+      // il centro ESATTAMENTE sul centro dell'ultima vicina, e un confronto
+      // stretto la lasciava penultima — sul telefono, dove le righe sono pari.
+      if (p > 0 && centre < tops[p - 1] + (g.heights.get(preview[p - 1]) ?? 0) / 2 + 1) want = p - 1;
+      else if (p < preview.length - 1 && centre > tops[p + 1] + (g.heights.get(preview[p + 1]) ?? 0) / 2 - 1) want = p + 1;
+      if (want === p) break;
+      const next = placeBench(preview, g.id, want);
+      if (next === preview) break; // fermo contro un chiodo
+      preview = next;
+    }
+    if (preview !== g.preview) {
+      g.preview = preview;
+      setDragPreview(preview);
+    }
+  };
+
+  const beginDrag = (id: number, el: HTMLElement, pointerId: number, clientY: number) => {
+    const order = benchIds;
+    const tops = new Map<number, number>();
+    const heights = new Map<number, number>();
+    for (const x of order) {
+      const r = benchRowEls.current.get(x)?.getBoundingClientRect();
+      if (!r) return;
+      tops.set(x, r.top + window.scrollY);
+      heights.set(x, r.height);
+    }
+    const first = order[0];
+    const second = order[1];
+    const gap =
+      second != null ? (tops.get(second) ?? 0) - ((tops.get(first) ?? 0) + (heights.get(first) ?? 0)) : 0;
+    // Il tratto in cui la carta può muoversi: fra il chiodo sopra e quello sotto.
+    const i = order.indexOf(id);
+    let lo = i;
+    while (lo > 0 && !lockedIds.has(order[lo - 1])) lo -= 1;
+    let hi = i;
+    while (hi < order.length - 1 && !lockedIds.has(order[hi + 1])) hi += 1;
+    const top0 = tops.get(id) ?? 0;
+    const listRect = benchListEl.current?.getBoundingClientRect();
+    try {
+      el.setPointerCapture(pointerId);
+    } catch {
+      /* il puntatore può essere già sparito: il trascinamento parte lo stesso */
+    }
+    document.addEventListener('touchmove', blockScroll, { passive: false });
+    document.documentElement.style.cursor = 'grabbing';
+    document.documentElement.style.userSelect = 'none';
+    el.style.transition = 'none';
+    el.style.willChange = 'transform';
+    grip.current = {
+      id,
+      el,
+      order,
+      preview: order,
+      tops,
+      heights,
+      gap,
+      listTop: tops.get(first) ?? 0,
+      containerTop: (listRect?.top ?? 0) + window.scrollY,
+      grabDy: clientY + window.scrollY - top0,
+      minY: (tops.get(order[lo]) ?? 0) - top0,
+      maxY: (tops.get(order[hi]) ?? 0) + (heights.get(order[hi]) ?? 0) - (heights.get(id) ?? 0) - top0,
+      pointerClientY: clientY,
+      y: 0,
+      target: 0,
+      lastT: performance.now(),
+      raf: 0,
+      settling: false,
+    };
+    setDragId(id);
+    setDragPreview(order);
+    grip.current.raf = requestAnimationFrame(tick);
+  };
+
+  /** LA PRESSIONE LUNGA AL POSTO DELLE FRECCETTE — sul dito.
    *
    *  Le due freccette erano bersagli da 21×11 pixel: sotto qualunque soglia
    *  ragionevole, ed e' il motivo per cui gli utenti scrivono che l'ordine della
@@ -842,6 +1019,11 @@ export default function FormationPage() {
    *  stessa riga: se si muove prima della soglia sta scorrendo la pagina e il
    *  gesto si annulla; se resta fermo vuole quella riga. Otto pixel di tolleranza
    *  perche' un dito fermo non e' mai fermo davvero.
+   *
+   *  COL MOUSE NIENTE ATTESA: un mouse non scorre la pagina trascinando, quindi
+   *  il dubbio non esiste e la presa parte al primo movimento. Tenere premuto
+   *  un quarto di secondo prima di poter muovere è il gesto di nessun programma
+   *  da scrivania, e la maniglia col cursore a mano lo dice prima di provare.
    *
    *  Lo scorrimento durante il trascinamento lo blocca un listener su `touchmove`
    *  non passivo, e non `touch-action`: quest'ultimo va deciso PRIMA che il gesto
@@ -859,6 +1041,8 @@ export default function FormationPage() {
     // I comandi dentro la riga restano comandi: un tocco sul segmentato non deve
     // diventare ne' una selezione ne' l'inizio di un trascinamento.
     if ((e.target as HTMLElement).closest('button')) return;
+    if (grip.current) return; // una carta per volta
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (immutableReason(id)) return; // il suo posto e' fissato: niente presa
     // Senza questo il dito (o il mouse) tenuto fermo su una riga avvia la
     // SELEZIONE DEL TESTO: il nome si evidenzia, il browser prende in mano il
@@ -866,38 +1050,48 @@ export default function FormationPage() {
     // vanno a muovere un'ancora di selezione.
     e.preventDefault();
     const el = e.currentTarget as HTMLElement;
-    const pointerId = e.pointerId;
-    pressFrom.current = { x: e.clientX, y: e.clientY, id };
+    pressFrom.current = { x: e.clientX, y: e.clientY, id, el, pointerId: e.pointerId };
+    if (e.pointerType === 'mouse') return; // parte al movimento, v. rowPointerMove
+    const clientY = e.clientY;
     pressTimer.current = window.setTimeout(() => {
       pressTimer.current = null;
+      pressFrom.current = null;
       try {
-        el.setPointerCapture(pointerId);
+        navigator.vibrate?.(8); // «presa»: un colpetto, dove il telefono lo dà
       } catch {
-        /* il puntatore puo' essere gia' sparito: il trascinamento parte lo stesso */
+        /* niente vibrazione: pazienza */
       }
-      document.addEventListener('touchmove', blockScroll, { passive: false });
-      setDragId(id);
-      setDragPreview(benchIds);
+      beginDrag(id, el, e.pointerId, clientY);
     }, 250);
   };
 
   const rowPointerMove = (e: React.PointerEvent) => {
-    if (dragId != null) {
-      dragMoveTo(e.clientY);
+    const g = grip.current;
+    if (g) {
+      g.pointerClientY = e.clientY;
       return;
     }
     const from = pressFrom.current;
     if (!from) return;
-    if (Math.abs(e.clientY - from.y) > 8 || Math.abs(e.clientX - from.x) > 8) cancelPress();
+    const moved = Math.abs(e.clientY - from.y) > 8 || Math.abs(e.clientX - from.x) > 8;
+    if (e.pointerType === 'mouse') {
+      if (Math.abs(e.clientY - from.y) > 4 || Math.abs(e.clientX - from.x) > 4) {
+        pressFrom.current = null;
+        beginDrag(from.id, from.el, from.pointerId, from.y);
+        if (grip.current) grip.current.pointerClientY = e.clientY;
+      }
+      return;
+    }
+    if (moved) cancelPress();
   };
 
   const rowPointerUp = (id: number) => (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
-    // Dito alzato prima della soglia e senza esserci mosso: era un tocco, e un
-    // tocco su un panchinaro apre la sua scheda.
-    const wasPress = pressTimer.current != null && pressFrom.current?.id === id;
+    // Dito alzato prima della soglia (o mouse rilasciato senza essersi mosso):
+    // era un tocco, e un tocco su un panchinaro apre la sua scheda.
+    const wasPress = pressFrom.current?.id === id && !grip.current;
     cancelPress();
-    if (dragId != null) {
+    if (grip.current) {
       dragEnd();
       return;
     }
@@ -907,17 +1101,46 @@ export default function FormationPage() {
     }
   };
 
+  /** LA CARTA SI POSA. Non si molla di colpo: scivola nella casella che le
+   *  altre le hanno lasciato, e solo a carta ferma l'ordine diventa quello vero
+   *  e i `transform` si azzerano — nello stesso istante e nello stesso posto,
+   *  quindi senza un salto. */
   const dragEnd = () => {
     document.removeEventListener('touchmove', blockScroll);
     cancelPress();
-    if (dragPreview) setBenchOrder(dragPreview);
-    setDragId(null);
-    setDragPreview(null);
+    const g = grip.current;
+    if (!g || g.settling) return;
+    g.settling = true;
+    cancelAnimationFrame(g.raf);
+    document.documentElement.style.cursor = '';
+    document.documentElement.style.userSelect = '';
+    // L'ultima parola ce l'ha il DITO, non la carta che gli va dietro: con un
+    // gesto secco la carta è ancora indietro di qualche riga, e rilasciare vuol
+    // dire «qui», dove sta il dito.
+    const top0 = g.tops.get(g.id) ?? 0;
+    const pointerY = g.pointerClientY + window.scrollY;
+    g.target = Math.max(g.minY, Math.min(g.maxY, pointerY - g.grabDy - top0));
+    settleOrder(g, top0 + g.target + (g.heights.get(g.id) ?? 0) / 2);
+    const p = g.preview.indexOf(g.id);
+    const finalY = stackTops(g, g.preview)[p] - (g.tops.get(g.id) ?? 0);
+    g.el.style.transition = 'transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1)';
+    g.el.style.transform = `translate3d(0, ${finalY.toFixed(2)}px, 0)`;
+    const finish = () => {
+      if (grip.current !== g) return;
+      g.el.style.transition = '';
+      g.el.style.transform = '';
+      g.el.style.willChange = '';
+      grip.current = null;
+      setBenchOrder(g.preview);
+      setDragId(null);
+      setDragPreview(null);
+    };
+    window.setTimeout(finish, 180);
   };
 
   /** «Fai entrare per primo»: il gesto che copre il caso vero. L'ordine fine si
    *  trascina, ma nove volte su dieci quello che si vuole è che UNO entri prima
-   *  degli altri, e per quello un tocco basta. Passa da `reorderBench`, quindi i
+   *  degli altri, e per quello un tocco basta. Passa da `placeBench`, quindi i
    *  posti fissati restano fissati: chi ha la partita in corso non si sposta e
    *  non viene scavalcato. */
   const benchToTop = (id: number) => {
@@ -932,7 +1155,7 @@ export default function FormationPage() {
       return;
     }
     setRefused(null);
-    setBenchOrder((b) => reorderBench(pinned(orderBench(ctx.roster, starterIds, b)), id, 0));
+    setBenchOrder((b) => placeBench(pinned(orderBench(ctx.roster, starterIds, b)), id, 0));
   };
 
   /** IL NUMERO DI DIFENSORI, CONGELATO DAL PRIMO CALCIO D'INIZIO.
@@ -952,11 +1175,25 @@ export default function FormationPage() {
   const byRole = (a: TeamLineupPlayer, b: TeamLineupPlayer) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || b.form - a.form;
   const starters = ctx.roster.filter((p) => starterIds.includes(p.player_id)).sort(byRole);
   const bench = benchIds.map((id) => byId.get(id)).filter((p): p is TeamLineupPlayer => !!p);
-  // Mentre il dito è giù si mostra l'anteprima, non l'ordine salvato: è il senso
-  // stesso del trascinare, vedere dove sta andando prima di lasciare.
-  const shownBench = (dragPreview ?? benchIds)
+  // Mentre il dito è giù il DOM resta nell'ordine della presa e l'anteprima si
+  // mostra coi `transform`: i numeri e le posizioni dicono dove sta andando
+  // ciascuno, senza che nessuna riga cambi posto nel DOM sotto il dito.
+  const domOrder = dragId != null && grip.current ? grip.current.order : benchIds;
+  const previewOrder = dragPreview ?? benchIds;
+  const shownBench = domOrder
     .map((id) => byId.get(id))
     .filter((p): p is TeamLineupPlayer => !!p);
+  const g = dragId != null ? grip.current : null;
+  const previewTops = g ? stackTops(g, previewOrder) : null;
+  const rowShift = (id: number): number => {
+    if (!g || !previewTops || id === g.id) return 0;
+    const i = previewOrder.indexOf(id);
+    return i < 0 ? 0 : previewTops[i] - (g.tops.get(id) ?? 0);
+  };
+  const hole =
+    g && previewTops
+      ? { top: previewTops[previewOrder.indexOf(g.id)] - g.containerTop, height: g.heights.get(g.id) ?? 0 }
+      : null;
   const starterRoles = starterIds.map((id) => byId.get(id)?.role).filter((r): r is PlayerRole => !!r);
   const classicErrors = isClassic && constraints ? validateClassic(starterRoles, constraints) : [];
   const gkOk = gkStarters.length === 1;
@@ -1583,17 +1820,29 @@ export default function FormationPage() {
               : 'In Aura il sostituto è il migliore disponibile; l’ordine conta solo a parità.'}
           </div>
           <div className="mt-1 text-[11px] text-ink-faint">
-            Tieni premuto e trascina per cambiare l'ordine.
+            {finePointer ? 'Trascina una riga per cambiare l’ordine.' : 'Tieni premuto e trascina per cambiare l’ordine.'}
           </div>
           <div
-            className="divide-y divide-line"
-            // Il gesto si segue sul CONTENITORE, non sulla riga: mentre la lista si
-            // riordina sotto il dito la riga di partenza cambia posto, e gli eventi
-            // agganciati a lei arriverebbero a singhiozzo.
+            ref={benchListEl}
+            // `isolate`: la casella vuota sta a z negativo, e senza un contesto suo
+            // finirebbe DIETRO lo sfondo della scheda invece che sotto le righe.
+            className="relative isolate divide-y divide-line"
+            // Il gesto si segue sul CONTENITORE, non sulla riga: la riga presa ha la
+            // cattura del puntatore, e da lei gli eventi risalgono fin qui.
             onPointerMove={rowPointerMove}
             onPointerCancel={dragEnd}
           >
-            {shownBench.map((p, i) => (
+            {/* LA CASELLA VUOTA: dove la carta si poserà. Le altre righe le hanno
+                fatto posto scivolando, e senza un segno quel vuoto sembrerebbe un
+                buco nella lista invece di un posto che aspetta. */}
+            {hole ? (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 -z-10 rounded-lg border border-dashed border-line bg-surface-2/60 transition-[top] duration-200 ease-out"
+                style={{ top: hole.top, height: hole.height }}
+              />
+            ) : null}
+            {shownBench.map((p) => (
               <RosterRow
                 key={p.player_id}
                 p={p}
@@ -1617,13 +1866,15 @@ export default function FormationPage() {
                    volte in dieci centimetri, e il gesto lo conferma — il dito ci
                    sbatte contro. */
                 wall={!closed && lockedIds.has(p.player_id)}
-                order={i + 1}
+                order={previewOrder.indexOf(p.player_id) + 1}
                 rowRef={(el) => {
                   if (el) benchRowEls.current.set(p.player_id, el);
                   else benchRowEls.current.delete(p.player_id);
                 }}
                 drag={{
                   dragging: dragId === p.player_id,
+                  inFlight: dragId != null,
+                  shift: rowShift(p.player_id),
                   disabled: !!immutableReason(p.player_id),
                   onPointerDown: rowPointerDown(p.player_id),
                   onPointerUp: rowPointerUp(p.player_id),
@@ -2075,13 +2326,27 @@ function RosterRow({
     onPointerDown: (e: React.PointerEvent) => void;
     onPointerUp: (e: React.PointerEvent) => void;
     dragging: boolean;
+    /** Qualcuno (non necessariamente questa riga) è in mano: le righe ferme
+     *  scivolano di `shift` pixel verso il posto nuovo, con transizione. */
+    inFlight: boolean;
+    shift: number;
     disabled: boolean;
   };
   rowRef?: (el: HTMLElement | null) => void;
 }) {
+  // La riga in mano il suo `transform` lo riceve dal ciclo di animazione, non da
+  // qui: React non deve né scriverlo né toglierlo finché la carta non si è posata.
+  const style: React.CSSProperties | undefined =
+    drag && drag.inFlight && !drag.dragging
+      ? {
+          transform: drag.shift ? `translate3d(0, ${drag.shift}px, 0)` : undefined,
+          transition: 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+        }
+      : undefined;
   return (
     <div
       ref={rowRef}
+      style={style}
       onPointerDown={drag?.onPointerDown}
       onPointerUp={drag?.onPointerUp}
       role={drag ? 'button' : undefined}
@@ -2102,10 +2367,19 @@ function RosterRow({
         // millisecondo di pressione, cioè molto prima che si sappia se è un
         // trascinamento.
         drag && 'select-none',
+        // La mano aperta dice «si prende» prima di provare: solo dove c'è un
+        // puntatore che la mostra, e non su una riga fissata.
+        drag && !drag.disabled && (drag.dragging ? 'cursor-grabbing' : 'cursor-grab'),
+        drag && !drag.disabled && !drag.inFlight && 'transition-colors hover:bg-surface-2/60',
         selected && 'bg-surface-2',
-        // La riga che sta sotto il dito: alzata dal foglio, così si vede che è in
-        // mano e non semplicemente selezionata.
-        drag?.dragging && 'rounded-lg bg-surface shadow-md ring-1 ring-line',
+        // La riga che sta in mano: alzata dal foglio — ombra larga, un filo più
+        // grande (lo scale lo dà il ciclo di animazione) e sopra tutte le altre,
+        // così si vede che è in mano e non semplicemente selezionata. L'ombra
+        // sfuma via al posarsi invece di sparire di colpo.
+        'transition-shadow duration-150',
+        drag?.dragging
+          && 'relative z-20 -mx-1 rounded-lg bg-surface px-1 ring-1 ring-line'
+            + ' shadow-[0_2px_6px_rgba(0,0,0,0.12),0_14px_28px_-8px_rgba(0,0,0,0.35)]',
         // Deciso solo QUANDO la presa è partita: al `pointerdown` non si sa ancora
         // se sarà un trascinamento o una scorsa, e toglierlo in anticipo
         // bloccherebbe lo scorrimento della pagina su tutta la panchina.
