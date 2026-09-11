@@ -594,10 +594,6 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
             why = explain(row.get("role") or roles.get(a.player_id, ""), feats[key],
                           mins.get(key, 0), reference, averages,
                           exposures.get(key, 0.0),
-                          # Lo stadio finale della scala: senza questi due la
-                          # scomposizione non torna col voto scritto sopra.
-                          scale_factor=row.get("scale_factor", 1.0),
-                          scale_base=row.get("scale_base"),
                           result_nudge=row.get("result_nudge", 0.0),
                           red_adjustment=row.get("red_adjustment", 0.0),
                           own_goal_adjustment=row.get("own_goal_adjustment", 0.0),
@@ -618,6 +614,7 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           # an assist is a bonus, not a feature: the explanation says
                           # so when the pass behind it carried little expected value
                           assists=a.assists or 0,
+                          goals=a.goals or 0,
                           # the per-feature ledger: off by default (it is far bigger
                           # than the vote it explains), on for the analysis report
                           full=full_explanation,
@@ -770,7 +767,9 @@ def shot_detail(match, player_id: int) -> dict:
     # ...e il fattore dello STADIO FINALE della scala, che la riga del voto porta
     # con se'. Senza, questa sezione somma a un numero che non e' quello scritto
     # sopra — che e' esattamente il difetto contro cui mette in guardia il commento
-    # qui accanto, ed e' successo lo stesso il 03/09/2026.
+    # qui accanto, ed e' successo lo stesso il 03/09/2026. Dall'11/09/2026 e' la
+    # parte LINEARE (v. saturation_linear), la stessa con cui il pannello mostra la
+    # riga delle conclusioni: la compressione sta in una riga sua e non tocca i tiri.
     fattore = row.get("scale_factor", 1.0) or 1.0
     per_unit = fattore * spread_k_for(role) * weight / reference[role]["std"]
     # LA FAMIGLIA DEI TIRI STA A CAVALLO DEI DUE GRUPPI: sga_post, xg_shots e
@@ -786,6 +785,17 @@ def shot_detail(match, player_id: int) -> dict:
     per_unit_obs = (fattore * spread_k_for(role)
                     * unshrunk_weight(role, mins, reference) / reference[role]["std"])
     unit_of = (lambda k: per_unit_obs if k in UNSHRUNK_FEATURES else per_unit)
+    # IL COMPLETAMENTO BAYESIANO (dall'11/09/2026): la riga delle conclusioni del
+    # pannello e' peso x (z completato - h z neutro) - t x media, sulla scala di
+    # partita intera per la scala del ruolo. Qui si usano le stesse funzioni, cosi'
+    # la sezione somma alla riga per costruzione e non per coincidenza.
+    from vfoot.services import bayesian_completion as bayes
+    bayesian = bayes.is_active(role)
+    t_frac = min(mins, 90) / 90.0
+    if bayesian:
+        _, _scala, _ = bayes.calibration(role)
+        _units = {k: fattore * _scala * bayes.unit_for(role, k, reference) for k in _SHOT_FAMILY}
+        unit_of = (lambda k: _units[k])
 
     counted = [i for i, s in enumerate(shots) if not s["own_goal"]]
     n = len(counted)
@@ -865,6 +875,11 @@ def shot_detail(match, player_id: int) -> dict:
         che e' fissata da un test."""
         t = totals_for(mask)
         t = {**t, **derived_features(t)}
+        if bayesian:
+            return sum(weights.get(k, 0.0) * unit_of(k)
+                       * (bayes.completed_z(role, k, t.get(k, 0.0), t_frac, scales)
+                          - (1.0 - t_frac) * bayes.neutral_z(role, k, scales))
+                       for k in _SHOT_FAMILY)
         return sum(weights.get(k, 0.0) * scored_z(k, t.get(k, 0.0), scales) * unit_of(k)
                    for k in _SHOT_FAMILY)
 
@@ -925,7 +940,8 @@ def shot_detail(match, player_id: int) -> dict:
 
     # Il metro: dove sta la riga di chi non ha concluso, rispetto ai pari ruolo.
     mean_terms = get_role_averages(match.competition_season_id).get(role, {})
-    baseline = empty_value - sum(mean_terms.get(k, 0.0) * unit_of(k) for k in _SHOT_FAMILY)
+    baseline = empty_value - sum(mean_terms.get(k, 0.0) * unit_of(k) for k in _SHOT_FAMILY) * (
+        t_frac if bayesian else 1.0)
     return {"shots": out, "baseline": round(baseline, 3),
             "total": round(baseline + joint, 3)}
 

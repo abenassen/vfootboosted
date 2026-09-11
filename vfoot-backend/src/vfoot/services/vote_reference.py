@@ -178,7 +178,12 @@ def weights_fingerprint() -> str:
 #           righe sulla 25-26, +0.067 di voto grezzo, 11 voti che cambiano casella —
 #           quindi QUI i voti si muovono davvero e la cache su file li servirebbe
 #           vecchi. Chi rilegge: classic_rating.effective_xgot, che porta la misura.
-SCORING_CODE_VERSION = 11
+#  11 -> 12: il completamento bayesiano dei minuti non giocati (services/
+#           bayesian_completion) sostituisce proiezione a 90, attenuazione e curva
+#           per minuto per i tre ruoli di movimento; pesi vincolati, centro e scala
+#           per ruolo. L'artifact e' nell'impronta qui sotto, ma il cambio di
+#           forward e' codice, e va segnato qui.
+SCORING_CODE_VERSION = 12
 
 
 def scoring_fingerprint() -> str:
@@ -203,6 +208,9 @@ def scoring_fingerprint() -> str:
     payload = {
         "code": SCORING_CODE_VERSION,
         "weights": weights_fingerprint(),
+        # Prior, dispersioni e calibrazione del completamento bayesiano dei minuti:
+        # ritararli cambia i voti di ogni spezzone, e centro/scala anche a 90'.
+        "bayesian_completion": _bayesian_artifact_sha(),
         # The calibrated scale, not just the weights that produced it.
         "reference": _load() or {},
         "gates": [cr.MIN_MINUTES_RATED, cr.MIN_TOUCHES_RATED,
@@ -253,6 +261,26 @@ def save(reference: dict, role_averages: dict, *, season_id: int,
 _cache: dict | None = None
 
 
+def _bayesian_artifact_sha() -> str | None:
+    from vfoot.services import bayesian_completion as bayes
+    return bayes.artifact_sha256()
+
+
+def _reference_kept_on_purpose(data: dict) -> bool:
+    """La reference e' stata calibrata con i pesi PRECEDENTI, e va bene cosi'.
+
+    Dall'11/09/2026 il completamento bayesiano ha pesi suoi ma e' stato tarato SU
+    QUESTA reference — scale, medie, dispersioni — e la sua calibrazione affine le
+    ha assorbite: ricalibrarla con i pesi nuovi produrrebbe un modello diverso da
+    quello misurato. L'artifact pinna l'impronta dei pesi con cui la reference fu
+    fatta e quella dei pesi correnti; se entrambe tornano, il disallineamento e'
+    voluto e non c'e' niente da ricalibrare."""
+    from vfoot.services import bayesian_completion as bayes
+    art = bayes.artifact()
+    return bool(art) and (art.get("reference_weights_fingerprint") == data.get("weights_fingerprint")
+                          and art.get("weights_fingerprint") == weights_fingerprint())
+
+
 def _load() -> dict | None:
     global _cache
     if _cache is not None:
@@ -260,7 +288,8 @@ def _load() -> dict | None:
     if not REFERENCE_PATH.exists():
         return None
     data = json.loads(REFERENCE_PATH.read_text())
-    if data.get("weights_fingerprint") != weights_fingerprint():
+    if (data.get("weights_fingerprint") != weights_fingerprint()
+            and not _reference_kept_on_purpose(data)):
         # Loud on purpose: the votes are now being scored against a scale that no
         # longer matches the weights producing the indices. Still usable — better
         # a slightly stale scale than none — but someone must recalibrate.
@@ -275,6 +304,8 @@ def clear_cache() -> None:
     """Drop the in-process copy (after a recalibration, or in tests)."""
     global _cache
     _cache = None
+    from vfoot.services import bayesian_completion as bayes
+    bayes.clear_cache()
 
 
 def fixed_reference() -> dict | None:

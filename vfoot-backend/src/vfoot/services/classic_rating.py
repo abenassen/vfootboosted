@@ -173,7 +173,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "expected_assists": 0.049,
+    "expected_assists": 0.057808759370212036,
     # The DISCRETE counterpart of xA, and the creator's side of a big chance —
     # verified as the PASSER's stat, not the shooter's: it never exceeds the
     # player's own key passes (0 violations in 10,067 player-matches), 36% of the
@@ -280,7 +280,7 @@ TOTAL_WEIGHTS = {
     # assist pagavamo il flag +0.133 contro +0.080 della Redazione, +0.093 dello
     # Statistico e +0.015 di SofaScore — il piu' alto del panel.
     # Tabelle in docs/voto_questioni_aperte.md §2.
-    "big_chance_created": 0.020,
+    "big_chance_created": 0.0,
     # L'ASSIST, come il gol. La simmetria mancava: ``shots_goal`` sta qui col suo
     # peso "on top of +3 bonus", quindi l'esito di una CONCLUSIONE il voto base lo
     # pagava gia', quello di un PASSAGGIO no — e non c'era una ragione scritta per la
@@ -318,7 +318,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "sga_post": 0.0335,
+    "sga_post": 0.03559042538884024,
     # = β: the mass of chances occupied. NON rialzato insieme a S, quindi β/S passa
     # da 1/3 a 1/4.5. E' una deroga consapevole al rapporto scritto sopra: β/S
     # esiste per l'ORDINAMENTO dei gol (un gol difficile deve battere un tap-in) e
@@ -330,7 +330,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "xg_shots": 0.005,
+    "xg_shots": 0.0,
     # RIAZZERATO il 01/09/2026, dopo essere stato acceso a 0.100 il 25/08 (e prima
     # ancora 0.181, poi 0 senza motivazione scritta).
     #
@@ -376,32 +376,32 @@ TOTAL_WEIGHTS = {
     # riduce la xA da 0.049 a 0.024 e sposta credito su ``passes_completed``. Qui la
     # xA NON si tocca, perche' la coda peggiora a toccarla e perche' un solo cambio
     # per volta si sa da dove viene.
-    "key_passes": 0.020,
+    "key_passes": 0.0,
     # IL BLOCCO DEL VOLUME, x0.7 il 29/08/2026 (v. la nota su sga_post). Tirare
     # tanto restava creditato quanto l'esecuzione, e le due cose si compensavano
     # quasi tiro per tiro: sprecare era gratis sotto 0.137 di xG, cioe' sulla
     # maggioranza dei tiri. Continuano a pesare — provarci vale — ma meno di come
     # si e' calciato.
-    "shots_on_target": 0.0175,
+    "shots_on_target": 0.00886295621279995,
     # RITARATO IL 04/09/2026: 0.0176 -> 0.0053. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "shots": 0.0053,              # shot ACTIVITY still rewarded, not penalised
+    "shots": 0.021493926659463473,              # shot ACTIVITY still rewarded, not penalised
     # RITARATO IL 04/09/2026: azzerato (era 0.0062). Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "shots_off": 0,          # even an off-target attempt: small credit for shooting
+    "shots_off": 0.0,          # even an off-target attempt: small credit for shooting
     # RISOLTO CONTRO IL GIUDICE, non ottimizzato (03/09/2026). L'ottimizzazione lo
     # aveva messo a -0.0264, che e' il punto di massima correlazione: sulle 75
     # presenze con l'errore il nostro voto stava 0.383 sotto lo Statistico piu' di
     # quanto ci stia in generale. Toglierlo COSTA 0.0006 di correlazione e vale
     # 0.054 di errore su quei giocatori — la Pearson non vede uno scostamento
     # sistematico su 75 righe di 7696, l'utente che apre il pannello si'.
-    "errors_led_to_goal": -0.0188,  # una occorrenza: -0.85 di voto
+    "errors_led_to_goal": -0.030608848483054507,  # una occorrenza: -0.85 di voto
     # Conceding a penalty hands over roughly 0.78 expected goals through a clear
     # individual foul, and — unlike a missed penalty — carries NO fantacalcio
     # malus, so the base vote is the only place it can register at all.
@@ -417,7 +417,7 @@ TOTAL_WEIGHTS = {
     # e' anche marcata come errore che porta a un gol.
     # Stessa storia (v. errors_led_to_goal): l'ottimizzazione lo portava a -0.0409,
     # con 0.312 di scarto sulle 76 presenze che concedono un rigore.
-    "penalties_conceded": -0.0355,  # una occorrenza: -1.60 di voto
+    "penalties_conceded": -0.04306608342491431,  # una occorrenza: -1.60 di voto
     # Winning one is the mirror image and equally unrewarded: the bonus goes to
     # whoever converts, never to the player who earned it.
     # RITARATO IL 04/09/2026: 0.0146 -> 0.0241. Le righe qui sopra raccontano come si
@@ -425,7 +425,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "penalties_won": 0.0251,  # una occorrenza: +1.40 (v. tests_rare_events)
+    "penalties_won": 0.02645377908306592,  # una occorrenza: +1.40 (v. tests_rare_events)
     # Interventions in a dangerous position. Kept as impact totals, not per-90:
     # their value does not scale with how long you played.
     #
@@ -484,7 +484,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "clearances_off_line": 0.0039,  # una occorrenza: +0.21 (v. tests_rare_events)
+    "clearances_off_line": 0.016988120582523778,  # una occorrenza: +0.21 (v. tests_rare_events)
     "last_man_tackle": 0.0,
     # An error that let the opponent SHOOT, without a goal following.
     # RITARATO IL 04/09/2026: -0.0113 -> -0.0057. Le righe qui sopra raccontano come si
@@ -492,13 +492,13 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "errors_led_to_shot": -0.0059,  # una occorrenza: -0.14 (v. tests_rare_events)
+    "errors_led_to_shot": -0.016933005036683803,  # una occorrenza: -0.14 (v. tests_rare_events)
     # RITARATO IL 04/09/2026: 0.0088 -> 0.0016. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "shots_blocked": 0.0016,      # the defence intervened (x0.7 col blocco volume)
+    "shots_blocked": 0.0027988060767783615,      # the defence intervened (x0.7 col blocco volume)
     # PROVIDER PROXY, and the only one in the model — read the note below before
     # touching it.
     # RITARATO IL 04/09/2026: 0.0850 -> 0.1089. Le righe qui sopra raccontano come si
@@ -506,7 +506,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "defensive_value": 0.1089,
+    "defensive_value": 0.10669952947097831,
 }
 
 # --- The one feature we do not measure ourselves ------------------------------
@@ -647,7 +647,7 @@ PER90_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "dribbles_won": 0.0483,
+    "dribbles_won": 0.04160363923759781,
     # x0.70 il 01/09/2026 — e questo peso ormai vale SOLO per CEN e ATT, perche' i
     # difensori hanno un valore assoluto in ROLE_WEIGHTS. Coefficiente per 1 sd dopo
     # il taglio: CEN +0.151, ATT +0.211, contro Redazione +0.089/+0.144 e Statistico
@@ -671,19 +671,19 @@ PER90_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "duels_won": 0.0164,
+    "duels_won": 0.0,
     # RITARATO IL 04/09/2026: -0.0631 -> -0.1011. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "duels_lost": -0.1011,          # the losing side of the contests we reward
+    "duels_lost": -0.04861752338381368,          # the losing side of the contests we reward
     # RITARATO IL 04/09/2026: azzerato (era -0.0341). Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "dribbled_past": 0,       # subset of duels_lost: beaten one-on-one is worse
+    "dribbled_past": 0.0,       # subset of duels_lost: beaten one-on-one is worse
                                     # ...ma SOLO per un difensore: v. ROLE_WEIGHTS
     # IL BLOCCO DEL POSSESSO, x0.50 il 01/09/2026 — questo peso, ``passes_completed``
     # e ``touches``. Sono TRE MODI DI CONTARE LA STESSA COSA: r(palloni giocati,
@@ -718,7 +718,7 @@ PER90_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "passes_opp_half": 0,      # progression: a pass in the opponent half is worth more
+    "passes_opp_half": 0.0,      # progression: a pass in the opponent half is worth more
     # APPUNTO APERTO (29/08/2026), rimandato di proposito. ``duels_lost`` CONTIENE
     # i duelli aerei persi: verificato su 10.950 presenze della 25-26 con zero
     # violazioni su entrambi i lati (duels_lost >= aerials_lost, duels_won >=
@@ -739,99 +739,99 @@ PER90_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "aerials_won": 0,
+    "aerials_won": 0.0,
     # RITARATO IL 04/09/2026: -0.0157 -> -0.0086. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "aerials_lost": -0.0086,
+    "aerials_lost": -0.01190284078747009,
     # RITARATO IL 04/09/2026: 0.0107 -> 0.0190. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "tackles_won": 0.019,          # a committed, deliberate intervention
+    "tackles_won": 0.03642212456616615,          # a committed, deliberate intervention
     # RITARATO IL 04/09/2026: 0.0117 -> 0.0324. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "was_fouled": 0.0324,           # an opponent had to stop you illegally
+    "was_fouled": 0.04476268251875272,           # an opponent had to stop you illegally
     # RITARATO IL 04/09/2026: 0.0331 -> 0.0268. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "long_balls_completed": 0.0268,
+    "long_balls_completed": 0.026938142661208333,
     # RITARATO IL 04/09/2026: azzerato (era 0.0222). Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "crosses_completed": 0,    # (reactivated by the hand-tuning)
+    "crosses_completed": 0.0,    # (reactivated by the hand-tuning)
     # RITARATO IL 04/09/2026: azzerato (era 0.0072). Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "touches_in_box": 0,
-    "interceptions": 0.0298,
+    "touches_in_box": 0.0,
+    "interceptions": 0.047017337275873004,
     # RITARATO IL 04/09/2026: 0.0187 -> 0.0067. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "ball_recoveries": 0.0067,
+    "ball_recoveries": 0.018926235976612058,
     # RITARATO IL 04/09/2026: azzerato (era 0.0116). Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "blocks": 0,
+    "blocks": 0.0,
     # RITARATO IL 04/09/2026: 0.0226 -> 0.0647. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "clearances": 0.0647,
+    "clearances": 0.08290576000168928,
     # passes_completed/touches held at 0.01: the earlier kurtosis-gradient nudge
     # (0.01 -> 0.02, with passes_opp_half 0.05 -> 0.06) flattened the distribution
     # toward Statistico's, but that low kurtosis is a symptom of Statistico being
     # result-driven, not a target — and the possession up-weight worked against
     # tempering high votes in defeats (Koopmeiners). Reverted; result-awareness is
     # instead carried by the (stronger) result mitigation below.
-    "passes_completed": 0.0192,
+    "passes_completed": 0.06115098923160221,
     # RITARATO IL 04/09/2026: 0.0125 -> 0.0347. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "touches": 0.0347,
+    "touches": 0.0,
     # RITARATO IL 04/09/2026: -0.0189 -> -0.0510. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "errors_bad_passes": -0.051,
+    "errors_bad_passes": -0.012573033998180983,
     # RITARATO IL 04/09/2026: -0.0163 -> -0.0217. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "errors_dispossessed": -0.0217,
+    "errors_dispossessed": -0.025215090830400893,
     # RITARATO IL 04/09/2026: -0.0190 -> -0.0281. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "errors_miscontrols": -0.0281,
+    "errors_miscontrols": -0.03054105608872995,
     # RITARATO IL 04/09/2026: -0.0114 -> -0.0249. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "errors_fouls_committed": -0.0249,
+    "errors_fouls_committed": -0.03527841417965513,
     # dribbles_won(+) / dribbles_attempted(-) is a deliberate RATE pairing, like
     # duels_won/duels_lost: the negative on the superset makes the net contribution
     # turn negative below a break-even success rate, so many failed take-ons cost
@@ -880,7 +880,7 @@ PER90_WEIGHTS = {
     # (Redazione 0.6347 -> 0.6303, Statistico 0.6597 -> 0.6507, SofaScore 0.7826 ->
     # 0.7694 fra 0 e +0.077), quindi fra i valori ammessi il piu' piccolo che fa il
     # lavoro e' il migliore: qui costa -0.0003, -0.0011 e -0.0016.
-    "dribbles_attempted": 0.0000,
+    "dribbles_attempted": 0.0,
 }
 
 WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / breakdowns
@@ -974,8 +974,10 @@ WEIGHTS = {**TOTAL_WEIGHTS, **PER90_WEIGHTS}  # union, for feature fetch / break
 # fine e' su due nomi e su due centesimi. Se un domani i numeri si muovono, non
 # inseguirli: rileggere questa nota e decidere di nuovo.
 ROLE_WEIGHTS = {
-    Player.ROLE_MID: {"duels_lost": -0.0975, "duels_won": 0.0257},
-    Player.ROLE_FWD: {"duels_lost": 0, "duels_won": 0.0238},
+    # Dall'11/09/2026 i tre valori vengono dalla ricerca bayesiana vincolata (v.
+    # services/bayesian_completion): il difensore usa il valore base di PER90_WEIGHTS.
+    Player.ROLE_MID: {"duels_lost": -0.07072442870667829, "duels_won": 0.026443242169541713},
+    Player.ROLE_FWD: {"duels_lost": 0.0, "duels_won": 0.042625878910532544},
 }
 
 
@@ -1017,7 +1019,13 @@ SHOT_DETAIL_FEATURES = frozenset(SHOT_TYPE_TO_FEATURE.values())
 # medio contro i +0.274 di un gol vero. A 0.40 sta all'85° percentile delle parate:
 # lo batte una buona parata, non gli arriva un tiro debole e centrale — che e' il
 # giudizio che si voleva.
-SGA_POST_WOODWORK = 0.40
+#
+# RIALZATO a 0.60 l'11/09/2026: da quando il gol e' pagato per impatto (v. il credito
+# nella banda) il legno, che dello stesso tiro e' l'esito piu' vicino, era rimasto
+# indietro. 0.60 sta sotto la mediana di un gol (0.626) e sopra la buona parata: il
+# palo vale quasi un gol nell'esecuzione, non nel risultato. La stessa costante entra in
+# EXPOSURE_POST_OUTCOME, quindi il difensore che lo concede paga la stessa cifra.
+SGA_POST_WOODWORK = 0.60
 # UN TIRO MURATO NON VALE NIENTE, e la ragione non e' una scelta di gusto: e' che
 # l'xG ha GIA' scontato il rischio di essere murati, quindi qualunque imputazione
 # positiva conta due volte la stessa cosa.
@@ -1587,20 +1595,25 @@ VOTE_SATURATION_T = 1.0
 # sulla pipeline vera e centrano media e dispersione di ogni ruolo a zero.
 ROLE_SATURATION = {          # ruolo: (centro_pre, centro_dopo, fattore)
     # Per intero, non per vezzo: v. la nota sulla riproducibilita' sopra.
-    Player.ROLE_DEF: (5.9555126399707925, 6.062612844212648, 1.5741175661583577),
-    Player.ROLE_MID: (6.047340997248938, 6.107976399551081, 1.576194793569985),
-    Player.ROLE_FWD: (6.101973810718524, 6.181583308706752, 1.6604646283704683),
+    # Le terne del 04/09/2026, che sono quelle su cui il completamento bayesiano e'
+    # stato tarato (services/bayesian_completion): la calibrazione affine del modello
+    # e' stata risolta CON queste, e cambiarle sposterebbe centro e scala di ogni ruolo.
+    Player.ROLE_DEF: (5.955666852686118, 6.061230791524389, 1.5485834273858712),
+    Player.ROLE_MID: (6.052875763317001, 6.1238237595148695, 1.596370972734363),
+    Player.ROLE_FWD: (6.097521915325461, 6.155905316629372, 1.676461101184294),
 }
 
 
 def scale_saturation(vote: float, ref_key: str) -> tuple[float, float]:
     """Il voto dopo lo stadio finale, e DI QUANTO e' stato riscalato.
 
-    Il secondo valore serve alla spiegazione: la scomposizione del voto e' additiva
-    (base + una fetta per voce) e una curva non lineare in fondo la farebbe non
-    tornare. Moltiplicando ogni fetta per questo fattore, e usando ``centro_dopo``
-    come base, la somma torna esatta — perche' il fattore e' definito proprio come
-    "quanto e' diventato lo scostamento dal centro".
+    Il secondo valore e' il rapporto secante "quanto e' diventato lo scostamento dal
+    centro", compressione inclusa. Dall'11/09/2026 la SPIEGAZIONE non lo usa piu':
+    riscalare ogni fetta col rapporto e spostare la base di conseguenza faceva
+    dipendere il «voto di partenza» dal voto stesso, e nessuno capiva perche'. Il
+    pannello usa la parte lineare (v. ``saturation_linear``) e mostra la
+    compressione come voce a se' (v. ``saturation_compression``). Il rapporto resta
+    per chi misura la scala nel suo insieme.
     """
     p = ROLE_SATURATION.get(ref_key)
     if not p:
@@ -1610,6 +1623,49 @@ def scale_saturation(vote: float, ref_key: str) -> tuple[float, float]:
     compresso = VOTE_SATURATION_T * math.log1p(d / VOTE_SATURATION_T) if d > 0 else d
     out = dopo + a * compresso
     return out, (a * compresso / d if abs(d) > 1e-12 else a)
+
+
+def saturation_linear(ref_key: str) -> tuple[float, float]:
+    """La parte LINEARE dello stadio finale: ``(fattore, base)``.
+
+    Il fattore e' di quanto la scala riapre lo scostamento dal centro; la base e'
+    dove finisce ``vote_center_for`` dopo lo stadio. Sono costanti DEL RUOLO, non
+    della presenza: e' la scala su cui la spiegazione mostra ogni voce, cosi' il
+    voto di partenza e' lo stesso per tutti i giocatori di un ruolo e lo
+    schiacciamento dei voti alti sta in una riga sua (``saturation_compression``).
+    Sotto il centro la saturazione E' questa retta, quindi li' non c'e' nient'altro.
+    """
+    p = ROLE_SATURATION.get(ref_key)
+    if not p:
+        return 1.0, vote_center_for(ref_key)
+    pre, dopo, a = p
+    return a, dopo + a * (vote_center_for(ref_key) - pre)
+
+
+def saturation_compression(vote: float, ref_key: str) -> float:
+    """Quanto lo stadio finale ha TOLTO rispetto alla sua retta: zero sotto il
+    centro, negativo e crescente sopra. E' la voce «compressione dei valori
+    estremi» del pannello, e chiude il conto: base + voci + correzioni +
+    compressione = voto."""
+    p = ROLE_SATURATION.get(ref_key)
+    if not p:
+        return 0.0
+    pre, dopo, a = p
+    return scale_saturation(vote, ref_key)[0] - (dopo + a * (vote - pre))
+
+
+def neutral_pre_scale(ref_key: str) -> float:
+    """Il valore PRIMA dello stadio finale che diventa esattamente 6 dopo.
+
+    E' l'ancora del completamento bayesiano dei minuti (services/bayesian_completion):
+    un giocatore di cui non si e' visto niente vale 6 sulla scala finale, e questa e'
+    la sua immagine sulla scala in cui l'indice viene sommato."""
+    p = ROLE_SATURATION.get(ref_key)
+    if not p:
+        return VOTE_CENTER
+    pre, dopo, a = p
+    d = (VOTE_CENTER - dopo) / a
+    return pre + (d if d <= 0 else VOTE_SATURATION_T * math.expm1(d / VOTE_SATURATION_T))
 
 
 def vote_center_for(role: str) -> float:
@@ -2174,7 +2230,7 @@ EXTRAP_FLOOR_MINUTES = 55
 # at 2.0 the term is 70% of the defender index and no defender can earn above 8.5).
 # Applied LINEARLY, unlike the √-compressed volume block: it is already a small
 # goal-equivalent figure, not a fat-tailed count.
-EXPOSURE_WEIGHT = 0.1314    # same unit as every other weight: index points per 1σ
+EXPOSURE_WEIGHT = 0.09648982048859779    # same unit as every other weight: index points per 1σ
 EXPOSURE_KEY = "_exposure"  # its name in the scales/breakdowns (it is not a provider stat)
 EXPOSURE_LAMBDA = 0.50      # share of the charge carried by the OUTCOME; 1−λ by xGOT
 EXPOSURE_KERNEL = 0.30      # weight of the four adjacent zones in the presence
@@ -3640,6 +3696,8 @@ def clear_scales_cache() -> None:
     """Drop the in-process copy (after a recalibration, or in tests)."""
     global _scales_cache
     _scales_cache = None
+    from vfoot.services import bayesian_completion as bayes
+    bayes.clear_cache()      # i suoi z neutri dipendono da queste scale
 
 
 MINUTE_CURVE_WINDOW = 8      # +-minuti della media mobile
@@ -4113,6 +4171,12 @@ def voto_puro_for_match(match, reference: dict,
     pen_adj = penalty_missed_adjustments(match.id)
     outfield_roles = (Player.ROLE_DEF, Player.ROLE_MID, Player.ROLE_FWD)
     always_rate = always_rate or set()
+    # I CONTEGGI di gol e assist della distinta: il completamento bayesiano dei
+    # minuti (v. services/bayesian_completion) aggiorna con questi il tasso atteso
+    # di chi non ha finito la partita. Non sono il credito (quello e' sopra).
+    from vfoot.services import bayesian_completion as bayes
+    event_counts = {pid_: (g or 0, a or 0) for pid_, g, a in MatchAppearance.objects
+                    .filter(match_id=match.id).values_list("player_id", "goals", "assists")}
 
     results = []
     for (mid, pid), feats in totals.items():
@@ -4135,7 +4199,17 @@ def voto_puro_for_match(match, reference: dict,
         rated = (is_rated(mins, feats) or pid in forcing or pid in always_rate
                  or feats.get("penalties_won", 0.0) > 0
                  or feats.get("penalties_conceded", 0.0) > 0)
-        raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k, obs)
+        if bayes.is_active(ref_key):
+            # IL COMPLETAMENTO BAYESIANO DEI MINUTI (dall'11/09/2026): i totali NON
+            # proiettati, e i minuti mancanti li tratta il modello. Restituisce il
+            # voto di merito gia' calibrato; il resto della catena e' identico.
+            g_n, a_n = event_counts.get(pid, (0, 0))
+            bayesian = bayes.index_vote(ref_key, raw_feature_values(feats, 90, exp),
+                                        mins, g_n, a_n, reference)
+            raw = bayesian["vote"]
+            idx = bayesian["index"]
+        else:
+            raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k, obs)
         # I GOL, in punti di voto e PRIMA della mitigazione: sono merito, quindi
         # devono essere temperati dal risultato come tutto il resto — un gol in una
         # goleada subita non fa eccezione. Sommati al voto grezzo e non all'indice
@@ -4174,7 +4248,7 @@ def voto_puro_for_match(match, reference: dict,
         # accettazione, con la produzione mezzo punto sopra il modello su un voto
         # ogni sette.
         pre_scala = pieno
-        pieno, scala = scale_saturation(pieno, ref_key)
+        pieno, _rapporto = scale_saturation(pieno, ref_key)
         voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, pieno)))
                 if rated else None)
         results.append({
@@ -4216,21 +4290,19 @@ def voto_puro_for_match(match, reference: dict,
             "red_detail": red_info.get(pid),
             "own_goal_detail": og_info.get(pid),
             "penalty_adjustment": padj,
-            # Lo stadio finale, per la SPIEGAZIONE: ``scale_factor`` e' quanto e'
-            # stato riscalato lo scostamento dal centro, ``scale_base`` il centro
-            # nuovo. Senza questi due la scomposizione additiva non torna col voto.
+            # Lo stadio finale, per la SPIEGAZIONE e per la mappa dei tiri, nelle
+            # sue due parti. ``scale_factor`` e ``scale_base`` sono la RETTA del
+            # ruolo (v. saturation_linear): costanti, uguali per ogni presenza di
+            # quel ruolo, e sono la scala su cui si mostra ogni voce.
+            # ``scale_compression`` e' quel che la curva ha tolto in piu' sopra il
+            # centro: una riga a se' nel pannello. Fino all'11/09/2026 il fattore
+            # era il rapporto secante e la base lo assorbiva presenza per presenza:
+            # il «voto di partenza» cambiava da un giocatore all'altro e nessuno
+            # capiva perche'.
             "voto_pre_scala": pre_scala,
-            "scale_factor": scala,
-            # La base che la SPIEGAZIONE deve usare. Non e' il centro nuovo del
-            # ruolo: il voto grezzo parte da ``vote_center_for``, mentre lo stadio
-            # finale comprime attorno a ``centro_pre``, che e' un altro punto. La
-            # differenza fra i due, riscalata, e' una costante e va nella base —
-            # se la si dimentica la scomposizione sballa di quella costante, ed e'
-            # esattamente l'errore che avevo fatto la prima volta.
-            "scale_base": (
-                ROLE_SATURATION[ref_key][1]
-                + scala * (vote_center_for(ref_key) - ROLE_SATURATION[ref_key][0])
-                if ref_key in ROLE_SATURATION else vote_center_for(ref_key)),
+            "scale_factor": saturation_linear(ref_key)[0],
+            "scale_base": saturation_linear(ref_key)[1],
+            "scale_compression": saturation_compression(pre_scala, ref_key),
             "voto_puro": voto,
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))

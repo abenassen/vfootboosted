@@ -182,7 +182,10 @@ class ShotSectionAddsUpTests(TestCase):
         # TOGLIE — è la stessa logica del tiro sprecato qui sotto, con la soglia
         # più bassa. L'invariante che questo test difende resta l'altro: la somma
         # della tabella È la riga.
-        self.assertLess(d["shots"][0]["points"], 0.0)
+        # Dall'11/09/2026 (pesi del Bayesiano vincolato: shots x3.6, xg_shots a
+        # zero) un tiro fuori da 0.054 di xG vale ~zero (+0.005): la soglia si e'
+        # spostata di nuovo. L'invariante e' la somma, e il metro resta negativo.
+        self.assertLess(abs(d["shots"][0]["points"]), 0.05)
         self.assertLess(d["total"], 0.0)
         # (che un tiro di valore continui ad aggiungere lo dice
         # ``test_shapley_charges_a_wasteful_shot_that_loo_let_through``, che

@@ -776,3 +776,27 @@ of the data between one deploy and the next, and it depends on nothing.
    (la stessa delle segnalazioni generali) e si smistano dall'admin di Django,
    dove `CrestImage` ha le miniature e l'azione «revoca». La prima linea però è
    l'admin di lega, dalla scheda Roster della gestione lega.
+
+## Deployare il completamento bayesiano dei minuti (rilascio 1.14, settembre 2026)
+
+Nessuna migrazione e nessun passo sui dati: prior e calibrazione viaggiano in
+`vfoot/data/bayesian_completion.json`, la reference e lo snapshot del listone nel
+repo. La procedura è quella standard (backup → pull → pip/migrate/collectstatic →
+restart → frontend), più DUE controlli propri di questo rilascio:
+
+1. **Finestra**: mai a giornata in corso (`vote-changes-ship-between-rounds`). Il
+   voto degli spezzoni cambia per tutti, anche a ritroso sulle giornate già
+   giocate — e la pagella si ricalcola.
+2. **Il modello che gira è quello testato.** Dopo il restart:
+   ```sh
+   scp experiments-voto-minutaggi/export_2627_server.py root@139.162.144.123:/tmp/
+   ssh root@139.162.144.123 'cd /srv/vfoot-app/vfoot-backend/src && sudo -u vfoot \
+       ../.venv/bin/python manage.py shell < /tmp/export_2627_server.py'
+   scp root@139.162.144.123:/tmp/season_2627_g1-3.json.gz \
+       experiments-voto-minutaggi/season_2627_g1-3_deployed.json.gz
+   vfoot-backend/.venv/bin/python experiments-voto-minutaggi/verify_2627_deploy.py
+   ```
+   Deve stampare `ESITO: OK`. Confronta ogni voto delle prime tre giornate con
+   l'artifact «Il Bayesiano vincolato» e i portieri con la produzione precedente.
+   In più, `journalctl -u vfoot` non deve contenere righe `bayesian_completion.json:`
+   (sono le impronte: pesi o reference diversi da quelli della taratura).

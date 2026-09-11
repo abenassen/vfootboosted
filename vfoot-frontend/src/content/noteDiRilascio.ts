@@ -64,38 +64,36 @@ export const RILASCI: Rilascio[] = [
   {
     id: 'v-1-14',
     versione: '1.14',
-    data: '6 settembre 2026',
-    titolo: 'L’occasione che crei conta, anche se il tuo compagno la sbaglia',
+    data: '11 settembre 2026',
+    titolo: 'Chi gioca uno spezzone viene votato con un modello, non con una proiezione',
     sommario:
-      'Il pannello del voto nominava le palle-gol che avevi servito, ma nel voto pesavano zero: se mandavi solo in porta un compagno e lui la buttava fuori, per il modello non era successo niente. Adesso pesano — meno di un gol, come è giusto, ma non più niente.',
+      'Fino a oggi chi entrava al 60’ veniva letto come se avesse fatto per novanta minuti quello che ha fatto in trenta, e poi il voto veniva riportato verso il 6 a forza. Adesso i minuti che non ha giocato li completa un modello statistico. Il voto di chi gioca tutta la partita cambia poco; quello degli spezzoni cambia di più, ed è più prudente.',
     voci: [
       {
-        tipo: 'bilanciamento',
+        tipo: 'nuovo',
         testo:
-          'Servire una palla-gol e vedersela sprecare adesso ti alza il voto. Contano sia le occasioni nitide sia i passaggi che finiscono in un tiro, non solo il valore atteso del pallone che hai giocato.',
+          'I minuti non giocati vengono completati con un modello poissoniano–bayesiano. In parole: per ogni cosa che si conta in una partita (duelli, passaggi, tiri, recuperi) il modello parte da quanto ne fa in media un giocatore del tuo ruolo in novanta minuti, guarda quanti ne ha fatti il tuo nei minuti in cui era in campo, e da lì stima quanti ne avrebbe fatti nel resto. Chi ha fatto molto in poco viene stimato sopra la media, ma con prudenza: meno minuti ha giocato, più la stima resta vicina alla media del ruolo, e più il voto resta vicino a quello di una prestazione nella media. A novanta minuti il modello non aggiunge niente.',
         caso:
-          'Rodrigo Mora in Roma-Atalanta: apertura per Mancini, che si fa parare il tiro. Nel pannello quell’occasione era scritta e valeva 0,00 — il segnale più forte di tutta la sua partita, moltiplicato per zero. Sulla stagione scorsa il cambiamento toglie quattro valutazioni gravemente sbagliate su 5.317 (cinque escono, una entra), e fra chi ha creato almeno una palla-gol le porta da cinque a due: quel gruppo aveva quasi il doppio degli errori del resto del campo, adesso sta sotto la media.',
+          'Le prime tre giornate di questo campionato, 789 giocatori di movimento con voto: rispetto alle pagelle il nuovo voto sbaglia meno spesso di un punto intero (da 53 a 37 casi contro la Redazione, da 39 a 34 contro lo Statistico) e resta allineato in media anche per chi entra a partita in corso, che prima stava sotto. Sugli spezzoni fra i 45 e gli 89 minuti l’ordinamento migliora.',
       },
       {
         tipo: 'bilanciamento',
         testo:
-          'Chi crea molto prende, da noi, un po’ più di quanto gli darebbe una pagella. È voluto: nessuna delle due redazioni paga il passaggio quando il gol non arriva, e questo è il punto per cui il voto puro esiste.',
-        caso:
-          'Su 617 partite con una palla-gol servita e nessun assist eravamo esattamente sulla pagella; adesso siamo un decimo di voto sopra. In cambio l’accordo complessivo con entrambe le redazioni migliora, e l’errore medio scende su tutte e due.',
+          'Il pannello del voto racconta il cambiamento: il voto di partenza è lo stesso per tutti i giocatori del tuo ruolo, ogni voce dice quanto i minuti visti hanno aggiunto, e per chi ha segnato o servito un assist in uno spezzone compare «attesa sui minuti non giocati».',
       },
       {
-        tipo: 'corretto',
+        tipo: 'bilanciamento',
         testo:
-          'Nel pannello, la riga della creazione dice di nuovo quante palle-gol vere contiene: «una o più occasioni create per i compagni (una nitida)».',
+          'Il palo vale di più. Da quando il gol è pagato per quanto ha cambiato la partita, il tiro che batte il portiere e prende il legno era rimasto indietro: adesso conta come una parata molto difficile, non come una buona.',
         caso:
-          'La precisazione veniva costruita e poi buttata via quando la riga finiva sotto «altre N voci» — cioè quasi sempre, perché la creazione di rado entra nei primi tre motivi di un voto. Era proprio il caso per cui era stata scritta.',
+          'Nel modello un tiro sul palo vale l’esecuzione che avrebbe avuto se fosse entrato meno quel che l’occasione già valeva. Quel valore sale da 0,40 a 0,60 di gol atteso sul bersaglio. Lo stesso numero lo paga, dall’altra parte, la difesa che lo concede. Sulle prime tre giornate tocca 136 voti di pochi centesimi e ne sposta otto di mezzo punto.',
       },
       {
-        tipo: 'corretto',
+        tipo: 'bilanciamento',
         testo:
-          'Gli attaccanti erano nel complesso quasi due centesimi sotto la media delle pagelle. Adesso i tre reparti sono centrati.',
+          'Gli episodi rari cambiano peso, perché sono stati ritarati insieme a tutto il resto: i rigori un po’ meno, gli errori che portano a un tiro e i palloni tolti dalla linea di più.',
         caso:
-          'L’ultimo passaggio del voto — quello che accorcia i voti alti e riapre la scala — era tarato su un banco di prova invece che sul calcolo vero, e si portava dietro quello scarto da inizio settembre.',
+          'Per un difensore, a fine partita: rigore concesso da −0,84 a −0,72 di voto, rigore procurato da +0,73 a +0,54, errore che porta al gol da −0,44 a −0,51, errore che porta a un tiro da −0,08 a −0,16, pallone tolto dalla linea da +0,11 a +0,35. Un gol vale fra 0,34 e 0,79: nessun episodio vale più di un gol.',
       },
     ],
   },

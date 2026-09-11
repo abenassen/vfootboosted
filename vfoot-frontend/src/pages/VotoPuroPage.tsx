@@ -179,12 +179,18 @@ export default function VotoPuroPage() {
           <Step n={3} title="La somma diventa un voto in scala di pagella">
             Tutte le voci pesate si sommano in un unico punteggio di prestazione, che poi viene
             confrontato con il suo ruolo: la media di ogni ruolo è <b className="text-ink">6</b>, e
-            da lì si sale o si scende in proporzione a quanto la partita si stacca dalla norma. Il
-            risultato viene arrotondato al mezzo voto, come una pagella, e sta tra 3 e 10.
+            da lì si sale o si scende in proporzione a quanto la partita si stacca dalla norma. Le
+            prestazioni eccezionali vengono poi <b className="text-ink">compresse</b>: sopra la media
+            la scala si accorcia, così un 8 resta raro e un 9 rarissimo. Nel conto di ogni voto questo
+            passaggio ha una riga sua, «compressione dei valori estremi», e compare solo nei voti
+            alti. Il risultato viene arrotondato al mezzo voto, come una pagella, e sta tra 3 e 10.
           </Step>
           <Step n={4} title="Le ultime correzioni">
-            Chi ha giocato pochi minuti torna verso il 6, perché venti minuti dicono poco: a un'ora
-            di gioco il voto vale quasi per intero, a un quarto d'ora conta meno della metà. Poi c'è
+            Chi ha giocato pochi minuti viene completato da un modello statistico: per ogni cosa
+            che si conta, il modello parte da quanto ne fa in media il suo ruolo in novanta minuti,
+            guarda quanto ne ha fatto lui nei minuti giocati, e stima il resto con prudenza — meno
+            minuti ha giocato, più la stima resta vicina alla media del ruolo e più il voto resta
+            vicino a quello di una prestazione nella media. Poi c'è
             il risultato: un voto alto in una sconfitta scende un po', un voto basso in una vittoria
             sale un po' — <b className="text-ink">mai il contrario</b>, quindi il risultato non
             gonfia nessuno e tempera solo i casi stonati. I due versi però non pesano uguale: più

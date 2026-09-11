@@ -8,15 +8,28 @@ from vfoot.services.vote_explanation import (
     readable_label, role_average_terms, to_sentence,
 )
 from vfoot.services.classic_rating import (
-    UNSHRUNK_FEATURES,
+    ROLE_SATURATION, UNSHRUNK_FEATURES,
+    saturation_linear,
     shrinkage_for,
     scale_saturation,
     GK_SPREAD_K, VOTE_CENTER, VOTE_MAX, VOTE_MIN, VOTE_SPREAD_K,
-    SHRINKAGE_MINUTES,
+    SHRINKAGE_MINUTES, raw_feature_values,
     _raw_vote_from_index, _round_half,
     vote_center_for,
     index_for_role,
 )
+
+
+def merit_vote(role, feats, minutes, reference, exposure=0.0, goals=0, assists=0):
+    """Il voto di merito COME LO SCRIVE LO SCORER: il completamento bayesiano per i
+    ruoli di movimento, la formula di partita intera per il portiere. I test lo
+    usano al posto di una copia della formula, che e' rimasta indietro due volte."""
+    from vfoot.services import bayesian_completion as bayes
+    if bayes.is_active(role):
+        return bayes.index_vote(role, raw_feature_values(feats, 90, exposure), minutes,
+                                goals, assists, reference)["vote"]
+    return _raw_vote_from_index(index_for_role(role, feats, minutes, exposure), role,
+                                minutes, reference)
 
 
 class VoteExplanationTests(SimpleTestCase):
@@ -36,7 +49,9 @@ class VoteExplanationTests(SimpleTestCase):
         read as "tanti/pochi", with gender/number agreement."""
         self.assertEqual(_phrase("DIF", "clearances", +0.3, 8.0), "tante respinte")
         self.assertEqual(_phrase("DIF", "clearances", -0.3, 1.0), "poche respinte")
-        self.assertEqual(_phrase("DIF", "duels_won", +0.3, 10.0), "tanti duelli vinti")
+        # CEN e non DIF: dall'11/09/2026 i duelli vinti pesano zero per i difensori, e
+        # la direzione della frase si legge dal segno del peso.
+        self.assertEqual(_phrase("CEN", "duels_won", +0.3, 10.0), "tanti duelli vinti")
 
     def test_negative_weight_feature_flips_direction(self):
         """More duels LOST is above average yet worsens the vote — the phrase must
@@ -80,13 +95,16 @@ class VoteExplanationTests(SimpleTestCase):
         nome e col suo numero. Un test che pretendesse di vederla in cima
         chiederebbe al modello di pagare i duelli vinti piu' di quanto abbiamo
         deciso che valgano."""
-        average = self._averages("DIF", {"duels_won": 16.0, "duels_lost": 16.0,
-                                         "clearances": 8.0, "touches": 60.0})
+        # CEN e non DIF: dall'11/09/2026 (Bayesiano vincolato) i duelli vinti pesano
+        # zero per i difensori, quindi il verso "vinti" per loro non esiste piu'; per
+        # i centrocampisti pesano 0,026 contro -0,071 dei persi, e l'asimmetria resta.
+        average = self._averages("CEN", {"duels_won": 16.0, "duels_lost": 16.0,
+                                         "clearances": 8.0, "passes_completed": 40.0})
         # Strong clearances keep the vote above the faint-praise cutoff, so the
         # duels directions are still surfaced.
-        e = explain("DIF", {"duels_won": 4.0, "duels_lost": 4.0,
-                            "clearances": 80.0, "touches": 90.0},
-                    90, self.REFERENCE, average, ledger=True)
+        e = explain("CEN", {"duels_won": 4.0, "duels_lost": 4.0,
+                            "clearances": 80.0, "passes_completed": 60.0},
+                    90, {**self.REFERENCE, "CEN": self.REFERENCE["DIF"]}, average, ledger=True)
         self.assertGreaterEqual(e["voto"], 5.5)
         persi = [x for x in e["positives"] if x["label"] == "pochi duelli persi"]
         self.assertTrue(persi)
@@ -94,7 +112,7 @@ class VoteExplanationTests(SimpleTestCase):
         self.assertEqual([r["label"] for r in vinti], ["pochi duelli vinti"])
         self.assertLess(vinti[0]["points"], 0)
         # e l'asimmetria, che e' il punto: il verso positivo vale molto di piu'
-        self.assertGreater(persi[0]["points"], 3 * abs(vinti[0]["points"]))
+        self.assertGreater(persi[0]["points"], 2 * abs(vinti[0]["points"]))
 
     def test_rare_events_are_named_only_when_they_happened(self):
         clean = explain("DIF", {"touches": 60.0}, 90, self.REFERENCE,
@@ -139,14 +157,9 @@ class VoteExplanationTests(SimpleTestCase):
         shown = e["base"] + sum(c["points"] for c in e["contributions"]) + e["other_points"]
         self.assertAlmostEqual(shown, e["subtotal"], places=2)
 
-        idx = index_for_role("DIF", feats, 90)
-        z = (idx - self.REFERENCE["DIF"]["mean"]) / self.REFERENCE["DIF"]["std"]
-        w = 90 / (90 + SHRINKAGE_MINUTES)
-        # vote_center_for: dal 25/08/2026 il centro dipende dal ruolo, e questo
-        # fixture e' un DIF (ROLE_VOTE_CENTER).
-        raw = max(VOTE_MIN, min(VOTE_MAX,
-                                vote_center_for("DIF") + VOTE_SPREAD_K * w * z))
-        self.assertAlmostEqual(e["voto"], round(raw * 2) / 2, places=2)
+        # Il numero in fondo e' quello dello scorer, passato dallo stadio finale.
+        raw = merit_vote("DIF", feats, 90, self.REFERENCE)
+        self.assertAlmostEqual(e["voto"], _round_half(scale_saturation(raw, "DIF")[0]), places=2)
 
     def test_the_panel_never_contradicts_the_row(self):
         """Il numero in fondo al pannello e' il voto scritto accanto al nome.
@@ -180,9 +193,8 @@ class VoteExplanationTests(SimpleTestCase):
                     # scala (classic_rating.scale_saturation): confrontare il
                     # pannello con la formula senza quello stadio confronterebbe
                     # con un modello che non gira piu'.
-                    row = _round_half(scale_saturation(_raw_vote_from_index(
-                        index_for_role(role, feats, minutes), role, minutes,
-                        self.REFERENCE), role)[0])
+                    row = _round_half(scale_saturation(
+                        merit_vote(role, feats, minutes, self.REFERENCE), role)[0])
                     self.assertEqual(e["voto"], row)
 
     def test_result_nudge_and_red_card_reconcile_and_are_named(self):
@@ -265,13 +277,14 @@ class VoteExplanationTests(SimpleTestCase):
         total = sum(t["points"] for t in e["all_terms"])
         # the merit vote before the adjustments the summary lists separately
         # vote_center_for, non 6.0: il centro dipende dal ruolo (ROLE_VOTE_CENTER).
-        # ``e["base"]``, non ``vote_center_for``: dallo stadio finale la base del
-        # pannello e' il centro RISCALATO (v. scale_base), e le voci sommano a
-        # quella.
-        self.assertAlmostEqual(e["base"] + total, e["subtotal"], places=2)
+        # ``e["base"]`` e' la costante del ruolo sulla retta dello stadio finale
+        # (v. saturation_linear); sopra il centro fra le voci e il voto sta la riga
+        # della compressione, che non e' una feature e quindi non e' in all_terms.
+        comp = sum(c["points"] for c in e["contributions"] if c.get("kind") == "compression")
+        self.assertAlmostEqual(e["base"] + total + comp, e["subtotal"], places=2)
         # and it agrees with the summary's own accounting
         shown = sum(c["points"] for c in e["contributions"]) + e["other_points"]
-        self.assertAlmostEqual(total, shown, places=2)
+        self.assertAlmostEqual(total + comp, shown, places=2)
 
     # --- cio' che il pannello NON diceva ---------------------------------
     def test_the_goal_credit_has_a_line_even_when_there_is_no_goal(self):
@@ -339,7 +352,8 @@ class VoteExplanationTests(SimpleTestCase):
         e = explain("ATT", feats, 25, reference, average, full=True, ledger=True)
 
         total = sum(t["points"] for t in e["all_terms"])
-        self.assertAlmostEqual(e["base"] + total, e["subtotal"], places=2)
+        comp = sum(c["points"] for c in e["contributions"] if c.get("kind") == "compression")
+        self.assertAlmostEqual(e["base"] + total + comp, e["subtotal"], places=2)
         # e il resto e' davvero il resto
         self.assertLess(abs(e["other_tiny"]["points"]), 0.05)
 
@@ -406,7 +420,13 @@ class VoteExplanationTests(SimpleTestCase):
         feats = {"clearances": 4.0, "touches": 40.0, "defensive_value": 0.44}
         e = explain("DIF", feats, 45, self.REFERENCE, average, ledger=True)
         rows = {r["label"]: r for r in e["other_terms"]}
-        self.assertEqual(rows["poche respinte"]["value"], 4)   # non 8, la proiezione
+        # Il completamento bayesiano legge i totali NON proiettati: il numero accanto
+        # e' 4, non le 8 della vecchia proiezione. La direzione della frase ("tante")
+        # si legge contro il prior VERO del ruolo, non contro la media del fixture:
+        # 4 respinte in 45' sono piu' delle ~1,9 che un difensore medio fa in 45'.
+        respinte = [l for l in rows if "respinte" in l]
+        self.assertEqual(len(respinte), 1)
+        self.assertEqual(rows[respinte[0]]["value"], 4)
         # un indice normalizzato non porta MAI un numero accanto: "0,44" non
         # spiega niente. Ora e' la voce piu' grande e sta nel riassunto, dove i
         # numeri accanto non ci vanno per costruzione.
@@ -556,19 +576,64 @@ class VoteExplanationTests(SimpleTestCase):
         missing = sorted(k for k in every if not readable_label(k))
         self.assertEqual(missing, [])
 
+    def test_the_compression_is_a_line_of_its_own(self):
+        """Lo stadio finale schiaccia i voti alti. Fino all'11/09/2026 il pannello lo
+        nascondeva riscalando ogni voce col rapporto secante e spostando il «voto di
+        partenza» di conseguenza: due giocatori dello stesso ruolo partivano da
+        numeri diversi e nessuna riga diceva perche'. Ora la base e' la costante del
+        ruolo, le voci stanno sulla retta della scala, e la curva e' una riga sua."""
+        average = self._averages("ATT", {"shots": 2.0, "touches": 40.0,
+                                         "expected_assists": 0.1})
+        a, base = saturation_linear("ATT")
+        alto = explain("ATT", {"shots": 9.0, "shots_on_target": 6.0, "touches": 80.0,
+                               "expected_assists": 1.2, "xg_shots": 1.5}, 90,
+                       self.REFERENCE, average, goal_adjustment=0.9)
+        self.assertGreaterEqual(alto["voto"], 6.5)
+        comp = [c for c in alto["contributions"] if c.get("kind") == "compression"]
+        self.assertEqual(len(comp), 1)
+        self.assertEqual(comp[0]["label"], "compressione dei valori estremi")
+        self.assertLess(comp[0]["points"], -0.05)
+        self.assertEqual(comp[0], alto["contributions"][-1])   # chiude l'elenco
+        # La base non dipende dal voto: a parita' di ruolo, minuti e metro e' la
+        # stessa per la partita alta e per quella bassa.
+        del base
+        shown = alto["base"] + sum(c["points"] for c in alto["contributions"]) + alto["other_points"]
+        # le voci sono arrotondate al centesimo una per una: fino a un centesimo di scarto
+        self.assertAlmostEqual(shown, alto["subtotal"], delta=0.011)
+        # Sotto il centro la curva e' la retta: nessuna riga, stessa base.
+        basso = explain("ATT", {"shots": 0.0, "touches": 20.0}, 90, self.REFERENCE,
+                        average, goal_adjustment=-0.2)
+        self.assertLess(basso["voto"], 6.0)
+        self.assertFalse([c for c in basso["contributions"] if c.get("kind") == "compression"])
+        self.assertAlmostEqual(basso["base"], alto["base"], places=6)
+        shown = basso["base"] + sum(c["points"] for c in basso["contributions"]) + basso["other_points"]
+        self.assertAlmostEqual(shown, basso["subtotal"], places=2)
+        # e il portiere, che dallo stadio non passa: base = centro del ruolo, fattore 1
+        self.assertEqual(saturation_linear("POR"), (1.0, vote_center_for("POR")))
+
+    def test_few_errors_are_called_few_errors(self):
+        """Il gruppo «Errori» raccoglie voci a peso negativo: un subtotale positivo
+        vuol dire che ne ha commessi meno del pari ruolo, e il titolo lo dice."""
+        from vfoot.services.vote_explanation import group_ledger
+        pochi = group_ledger([{"key": "errors_bad_passes", "label": "pochi passaggi sbagliati", "points": 0.08},
+                              {"key": "errors_miscontrols", "label": "nessun controllo sbagliato", "points": 0.03}])
+        self.assertEqual([(g["key"], g["title"], g["points"]) for g in pochi], [("errori", "Pochi errori", 0.11)])
+        tanti = group_ledger([{"key": "errors_bad_passes", "label": "tanti passaggi sbagliati", "points": -0.2}])
+        self.assertEqual(tanti[0]["title"], "Errori")
+
     def test_the_ledger_reports_the_scale_it_used(self):
         """``per_unit`` is what the page multiplies by to go from index points to
         vote points; if it did not travel with the rows they could not be read."""
         average = self._averages("ATT", {"shots": 2.0, "touches": 40.0})
         e = explain("ATT", {"shots": 5.0, "touches": 60.0}, 90, self.REFERENCE,
                     average, full=True)
-        # per_unit porta ANCHE il fattore dello stadio finale: e' cio' per cui la
-        # pagina moltiplica per arrivare al voto vero, non a quello intermedio.
-        _, fattore = scale_saturation(
-            _raw_vote_from_index(index_for_role("ATT", {"shots": 5.0, "touches": 60.0}, 90),
-                                 "ATT", 90, self.REFERENCE), "ATT")
-        expected = (fattore * VOTE_SPREAD_K * (90 / (90 + shrinkage_for("ATT")))
-                    / self.REFERENCE["ATT"]["std"])
+        # per_unit porta il fattore LINEARE dello stadio finale (la compressione e'
+        # una riga a se'), la scala del ruolo del completamento bayesiano e la
+        # scala di partita intera dei tassi: e' cio' per cui la pagina moltiplica.
+        from vfoot.services import bayesian_completion as bayes
+        fattore = ROLE_SATURATION["ATT"][2]
+        expected = (fattore * bayes.calibration("ATT")[1]
+                    * bayes.rate_unit("ATT", self.REFERENCE))
         self.assertAlmostEqual(e["per_unit"], expected, places=5)
         # e il portiere, che ha una scala sua
         por = explain("POR", {"gk_saves": 1.0, "touches": 25.0}, 90, self.REFERENCE,
@@ -752,8 +817,10 @@ class VoteExplanationTests(SimpleTestCase):
         arrivava al ventesimo di voto — fra queste portieri che avevano giocato
         novanta minuti. Si mostrano lo stesso le piu' grandi, e ``flat`` avverte chi
         scrive la frase di non spacciarle per un giudizio."""
-        average = self._averages("DIF", {"touches": 60.0, "duels_won": 3.0})
-        e = explain("DIF", {"touches": 61.0, "duels_won": 3.0}, 90,
+        # passes_completed e non touches: dall'11/09/2026 i tocchi pesano zero, e
+        # una voce a peso zero non produce nessuna riga da promuovere.
+        average = self._averages("DIF", {"passes_completed": 40.0, "duels_won": 3.0})
+        e = explain("DIF", {"passes_completed": 41.0, "duels_won": 3.0}, 90,
                     self.REFERENCE, average)
         self.assertTrue(e["flat"])
         self.assertTrue(e["positives"] or e["negatives"])
@@ -868,8 +935,10 @@ class VoteExplanationTests(SimpleTestCase):
                          "3 duelli persi")
         # sopra la soglia il quantificatore torna, perche' li' porta l'informazione
         # in piu' che il numero da solo non da'
-        self.assertEqual(ph("ATT", "touches", +0.01, 49.0, count=37),
-                         "tanti palloni giocati")
+        # passes_completed e non touches: dall'11/09/2026 i tocchi pesano zero e la
+        # direzione della frase si legge dal segno del peso.
+        self.assertEqual(ph("ATT", "passes_completed", +0.01, 49.0, count=37),
+                         "tanti passaggi riusciti")
         # e senza count (il riassunto parlato) il comportamento e' quello di sempre
         self.assertEqual(ph("ATT", "was_fouled", +0.01, 2.6), "tanti falli subiti")
 

@@ -191,9 +191,14 @@ class RealChampionshipTests(TestCase):
         line = next(l for l in pagella_for_match(self.match, self.reference)["home"]
                     ["starters"] if l["player_id"] == og.id)
         self.assertEqual(line["events"]["own_goals"], 1)
-        self.assertEqual(line["voto_puro"], 6.0)   # empty reference -> centre
+        # Il voto puro e' quello dello scorer (dall'11/09/2026 il completamento
+        # bayesiano calibra anche il centro: con reference vuota non e' piu' 6.0
+        # secco). Qui si controlla il MALUS, non il modello.
+        from vfoot.services.classic_rating import voto_puro_for_match
+        vp = {r["player_id"]: r for r in voto_puro_for_match(self.match, self.reference)}
+        self.assertEqual(line["voto_puro"], vp[og.id]["voto_puro"])
         self.assertEqual(line["malus"], 2.0)
-        self.assertEqual(line["fantavoto"], 4.0)
+        self.assertEqual(line["fantavoto"], line["voto_puro"] - 2.0)
 
     def test_own_goal_flat_penalty_without_sub_minute_timing(self):
         """Rows with no elapsed_seconds (imported before we captured it) cannot be
@@ -276,10 +281,14 @@ class RealChampionshipTests(TestCase):
                     ["starters"] if l["player_id"] == self.df.id)
         self.assertEqual(line["events"]["missed_penalties"], 1)
         self.assertEqual(line["malus"], 3.0)
-        # 4.5, non 5.0: il calo di 1.0 e' in punti PRIMA dello stadio finale della
-        # scala, che sotto il centro moltiplica per ~1.6 (v. ROLE_SATURATION).
-        self.assertEqual(line["voto_puro"], 4.5)
-        self.assertEqual(line["fantavoto"], 1.5)      # 4.5 - 3 malus
+        # Il voto puro e' quello dello scorer (dall'11/09/2026 il completamento
+        # bayesiano calibra anche il centro): qui si controlla che il calo arrivi in
+        # pagella insieme al malus, non il valore del modello.
+        from vfoot.services.classic_rating import voto_puro_for_match
+        vp = {r["player_id"]: r for r in voto_puro_for_match(self.match, self.reference)}
+        self.assertEqual(line["voto_puro"], vp[self.df.id]["voto_puro"])
+        self.assertLess(vp[self.df.id]["penalty_adjustment"], 0.0)
+        self.assertEqual(line["fantavoto"], line["voto_puro"] - 3.0)
 
     def test_saved_penalty_credited_to_the_keeper_on_pitch(self):
         """A saved penalty (+3 Rp) goes to the keeper defending it — the opposite

@@ -63,34 +63,42 @@ from vfoot.services.vote_reference import fixed_reference
 # sta qui, separata, proprio perche' l'obiettivo dell'ottimizzazione non puo'
 # vederla.
 ATTESI = {
-    "clearances_off_line": +0.209,
-    "penalties_won": +1.401,
-    "penalties_conceded": -1.596,
-    "errors_led_to_goal": -0.847,
-    "errors_led_to_shot": -0.143,
+    # RISOLTI DI NUOVO L'11/09/2026 dal modello «Bayesiano vincolato» (v.
+    # services/bayesian_completion): la ricerca ha cercato questi pesi col criterio
+    # della CODA (errori >= 1,5 contro lo Statistico), tenendo segno e zero di
+    # ciascuno, e la calibrazione affine del ruolo (scala 0,67 per i difensori) li
+    # ha riscalati. MISURATI SULLA PIPELINE (i vecchi ATTESI erano di una formula
+    # che ignorava sigma_z e l'attenuazione a 90', e li gonfiava di ~1,9x): rigore
+    # concesso da -0,84 a -0,72, rigore procurato da +0,73 a +0,54, errore che porta
+    # al gol da -0,44 a -0,51, errore che porta a un tiro da -0,08 a -0,16, pallone
+    # tolto dalla linea da +0,11 a +0,35. Non sono piu' i valori risolti a mano il
+    # 03/09: sono quelli del modello misurato fuori campione.
+    "clearances_off_line": +0.345,
+    "penalties_won": +0.544,
+    "penalties_conceded": -0.721,
+    "errors_led_to_goal": -0.507,
+    "errors_led_to_shot": -0.156,
 }
 TOLLERANZA = 0.10
 
 
 def valore_per_occorrenza(key: str, role: str = "DIF") -> float:
-    """Quanto sposta il voto UNA occorrenza di questa feature, a 90 minuti.
-
-    Una occorrenza vale ``1 / sigma_raw`` deviazioni della feature; il peso e' per
-    una deviazione, quindi l'indice sale di ``peso / sigma_raw``; e il voto e'
-    l'indice diviso la sigma del RUOLO, per la scala del voto di quel ruolo.
-    """
-    scales = cr.feature_scales(gk=False)
-    sigma_raw = (scales.get(key) or {}).get("sigma_raw") or 0.0
-    if not sigma_raw:
-        return 0.0
-    std = fixed_reference()[role]["std"]
-    # ...E IL FATTORE DELLO STADIO FINALE. Senza, questa funzione misura il valore
-    # in un voto INTERMEDIO che nessuno legge: lo stadio non comprime sotto il
-    # centro, dove gli eventi rari negativi vivono, quindi li moltiplica per intero
-    # (~1.6). Fino al 03/09/2026 mancava, e la guardia sottostimava di un terzo.
-    fattore = _fattore_stadio()
-    return (cr.WEIGHTS.get(key, 0.0) / sigma_raw * cr.spread_k_for(role) / std
-            * fattore)
+    """Quanto sposta il voto UNA occorrenza di questa feature, a 90 minuti, sulla
+    scala finale — misurato sulla pipeline che scrive il voto (il completamento
+    bayesiano per i ruoli di movimento), non con una formula ricopiata."""
+    from vfoot.services import bayesian_completion as bayes
+    ref = fixed_reference()
+    base = {k: 0.0 for k in cr.WEIGHTS}
+    base[cr.EXPOSURE_KEY] = 0.0
+    fattore = cr.saturation_linear(role)[0]
+    if bayes.is_active(role):
+        v0 = bayes.index_vote(role, base, 90, 0, 0, ref)["unclamped"]
+        v1 = bayes.index_vote(role, {**base, key: 1.0}, 90, 0, 0, ref)["unclamped"]
+        return (v1 - v0) * fattore
+    def vote(tot):
+        return cr._raw_vote_from_index(cr.index_for_role(role, tot, 90, 0.0), role, 90, ref,
+                                       observed=cr.observed_index(role, tot, 90, 0.0))
+    return (vote({**base, key: 1.0}) - vote(base)) * fattore
 
 
 def _fattore_stadio() -> float:

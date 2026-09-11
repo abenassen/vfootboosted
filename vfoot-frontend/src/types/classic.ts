@@ -80,10 +80,12 @@ export interface ClassicPlayerLine {
       family?: string;
       family_size?: number;
       /** Le correzioni a livello di voto, che non sono feature: gol, assist,
-       *  risultato, rosso, autogol, rigore sbagliato. */
+       *  risultato, rosso, autogol, rigore sbagliato; `completion`, il credito
+       *  atteso di gol/assist nei minuti non giocati; e `compression`, quanto la
+       *  scala ha accorciato un voto alto (sempre negativa, chiude l'elenco). */
       kind?: string;
     }[];
-    base: number;            // where every vote starts: the role average (6)
+    base: number;            // where every vote starts: the role constant (~6)
     other_points: number;    // the long tail of small slices, folded into one
     other_count: number;
     subtotal: number;        // base + contributions + other, before rounding

@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from vfoot.services.classic_rating import (
     DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
-    GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, scale_saturation,
-    shrinkage_for, TOTAL_WEIGHTS,
+    GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, saturation_compression,
+    saturation_linear, scale_saturation, shrinkage_for, TOTAL_WEIGHTS,
     UNSHRUNK_FEATURES, VOTE_CENTER, VOTE_MAX, VOTE_MIN, WEIGHTS,
     unshrunk_weight, vote_center_for,
     _feature_z, _raw_vote_from_index, exposure_z, scored_z, feature_scales,
@@ -385,13 +385,22 @@ def group_ledger(rows: list[dict]) -> list[dict]:
         b["terms"].append(row)
     for b in buckets.values():
         b["points"] = round(b["points"], 2)
+        # «Errori» con un subtotale POSITIVO si legge male: il gruppo raccoglie
+        # voci a peso negativo, e un totale sopra lo zero vuol dire che ne ha fatti
+        # meno del pari ruolo. Detto per quel che e' (richiesta dell'11/09/2026).
+        if b["key"] == "errori" and b["points"] > 0:
+            b["title"] = "Pochi errori"
     return sorted(buckets.values(), key=lambda b: -abs(b["points"]))
 
 
 def _weight_of(role: str, key: str) -> float:
+    """Il peso CHE IL RUOLO USA (v. ROLE_WEIGHTS): la direzione della frase si legge
+    dal suo segno. Il vettore globale non basta: dall'11/09/2026 ``duels_won`` vale
+    zero per i difensori e 0,026 per i centrocampisti, e con lo zero globale la
+    frase di un centrocampista si rovesciava."""
     if key == EXPOSURE_KEY:
         return -EXPOSURE_WEIGHT
-    return (GK_WEIGHTS if role == Player.ROLE_GK else WEIGHTS).get(key, 0.0)
+    return weights_for_role(role).get(key, 0.0)
 
 
 def _phrase(role: str, key: str, term_delta: float, raw_value: float,
@@ -762,6 +771,13 @@ def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0,
         scales = feature_scales(gk=is_gk)
     elif "outfield" in scales or "gk" in scales:
         scales = scales.get("gk" if is_gk else "outfield", {})
+    # IL COMPLETAMENTO BAYESIANO (dall'11/09/2026): per i ruoli di movimento la
+    # voce e' peso x (z completato - h z neutro), cioe' quel che i minuti visti
+    # hanno aggiunto rispetto a chi non ha giocato. I totali entrano NON proiettati.
+    from vfoot.services import bayesian_completion as bayes
+    if not is_gk and bayes.is_active(role):
+        return bayes.evidence_terms(role, raw_feature_values(totals, 90, exposure),
+                                    minutes, scales)
     values = raw_feature_values(totals, minutes, exposure, gk=is_gk)
     out = {}
     for key, w in weights.items():
@@ -810,7 +826,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
             goal_adjustment: float = 0.0, goal_detail: list | None = None,
             assist_adjustment: float = 0.0, assist_detail: list | None = None,
-            scale_factor: float = 1.0, scale_base: float | None = None,
+            goals: int = 0,
             full: bool = False,
             ledger: bool = False,
             red_detail: dict | None = None, own_goal_detail: dict | None = None,
@@ -827,9 +843,20 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
 
     Returns an additive breakdown: ``base`` (6), the largest ``contributions`` in
     vote points, an ``other`` bucket folding the long tail of small ones, and the
-    resulting ``voto`` — so 6 + contributions + other rounds to the vote. A short
-    appearance shrinks every slice toward zero (little evidence), which is why a
-    cameo's terms are all small: that is the honest reason, not a rounding quirk.
+    resulting ``voto`` — so 6 + contributions + other rounds to the vote. Per i
+    ruoli di movimento (dall'11/09/2026) i minuti non giocati sono completati dal
+    modello bayesiano (services/bayesian_completion): ogni voce e' quel che i minuti
+    VISTI hanno aggiunto rispetto a chi non ha giocato, e uno spezzone breve ha voci
+    piccole perche' gran parte della partita e' completata con la media del ruolo.
+
+    LO STADIO FINALE DELLA SCALA (classic_rating.scale_saturation) e' mostrato in
+    due parti, dall'11/09/2026. La sua RETTA — il fattore che riapre la
+    dispersione e la base del ruolo — moltiplica ogni voce ed e' la stessa per
+    ogni presenza del ruolo; la CURVA, che schiaccia i voti sopra il centro, e' una
+    riga a se' («compressione dei valori estremi», kind ``compression``). Prima si
+    riscalava ogni fetta col rapporto secante e la base assorbiva il resto: il
+    «voto di partenza» cambiava da un giocatore all'altro senza che nulla nel
+    pannello dicesse perche'.
     """
     terms = _terms(role, totals, minutes, exposure)
     ref = reference.get(role)
@@ -837,12 +864,23 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         return {"positives": [], "negatives": [], "contributions": [],
                 "all_terms": [], "other_terms": [],
                 "other_tiny": {"count": 0, "points": 0.0},
-                "assist_note": "", "base": (scale_base if scale_base is not None
-                                            else vote_center_for(role)),
+                "assist_note": "", "base": saturation_linear(role)[1],
                 "other_points": 0.0, "other_count": 0, "minutes": minutes,
                 "low_minutes": False, "flat": False, "note": ""}
 
     mean_terms = averages.get(role, {})
+    # IL COMPLETAMENTO BAYESIANO DEI MINUTI (dall'11/09/2026), per i tre ruoli di
+    # movimento: niente proiezione, niente attenuazione, niente curva per minuto.
+    # Le voci sono peso x (z completato - h z neutro) - t x media di ruolo, tutte
+    # sulla scala di partita intera, moltiplicate dalla scala del ruolo; il voto di
+    # partenza e' l'ancora neutra pesata (1-t) e la costante di partita intera
+    # pesata t. Il portiere resta al modello precedente.
+    from vfoot.services import bayesian_completion as bayes
+    bayesian = role != Player.ROLE_GK and bayes.is_active(role)
+    bd = (bayes.index_vote(role, raw_feature_values(totals, 90, exposure), minutes,
+                           goals, assists, reference) if bayesian else None)
+    if bayesian:
+        mean_terms = {k: bd["t"] * v for k, v in mean_terms.items()}
     # Lo stesso restringimento che applica il voto: quanto ha giocato. Scala ogni
     # fetta, cosi' la scomposizione continua a tornare col voto scritto sopra.
     weight = (minutes / (minutes + shrinkage_for(role)) if minutes > 0 else 0.0)
@@ -850,27 +888,22 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # (GK_SPREAD_K 0.8 contro 0.727), e una spiegazione costruita sulla scala di
     # movimento comprimeva ogni fetta del 9,1% — cioe' raccontava a un portiere un
     # voto piu' vicino al 6 di quello scritto accanto al suo nome.
-    # LO STADIO FINALE, RICAVATO QUI se il chiamante non l'ha passato. Era un
-    # parametro con default 1.0, e il default produceva un pannello incoerente col
-    # proprio totale: le fette non riscalate sotto un voto che invece lo era. Il
-    # fattore non e' un'opzione, e' una proprieta' della presenza — quindi si
-    # calcola, e il parametro serve solo a riusare quello gia' calcolato dallo
-    # scorer (stesso numero, una moltiplicazione in meno).
-    if scale_base is None:
-        _pre = _raw_vote_from_index(
-            index_for_role(role, totals, minutes, exposure), role, minutes, reference,
-            observed=observed_index(role, totals, minutes, exposure))
-        _pre = max(VOTE_MIN, min(VOTE_MAX, _pre + goal_adjustment + assist_adjustment))
-        _pre = max(VOTE_MIN, min(VOTE_MAX, _pre + result_nudge + red_adjustment
-                                 + own_goal_adjustment + penalty_adjustment))
-        _fin, scale_factor = scale_saturation(_pre, role)
-        scale_base = _fin - scale_factor * (_pre - vote_center_for(role))
-    # ``scale_factor``: lo stadio finale del voto (classic_rating.scale_saturation)
-    # comprime il lato alto e riapre la dispersione, e lo fa DOPO che le voci sono
-    # state sommate. Una scomposizione additiva non lo puo' rappresentare come una
-    # voce a se': o si riscala ogni fetta, o la somma non torna col voto scritto
-    # sopra. Riscalando, l'utente legge direttamente i valori giusti e non c'e'
-    # nessuna riga misteriosa in fondo da spiegare.
+    # LO STADIO FINALE, IN DUE PARTI. La retta del ruolo (fattore e base, costanti:
+    # v. classic_rating.saturation_linear) e' la scala su cui si mostra ogni voce.
+    # La curva, che sopra il centro schiaccia il voto, e' calcolata sul voto COMPLETO
+    # prima dello stadio — esattamente dove lo scorer la applica — e diventa la riga
+    # «compressione dei valori estremi» in fondo all'elenco. Cosi' un 7,8 mostra
+    # voci che sommano a piu' di 7,8 e una riga negativa che dice di quanto la
+    # scala l'ha accorciato; prima quelle voci apparivano rimpicciolite e il voto di
+    # partenza si spostava, e la cosa non aveva un nome.
+    scale_factor, base_role = saturation_linear(role)
+    merit = (bd["vote"] if bayesian else _raw_vote_from_index(
+        index_for_role(role, totals, minutes, exposure), role, minutes, reference,
+        observed=observed_index(role, totals, minutes, exposure)))
+    _pre = max(VOTE_MIN, min(VOTE_MAX, merit + goal_adjustment + assist_adjustment))
+    _pre = max(VOTE_MIN, min(VOTE_MAX, _pre + result_nudge + red_adjustment
+                             + own_goal_adjustment + penalty_adjustment))
+    compression = saturation_compression(_pre, role)
     per_unit = scale_factor * spread_k_for(role) * weight / ref["std"]
     # I FATTI OSSERVATI HANNO LA LORO SCALA, perche' il voto li attenua MENO (v.
     # classic_rating.UNSHRUNK_FEATURES): un gol segnato entrando all'85' pesa
@@ -890,6 +923,12 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     obs_weight = unshrunk_weight(role, minutes, reference)
     per_unit_obs = scale_factor * spread_k_for(role) * obs_weight / ref["std"]
     unit_of = (lambda key: per_unit_obs if key in UNSHRUNK_FEATURES else per_unit)
+    if bayesian:
+        # Scala di partita intera per ogni voce (i fatti osservati con la loro quota
+        # in piu'), per la scala del ruolo e per la retta dello stadio finale.
+        per_unit = scale_factor * bd["scale"] * bayes.rate_unit(role, reference)
+        unit_of = (lambda key: scale_factor * bd["scale"]
+                   * bayes.unit_for(role, key, reference))
 
     points_by_key = {key: (terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * unit_of(key)
                      for key in set(terms) | set(mean_terms)}
@@ -906,7 +945,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # is, not looked up in a totals dict that has never heard of it. Letto PRIMA
     # delle famiglie, che ne hanno bisogno: senza guardare i valori non si distingue
     # "ha tirato male" da "non ha tirato".
-    raw_values = raw_feature_values(totals, minutes, exposure,
+    raw_values = raw_feature_values(totals, 90 if bayesian else minutes, exposure,
                                     gk=role == Player.ROLE_GK)
 
     per90_keys = set(GK_PER90_WEIGHTS if role == Player.ROLE_GK else PER90_WEIGHTS)
@@ -984,16 +1023,19 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         + (obs_weight - weight) * minute_shift(role, minutes, reference,
                                                "observed_by_minute", "observed_mean")
     ) / ref["std"]
-    # La base nella scala finale. Il voto grezzo parte da ``vote_center_for``, ma lo
-    # stadio finale comprime attorno a un ALTRO punto (il baricentro misurato del
-    # ruolo): la differenza fra i due, riscalata, e' una costante che appartiene alla
-    # base. Dimenticarla sposta la scomposizione di quella costante, e le voci
-    # sembrano non tornare col voto senza che si capisca perche'.
-    centre = ((scale_base if scale_base is not None else vote_center_for(role))
-              + scale_factor * (centre - vote_center_for(role)))
-    raw = _raw_vote_from_index(
-        index_for_role(role, totals, minutes, exposure), role, minutes, reference,
-        observed=observed_index(role, totals, minutes, exposure))
+    if bayesian:
+        # Il voto-indice di chi ha fatto la media del ruolo per la frazione vista e
+        # niente per quella non vista (l'ancora neutra), calibrato come il voto.
+        # Il metro somma su TUTTE le voci pesate, non solo su quelle in cui questo
+        # giocatore ha evidenza: altrimenti la base cambierebbe da un giocatore
+        # all'altro con lo stesso ruolo e gli stessi minuti.
+        centre = (bd["anchor"] + bd["shift"] + bd["scale"] * (
+            bd["base_index"] + sum(v * bayes.unit_for(role, k, reference) for k, v in mean_terms.items())
+            - bd["anchor"]))
+    # La base nella scala finale: dove la retta del ruolo porta ``vote_center_for``
+    # (costante per ruolo), piu' la parte dei minuti riscalata dallo stesso fattore.
+    centre = base_role + scale_factor * (centre - vote_center_for(role))
+    raw = merit
     # Same order as the scorer: clamp the merit vote, add the (divergence-only)
     # result nudge, the red-card drop and the own-goal drop, then clamp back.
     # Stesso ordine dello scorer: il credito dei GOL entra nel voto grezzo (e' merito,
@@ -1119,6 +1161,13 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         contributions.append(entry(missing_goal, "nessun gol", kind="no_goal"))
     elif missing_assist:
         contributions.append(entry(missing_assist, "nessun assist", kind="no_assist"))
+    # L'ATTESA SUI MINUTI NON GIOCATI: il credito di gol e assist che il modello si
+    # aspetta nella parte di partita non vista, oltre la media del ruolo. Vale
+    # qualcosa solo per chi ha gia' segnato o servito in uno spezzone: il suo tasso
+    # a posteriori e' piu' alto della prior. Zero a partita intera.
+    if bayesian and abs(bd["event"] * bd["scale"] * scale_factor) >= 0.005:
+        contributions.append(entry(bd["event"] * bd["scale"] * scale_factor,
+                                   "attesa sui minuti non giocati", kind="completion"))
     if abs(p_nudge) >= 0.005:
         contributions.append(entry(p_nudge,
                                    "adeguamento al risultato di squadra",
@@ -1141,6 +1190,12 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         pen_label = ("rigore decisivo sbagliato" if penalty_adjustment <= -0.75
                      else "rigore sbagliato")
         contributions.append(entry(p_pen, pen_label, kind="penalty"))
+    # LA COMPRESSIONE, PER ULTIMA: e' l'unica riga che non racconta nulla del
+    # giocatore ma della scala — sopra il centro la curva accorcia lo scostamento,
+    # e qui sta scritto di quanto. Sotto il centro vale zero e non compare.
+    if abs(compression) >= 0.005:
+        contributions.append(entry(compression, "compressione dei valori estremi",
+                                   kind="compression"))
     shown_rounded = sum(c["points"] for c in contributions)
     other_points = round(subtotal - centre - shown_rounded, 2)
 
@@ -1216,8 +1271,13 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # so the open ledger still adds up to the fold it opened.
     tiny_points = round(other_points - sum(r["points"] for r in other_terms), 2)
     low = minutes < SHORT_APPEARANCE_MINUTES
-    note = ("Con pochi minuti giocati ogni voce pesa meno: il voto resta piu' "
-            "vicino al 6.") if low else ""
+    note = ""
+    if low:
+        note = ("Per la parte di partita non giocata si assume una prestazione nella "
+                "media del ruolo: con pochi minuti il voto resta piu' vicino al 6."
+                if bayesian else
+                "Con pochi minuti giocati ogni voce pesa meno: il voto resta piu' "
+                "vicino al 6.")
     if flat:
         # Le due voci promosse sono minuscole per costruzione. Il pannello le
         # mostra senza sapere quanto valgono, e senza questa riga sembrerebbero i
