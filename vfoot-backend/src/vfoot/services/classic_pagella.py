@@ -49,6 +49,25 @@ from vfoot.services.vote_reference import (
 log = logging.getLogger(__name__)
 
 CARD_MALUS = {CARD_YELLOW: 0.5, CARD_SECOND_YELLOW: 1.0, CARD_RED: 1.0}
+# Il malus da cartellini ha un TETTO: -1, qualunque sia la combinazione. Il
+# provider registra due incidenti per un doppio giallo (il primo ``yellow`` e poi
+# ``yellowRed``), e sommandoli Vásquez in Genoa-Frosinone (giornata 4 della
+# 2026-27, ammonito al 66' ed espulso all'86') pagava -1,5: 26 casi identici nella
+# 2025-26. La regola fantacalcio.it (chiarimento del 07/05/2019, «non esiste il
+# malus da -1.5») e' che doppia ammonizione, rosso diretto e giallo piu' rosso
+# diretto sono equivalenti: "il malus massimo accumulabile, sempre proveniente da
+# fonte cartellini, resta pari a -1". La scelta di allinearci e' del 12/09/2026.
+CARD_MALUS_CAP = 1.0
+
+
+def card_malus(cards: dict) -> float:
+    """Il malus da cartellini di UN giocatore in UNA partita, dai conteggi
+    ``{yellow, second_yellow, red}``: -0,5 per ammonizione, -1 per espulsione,
+    ma mai oltre ``CARD_MALUS_CAP`` in totale (v. sopra). Un solo punto lo
+    decide, cosi' la pagella vera e la lega demo non possono dissentire."""
+    raw = sum(CARD_MALUS.get(ct, 0.0) * n for ct, n in cards.items()
+              if ct in CARD_MALUS)
+    return min(raw, CARD_MALUS_CAP)
 OWN_GOAL_MALUS = 2.0  # classic fantacalcio: -2 per own goal (from raw_stats.ownGoals)
 PENALTY_MISSED_MALUS = 3.0  # classic fantacalcio: -3 per missed penalty (MatchShot situation)
 PENALTY_SAVED_BONUS = 3.0   # classic fantacalcio: +3 to the GK who saves a penalty
@@ -169,7 +188,8 @@ def _cards_for_match(match_id: int) -> dict[int, dict]:
         rec = cards[pid]
         if ct in rec:
             rec[ct] += 1
-        rec["malus"] += CARD_MALUS.get(ct, 0.0)
+    for rec in cards.values():
+        rec["malus"] = card_malus(rec)
     return cards
 
 

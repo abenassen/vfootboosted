@@ -15,6 +15,7 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from realdata.models import (
     CARD_RED,
+    CARD_SECOND_YELLOW,
     CARD_YELLOW,
     Competition,
     CompetitionSeason,
@@ -146,6 +147,33 @@ class RealChampionshipTests(TestCase):
         # Team total = sum of rated starters = only the GK
         self.assertEqual(home["total"], 3.5)
         self.assertEqual(pag["away"]["starters"], [])  # no away appearances seeded
+
+    def _gk_second_card(self, card_type):
+        """The keeper (booked in setUp) picks up a SECOND card on the pitch."""
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=self.gk, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=20.0, team_side="home")
+        MatchDisciplinaryEvent.objects.create(
+            match=self.match, player=self.gk, team_season=self.home_ts,
+            team_side="home", card_type=card_type, minute=86, provider="sofascore",
+            provider_event_id=f"card-{card_type}-{self.gk.id}")
+        return next(l for l in pagella_for_match(self.match, self.reference)["home"]
+                    ["starters"] if l["player_id"] == self.gk.id)
+
+    def test_double_yellow_costs_one_point_not_one_and_a_half(self):
+        """The provider stores a sending-off for two bookings as TWO events (the
+        first yellow, then the second): summing them charged Vásquez -1.5 in
+        Genoa-Frosinone. fantacalcio.it: the card malus never exceeds -1."""
+        line = self._gk_second_card(CARD_SECOND_YELLOW)
+        self.assertEqual(line["events"]["yellow"], 1)
+        self.assertEqual(line["events"]["red"], 1)
+        self.assertEqual(line["malus"], 2.0 + 1.0)  # 2 conceded + capped cards
+
+    def test_yellow_then_direct_red_is_also_capped_at_one(self):
+        """Same rule, other combination: 'doppia ammonizione, rosso diretto, o
+        giallo più rosso diretto sono assolutamente equivalenti'."""
+        line = self._gk_second_card(CARD_RED)
+        self.assertEqual(line["malus"], 2.0 + 1.0)
 
     def test_the_vote_ledger_opens_the_altre_voci_line(self):
         """La riga "altre N voci" del pannello si apre su una chiamata a parte: il

@@ -62,6 +62,21 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-15',
+    versione: '1.15',
+    data: '12 settembre 2026',
+    titolo: 'Un’espulsione per doppio giallo costa un punto, non un punto e mezzo',
+    voci: [
+      {
+        tipo: 'corretto',
+        testo:
+          'Chi viene espulso dopo essere già stato ammonito pagava l’ammonizione e l’espulsione insieme. Adesso il malus da cartellini non supera mai −1, come nel regolamento fantacalcio: doppia ammonizione, rosso diretto e giallo più rosso diretto valgono lo stesso.',
+        caso:
+          'Genoa-Frosinone, giornata 4: Vásquez ammonito al 66’ ed espulso all’86’ per doppio giallo pagava −1,5 invece di −1. Nella stagione scorsa il caso si era ripetuto 26 volte.',
+      },
+    ],
+  },
+  {
     id: 'v-1-14',
     versione: '1.14',
     data: '11 settembre 2026',

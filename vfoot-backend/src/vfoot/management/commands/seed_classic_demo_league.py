@@ -58,7 +58,9 @@ from vfoot.models import (
 )
 from vfoot.services import honours
 from vfoot.services.classic_rating import build_reference
-from vfoot.services.classic_pagella import get_role_averages, pagella_for_match
+from vfoot.services.classic_pagella import (
+    card_malus, get_role_averages, pagella_for_match,
+)
 from vfoot.services.defense_bonus import GATE_STARTERS, compute_defense_bonus
 from vfoot.services.formation_rules import is_legal_classic
 from vfoot.services.lineup_substitution import apply_classic_substitutions
@@ -77,7 +79,6 @@ CUP_ROUNDS = [("Quarti di finale", 24), ("Semifinali", 30), ("Finale", 36)]
 SV_BASELINE = 6.0
 
 SIDE_HOME, SIDE_AWAY = "home", "away"
-CARD_MALUS = {"yellow": 0.5, "second_yellow": 1.0, "red": 1.0}  # ammonizione/espulsione
 
 
 def classic_goals(total: float) -> int:
@@ -218,7 +219,8 @@ class Command(BaseCommand):
                 rec = cards[(md, pid)]
                 if ct in rec:
                     rec[ct] += 1
-                rec["malus"] += CARD_MALUS.get(ct, 0.0)
+        for rec in cards.values():
+            rec["malus"] = card_malus(rec)  # col tetto a -1 della pagella vera
         return cards
 
     # -- per-player fantavoto breakdown ----------------------------------
