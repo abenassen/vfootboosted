@@ -9,13 +9,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
+from django.core import mail
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 
 from realdata.models import (
-    Competition, CompetitionSeason, Match, Season, Team, TeamSeason,
+    Competition, CompetitionSeason, JobRun, Match, Season, Team, TeamSeason,
 )
-from realdata.services import live_ingest
+from realdata.services import alerting, egress_client, live_ingest
 from realdata.services.sofascore_adapter import SofaIngestResult
 
 _RESOLVED = SofaIngestResult(matches=1)
@@ -299,3 +300,123 @@ class TickWiringTests(_Base):
             with mock.patch.object(live_ingest, "finalize", return_value=True):
                 call_command("tick", "--now", _iso(now + timedelta(hours=2)))
             ann.assert_not_called()
+
+
+@override_settings(VFOOT_HEALTH_EMAIL="guasti@vfoot.it")
+class IlTickDaLAllarmeMentreLaPartitaEInCampo(_Base):
+    """Chi se ne accorge, e quando.
+
+    Il 14/09/2026 l'egress e' rimasto bloccato per novanta minuti con due partite
+    in corso. Il controllo che descrive esattamente quel guasto esisteva gia' e la
+    sua condizione era soddisfatta, ma lo faceva il rapporto quotidiano delle
+    07:30: la mail sarebbe arrivata la mattina dopo. Il tick invece era li', ogni
+    minuto, e non diceva niente a nessuno.
+    """
+
+    def _partita_in_corso(self, now):
+        return self._match(status=Match.STATUS_LIVE,
+                           kickoff=now - timedelta(minutes=30))
+
+    def _giri(self, quanti, start, *, riuscito=False):
+        for i in range(quanti):
+            with mock.patch.object(live_ingest, "live_round",
+                                   return_value=riuscito):
+                call_command("tick", "--now", _iso(start + timedelta(minutes=i)))
+
+    def test_dopo_una_serie_di_giri_ciechi_parte_una_mail(self):
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        self._partita_in_corso(now)
+        self._giri(8, now)
+        self.assertEqual(len(mail.outbox), 1)
+        testo = mail.outbox[0].subject + mail.outbox[0].body
+        self.assertIn("egress", testo)
+        self.assertIn("partite in corso sono ferme", testo)
+
+    def test_novanta_giri_ciechi_restano_UNA_mail(self):
+        """La ragione per cui l'allarme non sta in un `if` e basta: la serie vera
+        e' durata novanta esecuzioni, e novanta mail non le legge nessuno."""
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        self._partita_in_corso(now)
+        self._giri(40, now)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_il_giro_che_ha_spedito_lo_segna_nel_registro(self):
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        self._partita_in_corso(now)
+        self._giri(8, now)
+        segnati = [r for r in JobRun.objects.filter(job="tick")
+                   if r.did.get("alarm_mailed")]
+        self.assertEqual(len(segnati), 1)
+
+    def test_una_pipeline_sana_non_manda_niente(self):
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        self._partita_in_corso(now)
+        self._giri(20, now, riuscito=True)
+        self.assertEqual(mail.outbox, [])
+
+    def test_se_la_mail_non_parte_non_si_segna_e_si_riprova(self):
+        """Segnare «detto» su un invio fallito e' il modo di stare zitti per
+        un'ora dopo aver taciuto del tutto."""
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        self._partita_in_corso(now)
+        with mock.patch.object(alerting, "mail", return_value=False) as spedisci:
+            self._giri(8, now)
+        self.assertGreater(spedisci.call_count, 1)
+        self.assertEqual([r for r in JobRun.objects.filter(job="tick")
+                          if r.did.get("alarm_mailed")], [])
+
+    def test_un_server_di_posta_rotto_non_ferma_il_tick(self):
+        """La sorveglianza non puo' diventare il guasto di cui parla: il tick e'
+        cio' che tiene vive le partite in corso."""
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
+        m = self._partita_in_corso(now)
+        with mock.patch.object(alerting, "mail",
+                               side_effect=OSError("SMTP a terra")):
+            self._giri(8, now)   # non deve sollevare
+        m.refresh_from_db()
+        self.assertEqual(m.status, Match.STATUS_LIVE)
+
+
+class QuandoLEgressFallisceLoDiceTests(TestCase):
+    """Il 14/09/2026 il journal di una serata intera diceva solo «egress blocked;
+    will retry». Vero, ripetuto novanta volte, e inservibile: l'errore che aveva
+    inchiodato la pipeline era gia' passato per questo processo — letto in un
+    ``subprocess.run`` e buttato via un'istruzione dopo. E' saltato fuori solo
+    rilanciando la stessa fetch a mano, un'ora e mezza dopo.
+    """
+
+    def _run(self, *, rc, stdout="", stderr=""):
+        finto = mock.Mock(returncode=rc, stdout=stdout, stderr=stderr)
+        with mock.patch.object(egress_client.subprocess, "run", return_value=finto):
+            return egress_client.run_egress(["fetch", "--match-ids", "1"])
+
+    def test_il_motivo_del_fallimento_finisce_nel_log(self):
+        vero = ("ERROR: SSLError: Failed to perform, curl: (35) TLS connect "
+                "error: error:00000000:invalid library (0)")
+        with self.assertLogs("realdata.services.egress_client", "WARNING") as reg:
+            self.assertFalse(self._run(rc=1, stderr=vero))
+        detto = "\n".join(reg.output)
+        self.assertIn("TLS connect error", detto)
+        self.assertIn("rc=1", detto)
+
+    def test_senza_stderr_vale_la_narrazione_su_stdout(self):
+        """Quale IP si stava usando e quante rotazioni sono state fatte lo dice
+        l'orchestratore su stdout: senza stderr e' comunque meglio di niente."""
+        with self.assertLogs("realdata.services.egress_client", "WARNING") as reg:
+            self._run(rc=3, stdout="using 1.2.3.4 via it-rom\nexhausted rotations.")
+        self.assertIn("exhausted rotations.", "\n".join(reg.output))
+
+    def test_una_corsa_riuscita_non_scrive_niente(self):
+        """Il tick gira 1440 volte al giorno: se parlasse anche quando va tutto
+        bene, il journal smetterebbe di essere leggibile proprio nei giorni in cui
+        serve."""
+        import logging
+        with self.assertNoLogs("realdata.services.egress_client", logging.WARNING):
+            self.assertTrue(self._run(rc=0, stdout="  OK — cache warmed."))
+
+    def test_un_wrapper_che_non_parte_si_distingue_da_un_rifiuto(self):
+        with mock.patch.object(egress_client.subprocess, "run",
+                               side_effect=FileNotFoundError("sudo")), \
+             self.assertLogs("realdata.services.egress_client", "WARNING") as reg:
+            self.assertFalse(egress_client.run_egress(["fetch"]))
+        self.assertIn("non eseguibile", "\n".join(reg.output))

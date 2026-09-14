@@ -14,10 +14,18 @@ on-disk cache makes a later retry free).
 """
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Iterable
 
 from django.conf import settings
+
+log = logging.getLogger(__name__)
+
+# Quante righe dell'egress tenere quando fallisce. Poche apposta: serve la
+# diagnosi, non il verbale. L'egress dice l'IP usato in cima e il motivo in fondo,
+# e sono le due righe che contano.
+FAILURE_TAIL = 4
 
 
 def _wrapper() -> str:
@@ -41,9 +49,35 @@ def run_egress(args: list[str], *, timeout: float = 900.0) -> bool:
     cmd = ["sudo", "-n", _wrapper(), *args]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except Exception:  # noqa: BLE001 - sudo/wrapper missing, timeout, etc.
+    except Exception as exc:  # noqa: BLE001 - sudo/wrapper missing, timeout, etc.
+        log.warning("egress non eseguibile (%s: %s): %s",
+                    type(exc).__name__, exc, " ".join(args))
         return False
+    if r.returncode != 0:
+        # PERCHE' SI SCRIVE. Fino al 14/09/2026 qui si teneva il codice di uscita e
+        # si buttava tutto il resto, quindi il journal di una serata intera diceva
+        # solo "egress blocked; will retry" — vero e inutilizzabile. L'errore che
+        # aveva inchiodato la pipeline (una stretta di mano TLS tagliata) e' saltato
+        # fuori solo rilanciando a mano la stessa fetch novanta minuti dopo. Il
+        # processo l'aveva gia' letto e l'aveva gettato via.
+        log.warning("egress rc=%s per [%s]\n%s", r.returncode, " ".join(args),
+                    _tail(r.stderr, r.stdout))
     return r.returncode == 0
+
+
+def _tail(stderr: str, stdout: str) -> str:
+    """Le ultime righe non vuote di cio' che l'egress ha detto.
+
+    Prima stderr — e' li' che il worker riversa l'errore vero quando
+    l'orchestratore decide che non e' un problema di IP — e stdout come ripiego,
+    perche' la narrazione dell'orchestratore (quale IP, quante rotazioni) e' su
+    stdout e senza stderr e' comunque meglio di niente.
+    """
+    for stream in (stderr, stdout):
+        righe = [l.rstrip() for l in (stream or "").splitlines() if l.strip()]
+        if righe:
+            return "\n".join(f"    {l}" for l in righe[-FAILURE_TAIL:])
+    return "    (nessun output)"
 
 
 def warm_matches(event_ids: Iterable[int], kind: str) -> bool:

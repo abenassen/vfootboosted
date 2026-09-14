@@ -241,28 +241,74 @@ def _check_counters(health: Health, now) -> None:
                            value=value, baseline=baseline)
 
 
+@dataclass(frozen=True)
+class BlindTick:
+    """Il tick e' cieco: aveva partite da leggere e non ne legge piu' nessuna."""
+
+    streak: int          # quante esecuzioni consecutive, nell'ultima ora
+    since: object        # da quando (l'inizio della piu' vecchia della serie)
+    already_told: bool   # qualcuno ha gia' spedito l'allarme in questa finestra
+
+    @property
+    def message(self) -> str:
+        return (f"le ultime {self.streak} esecuzioni del tick avevano partite "
+                f"da leggere e non ne hanno importata nessuna: l'egress e' "
+                f"bloccato. Le partite in corso sono ferme.")
+
+
+def blind_tick(now=None) -> BlindTick | None:
+    """La regola, chiedibile da sola — ed e' per questo che sta fuori dal check.
+
+    Il rapporto quotidiano la fa alle 07:30, quando una serata di gara e' finita da
+    dieci ore: la notizia arriva, ma il giorno dopo. Il tick invece gira ogni
+    minuto e sa gia' tutto quello che serve per rispondere, quindi puo' fare la
+    stessa domanda mentre la partita e' ancora in campo. La regola pero' deve
+    restare UNA — due copie della stessa soglia divergono, e allora il rapporto e
+    la sorveglianza live raccontano due guasti diversi.
+
+    ``already_told`` esiste perche' chi chiede ogni minuto deve poter tacere: il
+    14/09/2026 la serie e' durata novanta esecuzioni, e novanta mail sono
+    indistinguibili da nessuna.
+    """
+    now = now or timezone.now()
+    # Delimitata all'ultima ora, non solo "gli ultimi cinque tick dovuti": cinque
+    # blocchi sparsi su tre giornate sono un IP storto ogni tanto, cinque dentro
+    # un'ora sono una partita che passa senza che nessuno la legga.
+    #
+    # L'esecuzione che sta CHIEDENDO non e' ancora chiusa (la sua riga ha ``due``
+    # vuoto fino alla fine), quindi non conta: l'allarme parte al sesto giro cieco
+    # invece che al quinto. Un minuto, e in cambio la domanda non dipende
+    # dall'ordine in cui il tick fa le cose.
+    window = list(JobRun.objects.filter(job="tick", dry_run=False,
+                                        started_at__gte=now - timedelta(hours=1))
+                  .exclude(due={}).order_by("-started_at")[:120])
+    if len(window) < BLIND_STREAK:
+        return None
+
+    def is_blind(r) -> bool:
+        return bool(not r.did.get("imported") and r.did.get("egress_blocked"))
+
+    if not all(is_blind(r) for r in window[:BLIND_STREAK]):
+        return None
+    streak = 0
+    for r in window:
+        if not is_blind(r):
+            break
+        streak += 1
+    return BlindTick(streak=streak, since=window[streak - 1].started_at,
+                     already_told=any(r.did.get("alarm_mailed") for r in window))
+
+
 def _check_blind_tick(health: Health, now) -> None:
     """Ticks that were owed live work and imported nothing — the egress is down.
 
     One is routine (a blocked exit IP, retried next minute). A run of them means
     the pool is exhausted or the tunnel is down, and every minute of it is a minute
     of a match nobody is seeing."""
-    # Bounded to the last hour, not just "the last five owed ticks": five blocked
-    # runs spread over three matchdays is a bad IP now and then, five inside an
-    # hour is a match going by unread.
-    recent = list(JobRun.objects.filter(job="tick", dry_run=False,
-                                        started_at__gte=now - timedelta(hours=1))
-                  .exclude(due={}).order_by("-started_at")[:BLIND_STREAK])
-    if len(recent) < BLIND_STREAK:
-        return
-    blind = [r for r in recent if not r.did.get("imported")
-             and r.did.get("egress_blocked")]
-    if len(blind) == BLIND_STREAK:
-        health.add("alarm", "tick:blind",
-                   f"le ultime {BLIND_STREAK} esecuzioni del tick avevano partite "
-                   f"da leggere e non ne hanno importata nessuna: l'egress e' "
-                   f"bloccato. Le partite in corso sono ferme.",
-                   since=recent[-1].started_at.isoformat())
+    blind = blind_tick(now)
+    if blind is not None:
+        health.add("alarm", "tick:blind", blind.message,
+                   since=blind.since.isoformat())
 
 
 def _check_calendar_yield(health: Health, now) -> None:

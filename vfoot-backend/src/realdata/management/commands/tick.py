@@ -25,11 +25,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone as djtz
 
 from realdata.models import Match
-from realdata.services import job_log, live_ingest
+from realdata.services import alerting, health, job_log, live_ingest
 from realdata.services import probable_lineups as forecasts
 from realdata.services.match_scheduler import (
     candidate_matches, clock_drift, human_gap, plan_tick,
@@ -237,5 +238,48 @@ class Command(BaseCommand):
             run.did(leagues_nudged=len(nudge))
             self.stdout.write(f"  {len(nudge)} leghe avvisate")
 
+        # 7) E se da un po' non entra piu' niente, dirlo a qualcuno — QUI e non nel
+        #    rapporto quotidiano, che gira alle 07:30 e su una serata di gara
+        #    arriva il giorno dopo. La regola e' la stessa (``health.blind_tick``),
+        #    il momento no: questo e' l'unico processo che sta guardando mentre la
+        #    partita e' in campo. Ultimo passo apposta, cosi' una chiamata SMTP
+        #    lenta non ritarda ne' un import ne' un avviso alle leghe.
         if not dry:
+            self._alarm_if_blind(now, run)
             self.stdout.write(self.style.SUCCESS("  applied"))
+
+    def _alarm_if_blind(self, now, run) -> None:
+        """Una mail per episodio, non una al minuto.
+
+        Tutto qui dentro e' avvolto: la sorveglianza non puo' diventare il guasto
+        di cui parla. Il tick e' cio' che tiene vive le partite in corso, e se il
+        prezzo di accorgersene fosse rischiare di fermarlo, non varrebbe la pena.
+        """
+        try:
+            blind = health.blind_tick(now)
+            if blind is None or blind.already_told:
+                return
+            body = (
+                f"{blind.message}\n\n"
+                f"Va avanti dalle {blind.since:%H:%M} UTC "
+                f"({blind.streak} esecuzioni).\n\n"
+                f"Da guardare, sul server:\n"
+                f"  journalctl -u vfoot-tick.service -n 80   # l'errore dell'egress "
+                f"e' li', riga 'egress rc='\n"
+                f"  vfoot-egress status --for sofascore      # quanti IP buoni "
+                f"restano\n\n"
+                f"Se serve rivederlo dal vivo, la stessa fetch a mano:\n"
+                f"  /usr/local/sbin/vfoot-egress fetch --match-ids <id> --kind live "
+                f"--cache-dir {settings.VFOOT_SOFASCORE_CACHE}\n"
+            )
+            if alerting.mail("[vfoot] l'egress e' bloccato, "
+                             "le partite in corso sono ferme", body):
+                # Segnato nel registro e non altrove: e' la stessa riga che ha
+                # fatto scattare l'allarme, quindi "l'ho gia' detto" si legge
+                # dove si legge "e' successo", e sopravvive a un riavvio.
+                run.did(alarm_mailed=1)
+                self.stdout.write(self.style.ERROR(
+                    f"  ALLARME spedito: {blind.streak} tick ciechi di fila"))
+        except Exception as exc:  # noqa: BLE001 — v. docstring
+            self.stdout.write(self.style.WARNING(
+                f"  allarme non valutato ({type(exc).__name__}: {exc})"))

@@ -25,12 +25,10 @@ from __future__ import annotations
 
 import json
 
-from django.conf import settings
-from django.core.mail import send_mail
 from django.core.management.base import BaseCommand
 
 from realdata.models import JobRun
-from realdata.services import health
+from realdata.services import alerting, health
 
 LEVEL_STYLE = {"alarm": "ERROR", "warn": "WARNING", "info": "SUCCESS"}
 LEVEL_MARK = {"alarm": "!!", "warn": " !", "info": "  "}
@@ -115,8 +113,11 @@ class Command(BaseCommand):
     # -- mail --------------------------------------------------------------
 
     def _mail(self, report, always: bool) -> None:
-        to = getattr(settings, "VFOOT_HEALTH_EMAIL", "") or ""
-        if not to:
+        """Il rapporto per posta. Chi lo riceve, e le cautele dell'invio, non stanno
+        piu' qui: da quando anche il tick puo' dare un allarme (v.
+        ``services.alerting``) l'elenco dei destinatari deve essere UNO, o le due
+        vie divergono e un guasto arriva a meta' delle persone."""
+        if not alerting.recipients():
             self.stderr.write(self.style.WARNING(
                 "--mail ma VFOOT_HEALTH_EMAIL non e' impostata nel .env: "
                 "nessuna mail inviata."))
@@ -126,13 +127,8 @@ class Command(BaseCommand):
         subject = {"alarm": "[vfoot] qualcosa e' rotto",
                    "warn": "[vfoot] da guardare",
                    "ok": "[vfoot] tutto a posto"}[report.verdict]
-        try:
-            send_mail(subject, self._plain(report),
-                      settings.DEFAULT_FROM_EMAIL, [t.strip() for t in to.split(",")],
-                      fail_silently=False)
-        except Exception as exc:  # noqa: BLE001
-            # Reported and swallowed: a mail server having a bad morning must not
-            # turn the health check itself into the day's failure.
+        if not alerting.mail(subject, self._plain(report)):
+            # Riportato e ingoiato: un server di posta con una brutta mattina non
+            # deve diventare il guasto della giornata.
             self.stderr.write(self.style.ERROR(
-                f"invio della mail fallito ({type(exc).__name__}: {exc}); "
-                f"il rapporto resta nel journal."))
+                "invio della mail fallito; il rapporto resta nel journal."))

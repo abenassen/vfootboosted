@@ -463,3 +463,77 @@ class DoppioTesseramento(TestCase):
         self._stint(self.milan, datetime(2026, 8, 10).date())
         rep = health.report(now=NOW, skip_shape=True)
         self.assertEqual(rep.verdict, "ok")
+
+
+class LAllarmeArrivaMentreLaPartitaEInCampo(TestCase):
+    """Il buco del 14/09/2026, che non era la mancanza di un controllo.
+
+    Il controllo c'era — ``tick:blind``, livello allarme — e la condizione era
+    soddisfatta: 94 esecuzioni consecutive con partite da leggere e zero importate,
+    fra le 16:31 e le 18:10 UTC. Anche la mail c'era. Mancava il MOMENTO: il
+    rapporto di salute gira una volta al giorno alle 07:30, quindi la notizia
+    sarebbe arrivata la mattina dopo, a serata finita.
+
+    Adesso la stessa regola la puo' chiedere il tick, che gira ogni minuto. Questi
+    test tengono fermo che sia la STESSA regola (non una copia con un'altra soglia)
+    e che chi la chiede ogni minuto sappia tacere.
+    """
+
+    def _tick(self, *, minutes_ago, due=None, did=None):
+        return JobRun.objects.create(
+            job="tick", started_at=NOW - timedelta(minutes=minutes_ago),
+            finished_at=NOW - timedelta(minutes=minutes_ago), ok=True,
+            due=due or {}, did=did or {})
+
+    def _ciechi(self, quanti, *, da=1, mailed_at=None):
+        for i in range(quanti):
+            did = {"egress_blocked": 2}
+            if mailed_at is not None and i == mailed_at:
+                did["alarm_mailed"] = 1
+            self._tick(minutes_ago=da + i, due={"live_round": 2}, did=did)
+
+    def test_sotto_la_soglia_non_si_dice_niente(self):
+        self._ciechi(health.BLIND_STREAK - 1)
+        self.assertIsNone(health.blind_tick(NOW))
+
+    def test_alla_soglia_si_dice(self):
+        self._ciechi(health.BLIND_STREAK)
+        cieco = health.blind_tick(NOW)
+        self.assertIsNotNone(cieco)
+        self.assertEqual(cieco.streak, health.BLIND_STREAK)
+        self.assertFalse(cieco.already_told)
+
+    def test_la_serie_si_conta_tutta_non_si_ferma_alla_soglia(self):
+        """Novanta giri ciechi e cinque non sono la stessa notizia, e chi legge la
+        mail deve poter distinguere «e' appena cominciato» da «va avanti da un'ora»."""
+        self._ciechi(40)
+        cieco = health.blind_tick(NOW)
+        self.assertEqual(cieco.streak, 40)
+        self.assertEqual(cieco.since, NOW - timedelta(minutes=40))
+
+    def test_un_import_riuscito_spezza_la_serie(self):
+        self._ciechi(health.BLIND_STREAK, da=2)
+        self._tick(minutes_ago=1, due={"live_round": 2}, did={"imported": 2})
+        self.assertIsNone(health.blind_tick(NOW))
+
+    def test_una_volta_detto_resta_detto(self):
+        """Il 14/09 la serie e' durata novanta esecuzioni: novanta mail sono
+        indistinguibili da nessuna."""
+        self._ciechi(20, mailed_at=10)
+        cieco = health.blind_tick(NOW)
+        self.assertTrue(cieco.already_told)
+
+    def test_fuori_dalla_finestra_il_detto_scade(self):
+        """Un'ora dopo si torna a poterlo dire: se dopo sessanta minuti e' ancora
+        tutto fermo, e' una notizia nuova."""
+        self._ciechi(health.BLIND_STREAK)
+        self._tick(minutes_ago=70, due={"live_round": 2},
+                   did={"egress_blocked": 2, "alarm_mailed": 1})
+        self.assertFalse(health.blind_tick(NOW).already_told)
+
+    def test_il_rapporto_quotidiano_usa_la_stessa_regola(self):
+        """La ragione per cui la regola e' stata estratta invece che copiata."""
+        self._ciechi(health.BLIND_STREAK)
+        rep = health.report(now=NOW, skip_shape=True)
+        codici = {c.code for c in rep.checks if c.level == "alarm"}
+        self.assertIn("tick:blind", codici)

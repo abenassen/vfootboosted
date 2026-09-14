@@ -29,13 +29,58 @@ questi file ne sono la copia versionata. L'ambiente (DB, SMTP, VAPID) arriva da
 | `vfoot-nudge` | 10:00 | `nudge_conclusions` | l'admin distratto non viene mai richiamato: classifica ferma finché non se ne accorge da solo |
 | `vfoot-digest` | ogni 5 min | `send_decision_digests` | **i membri non vengono avvisati di nessuna consultazione**: la domanda resta solo sullo schermo di chi apre l'app |
 | `vfoot-backup` | 03:15 | `/usr/local/sbin/vfoot-backup` | **nessuna copia dei dati** fra un deploy e l'altro (**root**) |
-| `vfoot-health` | 07:30 | `health_report --mail --prune` | nessuno si accorge che uno degli altri sette ha smesso di girare, o che gira e non riporta piu' niente |
+| `vfoot-health` | 07:30 | `health_report --mail --prune` | nessuno si accorge che uno degli altri sette ha smesso di girare, o che gira e non riporta piu' niente — ma v. *«Il controllo di fondo e la sorveglianza live»* |
 | `vfoot-agent` | ogni ora, ma decide da sé | `maintenance_run` | niente diagnosi automatica: il guasto lo scopri lo stesso dalla mail, ma lo capisci e lo correggi tu |
 | `vfoot-maintenance` | ogni 5 min | `maintenance_tick` | le proposte che hai approvato non vengono mai eseguite |
 
 Fuori da questa tabella, ma schedulato lo stesso: il rinnovo dei certificati TLS,
 che è il timer di sistema `certbot.timer` (vedi `DEPLOY.md`) — di nostro non ha
 niente, ma se un giorno il sito diventa irraggiungibile in HTTPS, si guarda lì.
+
+### Il controllo di fondo e la sorveglianza live
+
+`vfoot-health` gira **una volta al giorno**, e va benissimo per ciò per cui è
+fatto: accorgersi che un job ha smesso di girare, che un contatore è crollato,
+che il pool di IP si sta svuotando. Sono guasti che durano, e che il giorno dopo
+sono ancora lì da correggere.
+
+Un guasto **non** ha quella forma, e il 14/09/2026 ha fatto vedere quale:
+l'egress bloccato con due partite in corso. Il controllo esisteva già
+(`tick:blind` — cinque esecuzioni di fila con partite da leggere e zero
+importate), la sua condizione era soddisfatta da 94 esecuzioni consecutive, e la
+mail sarebbe arrivata **la mattina dopo**, a serata finita e a voti persi.
+
+Quindi la stessa regola la chiede anche il **tick**, che gira ogni minuto ed è
+l'unico processo sveglio mentre la partita è in campo. Non è un controllo nuovo:
+è `health.blind_tick()`, la stessa funzione che usa il rapporto quotidiano —
+apposta, perché due copie della stessa soglia prima o poi divergono e allora la
+mail del mattino e l'allarme della sera raccontano due guasti diversi.
+
+Tre cose tengono l'allarme dall'essere peggio del guasto:
+
+- **una mail per episodio.** La serie vera è durata novanta esecuzioni. Il tick
+  che ha spedito si segna `alarm_mailed` nella sua riga del registro, e finché
+  quella riga è nella finestra dell'ora nessun altro riparla. Dopo un'ora sì: se
+  è ancora tutto fermo, è una notizia nuova.
+- **se la mail non parte, non si segna.** Altrimenti un server di posta con una
+  brutta serata comprerebbe un'ora di silenzio dopo aver taciuto del tutto.
+- **niente di tutto questo può rompere il tick.** È l'ultimo passo, dopo gli
+  import e dopo l'avviso alle leghe, e sta dentro un `try`: la sorveglianza non
+  può diventare il guasto di cui parla.
+
+Chi riceve gli allarmi è `VFOOT_HEALTH_EMAIL`, e la risposta sta in **un posto
+solo** (`services/alerting.py`) da quando a chiedere sono in due.
+
+#### E l'errore dell'egress adesso si legge
+
+Collegata, perché è l'altra metà di quella serata. `egress_client.run_egress`
+teneva il codice di uscita del wrapper e **buttava via stdout e stderr**: il
+journal di novanta minuti diceva solo `egress blocked; will retry`, ripetuto, e
+l'errore vero (una stretta di mano TLS tagliata da un IP bruciato) è saltato
+fuori solo rilanciando la stessa fetch a mano. Ora un'uscita diversa da zero
+lascia nel journal le ultime righe di ciò che l'egress ha detto — `egress rc=...`
+— e una corsa riuscita continua a non scrivere niente, che con 1440 giri al
+giorno è la differenza fra un journal leggibile e uno no.
 
 ### Il digest è l'unica strada, non un di più
 
