@@ -194,3 +194,81 @@ class AWarmDoesNotServeTheLastWarmTests(_Base):
         self.assertEqual(self._run("--schedule-year", "26/27"), 0)
         self.assertTrue(vecchia.exists(),
                         "la 25/26 gia' scaricata e' stata cancellata per aggiornare la 26/27")
+
+
+class ABurnedExitIpMustReadAsABlockTests(_Base):
+    """Il guasto del 14/09/2026, e il motivo per cui e' durato novanta minuti.
+
+    Un IP di uscita bruciato non sempre si prende un 403: la stretta di mano TLS
+    viene tagliata e basta, e curl la racconta come un errore di libreria con la
+    coda degli errori vuota. Il worker la classificava fra gli imprevisti (rc=1),
+    l'orchestratore leggeva "non e' un problema di IP" e NON ruotava — cosi' ogni
+    tick della serata e' ripartito sullo stesso IP che non poteva rispondere,
+    mentre altri due nel pool passavano.
+    """
+
+    def _cut(self, error):
+        class _CutSession:
+            def get(self, *a, **kw):
+                raise error
+
+        class _CutWire(fetch_worker.SofaScoreClient):
+            def _ensure_session(inner):
+                # La sessione vera si costruisce davvero — e' li' che vive la
+                # famiglia di eccezioni che stiamo collaudando — e poi si taglia
+                # il filo. Nessun byte esce di qui.
+                super()._ensure_session()
+                inner._session = _CutSession()
+                return inner._session
+
+        return _CutWire
+
+    def _run_cut(self, error, **kw):
+        wire = self._cut(error)
+
+        def build(cache_dir, **kwargs):
+            c = wire(cache_dir, **{**kwargs, **kw})
+            self.clients.append(c)
+            return c
+
+        with mock.patch.object(sys, "argv",
+                               ["fetch_worker", "--cache-dir", str(self.cache),
+                                "--delay", "0",
+                                "--match-ids", str(MID), "--kind", "live"]), \
+             mock.patch.object(fetch_worker, "SofaScoreClient", build):
+            return fetch_worker.main()
+
+    def test_a_cut_tls_handshake_exits_3_so_the_orchestrator_rotates(self):
+        cffi_ex = _cffi_exceptions()
+        rc = self._run_cut(cffi_ex.SSLError(
+            "Failed to perform, curl: (35) TLS connect error: "
+            "error:00000000:invalid library (0):OPENSSL_internal"))
+        self.assertEqual(rc, 3, "una stretta di mano tagliata e' un IP da ruotare, "
+                                "non un errore nostro")
+
+    def test_a_dead_connection_exits_3_too(self):
+        cffi_ex = _cffi_exceptions()
+        self.assertEqual(self._run_cut(cffi_ex.ConnectionError("recv failure")), 3)
+        self.assertEqual(self._run_cut(cffi_ex.ReadTimeout("timed out")), 3)
+
+    def test_asking_for_something_impossible_is_still_OUR_bug(self):
+        """Il confine dall'altra parte: un impersonate inesistente o un URL
+        malformato non sono l'IP che non passa, e demoterlo sarebbe buttare via un
+        IP buono a ogni giro."""
+        cffi_ex = _cffi_exceptions()
+        self.assertEqual(self._run_cut(cffi_ex.ImpersonateError("no such target")), 1)
+
+    def test_the_last_attempt_does_not_sleep_before_giving_up(self):
+        """Il worker tiene ``max_retries=1``: l'unico tentativo e' anche l'ultimo, e
+        aspettare venti secondi prima di una rinuncia gia' decisa ritarda la
+        rotazione di quanto costa un intero giro di tick."""
+        cffi_ex = _cffi_exceptions()
+        with mock.patch("realdata.services.sofascore_client.time.sleep") as dorme:
+            self.assertEqual(self._run_cut(cffi_ex.SSLError("cut")), 3)
+        self.assertEqual(dorme.call_args_list, [],
+                         "ha aspettato prima di arrendersi")
+
+
+def _cffi_exceptions():
+    from curl_cffi.requests import exceptions as cffi_ex
+    return cffi_ex

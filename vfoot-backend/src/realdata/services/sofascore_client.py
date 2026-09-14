@@ -41,7 +41,18 @@ class SofaScoreError(RuntimeError):
 
 
 class SofaScoreBlocked(SofaScoreError):
-    """Raised when SofaScore keeps refusing — signal to stop the batch."""
+    """Raised when SofaScore keeps refusing — signal to stop the batch.
+
+    A refusal is not only an HTTP status. Through the egress the request leaves
+    from ONE pinned exit IP, and a burned one does not always get the courtesy of
+    a 403: the handshake is simply cut, which curl reports as a TLS error with an
+    empty OpenSSL error queue. That is the same fact wearing different clothes —
+    "this exit is not getting through" — and it has to raise the same exception,
+    or the orchestrator reads a transport failure as a bug in our own code, does
+    not rotate, and keeps every tick of the evening on the one IP that cannot
+    answer. Measured 14/09/2026: two matches live, ninety minutes of ticks, every
+    one of them "egress blocked; will retry" on the same burned exit.
+    """
 
 
 class SofaScoreClient:
@@ -61,6 +72,11 @@ class SofaScoreClient:
         # fully-cached run (e.g. importing on the laptop from a Pi-warmed cache)
         # needs neither the dependency nor network access.
         self._session = None
+        # Filled in with the session (the dependency is optional and lazy); see
+        # ``_ensure_session``. Empty until then, which catches nothing — the only
+        # way to reach ``_raw_get`` without a session is with one injected by a
+        # test, and a test's fake transport is not an exit IP to demote.
+        self._transport_errors: tuple = ()
         self._impersonate = impersonate
         self._timeout = timeout
         self._cache_dir = Path(cache_dir)
@@ -92,12 +108,30 @@ class SofaScoreClient:
                 raise SofaScoreError(
                     "curl_cffi is not installed. Run: pip install curl_cffi") from exc
             self._session = cffi_requests.Session()
+            # The transport family, resolved with the session and not at import
+            # time (the dependency is optional). ConnectionError and Timeout
+            # between them cover SSL, DNS, connect and read — everything that
+            # means "the bytes did not make it", and nothing that means "we asked
+            # for something impossible" (ImpersonateError, InvalidURL): those stay
+            # our own bug and must not be blamed on the exit IP.
+            self._transport_errors = (cffi_requests.exceptions.ConnectionError,
+                                      cffi_requests.exceptions.Timeout)
         return self._session
 
     def _raw_get(self, path: str) -> Any:
-        resp = self._ensure_session().get(API_BASE + path, headers=_HEADERS,
-                                          impersonate=self._impersonate, timeout=self._timeout)
-        self._last_request = time.monotonic()
+        session = self._ensure_session()
+        try:
+            resp = session.get(API_BASE + path, headers=_HEADERS,
+                               impersonate=self._impersonate, timeout=self._timeout)
+        except self._transport_errors as exc:
+            raise SofaScoreBlocked(
+                f"transport: {type(exc).__name__}: {str(exc)[:120]}") from exc
+        finally:
+            # Stamped whatever happened: a request that died on the wire still
+            # went out, and the throttle exists to space what goes OUT. Stamping
+            # only the successes would let a run that is failing fire as fast as
+            # the failures come back — the worst possible moment to stop pacing.
+            self._last_request = time.monotonic()
         if resp.status_code == 404:
             return None  # legitimately absent (e.g. a match with no shotmap)
         if resp.status_code != 200:
@@ -135,6 +169,14 @@ class SofaScoreClient:
                 data = self._raw_get(path)
             except SofaScoreBlocked as exc:
                 last_exc = exc
+                if attempt == self._max_retries - 1:
+                    # The last attempt has nothing to wait FOR: the loop is over
+                    # and the next line raises. Waiting anyway is what made a
+                    # ``max_retries=1`` client — the one that reads the warm cache
+                    # and is documented never to sit on the network — sleep twenty
+                    # seconds per cache miss before saying so.
+                    self._log(f"  blocked on {path} ({exc}); giving up")
+                    break
                 # Cloudflare rate-blocks are time-based (often 15-60 min). Be
                 # patient enough to ride one out within a single unattended run.
                 backoff = min(600.0, 20.0 * (2 ** attempt)) + random.uniform(0, 5)
