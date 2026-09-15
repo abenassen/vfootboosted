@@ -94,9 +94,14 @@ export interface ClassicPlayerLine {
     note: string;
   };
   explanation_text?: string;
-  entered: boolean; // bench player who came in
-  entered_for: ClassicPlayerRef | null;
-  replaced_by: ClassicPlayerRef | null; // starter who was substituted
+  /** Il cambio, nello stesso vocabolario su entrambi i tabellini. In una sfida di
+   *  lega è quello del motore: la panchina che copre un senza voto. Sulla pagella
+   *  di una partita vera è quello dell'allenatore vero, letto dagli intervalli in
+   *  campo — e lì un subentrato può uscire a sua volta, quindi una riga può
+   *  portare sia `entered_for` sia `replaced_by`. */
+  entered: boolean; // è entrato (dalla panchina)
+  entered_for: ClassicPlayerRef | null; // per chi
+  replaced_by: ClassicPlayerRef | null; // è uscito: chi ha preso il suo posto
 }
 
 /** Le voci che il riassunto NON mostra, una per una: cosa c'è sotto la riga
@@ -226,6 +231,9 @@ export interface ClassicDefenseBonus {
 export interface ClassicSubstitution {
   out: ClassicPlayerRef;
   in: ClassicPlayerRef;
+  /** Il minuto del cambio. Solo sulla pagella di una partita vera: il cambio del
+   *  motore di lega non avviene a un minuto. */
+  minute?: number | null;
 }
 
 export interface ClassicTeamDetail {

@@ -690,7 +690,7 @@ function TeamColumn({
           </div>
           <div className="divide-y">
             {team.starters.map((p) => (
-              <PlayerRow key={p.player_id} p={p} compact={compact} />
+              <PlayerRow key={p.player_id} p={p} compact={compact} realMatch={realMatch} />
             ))}
           </div>
 
@@ -699,7 +699,14 @@ function TeamColumn({
           </div>
           <div className="divide-y">
             {team.bench.map((p, i) => (
-              <PlayerRow key={p.player_id} p={p} order={i + 1} bench compact={compact} />
+              <PlayerRow
+                key={p.player_id}
+                p={p}
+                order={i + 1}
+                bench
+                compact={compact}
+                realMatch={realMatch}
+              />
             ))}
           </div>
         </>
@@ -850,11 +857,44 @@ function RoleChip({
   );
 }
 
+/** Il cambio, con lo stesso vocabolario sui due tabellini: «▲ entra per X» su chi
+ *  è entrato, «↓ esce · entra X» su chi è uscito. In una sfida di lega è il motore
+ *  che cambia (la panchina copre un senza voto); sulla pagella di una partita vera
+ *  è l'allenatore vero al 60', e lì un subentrato può uscire a sua volta: la riga
+ *  porta tutte e due le note, prima l'entrata e poi l'uscita, nell'ordine in cui
+ *  sono successe.
+ *
+ *  Tre grafie per tre spazi: la frase intera sulla colonna larga, il solo nome
+ *  sulla riga d'appoggio di un senza voto (dove non c'è un numero a contendergli
+ *  il posto), la sola freccia dove c'è il voto — il nome sta nel tocco prolungato. */
+function SubNote({ p, mode }: { p: ClassicPlayerLine; mode: 'full' | 'names' | 'arrows' }) {
+  const inFor = p.entered && p.entered_for ? p.entered_for : null;
+  const out = p.replaced_by;
+  if (!inFor && !out) return null;
+  const truncate = mode === 'names' ? 'truncate' : '';
+  return (
+    <>
+      {inFor ? (
+        <span className={`${truncate} font-semibold text-good`} title={`Entra per ${inFor.name}`}>
+          ▲{mode === 'full' ? ` entra per ${inFor.name}` : mode === 'names' ? ` ${inFor.name}` : ''}
+        </span>
+      ) : null}
+      {inFor && out && mode !== 'arrows' ? <span className="text-ink-faint">·</span> : null}
+      {out ? (
+        <span className={`${truncate} text-ink-faint`} title={`Esce · entra ${out.name}`}>
+          ↓{mode === 'full' ? ` esce · entra ${out.name}` : mode === 'names' ? ` ${out.name}` : ''}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 function PlayerRow({
   p,
   order,
   bench = false,
   compact = false,
+  realMatch = false,
 }: {
   p: ClassicPlayerLine;
   order?: number;
@@ -862,9 +902,15 @@ function PlayerRow({
   /** La colonna è larga la metà dello schermo: la riga si dispone su due piani
    *  invece che su uno (v. `CompactRow`). */
   compact?: boolean;
+  /** La pagella di una partita vera. Cambia una cosa sola: chi è uscito NON si
+   *  barra. In lega la barra dice «il suo voto non conta, conta quello di chi è
+   *  entrato»; su una partita vera il voto di chi esce al 60' è il suo, e conta
+   *  eccome — barrarlo direbbe il contrario. */
+  realMatch?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const played = !p.sv && p.fantavoto != null;
+  const struck = !!p.replaced_by && !realMatch;
   const role = roleOf(p);
   const why = p.explanation;
   const hasWhy = !!why && (why.contributions.length > 0 || why.other_count > 0);
@@ -918,7 +964,7 @@ function PlayerRow({
               {role ? <RoleChip role={role} known={p.role_known !== false} compact /> : null}
               <span
                 className={`min-w-0 truncate text-[13px] font-semibold leading-tight text-ink ${
-                  p.replaced_by ? 'line-through opacity-60' : ''
+                  struck ? 'line-through opacity-60' : ''
                 }`}
               >
                 {p.name}
@@ -934,15 +980,7 @@ function PlayerRow({
                    esattamente quello di cui si vuole sapere chi l'ha coperto, e
                    sulla sua riga non c'è nessun numero che gli contenda il posto. */
                 <>
-                  {p.replaced_by ? (
-                    <span className="truncate" title={`Esce · entra ${p.replaced_by.name}`}>
-                      ↓ {p.replaced_by.name}
-                    </span>
-                  ) : p.entered && p.entered_for ? (
-                    <span className="truncate font-semibold text-good" title={`Entra per ${p.entered_for.name}`}>
-                      ▲ {p.entered_for.name}
-                    </span>
-                  ) : null}
+                  <SubNote p={p} mode="names" />
                   {verdict.long === verdict.short ? null : (
                     <span className="truncate" title={verdict.title}>
                       {p.replaced_by || p.entered ? '· ' : null}
@@ -953,13 +991,7 @@ function PlayerRow({
               ) : (
                 <>
                   {p.minutes > 0 ? <span className="tabular-nums">{p.minutes}′</span> : null}
-                  {p.replaced_by ? (
-                    <span title={`Esce · entra ${p.replaced_by.name}`}>↓</span>
-                  ) : p.entered && p.entered_for ? (
-                    <span className="font-semibold text-good" title={`Entra per ${p.entered_for.name}`}>
-                      ▲
-                    </span>
-                  ) : null}
+                  <SubNote p={p} mode="arrows" />
                   <span
                     className={hasWhy ? 'underline decoration-dotted underline-offset-2' : undefined}
                     title={hasWhy ? 'Tocca la riga per il dettaglio del voto' : 'Voto puro'}
@@ -1022,7 +1054,7 @@ function PlayerRow({
         ) : null}
         {role ? <RoleChip role={role} known={p.role_known !== false} compact={false} /> : null}
         <span className="min-w-0">
-          <span className={`block truncate text-sm font-semibold text-ink ${p.replaced_by ? 'line-through opacity-60' : ''}`}>
+          <span className={`block truncate text-sm font-semibold text-ink ${struck ? 'line-through opacity-60' : ''}`}>
             {p.name}
             {p.minutes > 0 ? <span className="ml-1 text-[11px] font-normal text-ink-faint">{p.minutes}′</span> : null}
             <EventIcons ev={p.events} />
@@ -1030,11 +1062,7 @@ function PlayerRow({
           {/* annotation line — always reserved (fixed height) so every row has the
               same height and the two teams' bench sections start at the same point */}
           <span className="block h-[15px] truncate text-[11px] leading-[15px]">
-            {p.replaced_by ? (
-              <span className="text-ink-faint">↓ esce · entra {p.replaced_by.name}</span>
-            ) : p.entered && p.entered_for ? (
-              <span className="font-semibold text-good">▲ entra per {p.entered_for.name}</span>
-            ) : null}
+            <SubNote p={p} mode="full" />
           </span>
         </span>
       </div>

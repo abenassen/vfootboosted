@@ -34,6 +34,7 @@ from realdata.models import (
     MatchShot,
     Player,
 )
+from realdata.services.sofascore_intervals import substitution_pairs
 from vfoot.models import LeaguePlayerRole
 from vfoot.services import goal_impact
 from vfoot.services.classic_rating import (
@@ -497,7 +498,8 @@ def vote_ledger(match, player_id: int) -> dict | None:
     return rows.get(player_id)
 
 
-def _team_detail(starters: list[dict], bench: list[dict]) -> dict:
+def _team_detail(starters: list[dict], bench: list[dict],
+                 substitutions: list[dict] | None = None) -> dict:
     # Order by role (GK->DEF->MID->ATT), then by fantavoto desc within a role,
     # with senza-voto players last in their role band.
     def _sort(ls):
@@ -509,7 +511,8 @@ def _team_detail(starters: list[dict], bench: list[dict]) -> dict:
     total = round(sum(l["fantavoto"] for l in starters
                       if l["fantavoto"] is not None), 1)
     return {
-        "starters": starters, "bench": bench, "substitutions": [],
+        "starters": starters, "bench": bench,
+        "substitutions": list(substitutions or []),
         "base_total": total, "total": total, "goals": classic_goals(total),
         "defense": {"eligible": False, "reason": "non applicabile (partita reale)",
                     "avg": None, "bonus": 0.0, "applied": 0.0, "mode": None},
@@ -647,10 +650,52 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                      on_pitch=a.player_id in on_pitch)
         buckets[a.side]["starters" if a.is_starter else "bench"].append(line)
 
+    subs = _mark_substitutions(match.id, buckets)
     return {
-        "home": _team_detail(buckets["home"]["starters"], buckets["home"]["bench"]),
-        "away": _team_detail(buckets["away"]["starters"], buckets["away"]["bench"]),
+        "home": _team_detail(buckets["home"]["starters"], buckets["home"]["bench"],
+                             subs["home"]),
+        "away": _team_detail(buckets["away"]["starters"], buckets["away"]["bench"],
+                             subs["away"]),
     }
+
+
+def _mark_substitutions(match_id: int, buckets: dict) -> dict[str, list[dict]]:
+    """I cambi VERI della partita, scritti sulle righe con lo stesso vocabolario
+    del tabellino di lega — ``replaced_by`` su chi e' uscito, ``entered`` /
+    ``entered_for`` su chi e' entrato — cosi' il componente che li disegna e' uno
+    solo e la notazione e' la stessa da una parte e dall'altra.
+
+    Sono due fatti diversi, e la stessa parola: in lega «esce · entra X» e' la
+    panchina che copre un senza voto, qui e' l'allenatore vero che cambia al 60'.
+    Il tabellino di lega NON deve ereditare questi (v. ``compose_team_lines``, che
+    li azzera sulla copia): li' il cambio e' quello del motore.
+
+    Da ``PlayerOnPitchInterval`` e non dagli incidents: la pagella e' DB-only, e
+    l'intervallo e' l'oggetto che gia' risponde a «era in campo al minuto X».
+    Una coppia si scrive solo se entrambi hanno una riga; un cambio senza riga
+    (un id che non traduce) resta fuori invece di produrre un nome vuoto.
+    """
+    lines: dict[int, dict] = {}
+    side_of: dict[int, str] = {}
+    for side, groups in buckets.items():
+        for line in groups["starters"] + groups["bench"]:
+            lines[line["player_id"]] = line
+            side_of[line["player_id"]] = side
+    out: dict[str, list[dict]] = {"home": [], "away": []}
+    for pair in substitution_pairs(match_id):
+        l_out, l_in = lines.get(pair["out"]), lines.get(pair["in"])
+        if l_out is None or l_in is None:
+            continue
+        ref_out = {"player_id": l_out["player_id"], "name": l_out["name"]}
+        ref_in = {"player_id": l_in["player_id"], "name": l_in["name"]}
+        l_out["replaced_by"] = ref_in
+        l_in["entered"] = True
+        l_in["entered_for"] = ref_out
+        # Il lato lo dice la riga, non l'intervallo: e' la stessa cosa, ma la riga
+        # e' quella che il tabellino stampa.
+        out[side_of.get(pair["out"], pair["side"])].append(
+            {"out": ref_out, "in": ref_in, "minute": pair.get("minute")})
+    return out
 
 
 # Come si chiama, a schermo, l'esito di un tiro. L'AUTOGOL non e' fra le chiavi

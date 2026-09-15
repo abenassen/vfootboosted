@@ -14,28 +14,28 @@ cannot represent at all: a substitute who is himself later withdrawn.
 
 A red card ends an interval too — he is off the pitch just as surely.
 
+DAL 15/09/2026 l'importatore scrive gli intervalli da solo a ogni giro (v.
+``realdata.services.sofascore_intervals``, che e' anche il codice di questo
+comando). Il comando serve per i RIEMPIMENTI: le partite importate prima di quella
+data — e con loro la coppia uscito/entrato che il tabellino legge, che le righe
+vecchie non portano.
+
 Offline; the scrape is the only network step. Idempotent per match.
 
     python manage.py import_sofascore_intervals --competition-season 2
 """
 from __future__ import annotations
 
-import glob
 import json
 from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
 
-from realdata.models import (
-    INTERVAL_FINAL_WHISTLE, INTERVAL_RED_CARD, INTERVAL_STARTING_XI,
-    INTERVAL_SUBSTITUTION_OFF, INTERVAL_SUBSTITUTION_ON,
-    Match, MatchAppearance, Player, PlayerOnPitchInterval, PROVIDER_SOFASCORE,
-    SIDE_AWAY, SIDE_HOME,
+from realdata.models import Match, Player
+from realdata.services.sofascore_intervals import (
+    appearances_of, build_intervals, replace_intervals,
 )
-
-FULL_TIME = 90
 
 
 class Command(BaseCommand):
@@ -63,61 +63,24 @@ class Command(BaseCommand):
                 continue
             raw = json.loads(path.read_text())
             rows = raw if isinstance(raw, list) else raw.get("incidents", [])
+            subs_seen += sum(1 for r in rows if r.get("incidentType") == "substitution")
+            reds_seen += sum(1 for r in rows if r.get("incidentType") == "card"
+                             and str(r.get("incidentClass", "")).lower()
+                             in ("red", "redyellow", "yellowred"))
 
-            # side -> {player_id: (start, start_reason)} while we walk the timeline
-            appearances = {(a["player_id"]): a for a in MatchAppearance.objects
-                           .filter(match=match).values("player_id", "side",
-                                                       "is_starter", "minutes_played")}
-            ext_to_local = {}
-            for pid, ext in (Player.objects.filter(id__in=appearances)
-                             .exclude(external_id="")
-                             .values_list("id", "external_id")):
-                ext_to_local[str(ext)] = pid
-
-            start = {pid: (0, INTERVAL_STARTING_XI)
-                     for pid, a in appearances.items() if a["is_starter"]}
-            end: dict[int, tuple[int, str]] = {}
-            for inc in sorted(rows, key=lambda r: (r.get("time") or 0)):
-                kind = inc.get("incidentType")
-                minute = inc.get("time")
-                if minute is None:
-                    continue
-                if kind == "substitution":
-                    subs_seen += 1
-                    pin = ext_to_local.get(str((inc.get("playerIn") or {}).get("id")))
-                    pout = ext_to_local.get(str((inc.get("playerOut") or {}).get("id")))
-                    if pin is not None:
-                        start[pin] = (int(minute), INTERVAL_SUBSTITUTION_ON)
-                    if pout is not None:
-                        end[pout] = (int(minute), INTERVAL_SUBSTITUTION_OFF)
-                elif kind == "card" and str(inc.get("incidentClass", "")).lower() in (
-                        "red", "redyellow", "yellowred"):
-                    reds_seen += 1
-                    pid = ext_to_local.get(str((inc.get("player") or {}).get("id")))
-                    if pid is not None:
-                        end[pid] = (int(minute), INTERVAL_RED_CARD)
-
-            rows_out = []
-            for pid, (s_min, s_reason) in start.items():
-                a = appearances.get(pid)
-                if a is None:
-                    continue
-                e_min, e_reason = end.get(pid, (FULL_TIME, INTERVAL_FINAL_WHISTLE))
-                if e_min < s_min:          # provider inconsistency: trust nothing
-                    skipped += 1
-                    continue
-                ts = match.home_team if a["side"] == SIDE_HOME else match.away_team
-                rows_out.append(PlayerOnPitchInterval(
-                    match=match, player_id=pid, team_season=ts, team_side=a["side"],
-                    start_minute=s_min, start_elapsed_seconds=s_min * 60,
-                    end_minute=e_min, end_elapsed_seconds=e_min * 60,
-                    start_reason=s_reason, end_reason=e_reason,
-                    provider=PROVIDER_SOFASCORE))
+            appearances = appearances_of(match)
+            ext_to_local = {str(ext): pid for pid, ext in
+                            Player.objects.filter(id__in=appearances)
+                            .exclude(external_id="")
+                            .values_list("id", "external_id")}
+            # Una partita in cache e' una partita giocata: la fine aperta e' il
+            # fischio finale. Chi e' ancora sul campo passa dall'importatore live.
+            rows_out, bad = build_intervals(
+                match, rows, appearances, ext_to_local,
+                finished=match.status != Match.STATUS_LIVE)
+            skipped += bad
             if not o["dry_run"]:
-                with transaction.atomic():
-                    PlayerOnPitchInterval.objects.filter(
-                        match=match, provider=PROVIDER_SOFASCORE).delete()
-                    PlayerOnPitchInterval.objects.bulk_create(rows_out, batch_size=500)
+                replace_intervals(match, rows_out)
             made += len(rows_out)
 
         self.stdout.write(f"partite trattate      : {len(matches) - missing}")

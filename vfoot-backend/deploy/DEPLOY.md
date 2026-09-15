@@ -451,7 +451,13 @@ Come si legge il risultato:
    codice ripiega su una stima («un titolare gioca dal fischio d'inizio, un
    subentrato finisce la partita») che sbaglia di oltre venti punti percentuali il
    pericolo addebitato a un difensore su sette. In produzione erano **zero** per
-   tutta la 2025-26. Si ricostruiscono dalla cache, senza rete:
+   tutta la 2025-26, e di nuovo zero per le prime 40 partite della 2026-27
+   (15/09/2026): il tick non li scriveva. **Dal rilascio 1.16 li scrive
+   l'importatore a ogni giro**, con la coppia uscito/entrato nel `payload` che il
+   tabellino della partita vera mostra. Il comando resta per il riempimento delle
+   partite importate PRIMA — e va rilanciato anche sulla 2025-26, perche' le righe
+   vecchie non portano la coppia e senza di essa il tabellino accoppia solo i
+   cambi soli al loro minuto. Dalla cache, senza rete:
    ```sh
    manage.py import_sofascore_intervals --competition-season <id stagione dati>
    ```

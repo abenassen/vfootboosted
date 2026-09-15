@@ -75,6 +75,7 @@ from realdata.models import (
 from realdata.services.statsbomb_adapter import (
     BOX_X_MIN, BOX_Y_MIN, BOX_Y_MAX, _zone_key)
 from realdata.services.sofascore_client import SofaScoreBlocked
+from realdata.services.sofascore_intervals import build_intervals, replace_intervals
 from realdata.services.identity import (
     is_placeholder_dob, is_synthetic_sofascore_id, matches_by_surname, norm_name,
     spell_out_particles,
@@ -199,6 +200,9 @@ class SofaIngestResult:
     players: int = 0
     appearances: int = 0
     cards: int = 0
+    # Gli intervalli in campo scritti dagli incidents (v. sofascore_intervals):
+    # da qui passa anche la coppia uscito/entrato che il tabellino mostra.
+    on_pitch_intervals: int = 0
     player_zone_features: int = 0
     team_zone_features: int = 0
     # Players whose totals were written without a position: no heatmap this pass
@@ -637,6 +641,22 @@ def _ingest_cards(incidents_rows, match, home_ts, away_ts, player_cache) -> int:
     return len(rows)
 
 
+def _ingest_intervals(incidents_rows, match, player_cache, *, finished: bool) -> int:
+    """PlayerOnPitchInterval rows for this match from its incidents, with the
+    substitution pairing in the payload. Idempotent per match; returns how many
+    rows were written. Only players already in the sheet (MatchAppearance) count:
+    the appearances were written a few lines above from the very same lineups."""
+    appearances = {a["player_id"]: a for a in MatchAppearance.objects
+                   .filter(match=match)
+                   .values("player_id", "side", "is_starter", "minutes_played")}
+    ext_to_local = {ext: p.id for ext, p in player_cache.items()
+                    if p is not None and p.id in appearances}
+    rows, _skipped = build_intervals(match, incidents_rows, appearances, ext_to_local,
+                                     finished=finished)
+    replace_intervals(match, rows)
+    return len(rows)
+
+
 def _carried_presence(match) -> dict[int, tuple[dict[str, float], dict[str, float]]]:
     """{player_id: (presence share per zone, box share per zone)} as the last pass
     that DID have heatmaps measured them.
@@ -874,6 +894,13 @@ def _ingest_match(
     # /lineups statistics, so they must be ingested as part of every import.
     cards = _ingest_cards(incidents_rows, match, home_ts, away_ts, player_cache)
 
+    # Incidents -> intervalli in campo, con la coppia uscito/entrato. A OGNI giro,
+    # anche quello leggero: sono trenta righe, e a partita in corso e' cosi' che il
+    # tabellino sa gia' chi e' uscito per chi. Prima li scriveva solo un comando a
+    # mano, e la stagione in corso in produzione non ne aveva nessuno (15/09/2026).
+    intervals = _ingest_intervals(incidents_rows, match, player_cache,
+                                  finished=(event.get("status") or {}).get("type") == "finished")
+
     # CHI HA SERVITO IL GOL, dagli stessi incidenti gia' in mano. Serve a graduare
     # l'assist per impatto come il gol (v. vfoot.services.goal_impact): il ΔxP e'
     # una proprieta' del gol, quindi senza questo legame l'assist tornerebbe a una
@@ -926,11 +953,12 @@ def _ingest_match(
 
     log(f"  match {match_id} {home_team.get('name')} v {away_team.get('name')}: "
         f"{'heavy' if with_heatmaps else 'light'} "
-        f"appearances={appearances} cards={cards} "
+        f"appearances={appearances} cards={cards} intervals={intervals} "
         f"player_rows={player_written}/{player_total} unplaced={unplaced}")
 
     return SofaIngestResult(
         matches=1, appearances=appearances, cards=cards,
+        on_pitch_intervals=intervals,
         player_zone_features=player_total, team_zone_features=team_total,
         players_unplaced=unplaced,
     )

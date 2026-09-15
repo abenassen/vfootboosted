@@ -345,6 +345,14 @@ def compose_team_lines(
             return _sv_line(pid, role, name)  # played, not rated: a plain s.v.
         line = dict(base)
         line["lineup_role"] = role
+        # La pagella della partita vera porta i cambi VERI con lo stesso
+        # vocabolario (v. classic_pagella._mark_substitutions): qui il cambio e'
+        # quello del motore — la panchina che copre un senza voto — e lo scrive
+        # score_team. Senza questo azzeramento un titolare uscito al 60' si
+        # leggeva in lega come «sostituito» dal suo compagno di club.
+        line["entered"] = False
+        line["entered_for"] = None
+        line["replaced_by"] = None
         return line
 
     starters = [line_for(pid) for pid in starter_ids]

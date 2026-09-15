@@ -961,3 +961,81 @@ class ChampionshipWithoutALeagueTests(TestCase):
                 competition_season=self.over_cs).last(),
             status=Match.STATUS_POSTPONED, external_id="old-pp")
         self.assertNotIn(self.over_cs.id, matchday_state.open_season_ids())
+
+
+class RealMatchSubstitutionMarkersTests(TestCase):
+    """La pagella di una partita vera porta i cambi VERI con lo stesso vocabolario
+    del tabellino di lega: ``replaced_by`` su chi e' uscito, ``entered_for`` su
+    chi e' entrato — letti dagli intervalli in campo, non inventati."""
+
+    def setUp(self):
+        from realdata.models import (
+            INTERVAL_FINAL_WHISTLE, INTERVAL_STARTING_XI, INTERVAL_SUBSTITUTION_OFF,
+            INTERVAL_SUBSTITUTION_ON, PlayerOnPitchInterval,
+        )
+        comp = Competition.objects.create(external_id="23", name="Serie A")
+        self.cs = CompetitionSeason.objects.create(
+            competition=comp, season=Season.objects.create(code="2026-2027"),
+            name="Serie A 2026-2027")
+        self.home_ts = TeamSeason.objects.create(
+            competition_season=self.cs, team=Team.objects.create(name="Como"))
+        self.away_ts = TeamSeason.objects.create(
+            competition_season=self.cs, team=Team.objects.create(name="Sassuolo"))
+        self.match = Match.objects.create(
+            competition_season=self.cs, matchday=1, home_team=self.home_ts,
+            away_team=self.away_ts, home_goals=0, away_goals=0,
+            status=Match.STATUS_FINISHED, external_source="sofascore", external_id="9")
+        self.paz = Player.objects.create(full_name="Nico Paz", short_name="N. Paz",
+                                         classic_role_seed="CEN")
+        self.lahdo = Player.objects.create(full_name="Ayman Lahdo", short_name="A. Lahdo",
+                                           classic_role_seed="ATT")
+        self.kuhn = Player.objects.create(full_name="Nicolas Kuhn", short_name="N. Kühn",
+                                          classic_role_seed="ATT")
+        for p, starter, mins in ((self.paz, True, 58), (self.lahdo, False, 32),
+                                 (self.kuhn, False, 0)):
+            MatchAppearance.objects.create(match=self.match, player=p,
+                                           team_season=self.home_ts, side="home",
+                                           minutes_played=mins, is_starter=starter)
+        pair = {"in": self.lahdo.id, "out": self.paz.id, "minute": 58}
+        PlayerOnPitchInterval.objects.create(
+            match=self.match, player=self.paz, team_season=self.home_ts, team_side="home",
+            start_minute=0, end_minute=58, start_reason=INTERVAL_STARTING_XI,
+            end_reason=INTERVAL_SUBSTITUTION_OFF, provider="sofascore", payload={"exit": pair})
+        PlayerOnPitchInterval.objects.create(
+            match=self.match, player=self.lahdo, team_season=self.home_ts, team_side="home",
+            start_minute=58, end_minute=90, start_reason=INTERVAL_SUBSTITUTION_ON,
+            end_reason=INTERVAL_FINAL_WHISTLE, provider="sofascore", payload={"entry": pair})
+
+    def _lines(self):
+        pag = pagella_for_match(self.match, {})
+        return pag, {l["player_id"]: l for l in pag["home"]["starters"] + pag["home"]["bench"]}
+
+    def test_starter_out_and_bench_in_are_marked_with_the_league_vocabulary(self):
+        pag, by = self._lines()
+        self.assertEqual(by[self.paz.id]["replaced_by"],
+                         {"player_id": self.lahdo.id, "name": "A. Lahdo"})
+        self.assertFalse(by[self.paz.id]["entered"])
+        self.assertTrue(by[self.lahdo.id]["entered"])
+        self.assertEqual(by[self.lahdo.id]["entered_for"],
+                         {"player_id": self.paz.id, "name": "N. Paz"})
+        self.assertIsNone(by[self.lahdo.id]["replaced_by"])
+        # chi e' rimasto in panchina non porta niente
+        self.assertFalse(by[self.kuhn.id]["entered"])
+        self.assertIsNone(by[self.kuhn.id]["entered_for"])
+        self.assertEqual(pag["home"]["substitutions"], [
+            {"out": {"player_id": self.paz.id, "name": "N. Paz"},
+             "in": {"player_id": self.lahdo.id, "name": "A. Lahdo"}, "minute": 58}])
+        self.assertEqual(pag["away"]["substitutions"], [])
+
+    def test_league_fixture_lines_do_not_inherit_the_real_substitution(self):
+        # Il tabellino di lega riusa queste righe: li' «esce · entra» e' il motore
+        # che copre un senza voto, e Paz uscito al 58' NON e' stato sostituito.
+        from vfoot.services.classic_matchday_scoring import compose_team_lines
+        _pag, by = self._lines()
+        role_map = {self.paz.id: "MID", self.lahdo.id: "ATT"}
+        starters, bench = compose_team_lines(None, [self.paz.id], [self.lahdo.id], by, role_map)
+        self.assertIsNone(starters[0]["replaced_by"])
+        self.assertFalse(bench[0]["entered"])
+        self.assertIsNone(bench[0]["entered_for"])
+        # e la riga di partenza non e' stata toccata
+        self.assertIsNotNone(by[self.paz.id]["replaced_by"])

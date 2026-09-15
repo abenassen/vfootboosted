@@ -62,6 +62,24 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-16',
+    versione: '1.16',
+    data: '15 settembre 2026',
+    titolo: 'Nel tabellino di una partita di Serie A si vede chi è uscito e chi è entrato per lui',
+    voci: [
+      {
+        tipo: 'nuovo',
+        testo:
+          'Nelle pagelle di una partita vera i cambi sono segnati come in quelli di lega: «↓ esce · entra X» sul titolare sostituito, «▲ entra per X» sul subentrato, con il minuto accanto al nome. Il nome di chi esce non è barrato: il suo voto è suo e conta, a differenza del cambio di lega dove la barra dice che conta quello di chi è entrato.',
+      },
+      {
+        tipo: 'migliorato',
+        testo:
+          'Chi era in campo a ogni minuto si legge ora direttamente dall’importazione della partita, anche in diretta, invece che da un passaggio a mano a fine stagione: il termine del voto che pesa i pericoli concessi mentre un difensore era sul campo non deve più tirare a indovinare l’intervallo di chi è entrato dalla panchina.',
+      },
+    ],
+  },
+  {
     id: 'v-1-15',
     versione: '1.15',
     data: '12 settembre 2026',
