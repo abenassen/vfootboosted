@@ -32,9 +32,9 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from realdata.models import Match, Player
+from realdata.models import Match
 from realdata.services.sofascore_intervals import (
-    appearances_of, build_intervals, replace_intervals,
+    appearances_of, build_intervals, ext_to_local_for, replace_intervals,
 )
 
 
@@ -69,10 +69,9 @@ class Command(BaseCommand):
                              in ("red", "redyellow", "yellowred"))
 
             appearances = appearances_of(match)
-            ext_to_local = {str(ext): pid for pid, ext in
-                            Player.objects.filter(id__in=appearances)
-                            .exclude(external_id="")
-                            .values_list("id", "external_id")}
+            # external_id E alias: in produzione un giocatore su quattro sta solo
+            # nel secondo, e senza il suo cambio non si vedeva (v. ext_to_local_for).
+            ext_to_local = ext_to_local_for(appearances)
             # Una partita in cache e' una partita giocata: la fine aperta e' il
             # fischio finale. Chi e' ancora sul campo passa dall'importatore live.
             rows_out, bad = build_intervals(

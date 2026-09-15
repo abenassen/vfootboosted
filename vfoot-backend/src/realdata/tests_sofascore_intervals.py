@@ -233,3 +233,35 @@ class ImporterWritesIntervalsTests(TestCase):
         self.assertEqual(PlayerOnPitchInterval.objects.filter(match=match).count(), 3)
         self.assertEqual(PlayerOnPitchInterval.objects.filter(
             match=match, end_reason=INTERVAL_SUBSTITUTION_OFF).count(), 1)
+
+
+class AliasResolutionTests(_Fixture):
+    """Un giocatore che SofaScore chiama con un id che da noi sta SOLO in
+    PlayerAlias — in produzione uno su quattro nella 26-27 — deve avere il suo
+    cambio riconosciuto come tutti gli altri."""
+
+    def test_alias_only_player_is_resolved(self):
+        from realdata.models import PlayerAlias
+        from realdata.services.sofascore_intervals import ext_to_local_for
+        paz = self.players[101]
+        paz.external_id = "tm-777"          # l'id in Player e' quello di un'altra fonte
+        paz.save()
+        PlayerAlias.objects.create(player=paz, source=PROVIDER_SOFASCORE, alias="101")
+        mapping = ext_to_local_for(appearances_of(self.match))
+        self.assertEqual(mapping["101"], paz.id)
+        self.assertEqual(mapping["tm-777"], paz.id)
+        rows, _ = build_intervals(self.match, [_sub(58, 111, 101)],
+                                  appearances_of(self.match), mapping)
+        by = {r.player_id: r for r in rows}
+        self.assertEqual((by[paz.id].end_minute, by[paz.id].end_reason),
+                         (58, INTERVAL_SUBSTITUTION_OFF))
+        self.assertEqual(by[paz.id].payload["exit"]["in"], self.players[111].id)
+
+    def test_real_id_beats_synthetic_alias(self):
+        from realdata.models import PlayerAlias
+        from realdata.services.sofascore_intervals import ext_to_local_for
+        paz = self.players[101]
+        PlayerAlias.objects.create(player=paz, source=PROVIDER_SOFASCORE, alias="900000101")
+        mapping = ext_to_local_for(appearances_of(self.match))
+        self.assertEqual(mapping["101"], paz.id)
+        self.assertEqual(mapping["900000101"], paz.id)

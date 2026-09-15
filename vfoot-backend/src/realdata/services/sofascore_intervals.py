@@ -32,7 +32,8 @@ from django.db import transaction
 from realdata.models import (
     INTERVAL_FINAL_WHISTLE, INTERVAL_RED_CARD, INTERVAL_STARTING_XI,
     INTERVAL_SUBSTITUTION_OFF, INTERVAL_SUBSTITUTION_ON, INTERVAL_UNKNOWN_END,
-    Match, MatchAppearance, PROVIDER_SOFASCORE, PlayerOnPitchInterval, SIDE_HOME,
+    Match, MatchAppearance, PROVIDER_SOFASCORE, Player, PlayerAlias,
+    PlayerOnPitchInterval, SIDE_HOME,
 )
 
 FULL_TIME = 90
@@ -47,6 +48,30 @@ def appearances_of(match: Match) -> dict[int, dict]:
     return {a["player_id"]: a for a in MatchAppearance.objects
             .filter(match=match).values("player_id", "side", "is_starter",
                                         "minutes_played")}
+
+
+def ext_to_local_for(appearances: Mapping[int, Any]) -> dict[str, int]:
+    """{id SofaScore: Player.id} per i giocatori in distinta — da ``external_id``
+    E dagli alias, perche' in produzione uno su quattro sta solo li'.
+
+    Misurato il 15/09/2026 sulla 26-27 di prod: 225 dei 788 id nelle sostituzioni
+    non erano ``Player.external_id`` di nessuno, ed erano TUTTI un
+    ``PlayerAlias(source=sofascore)``. Il comando li leggeva solo dal primo campo,
+    quindi per quei cambi non vedeva niente: il titolare uscito al 60' risultava in
+    campo fino al fischio, e pagava il pericolo concesso dopo la sua uscita —
+    peggio della stima di ripiego, che almeno leggeva i suoi minuti. L'importatore
+    non ha mai avuto il problema perche' risolve gli id con ``_player``, che gli
+    alias li conosce. Un id vero ha la precedenza su uno sintetico (v.
+    ``sofascore_adapter._player_by_alias``)."""
+    out: dict[str, int] = {}
+    for pid, alias in (PlayerAlias.objects
+                       .filter(player_id__in=list(appearances), source=PROVIDER_SOFASCORE)
+                       .values_list("player_id", "alias")):
+        out.setdefault(str(alias), pid)
+    for pid, ext in (Player.objects.filter(id__in=list(appearances))
+                     .exclude(external_id="").values_list("id", "external_id")):
+        out[str(ext)] = pid
+    return out
 
 
 def build_intervals(match: Match, incidents_rows: Iterable[Mapping[str, Any]],
