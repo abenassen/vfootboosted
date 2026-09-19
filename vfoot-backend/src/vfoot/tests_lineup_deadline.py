@@ -365,8 +365,12 @@ class SaveEndpointTests(_Season):
         snap = SavedLineupSnapshot.objects.get(
             league_id=str(self.league.id), matchday_id="22",
             lineup_id=f"team{self.team.id}")
+        # NUMERI, qualunque cosa abbia mandato il client: gli id li normalizza il
+        # salvataggio (v. tests_lineup_id_shape). Prima qui
+        # finiva la richiesta tale e quale, e la forma degli id la decideva chi
+        # scriveva — la pagina numeri, la riparazione del mercato stringhe.
         self.assertEqual(snap.bench_player_ids,
-                         [str(self.pid["lazio1"]), str(self.pid["como2"])])
+                         [self.pid["lazio1"], self.pid["como2"]])
 
     def test_the_matchday_mode_shuts_the_whole_thing(self):
         self.league.lineup_lock_mode = FantasyLeague.LOCK_MATCHDAY
@@ -420,11 +424,14 @@ class RepairTests(_Season):
         Match.objects.filter(external_id="mon22").update(kickoff=now + timedelta(days=1))
 
     def _snapshot(self, matchday: str):
+        # NUMERI, come li scrive la pagina e come il campo li conserva: una
+        # fixture che scrive stringhe collauda una forma che non esiste piu'
+        # (v. tests_lineup_id_shape).
         SavedLineupSnapshot.objects.create(
             league_id=str(self.league.id), matchday_id=matchday,
             lineup_id=f"team{self.team.id}",
             gk_player_id=str(self.pid["como1"]),
-            starter_player_ids=[str(self.pid["milan1"]), str(self.pid["lazio1"])],
+            starter_player_ids=[self.pid["milan1"], self.pid["lazio1"]],
             bench_player_ids=[],
         )
 
@@ -433,7 +440,7 @@ class RepairTests(_Season):
             self.league, self.team.id, self.pid["milan1"], self.pid["roma2"])
         self.assertEqual(touched, [])
         snap = SavedLineupSnapshot.objects.get(matchday_id="22")
-        self.assertIn(str(self.pid["milan1"]), snap.starter_player_ids)
+        self.assertIn(self.pid["milan1"], snap.starter_player_ids)
 
     def test_nor_is_one_who_has_not_kicked_off_yet(self):
         """IL CAMBIO. Il lunedi' non ha ancora giocato e la formazione della 22 e'
@@ -444,8 +451,8 @@ class RepairTests(_Season):
             self.league, self.team.id, self.pid["lazio1"], self.pid["roma2"])
         self.assertEqual(touched, [])
         snap = SavedLineupSnapshot.objects.get(matchday_id="22")
-        self.assertIn(str(self.pid["lazio1"]), snap.starter_player_ids)
-        self.assertNotIn(str(self.pid["roma2"]), snap.starter_player_ids)
+        self.assertIn(self.pid["lazio1"], snap.starter_player_ids)
+        self.assertNotIn(self.pid["roma2"], snap.starter_player_ids)
 
     def test_a_round_that_has_not_begun_is_repaired_as_always(self):
         """E il mestiere di R2 resta: sul turno successivo, che non e' cominciato,
@@ -459,7 +466,7 @@ class RepairTests(_Season):
         touched = lineup_repair.swap_player(
             self.league, self.team.id, self.pid["lazio1"], self.pid["roma2"])
         self.assertEqual(touched, [23])
-        self.assertIn(str(self.pid["roma2"]),
+        self.assertIn(self.pid["roma2"],
                       SavedLineupSnapshot.objects.get(matchday_id="23").starter_player_ids)
-        self.assertIn(str(self.pid["lazio1"]),
+        self.assertIn(self.pid["lazio1"],
                       SavedLineupSnapshot.objects.get(matchday_id="22").starter_player_ids)

@@ -109,13 +109,25 @@ def swap_player(league, team_id: int, out_pid: int, in_pid: int | None, now=None
             changed = True
 
         for field in ("starter_player_ids", "bench_player_ids"):
-            ids = [str(x) for x in (getattr(snap, field) or [])]
-            if out_s not in ids:
+            ids = list(getattr(snap, field) or [])
+            if not any(str(x) == out_s for x in ids):
                 continue
-            if in_s is None:
-                new = [x for x in ids if x != out_s]
+            if in_pid is None:
+                new = [x for x in ids if str(x) != out_s]
             else:
-                new = [in_s if x == out_s else x for x in ids]
+                # L'ENTRANTE PRENDE IL POSTO E LA FORMA DELL'USCENTE. Il confronto
+                # si fa per stringa — il campo e' un JSON e ha ospitato tutt'e due
+                # le forme — ma cio' che si RISCRIVE deve avere il tipo di quel che
+                # sostituisce: una lista di numeri resta di numeri.
+                #
+                # Prima la riparazione convertiva l'intera lista in stringhe, e
+                # l'undici spariva dal campo della pagina Formazione: il client
+                # cerca i giocatori in una mappa con chiavi numeriche, quindi
+                # `"888"` non trovava nessuno. Il contatore diceva 11/11 e la
+                # sagoma ne mostrava uno — il portiere, che viaggia in un campo a
+                # parte e veniva convertito a numero dall'API.
+                new = [(in_pid if isinstance(x, int) else in_s) if str(x) == out_s else x
+                       for x in ids]
             setattr(snap, field, new)
             changed = True
 

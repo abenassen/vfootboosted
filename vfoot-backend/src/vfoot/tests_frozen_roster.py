@@ -340,7 +340,7 @@ class TheWalletCountsWhatIsPromisedToOffersTests(_ClassicRound):
         self.assertEqual(budget["available"], 855)
 
 
-class ASaveCannotUndoTheRepairTests(_ClassicRound):
+class _RepairedRound(_ClassicRound):
     """La giornata NON e' ancora cominciata, quindi R4 non congela niente — ma la
     proprieta' va verificata lo stesso, contro la rosa di adesso.
 
@@ -396,15 +396,23 @@ class ASaveCannotUndoTheRepairTests(_ClassicRound):
              "bench_player_ids": self._xi("dbench", "abench")},
             format="json")
 
+
+class ASaveCannotUndoTheRepairTests(_RepairedRound):
+
     def test_a_stale_page_is_refused_instead_of_undoing_the_repair(self):
         newcomer = self._settle()
         r = self._save_the_stale_page()
         self.assertEqual(r.status_code, 409)
         self.assertIn("ricarica", r.json()["detail"].lower())
         snap = SavedLineupSnapshot.objects.get(matchday_id="23")
-        ids = [int(x) for x in snap.starter_player_ids]
-        self.assertIn(newcomer.id, ids, "la riparazione di R2 e' stata disfatta")
-        self.assertNotIn(self.pid["m4"], ids)
+        # SENZA ``int(x)`` NELL'ASSERZIONE. Convertire qui era mettersi la stessa
+        # benda del codice sotto esame: la riparazione ha spedito in produzione
+        # un undici di stringhe e questa prova e' passata lo stesso. La forma ha
+        # un posto suo dove si misura (``tests_lineup_id_shape``); qui si guarda
+        # CHI c'e' dentro, e lo si guarda sui dati come sono davvero scritti.
+        self.assertIn(newcomer.id, snap.starter_player_ids,
+                      "la riparazione di R2 e' stata disfatta")
+        self.assertNotIn(self.pid["m4"], snap.starter_player_ids)
 
     def test_a_player_who_was_never_yours_is_refused_too(self):
         """L'altra faccia: non solo il ritardo, anche l'invio costruito a mano.

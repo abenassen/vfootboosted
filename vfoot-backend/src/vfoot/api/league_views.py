@@ -6081,11 +6081,18 @@ class LeagueTeamLineupView(APIView):
                         starter_backups=[],
                     )
 
+        # NUMERI, sempre. Il portiere lo era gia'; gli altri due campi
+        # viaggiavano com'erano scritti nel JSON, e una formazione riparata dal
+        # mercato li aveva come stringhe. Il client cerca i giocatori in una mappa
+        # con chiavi numeriche: `"888"` non trova nessuno, e l'undici spariva dal
+        # campo lasciando il solo portiere. La causa e' riparata in
+        # ``lineup_repair``, ma la forma con cui una formazione esce di qui e'
+        # parte del contratto e va imposta qui, non sperata a monte.
         saved_lineup = (
             {
                 "gk_player_id": int(snap.gk_player_id) if snap.gk_player_id else None,
-                "starter_player_ids": snap.starter_player_ids,
-                "bench_player_ids": snap.bench_player_ids,
+                "starter_player_ids": lineup_deadline.as_ids(snap.starter_player_ids),
+                "bench_player_ids": lineup_deadline.as_ids(snap.bench_player_ids),
                 "starter_backups": snap.starter_backups,
             }
             if snap
@@ -6349,10 +6356,10 @@ class LeagueTeamLineupSaveView(APIView):
         # errore, e la pagina manda tutti e venticinque i giocatori, quindi un
         # filtro muto qui vorrebbe dire panchine dimezzate senza traccia.
         outfield_ids = [int(x) for x in request.data.get("starter_player_ids", []) if x is not None]
+        bench_ids = [int(x) for x in request.data.get("bench_player_ids", []) if x is not None]
         fieldable = frozen_roster.owned_for_matchday(league, team, md_int)
         started = frozen_roster.lock_instant(league, md_int) is not None
-        sent = ([int(gk)] if gk else []) + outfield_ids + [
-            int(x) for x in request.data.get("bench_player_ids", []) if x is not None]
+        sent = ([int(gk)] if gk else []) + outfield_ids + bench_ids
         intruders = [pid for pid in dict.fromkeys(sent) if pid not in fieldable]
         if intruders:
             names = {
@@ -6415,10 +6422,13 @@ class LeagueTeamLineupSaveView(APIView):
             comp = request.data.get("competition")
             target_comp_ids = [int(comp)] if comp else [None]
 
+        # I NUMERI GIA' CONVERTITI, non quel che e' arrivato. Il campo e' un JSON
+        # e accetta qualunque cosa: scriverci dentro la richiesta cosi' com'e'
+        # significa che la forma degli id la decide il client.
         defaults = {
             "gk_player_id": str(gk) if gk else None,
-            "starter_player_ids": request.data.get("starter_player_ids", []),
-            "bench_player_ids": request.data.get("bench_player_ids", []),
+            "starter_player_ids": outfield_ids,
+            "bench_player_ids": bench_ids,
             "starter_backups": request.data.get("starter_backups", []),
         }
         keys = [f"team{team.id}" + (f":comp{cid}" if cid is not None else "")

@@ -264,13 +264,16 @@ class TradeTests(MarketBase):
         snap = SavedLineupSnapshot.objects.create(
             league_id=str(self.league.id), lineup_id=f"team{self.t2.id}",
             matchday_id="1", gk_player_id=None,
-            # Gli id nelle formazioni sono stringhe, come li scrive la pagina.
-            starter_player_ids=[str(self.yildiz.id)], bench_player_ids=[],
+            # NUMERI. Qui c'era scritto «gli id nelle formazioni sono stringhe,
+            # come li scrive la pagina», e la pagina scrive numeri: la convinzione
+            # sbagliata era messa nero su bianco in una fixture, e da li' in
+            # un'asserzione. V. tests_lineup_id_shape per la forma e il perche'.
+            starter_player_ids=[self.yildiz.id], bench_player_ids=[],
         )
         econ.apply_trade(self.league, self.t2, self.t3,
                          [self.yildiz.id], [self.pellegrini.id], actor=self.admin)
         snap.refresh_from_db()
-        self.assertEqual(snap.starter_player_ids, [str(self.pellegrini.id)])
+        self.assertEqual(snap.starter_player_ids, [self.pellegrini.id])
 
     def test_in_bacheca_e_uno_scambio_non_due_acquisti(self):
         econ.apply_trade(self.league, self.t2, self.t3,

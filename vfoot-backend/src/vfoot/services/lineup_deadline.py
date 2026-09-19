@@ -45,7 +45,15 @@ BUCKET_BENCH = "panchina"
 BUCKET_OUT = "fuori"
 
 
-def _as_ids(values) -> list[int]:
+def as_ids(values) -> list[int]:
+    """Una lista di id di giocatore, come NUMERI.
+
+    Il campo che li conserva e' un JSON, e ci sono passate tutt'e due le forme:
+    la pagina manda numeri, il salvataggio li riscrive tali e quali, la
+    riparazione del mercato li ha riscritti per un periodo come stringhe. Chi
+    legge una formazione la deve leggere in un modo solo, e questo e' il posto
+    dove la forma si decide.
+    """
     out: list[int] = []
     for v in values or []:
         try:
@@ -63,9 +71,9 @@ def placement(lineup: dict) -> dict[int, str]:
     he is a fielder" has to read as a move.
     """
     out: dict[int, str] = {}
-    for pid in _as_ids(lineup.get("bench_player_ids")):
+    for pid in as_ids(lineup.get("bench_player_ids")):
         out[pid] = BUCKET_BENCH
-    for pid in _as_ids(lineup.get("starter_player_ids")):
+    for pid in as_ids(lineup.get("starter_player_ids")):
         out[pid] = BUCKET_XI
     gk = lineup.get("gk_player_id")
     if gk not in (None, ""):
@@ -111,7 +119,7 @@ def normalise_xi(outfield_ids: list[int], roles: dict[int, str],
     seen: dict[str, int] = {}
     # The stored lists hold whatever was posted — the seeds write strings, the page
     # numbers — so the previous order is coerced rather than compared as it lies.
-    for pid in _as_ids(previous_ids):
+    for pid in as_ids(previous_ids):
         role = roles.get(pid, "MID")
         i = seen.get(role, 0)
         seen[role] = i + 1
@@ -143,7 +151,7 @@ def normalise_xi(outfield_ids: list[int], roles: dict[int, str],
 
 def slots(lineup: dict, key: str, only: set[int]) -> dict[int, int]:
     """{index: player} within one ordered list, for the players we care about."""
-    return {i: pid for i, pid in enumerate(_as_ids(lineup.get(key))) if pid in only}
+    return {i: pid for i, pid in enumerate(as_ids(lineup.get(key))) if pid in only}
 
 
 def rank(lineup: dict) -> dict[int, int]:
@@ -155,7 +163,7 @@ def rank(lineup: dict) -> dict[int, int]:
     those positions would refuse such a change with a message nobody could read.
     """
     out: dict[int, int] = {}
-    for pid in _as_ids(lineup.get("starter_player_ids")):
+    for pid in as_ids(lineup.get("starter_player_ids")):
         out[pid] = 0
     gk = lineup.get("gk_player_id")
     if gk not in (None, ""):
@@ -163,7 +171,7 @@ def rank(lineup: dict) -> dict[int, int]:
             out[int(gk)] = 0
         except (TypeError, ValueError):
             pass
-    for i, pid in enumerate(_as_ids(lineup.get("bench_player_ids"))):
+    for i, pid in enumerate(as_ids(lineup.get("bench_player_ids"))):
         out[pid] = 1 + i
     return out
 

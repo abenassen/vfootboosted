@@ -215,7 +215,8 @@ class TheMarketCannotReopenAClosedRoundTests(_OwnRound):
         touched = lineup_repair.swap_player(self.league, self.team.id, fri.id, self.pid["m1"])
         self.assertEqual(touched, [])
         snap.refresh_from_db()
-        self.assertIn(fri.id, [int(x) for x in snap.starter_player_ids])
+        # Sui dati come sono scritti, non convertiti: v. tests_lineup_id_shape.
+        self.assertIn(fri.id, snap.starter_player_ids)
 
     def test_selling_a_man_before_his_kickoff_does_not_bind(self):
         self.saturday_roster()

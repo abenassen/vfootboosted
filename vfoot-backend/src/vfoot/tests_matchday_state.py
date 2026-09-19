@@ -259,19 +259,19 @@ class LineupRepairTests(TestCase):
                              external_source="sofascore", external_id="m17")
         self.now = DEC20 + timedelta(days=2)   # after 16, before 17
 
-    def _snap(self, matchday, lineup_id="team1", gk="99", starters=("5", "6"), bench=("20",)):
+    def _snap(self, matchday, lineup_id="team1", gk="99", starters=(5, 6), bench=(20,)):
         return SavedLineupSnapshot.objects.create(
             league_id=str(self.league.id), matchday_id=str(matchday), lineup_id=lineup_id,
             gk_player_id=gk, starter_player_ids=list(starters), bench_player_ids=list(bench),
-            starter_backups=[{"starter_player_id": "5", "backup_player_ids": ["20"]}])
+            starter_backups=[{"starter_player_id": "5", "backup_player_ids": [20]}])
 
     def test_the_incoming_player_takes_the_exact_place_of_the_outgoing_one(self):
         snap = self._snap(17)
         touched = lineup_repair.swap_player(self.league, 1, 5, 77, self.now)
         snap.refresh_from_db()
         self.assertEqual(touched, [17])
-        self.assertEqual(snap.starter_player_ids, ["77", "6"], "stessa posizione nell'XI")
-        self.assertEqual(snap.bench_player_ids, ["20"], "panchina intatta")
+        self.assertEqual(snap.starter_player_ids, [77, 6], "stessa posizione nell'XI")
+        self.assertEqual(snap.bench_player_ids, [20], "panchina intatta")
         self.assertEqual(snap.starter_backups[0]["starter_player_id"], "77")
 
     def test_a_goalkeeper_is_swapped_in_goal(self):
@@ -286,13 +286,13 @@ class LineupRepairTests(TestCase):
         touched = lineup_repair.swap_player(self.league, 1, 5, 77, self.now)
         snap.refresh_from_db()
         self.assertEqual(touched, [])
-        self.assertEqual(snap.starter_player_ids, ["5", "6"])
+        self.assertEqual(snap.starter_player_ids, [5, 6])
 
     def test_a_manual_removal_vacates_the_slot(self):
         snap = self._snap(17)
         lineup_repair.swap_player(self.league, 1, 5, None, self.now)
         snap.refresh_from_db()
-        self.assertEqual(snap.starter_player_ids, ["6"])
+        self.assertEqual(snap.starter_player_ids, [6])
         self.assertEqual(snap.starter_backups, [], "niente titolare fantasma nei backup")
 
     def test_another_team_with_a_similar_id_is_not_touched(self):
@@ -300,7 +300,7 @@ class LineupRepairTests(TestCase):
         other = self._snap(17, lineup_id="team12")
         lineup_repair.swap_player(self.league, 1, 5, 77, self.now)
         other.refresh_from_db()
-        self.assertEqual(other.starter_player_ids, ["5", "6"])
+        self.assertEqual(other.starter_player_ids, [5, 6])
 
     def test_every_competition_of_the_same_matchday_is_repaired(self):
         cup = self._snap(17, lineup_id="team1:comp3")
@@ -308,8 +308,8 @@ class LineupRepairTests(TestCase):
         lineup_repair.swap_player(self.league, 1, 5, 77, self.now)
         cup.refresh_from_db()
         league_snap.refresh_from_db()
-        self.assertEqual(cup.starter_player_ids, ["77", "6"])
-        self.assertEqual(league_snap.starter_player_ids, ["77", "6"])
+        self.assertEqual(cup.starter_player_ids, [77, 6])
+        self.assertEqual(league_snap.starter_player_ids, [77, 6])
 
 
 class OfficeVoteTests(TestCase):
