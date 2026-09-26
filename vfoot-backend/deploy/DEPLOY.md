@@ -614,6 +614,28 @@ exits and demoted the whole pool. Three defences, all in the code:
   Without it the fallback reports "browser unavailable" and the warm fails as it
   would have anyway: nothing breaks, the safety net is just missing.
 
+  The browser rotates over a pool of its OWN (`sofa_browser_pool.json`, target
+  `sofascore-browser`, probe `sofa_probe_browser_netns.py`): the curl pool is
+  exactly what the fingerprint refusal empties, and a third of the exits are
+  burned on any given day. It is filled only when needed — when a curl refill
+  concludes the fingerprint is refused, and when the fallback runs out of exits —
+  because every probe boots a Chromium. `vfoot-egress status --for all` shows it.
+
+  **Drill** (do it in a break, not on a match day): `SOFA_SIMULATE_CURL_REFUSED=1`
+  makes every curl request come back challenged without leaving the machine, so
+  the whole chain can be watched while the real SofaScore still lets curl
+  through. Point it at COPIES of the state, or it demotes the real pool:
+  ```sh
+  mkdir -p /tmp/drill && cp /var/lib/vfoot-egress/sofa_*.json /tmp/drill/
+  SOFA_SIMULATE_CURL_REFUSED=1 SOFA_POOL=/tmp/drill/sofa_pool.json \
+    SOFA_BROWSER_POOL=/tmp/drill/sofa_browser_pool.json \
+    SOFA_TRANSPORT=/tmp/drill/sofa_transport.json \
+    vfoot-egress schedule --year 26/27 --rounds 6 --cache-dir /tmp/drill/cache
+  ```
+  Expected: curl demotes every exit, the refill finds nothing and says it is the
+  fingerprint, the browser pool is filled, the browser warms the round; run it
+  again and it goes straight to the browser.
+
 The **DB-aware wiring IS built** (`realdata/services/live_ingest.py` + `egress_client.py`,
 wired into `tick` and `sync_calendar --egress`, tested in `tests_live_pipeline`). The
 tick decides which matches are due (DB calendar), warms them through the egress via a

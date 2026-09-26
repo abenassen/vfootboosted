@@ -64,6 +64,10 @@ TM_POOL_FILE = Path(os.environ.get("TM_POOL", "/var/lib/vfoot-egress/tm_pool.jso
 CLIENT_CONF = Path(os.environ.get("SOFA_WG_CONF", "/etc/wireguard/surfshark_wg.conf"))
 PROBE = Path(os.environ.get("SOFA_PROBE", HERE / "sofa_probe_netns.py"))
 TM_PROBE = Path(os.environ.get("TM_PROBE", HERE / "tm_probe_netns.py"))
+BROWSER_PROBE = Path(os.environ.get("SOFA_BROWSER_PROBE",
+                                    HERE / "sofa_probe_browser_netns.py"))
+BROWSER_POOL_FILE = Path(os.environ.get("SOFA_BROWSER_POOL",
+                                        "/var/lib/vfoot-egress/sofa_browser_pool.json"))
 WORKER = Path(os.environ.get("SOFA_WORKER", HERE / "fetch_worker.py"))
 TM_WORKER = Path(os.environ.get("TM_WORKER", HERE / "tm_worker.py"))
 CACHE_DIR = Path(os.environ.get("SOFA_CACHE", "/var/cache/sofascore"))
@@ -100,7 +104,14 @@ FRESH_SECONDS = 6 * 3600
 TRANSPORT_FILE = Path(os.environ.get("SOFA_TRANSPORT",
                                      "/var/lib/vfoot-egress/sofa_transport.json"))
 BROWSER_MODE_SECONDS = 3600
-BROWSER_ROTATIONS = 2       # exits to try the browser through before giving up
+# The browser has a pool of its OWN (target "sofascore-browser"): the curl pool
+# says which exits curl gets through, and in the case the browser exists for it
+# has just been demoted to nothing. Without its own pool the fallback could only
+# try a couple of exits curl had lately seen and never discover a new one — and a
+# third of Surfshark's exits are burned on any given day (4 of 10 on 26/09/2026).
+BROWSER_ROTATIONS = 2       # extra exits from the curl pool, after the browser's own
+BROWSER_POOL_WANT = 2
+BROWSER_REFILL_PROBES = 6   # each boots a Chromium: ~10 s and ~200 MB on the Linode
 # Chromium installed once for root, outside any home directory, so the path does
 # not depend on who ran `playwright install` (see DEPLOY.md).
 PLAYWRIGHT_BROWSERS = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/ms-playwright")
@@ -152,6 +163,8 @@ def target(name: str) -> Target:
         "sofascore": Target("sofascore", PROBE, POOL_FILE, PREFERRED_CC),
         "transfermarkt": Target("transfermarkt", TM_PROBE, TM_POOL_FILE,
                                 TM_PREFERRED_CC),
+        "sofascore-browser": Target("sofascore-browser", BROWSER_PROBE,
+                                    BROWSER_POOL_FILE, PREFERRED_CC),
     }
     try:
         return targets[name]
@@ -162,6 +175,7 @@ def target(name: str) -> Target:
 
 SOFASCORE = "sofascore"
 TRANSFERMARKT = "transfermarkt"
+SOFASCORE_BROWSER = "sofascore-browser"
 
 
 # --- the lock ---------------------------------------------------------------
@@ -293,9 +307,20 @@ def passed(verdict: str) -> bool:
     return verdict.split(" ", 1)[0] == "PASS"
 
 
+def _child_env() -> dict:
+    """What the in-netns children run with: ours, plus where Chromium lives."""
+    return {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": PLAYWRIGHT_BROWSERS}
+
+
+def browser_installed() -> bool:
+    """Is there a Chromium for the fallback? Asked before booting one, so a server
+    without it does not spend a refill's worth of probes finding out."""
+    return any(Path(PLAYWRIGHT_BROWSERS).glob("chromium*"))
+
+
 def probe_in_netns(tgt: Target) -> tuple[str, str]:
     """Run the target's probe inside the current netns. Returns (exit_ip, verdict)."""
-    r = _run(["ip", "netns", "exec", NS, VENV_PY, str(tgt.probe)])
+    r = _run(["ip", "netns", "exec", NS, VENV_PY, str(tgt.probe)], env=_child_env())
     out = r.stdout + r.stderr
     exit_ip = verdict = ""
     for line in out.splitlines():
@@ -433,6 +458,20 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
         print(f"!! {challenged_all} exits in {len(countries)} countries refused "
               f"EVERY fingerprint: this is SofaScore against curl_cffi, not IP "
               f"reputation. Refilling will not help; upgrade curl_cffi.")
+        if tgt.name == SOFASCORE:
+            # Get the browser its exits NOW, while nobody is waiting on them: the
+            # next warm will need them, and a live tick is the worst moment to
+            # boot six Chromiums looking for one.
+            refill_browser_pool()
+
+
+def refill_browser_pool() -> None:
+    if not browser_installed():
+        print(f"no Chromium under {PLAYWRIGHT_BROWSERS}: the browser fallback is "
+              f"not installed (see DEPLOY.md).")
+        return
+    refill(target(SOFASCORE_BROWSER), want=BROWSER_POOL_WANT,
+           max_probes=BROWSER_REFILL_PROBES, delay=3.0)
 
 
 def fingerprint_refused(challenged_all: int, countries, passed_now: int) -> bool:
@@ -504,15 +543,22 @@ def browser_mode(state: dict) -> bool:
     return bool(until) and _age_seconds(until) < 0
 
 
-def _rescue_candidates(servers: list[dict], state: dict) -> list[dict]:
-    """Exits to try the browser through: the one it last worked on, then the good
-    ones, then the most recently checked. The pool certifies CURL — in the case
-    this exists for, it has been demoted to nothing by a fault no IP caused, so
-    "recently seen" is the best evidence left that an exit is alive."""
+def _rescue_candidates(browser_pool: list[dict], curl_pool: list[dict],
+                       state: dict, tried: set[str]) -> list[dict]:
+    """Exits to try the browser through, best evidence first: the ones the
+    browser's own pool vouches for (freshest first), then the one it last worked
+    on, then a couple the curl pool saw most recently — "recently seen" is the best
+    evidence left that an exit is alive at all when curl has been demoting
+    everything for a fault no IP caused."""
     last = (state.get("browser") or {}).get("ip")
-    order = sorted(servers, key=lambda s: s.get("last_checked") or "", reverse=True)
-    order.sort(key=lambda s: (s["endpoint_ip"] != last, not s.get("last_ok")))
-    return order[:BROWSER_ROTATIONS]
+    recent = sorted(curl_pool, key=lambda s: s.get("last_checked") or "", reverse=True)
+    recent.sort(key=lambda s: s["endpoint_ip"] != last)
+    out, seen = [], set(tried)
+    for srv in [*good_servers(browser_pool), *recent[:BROWSER_ROTATIONS]]:
+        if srv["endpoint_ip"] not in seen:
+            seen.add(srv["endpoint_ip"])
+            out.append(srv)
+    return out
 
 
 class _Warm:
@@ -536,13 +582,10 @@ class _Warm:
                     what=f"warm:sofascore:{transport}") as up:
             if not up:
                 return None
-            env = None
-            if transport == "browser":
-                env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": PLAYWRIGHT_BROWSERS}
             r = _run(["ip", "netns", "exec", NS, VENV_PY, str(WORKER),
                       *self.args, "--cache-dir", str(self.cache_dir),
                       *(["--transport", "browser"] if transport == "browser" else []),
-                      *(["--resume"] if self.attempted else [])], env=env)
+                      *(["--resume"] if self.attempted else [])], env=_child_env())
         self.attempted = True
         sys.stdout.write(r.stdout)
         return r
@@ -626,35 +669,69 @@ def _curl_warm(w: _Warm, state: dict, max_rotations: int) -> int:
 
 
 def _browser_warm(w: _Warm, state: dict) -> int:
-    """The last resort. It never touches the pool: the pool says which exits CURL
-    gets through, and an exit the browser passes on is no evidence of that."""
-    for srv in _rescue_candidates(load_pool(w.tgt), state):
-        print(f"browser via {srv.get('exit_ip')} ({srv['endpoint_ip']})")
-        r = w.run_worker(srv, "browser")
-        if r is None:
-            print("  no handshake; next exit.")
-            continue
-        if r.returncode == 0:
-            prev = state.get("browser") or {}
-            state["browser"] = {
-                "since": prev.get("since") or _now(),
-                # Set once per episode and never pushed forward by a success, or
-                # a browser that keeps working would keep curl out forever.
-                "until": prev.get("until") if browser_mode(state) else
-                datetime.fromtimestamp(time.time() + BROWSER_MODE_SECONDS,
-                                       timezone.utc).isoformat(timespec="seconds"),
-                "last_ok": _now(), "ip": srv["endpoint_ip"],
-            }
-            save_transport(state)
-            print("  OK — cache warmed by the browser.")
-            return 0
-        if r.returncode != 3:
-            # No playwright, no Chromium, a crash: the browser is not there, and
-            # another exit will not bring it.
-            print(f"  browser unavailable (rc={r.returncode}):")
-            sys.stderr.write(r.stderr)
-            break
-        print("  the browser was refused too; next exit.")
+    """The last resort, rotating over the browser's OWN pool and refilling it when
+    it runs dry — the same self-validating loop as curl's: a clean run vouches for
+    the exit, a refusal demotes it. It never touches the curl pool."""
+    if not browser_installed():
+        print(f"  no Chromium under {PLAYWRIGHT_BROWSERS}: no browser fallback "
+              f"on this server (see DEPLOY.md).")
+        return 3
+    btgt = target(SOFASCORE_BROWSER)
+    tried: set[str] = set()
+    for attempt in range(2):
+        bpool = load_pool(btgt)
+        for srv in _rescue_candidates(bpool, load_pool(w.tgt), state, tried):
+            ip = srv["endpoint_ip"]
+            tried.add(ip)
+            print(f"browser via {srv.get('exit_ip')} ({ip})")
+            r = w.run_worker(srv, "browser")
+            if r is None:
+                print("  no handshake; next exit.")
+                _demote(btgt, bpool, ip)
+                continue
+            if r.returncode == 0:
+                _vouch(btgt, bpool, srv)
+                _enter_browser_mode(state, ip)
+                print("  OK — cache warmed by the browser.")
+                return 0
+            if r.returncode != 3:
+                # No playwright, a crash: the browser is not there, and another
+                # exit will not bring it.
+                print(f"  browser unavailable (rc={r.returncode}):")
+                sys.stderr.write(r.stderr)
+                return _browser_failed(state)
+            print("  the browser was refused too; demoting + next exit.")
+            _demote(btgt, bpool, ip)
+        if attempt == 0:
+            print("no exit left for the browser — refilling its pool.")
+            refill_browser_pool()
+    return _browser_failed(state)
+
+
+def _vouch(tgt: Target, servers: list[dict], srv: dict) -> None:
+    rec = next((s for s in servers if s["endpoint_ip"] == srv["endpoint_ip"]), None)
+    if rec is None:
+        rec = {k: srv.get(k) for k in ("endpoint_ip", "cluster", "pubKey", "exit_ip")}
+        servers.append(rec)
+    rec.update(last_ok=_now(), last_checked=_now(), fail_count=0)
+    save_pool(tgt, servers)
+
+
+def _enter_browser_mode(state: dict, ip: str) -> None:
+    prev = state.get("browser") or {}
+    state["browser"] = {
+        "since": prev.get("since") or _now(),
+        # Set once per episode and never pushed forward by a success, or a
+        # browser that keeps working would keep curl out forever.
+        "until": prev.get("until") if browser_mode(state) else
+        datetime.fromtimestamp(time.time() + BROWSER_MODE_SECONDS,
+                               timezone.utc).isoformat(timespec="seconds"),
+        "last_ok": _now(), "ip": ip,
+    }
+    save_transport(state)
+
+
+def _browser_failed(state: dict) -> int:
     state.setdefault("browser", {})["failed_at"] = _now()
     save_transport(state)
     return 3
@@ -807,16 +884,17 @@ def main() -> None:
     # and every runbook line keep working unchanged.
     r = sub.add_parser("refill", help="probe fresh candidate IPs, keep the ones that PASS")
     r.add_argument("--for", dest="site", default=SOFASCORE,
-                   choices=[SOFASCORE, TRANSFERMARKT], help="which site's pool")
+                   choices=[SOFASCORE, TRANSFERMARKT, SOFASCORE_BROWSER],
+                   help="which site's pool")
     r.add_argument("--target", type=int, default=6, help="stop once this many good IPs are pooled")
     r.add_argument("--max-probes", type=int, default=30, help="cap probes per run (rate-limit safety)")
     r.add_argument("--delay", type=float, default=3.0, help="seconds between probes")
     st = sub.add_parser("status", help="show the current pool")
     st.add_argument("--for", dest="site", default=SOFASCORE,
-                    choices=[SOFASCORE, TRANSFERMARKT, "all"])
+                    choices=[SOFASCORE, TRANSFERMARKT, SOFASCORE_BROWSER, "all"])
     p = sub.add_parser("probe", help="probe one endpoint IP")
     p.add_argument("--for", dest="site", default=SOFASCORE,
-                   choices=[SOFASCORE, TRANSFERMARKT])
+                   choices=[SOFASCORE, TRANSFERMARKT, SOFASCORE_BROWSER])
     p.add_argument("ip"); p.add_argument("pubkey")
     f = sub.add_parser("fetch", help="fetch match ids through a good pooled IP, rotating on block")
     f.add_argument("--match-ids", required=True, help="comma-separated match ids")
@@ -851,7 +929,8 @@ def main() -> None:
     if args.cmd == "refill":
         refill(target(args.site), args.target, args.max_probes, args.delay)
     elif args.cmd == "status":
-        for name in ([SOFASCORE, TRANSFERMARKT] if args.site == "all" else [args.site]):
+        for name in ([SOFASCORE, TRANSFERMARKT, SOFASCORE_BROWSER]
+                     if args.site == "all" else [args.site]):
             status(target(name))
     elif args.cmd == "probe":
         probe_one(target(args.site), args.ip, args.pubkey)

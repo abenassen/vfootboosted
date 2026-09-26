@@ -17,7 +17,8 @@ from curl_cffi import requests as cffi
 # Same trick as fetch_worker: the client lives in the app tree.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__),
                                 "..", "src", "realdata", "services"))
-from sofascore_client import IMPERSONATE_CHAIN, is_challenge  # noqa: E402
+from sofascore_client import (  # noqa: E402
+    IMPERSONATE_CHAIN, is_challenge, simulating_refusal)
 
 API = "https://api.sofascore.com"
 SITE = "https://www.sofascore.com"
@@ -35,6 +36,8 @@ def exit_ip():
 
 
 def get(s, url, fp):
+    if simulating_refusal():    # the drill: see sofascore_client
+        return None, "FP_CHALLENGE"
     try:
         r = s.get(url, headers=H, impersonate=fp, timeout=20)
     except Exception as e:

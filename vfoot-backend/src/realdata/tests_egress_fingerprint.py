@@ -172,14 +172,17 @@ class IlRipiegoSulBrowser(_Tmp):
     def setUp(self):
         super().setUp()
         for attr, name in (("POOL_FILE", "sofa_pool.json"),
+                           ("BROWSER_POOL_FILE", "sofa_browser_pool.json"),
                            ("TRANSPORT_FILE", "sofa_transport.json"),
                            ("LOCK_FILE", "egress.lock")):
             p = mock.patch.object(E, attr, self.dir / name)
             p.start(); self.addCleanup(p.stop)
+        self.refill = mock.MagicMock()
         for name, kw in (("_client_identity", {"return_value": ("p", "10.0.0.2/32")}),
                          ("netns_up", {"return_value": True}),
                          ("netns_down", {}),
-                         ("refill", {})):
+                         ("browser_installed", {"return_value": True}),
+                         ("refill", {"new": self.refill})):
             p = mock.patch.object(E, name, **kw)
             p.start(); self.addCleanup(p.stop)
         self.tgt = E.target(E.SOFASCORE)
@@ -193,10 +196,20 @@ class IlRipiegoSulBrowser(_Tmp):
 
     def _fake_run(self, cmd, **kw):
         self.calls.append(cmd)
-        return self.browser if "browser" in cmd else self.curl
+        if "browser" not in cmd:
+            return self.curl
+        # The browser answers per exit when told to (a list of verdicts by the
+        # endpoint the tunnel was pinned to), otherwise the same for all.
+        if isinstance(self.browser, dict):
+            return self.browser.get(self.pinned, _done(3, "BLOCKED: HTTP 403\n"))
+        return self.browser
 
     def _warm(self) -> int:
+        def up(ip, *a, **kw):
+            self.pinned = ip
+            return True
         with mock.patch.object(E, "_run", side_effect=self._fake_run), \
+             mock.patch.object(E, "netns_up", side_effect=up), \
              redirect_stdout(io.StringIO()):
             return E._warm(["--match-ids", str(MID), "--kind", "live"],
                            self.dir / "cache", max_rotations=3)
@@ -255,6 +268,52 @@ class IlRipiegoSulBrowser(_Tmp):
         self.browser = _done(1, "ERROR: SofaScoreError: playwright is not installed\n")
         self.assertEqual(self._warm(), 3)
         self.assertEqual(self._transports().count("browser"), 1)
+
+    def _browser_pool(self, *ips, ok=True):
+        E.save_pool(E.target(E.SOFASCORE_BROWSER), [
+            {"endpoint_ip": ip, "pubKey": "k", "cluster": "it-rom.prod.surfshark.com",
+             "exit_ip": ip, "last_ok": E._now() if ok else None,
+             "last_checked": E._now()} for ip in ips])
+
+    def _browser_calls(self) -> int:
+        return self._transports().count("browser")
+
+    def test_il_browser_prova_prima_le_uscite_del_suo_pool(self):
+        self._browser_pool("9.9.9.9")
+        self.browser = {"9.9.9.9": _done(0, "TRANSPORT=browser\n")}
+        self.assertEqual(self._warm(), 0)
+        self.assertEqual(self._browser_calls(), 1)
+        self.assertEqual(E.load_transport()["browser"]["ip"], "9.9.9.9")
+
+    def test_un_uscita_rifiutata_al_browser_esce_dal_suo_pool(self):
+        self._browser_pool("9.9.9.9")
+        self.browser = {"1.1.1.1": _done(0, "TRANSPORT=browser\n")}
+        self.assertEqual(self._warm(), 0)
+        bpool = E.load_pool(E.target(E.SOFASCORE_BROWSER))
+        self.assertEqual([s["endpoint_ip"] for s in E.good_servers(bpool)], ["1.1.1.1"],
+                         "9.9.9.9 declassata, e l'uscita che ha funzionato entra "
+                         "nel pool del browser")
+
+    def test_finite_le_uscite_riempie_il_pool_del_browser_e_riprova(self):
+        """Il buco che questo chiude: prima il ripiego provava due uscite e poi si
+        arrendeva, senza modo di trovarne di nuove."""
+        self.browser = {"7.7.7.7": _done(0, "TRANSPORT=browser\n")}
+
+        def refill(tgt, **kw):
+            if tgt.name == E.SOFASCORE_BROWSER:
+                self._browser_pool("7.7.7.7")
+        self.refill.side_effect = refill
+        self.assertEqual(self._warm(), 0)
+        self.assertIn(E.SOFASCORE_BROWSER,
+                      [c.args[0].name for c in self.refill.call_args_list])
+        self.assertEqual(E.load_transport()["browser"]["ip"], "7.7.7.7")
+
+    def test_senza_chromium_non_si_prova_nemmeno(self):
+        with mock.patch.object(E, "browser_installed", return_value=False):
+            self.assertEqual(self._warm(), 3)
+        self.assertEqual(self._browser_calls(), 0)
+        self.assertNotIn(E.SOFASCORE_BROWSER,
+                         [c.args[0].name for c in self.refill.call_args_list])
 
     def test_un_ip_bruciato_normale_non_scomoda_il_browser(self):
         """La rotazione ordinaria: il primo IP è bruciato, il secondo passa."""
@@ -324,6 +383,16 @@ class IlRefillRiconosceLImpronta(_Tmp):
                                "HTTP_403 (rounds)")
         self.assertFalse(last["fingerprint_refused"])
 
+    def test_l_impronta_rifiutata_prepara_subito_le_uscite_del_browser(self):
+        with mock.patch.object(E, "refill_browser_pool") as prepara:
+            self._refill(["it-mil.prod", "it-rom.prod", "uk-lon.prod"], "CHALLENGE_ALL")
+        prepara.assert_called_once()
+
+    def test_un_refill_normale_non_accende_chromium(self):
+        with mock.patch.object(E, "refill_browser_pool") as prepara:
+            self._refill(["it-mil.prod", "uk-lon.prod", "es-bcn.prod"], "HTTP_403 (rounds)")
+        prepara.assert_not_called()
+
     def test_il_declassamento_non_cancella_quello_che_il_refill_ha_scoperto(self):
         self._refill(["it-mil.prod", "it-rom.prod", "uk-lon.prod"], "CHALLENGE_ALL")
         E._demote(self.tgt, E.load_pool(self.tgt), "10.0.0.1")
@@ -392,3 +461,31 @@ class LaSaluteDistingueIPDaImpronta(_Tmp):
             "checked_at": self._iso(days=5), "ok_at": self._iso(days=5),
             "used": "firefox", "challenged": ["safari"]}})
         self.assertNotIn("egress:fingerprint-refused", checks)
+
+
+class LaSimulazione(_Tmp):
+    """SOFA_SIMULATE_CURL_REFUSED: la prova generale sul server vero, mentre il
+    SofaScore vero lascia ancora passare curl."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.dict("os.environ", {"SOFA_SIMULATE_CURL_REFUSED": "1"})
+        p.start(); self.addCleanup(p.stop)
+
+    def test_il_client_si_prende_la_sfida_senza_uscire(self):
+        s = _Session()
+        c = _client_on(s, self.dir)
+        with self.assertRaises(fetch_worker.SofaScoreChallenged):
+            c.get(f"/api/v1/event/{MID}")
+        self.assertEqual(s.calls, [], "nessuna richiesta deve partire davvero")
+        self.assertEqual(c.challenged, list(IMPERSONATE_CHAIN))
+
+    def test_il_probe_curl_dice_challenge_all(self):
+        import sofa_probe_netns as probe
+        self.assertEqual(probe.get(None, "https://x", "safari"), (None, "FP_CHALLENGE"))
+
+    def test_senza_la_variabile_non_cambia_niente(self):
+        with mock.patch.dict("os.environ", {"SOFA_SIMULATE_CURL_REFUSED": ""}):
+            s = _Session()
+            _client_on(s, self.dir).get(f"/api/v1/event/{MID}")
+        self.assertEqual(len(s.calls), 1)

@@ -20,6 +20,7 @@ Install the optional dep yourself: ``pip install curl_cffi``.
 from __future__ import annotations
 
 import json
+import os
 import random
 import time
 from pathlib import Path
@@ -45,6 +46,22 @@ SITE_BASE = "https://www.sofascore.com"
 # egress/sofa_probe_netns.py imports this: a probe that certified IPs with another
 # fingerprint than the scraper's would hand it exits it cannot use.
 IMPERSONATE_CHAIN = ("safari", "firefox", "chrome", "tor")
+# A DRILL, not a feature: with this set, every curl request is answered with
+# SofaScore's challenge without leaving the machine, so the whole fallback — chain
+# exhausted, refill finding nothing, the browser taking over — can be watched on
+# the real server while the real SofaScore is still letting curl through. Read at
+# request time, never cached, and it never touches the browser transport (which
+# overrides ``_raw_get``). Set it only on a command line, never in a unit file.
+SIMULATE_REFUSAL_ENV = "SOFA_SIMULATE_CURL_REFUSED"
+
+
+def simulating_refusal() -> bool:
+    return os.environ.get(SIMULATE_REFUSAL_ENV) == "1"
+
+
+class _SimulatedChallenge:
+    status_code = 403
+    text = '{"error": {"code": 403, "reason": "challenge" }}'
 
 _HEADERS = {
     "Accept": "*/*",
@@ -172,22 +189,27 @@ class SofaScoreClient:
         """The fingerprint the next request will present."""
         return self._chain[self._fp]
 
+    def _send(self, session, path: str):
+        if simulating_refusal():
+            self._last_request = time.monotonic()
+            return _SimulatedChallenge()
+        try:
+            return session.get(API_BASE + path, headers=_HEADERS,
+                               impersonate=self.fingerprint, timeout=self._timeout)
+        except self._transport_errors as exc:
+            raise SofaScoreBlocked(
+                f"transport: {type(exc).__name__}: {str(exc)[:120]}") from exc
+        finally:
+            # Stamped whatever happened: a request that died on the wire still
+            # went out, and the throttle exists to space what goes OUT. Stamping
+            # only the successes would let a run that is failing fire as fast as
+            # the failures come back — the worst possible moment to stop pacing.
+            self._last_request = time.monotonic()
+
     def _raw_get(self, path: str) -> Any:
         session = self._ensure_session()
         while True:
-            try:
-                resp = session.get(API_BASE + path, headers=_HEADERS,
-                                   impersonate=self.fingerprint,
-                                   timeout=self._timeout)
-            except self._transport_errors as exc:
-                raise SofaScoreBlocked(
-                    f"transport: {type(exc).__name__}: {str(exc)[:120]}") from exc
-            finally:
-                # Stamped whatever happened: a request that died on the wire still
-                # went out, and the throttle exists to space what goes OUT. Stamping
-                # only the successes would let a run that is failing fire as fast as
-                # the failures come back — the worst possible moment to stop pacing.
-                self._last_request = time.monotonic()
+            resp = self._send(session, path)
             if not is_challenge(resp.status_code, resp.text):
                 break
             # The fingerprint was refused, not the exit: try the next one on the
