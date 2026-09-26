@@ -85,11 +85,15 @@ class SofaScoreChallenged(SofaScoreBlocked):
 
 
 def is_challenge(status: int, text: str) -> bool:
-    """SofaScore's refusal of a FINGERPRINT: a 403 whose JSON says ``challenge``.
+    """SofaScore's challenge: a 403 whose JSON says ``challenge``.
 
-    Deliberately narrow. A burned exit usually has the handshake cut or gets an
-    empty body, and those must not walk the chain: four fingerprints tried against
-    an IP that answers none of them would be four requests to learn nothing.
+    It is how a refused FINGERPRINT looks, so it is what walks the chain — but not
+    only that: a burned exit can get the very same body on every fingerprint
+    (26/09/2026, four London exits in a row). There it costs a chain's worth of
+    requests before the rotation, which is the price of not being able to tell
+    the two apart from one exit; across exits the refill can
+    (``fingerprint_refused``). Anything else — a cut handshake, an empty body, a
+    bare 403 — is the exit, and does not walk the chain.
     """
     return status == 403 and "challenge" in (text or "").lower()
 

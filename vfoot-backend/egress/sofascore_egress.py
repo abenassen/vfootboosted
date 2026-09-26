@@ -393,7 +393,7 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
     # burned IP; the same verdict from exits in several countries is SofaScore
     # refusing curl_cffi itself — the 25/09/2026 case, where this loop kept
     # probing and demoting for a fault no IP could fix.
-    challenged_all = 0
+    challenged_all = passed_now = 0
     countries: set[str] = set()
     for ip, cluster, pub in cands:
         if len(good_servers(servers)) >= want or probes >= max_probes:
@@ -412,6 +412,7 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
             challenged_all += 1
             countries.add(cluster.split("-", 1)[0])
         if passed(verdict):
+            passed_now += 1
             rec = by_ip.get(ip) or {"endpoint_ip": ip}
             rec.update({"cluster": cluster, "pubKey": pub, "exit_ip": exit_ip,
                         "last_ok": _now(), "last_checked": _now(), "fail_count": 0})
@@ -420,7 +421,7 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
             save_pool(tgt, servers)
         time.sleep(delay)
     n_good = len(good_servers(servers))
-    refused = fingerprint_refused(challenged_all, countries)
+    refused = fingerprint_refused(challenged_all, countries, passed_now)
     # Written down as a verdict, not only as counts, so health reads the same rule
     # instead of keeping its own copy of it.
     save_pool(tgt, servers, last_refill={
@@ -434,10 +435,16 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
               f"reputation. Refilling will not help; upgrade curl_cffi.")
 
 
-def fingerprint_refused(challenged_all: int, countries) -> bool:
-    """The refill's verdict on WHAT is being refused. Three exits in two countries:
-    enough that a couple of neighbouring burned IPs cannot fake it."""
-    return challenged_all >= 3 and len(set(countries)) >= 2
+def fingerprint_refused(challenged_all: int, countries, passed_now: int) -> bool:
+    """The refill's verdict on WHAT is being refused.
+
+    The refusal alone does not say it: a burned exit gets the same
+    ``403 "challenge"`` on every fingerprint too (26/09/2026, four London exits in
+    a row, while Milan and Rome passed on Safari). What says it is that NOTHING
+    passed in the same run — one exit getting through proves the fingerprint is
+    fine — from exits in at least two countries, so one bad neighbourhood cannot
+    fake it."""
+    return passed_now == 0 and challenged_all >= 3 and len(set(countries)) >= 2
 
 
 def _demote(tgt: Target, servers: list[dict], ip: str) -> None:

@@ -285,12 +285,14 @@ class IlRefillRiconosceLImpronta(_Tmp):
         self.tgt = E.target(E.SOFASCORE)
 
     def _refill(self, clusters, verdict):
+        verdicts = verdict if isinstance(verdict, list) else [verdict] * len(clusters)
         cands = [(f"10.0.0.{i}", c, "k") for i, c in enumerate(clusters)]
         with mock.patch.object(E, "candidate_ips", return_value=cands), \
              mock.patch.object(E, "_client_identity", return_value=("p", "a")), \
              mock.patch.object(E, "netns_up", return_value=True), \
              mock.patch.object(E, "netns_down"), \
-             mock.patch.object(E, "probe_in_netns", return_value=("9.9.9.9", verdict)), \
+             mock.patch.object(E, "probe_in_netns",
+                               side_effect=[("9.9.9.9", v) for v in verdicts]), \
              mock.patch.object(E.time, "sleep"), \
              redirect_stdout(io.StringIO()) as out:
             E.refill(self.tgt, want=6, max_probes=10, delay=0)
@@ -306,6 +308,16 @@ class IlRefillRiconosceLImpronta(_Tmp):
         last, _ = self._refill(["it-mil.prod"] * 4,
                                "CHALLENGE_ALL (rounds; safari,firefox,chrome,tor)")
         self.assertFalse(last["fingerprint_refused"])
+
+    def test_se_un_uscita_passa_nello_stesso_giro_l_impronta_e_buona(self):
+        """Il refill del 26/09 dopo la correzione: quattro uscite di Londra
+        rifiutavano ogni impronta mentre Milano e Roma passavano con Safari. Era
+        reputazione, con la stessa parola 'challenge'."""
+        ca = "CHALLENGE_ALL (rounds; safari,firefox,chrome,tor)"
+        last, out = self._refill(["uk-lon.prod", "uk-gla.prod", "es-bcn.prod", "it-mil.prod"],
+                                 [ca, ca, ca, "PASS (safari)"])
+        self.assertFalse(last["fingerprint_refused"])
+        self.assertNotIn("not IP", out)
 
     def test_i_403_ordinari_non_sono_l_impronta(self):
         last, _ = self._refill(["it-mil.prod", "uk-lon.prod", "es-bcn.prod"],
