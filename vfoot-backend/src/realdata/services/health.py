@@ -90,7 +90,8 @@ EGRESS_POOLS = {
 EGRESS_TRANSPORT = Path("/var/lib/vfoot-egress/sofa_transport.json")
 # A refused fingerprint observed longer ago than this is history, not a warning.
 FINGERPRINT_MEMORY = timedelta(days=2)
-CURL_UPGRADE = ("/srv/vfoot-app/vfoot-backend/.venv/bin/pip install -U curl_cffi, "
+CURL_UPGRADE = ("sudo -u vfoot /srv/vfoot-app/vfoot-backend/.venv/bin/pip install -U "
+                "curl_cffi (come vfoot: da root lascia nel venv file di root), "
                 "poi sudo vfoot-egress probe su un IP del pool")
 BLIND_STREAK = 5          # consecutive ticks owed work that imported nothing
 SETTLE_AFTER = timedelta(hours=4)   # from kickoff, by when a match should be ready
