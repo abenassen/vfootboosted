@@ -588,6 +588,32 @@ minute is cheaper than a queue), batch jobs wait. The TM scrape takes it **per
 page**, not per run — at 90s a page a full scrape spans half an hour, and holding
 the namespace throughout would starve the tick for the whole window.
 
+**SofaScore also refuses by FINGERPRINT, and no IP fixes that.** On 25/09/2026 it
+began answering `403 {"reason": "challenge"}` to every Chrome curl_cffi 0.15 could
+imitate, from every address, residential included. The refill read it as burned
+exits and demoted the whole pool. Three defences, all in the code:
+
+- `sofascore_client.IMPERSONATE_CHAIN` (safari → firefox → chrome → tor): on that
+  exact refusal the client moves to the next fingerprint on the same exit, and the
+  probe walks the same chain. Aliases, not versions: **upgrading curl_cffi is what
+  refreshes them** (`pip install -U curl_cffi` in the venv; 0.16.3's chrome150
+  passed where 0.15's chrome136 did not).
+- health warns when a fingerprint is refused while another still passes
+  (`egress:fingerprint-refused`, state in `/var/lib/vfoot-egress/sofa_transport.json`)
+  and, when the pool is empty because EVERY fingerprint is refused, says so instead
+  of recommending a refill.
+- **last resort, a real browser**: when curl gets through nowhere, `_warm` runs the
+  worker with `--transport browser` (headless Chromium via Playwright, same tunnel)
+  and stays on it for an hour before giving curl another go (alarm
+  `egress:browser-fallback`). Chromium must be installed once, where the egress
+  looks for it:
+  ```sh
+  ssh root@139.162.144.123 'PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    /srv/vfoot-app/vfoot-backend/.venv/bin/playwright install --with-deps --only-shell chromium'
+  ```
+  Without it the fallback reports "browser unavailable" and the warm fails as it
+  would have anyway: nothing breaks, the safety net is just missing.
+
 The **DB-aware wiring IS built** (`realdata/services/live_ingest.py` + `egress_client.py`,
 wired into `tick` and `sync_calendar --egress`, tested in `tests_live_pipeline`). The
 tick decides which matches are due (DB calendar), warms them through the egress via a

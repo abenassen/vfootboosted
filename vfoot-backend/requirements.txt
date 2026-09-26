@@ -25,7 +25,10 @@ numpy==2.4.6
 httpx
 beautifulsoup4
 lxml
-curl_cffi
+# A floor, not a pin: SofaScore refuses curl_cffi's older Chrome imitations
+# (25/09/2026: chrome136 and below refused, 0.16.3's chrome150 passes), so a newer
+# release is the fix, never the risk. See sofascore_client.IMPERSONATE_CHAIN.
+curl_cffi>=0.16.3
 # roster xlsx re-upload (listone import). Lazily imported by the import-xlsx
 # endpoint only, so the app still boots if it's missing.
 openpyxl==3.1.5

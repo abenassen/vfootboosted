@@ -20,6 +20,16 @@ Exit codes let the root orchestrator react:
   3  = SofaScore blocked this IP  -> orchestrator should rotate to another IP
   1  = other error
 
+On the way out it prints ONE line the orchestrator parses, whatever happened:
+``FINGERPRINT used=<fp> challenged=<csv>`` (or ``TRANSPORT=browser``), and before
+it ``CHALLENGED_ALL`` when every fingerprint was refused on this exit. That is the
+only channel back: this side never writes state, it runs inside the netns.
+
+``--transport browser`` drives a real headless Chromium instead of curl_cffi
+(``sofascore_browser_client``). It is the last resort, for when SofaScore refuses
+every fingerprint curl_cffi can imitate — slow (seconds to boot, ~200 MB on a box
+that has 400 free) and therefore never the default; the orchestrator decides when.
+
   python fetch_worker.py --match-ids 123,456 --kind final --cache-dir /var/cache/sofa
 """
 from __future__ import annotations
@@ -34,7 +44,15 @@ from pathlib import Path
 # egress/ dir. Python already put THIS dir on sys.path[0]; add the services dir too.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__),
                                 "..", "src", "realdata", "services"))
-from sofascore_client import SofaScoreClient, SofaScoreBlocked  # noqa: E402
+from sofascore_client import (  # noqa: E402
+    SofaScoreBlocked, SofaScoreChallenged, SofaScoreClient)
+
+
+def _browser_client(cache_dir: Path, **kw):
+    """Imported only when asked for: playwright is a heavy optional dependency and
+    the curl path must not need it."""
+    from sofascore_browser_client import SofaScoreBrowserClient
+    return SofaScoreBrowserClient(cache_dir, **kw)
 
 
 def _minutes(row: dict) -> int:
@@ -148,6 +166,9 @@ def main() -> int:
     ap.add_argument("--kind", choices=["live", "final", "probable"], default="final")
     ap.add_argument("--cache-dir", required=True)
     ap.add_argument("--delay", type=float, default=1.5)
+    ap.add_argument("--transport", choices=["curl", "browser"], default="curl",
+                    help="curl_cffi (default) or a real headless browser, the "
+                         "last resort when every fingerprint is challenged")
     ap.add_argument("--resume", action="store_true",
                     help="keep what is already cached instead of re-fetching it. "
                          "For a retry on another IP after a block — the same warm "
@@ -158,8 +179,20 @@ def main() -> int:
     ids = [int(x) for x in (args.match_ids or "").split(",") if x.strip()]
     rounds = ([int(x) for x in args.rounds.split(",") if x.strip()]
               if args.rounds else None)
-    client = SofaScoreClient(cache_dir, min_delay=args.delay,
-                             max_retries=1, logger=print)
+    build = _browser_client if args.transport == "browser" else SofaScoreClient
+    client = build(cache_dir, min_delay=args.delay, max_retries=1, logger=print)
+    try:
+        return _work(client, args, cache_dir, ids, rounds)
+    finally:
+        if args.transport == "browser":
+            print("TRANSPORT=browser")
+            client.close()
+        else:
+            print(f"FINGERPRINT used={client.fingerprint} "
+                  f"challenged={','.join(client.challenged)}")
+
+
+def _work(client, args, cache_dir: Path, ids: list[int], rounds) -> int:
     try:
         if args.schedule_year:
             # Drops as it goes: which files belong to this season is not knowable
@@ -186,6 +219,9 @@ def main() -> int:
         else:
             print("ERROR: need --match-ids or --schedule-year")
             return 1
+    except SofaScoreChallenged as exc:
+        print(f"CHALLENGED_ALL: {exc}")
+        return 3
     except SofaScoreBlocked as exc:
         print(f"BLOCKED: {exc}")
         return 3

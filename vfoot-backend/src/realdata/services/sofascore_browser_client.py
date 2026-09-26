@@ -27,16 +27,14 @@ import json
 import time
 
 # Works both as a Django package module (realdata.services.*) and as a standalone
-# script run from this directory (the probe_*.py helpers).
-try:
-    from realdata.services.sofascore_client import (
-        API_BASE,
-        SofaScoreBlocked,
-        SofaScoreClient,
-        SofaScoreError,
-        SITE_BASE,
-    )
-except ModuleNotFoundError:
+# script run from this directory (the probe_*.py helpers, the egress worker).
+# When the standalone module is ALREADY loaded it wins: the egress worker catches
+# ``sofascore_client.SofaScoreBlocked``, and the same class imported under the
+# package name would be a different class it cannot catch — a browser block would
+# surface as an unexpected error and the orchestrator would not rotate.
+import sys
+
+if "sofascore_client" in sys.modules:
     from sofascore_client import (
         API_BASE,
         SofaScoreBlocked,
@@ -44,6 +42,23 @@ except ModuleNotFoundError:
         SofaScoreError,
         SITE_BASE,
     )
+else:
+    try:
+        from realdata.services.sofascore_client import (
+            API_BASE,
+            SofaScoreBlocked,
+            SofaScoreClient,
+            SofaScoreError,
+            SITE_BASE,
+        )
+    except ModuleNotFoundError:
+        from sofascore_client import (
+            API_BASE,
+            SofaScoreBlocked,
+            SofaScoreClient,
+            SofaScoreError,
+            SITE_BASE,
+        )
 
 # A normal desktop Chrome UA (no "HeadlessChrome" token).
 _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "

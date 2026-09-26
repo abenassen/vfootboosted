@@ -30,7 +30,7 @@ import json
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from statistics import median
 
@@ -84,6 +84,14 @@ EGRESS_POOLS = {
     "transfermarkt": (Path("/var/lib/vfoot-egress/tm_pool.json"), 1,
                       "il polling del listone resta senza uscita"),
 }
+# What the egress knows about HOW it gets through (sofascore_egress.TRANSPORT_FILE):
+# which curl_cffi fingerprint passes, which ones SofaScore refuses, and whether it
+# has had to fall back to a real browser.
+EGRESS_TRANSPORT = Path("/var/lib/vfoot-egress/sofa_transport.json")
+# A refused fingerprint observed longer ago than this is history, not a warning.
+FINGERPRINT_MEMORY = timedelta(days=2)
+CURL_UPGRADE = ("/srv/vfoot-app/vfoot-backend/.venv/bin/pip install -U curl_cffi, "
+                "poi sudo vfoot-egress probe su un IP del pool")
 BLIND_STREAK = 5          # consecutive ticks owed work that imported nothing
 SETTLE_AFTER = timedelta(hours=4)   # from kickoff, by when a match should be ready
 # Quanto indietro guardare per il campo xGOT mancante. Due settimane: abbastanza da
@@ -351,7 +359,20 @@ def _check_egress_pool(health: Health, now) -> None:
                        f"il file del pool egress {site} ({path}) non si legge.")
             continue
         good = [s for s in data.get("servers", []) if s.get("last_ok")]
-        if len(good) < low:
+        refill = data.get("last_refill") or {}
+        if len(good) < low and refill.get("fingerprint_refused"):
+            # The 25/09/2026 case: the pool is empty because SofaScore refuses the
+            # fingerprint, and the usual remedy — refill — would demote more exits
+            # for a fault none of them has.
+            health.add("alarm", f"egress:pool-low:{site}",
+                       f"solo {len(good)} IP di uscita buoni nel pool {site}, ma non "
+                       f"e' reputazione degli IP: all'ultimo refill "
+                       f"{refill.get('challenged_all')} uscite in "
+                       f"{len(refill.get('countries') or [])} paesi hanno rifiutato "
+                       f"TUTTE le impronte di curl_cffi. Il refill non serve. "
+                       f"Rimedio: {CURL_UPGRADE}",
+                       good=len(good), site=site)
+        elif len(good) < low:
             health.add("alarm", f"egress:pool-low:{site}",
                        f"solo {len(good)} IP di uscita buoni nel pool {site} "
                        f"(soglia {low}): {consequence}. "
@@ -360,6 +381,57 @@ def _check_egress_pool(health: Health, now) -> None:
         else:
             health.add("info", f"egress:pool:{site}",
                        f"pool egress {site}: {len(good)} IP buoni.", good=len(good))
+
+
+def _check_egress_transport(health: Health, now) -> None:
+    """How the egress is getting through SofaScore, which the pool cannot say.
+
+    Two levels, and the first is the point of the whole check: a fingerprint
+    refused while another still passes is the warning that comes BEFORE the
+    outage — the 25/09/2026 one arrived with no warning at all.
+    """
+    path = EGRESS_TRANSPORT
+    if not path.exists():
+        return
+    try:
+        state = json.loads(path.read_text())
+    except (OSError, ValueError):
+        health.add("warn", "egress:transport-unreadable",
+                   f"lo stato del trasporto egress ({path}) non si legge.")
+        return
+    browser = state.get("browser") or {}
+    curl = state.get("curl") or {}
+    refused = ", ".join(curl.get("challenged") or [])
+    if browser.get("last_ok") and not _older(browser["last_ok"], now, FINGERPRINT_MEMORY):
+        health.add("alarm", "egress:browser-fallback",
+                   f"SofaScore rifiuta tutte le impronte di curl_cffi"
+                   + (f" ({refused})" if refused else "")
+                   + f": dal {_local(browser.get('since'))} si legge con un browser "
+                   f"vero, lento e pesante sul Linode. Il sito regge, ma e' il "
+                   f"ripiego. Rimedio: {CURL_UPGRADE}.",
+                   since=browser.get("since"))
+        return
+    if refused and curl.get("ok_at") and not _older(curl.get("checked_at"), now,
+                                                    FINGERPRINT_MEMORY):
+        health.add("warn", "egress:fingerprint-refused",
+                   f"SofaScore rifiuta l'impronta {refused} di curl_cffi; si legge "
+                   f"con {curl.get('used')}. Aggiornare curl_cffi prima che cada "
+                   f"anche questa: {CURL_UPGRADE}.",
+                   refused=curl.get("challenged"), used=curl.get("used"))
+
+
+def _older(iso: str | None, now, age: timedelta) -> bool:
+    try:
+        return now - datetime.fromisoformat(iso) > age
+    except (TypeError, ValueError):
+        return True
+
+
+def _local(iso: str | None) -> str:
+    try:
+        return timezone.localtime(datetime.fromisoformat(iso)).strftime("%d/%m %H:%M")
+    except (TypeError, ValueError):
+        return "?"
 
 
 def _check_stuck_matches(health: Health, now) -> None:
@@ -583,6 +655,7 @@ def report(*, now=None, skip_shape: bool = False) -> Health:
     _check_blind_tick(health, now)
     _check_calendar_yield(health, now)
     _check_egress_pool(health, now)
+    _check_egress_transport(health, now)
     _check_stuck_matches(health, now)
     _check_calendar_freshness(health, now)
     _check_pending_digests(health, now)

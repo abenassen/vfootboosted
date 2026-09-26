@@ -1,18 +1,26 @@
-"""Compact SofaScore probe for the VPN sweep. Runs inside a netns; prints two
-parseable lines: EXITIP=<ip>  and  VERDICT=<PASS|CHALLENGE|EMPTY|HTTP_n|EXC ...>.
+"""Compact SofaScore probe for the VPN sweep. Runs inside a netns; prints
+parseable lines: EXITIP=<ip>, FINGERPRINT=<used>, CHALLENGED=<csv> and
+VERDICT=<PASS|CHALLENGE_ALL|CHALLENGE|EMPTY|HTTP_n|EXC ...>.
 
 PASS requires the endpoints the scraper actually depends on (a real match's
 lineups), not just the light seasons list — a soft block often lets the cheap
-endpoint through and challenges the heavy ones."""
+endpoint through and challenges the heavy ones.
+
+It walks the SAME fingerprint chain as the scraper (imported, not copied): an
+exit is good if the scraper can get through it, and the scraper walks the chain.
+CHALLENGE_ALL is the verdict that says more than "this IP": every fingerprint was
+refused, and when every exit says it the fault is curl_cffi, not the pool."""
 from __future__ import annotations
-import json, urllib.request
+import json, os, sys, urllib.request
 from curl_cffi import requests as cffi
+
+# Same trick as fetch_worker: the client lives in the app tree.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__),
+                                "..", "src", "realdata", "services"))
+from sofascore_client import IMPERSONATE_CHAIN, is_challenge  # noqa: E402
 
 API = "https://api.sofascore.com"
 SITE = "https://www.sofascore.com"
-# Must match sofascore_client.IMPERSONATE (this runs standalone in the netns, so
-# it cannot import it): Chromium fingerprints are challenged from every IP.
-IMPERSONATE = "safari18_0"
 H = {"Accept": "*/*", "Accept-Language": "en-US,en;q=0.9",
      "Referer": SITE + "/", "Origin": SITE}
 MARKERS = ["just a moment", "challenge-platform", "__cf_chl", "cf_chl_opt",
@@ -26,13 +34,15 @@ def exit_ip():
         return "?"
 
 
-def get(s, url):
+def get(s, url, fp):
     try:
-        r = s.get(url, headers=H, impersonate=IMPERSONATE, timeout=20)
+        r = s.get(url, headers=H, impersonate=fp, timeout=20)
     except Exception as e:
         return None, f"EXC {type(e).__name__}"
     body = r.text or ""
     low = body.lower()
+    if is_challenge(r.status_code, body):
+        return r, "FP_CHALLENGE"
     if r.status_code == 200 and body.strip():
         if any(m in low for m in MARKERS):
             return r, "CHALLENGE"
@@ -47,10 +57,22 @@ def get(s, url):
 def main():
     print(f"EXITIP={exit_ip()}")
     s = cffi.Session()
-    r, v = get(s, f"{API}/api/v1/unique-tournament/23/season/76457/rounds")
+    rounds_url = f"{API}/api/v1/unique-tournament/23/season/76457/rounds"
+    challenged = []
+    fp = None
+    for cand in IMPERSONATE_CHAIN:
+        r, v = get(s, rounds_url, cand)
+        if v == "FP_CHALLENGE":
+            challenged.append(cand); continue
+        fp = cand
+        break
+    print(f"CHALLENGED={','.join(challenged)}")
+    if fp is None:
+        print(f"VERDICT=CHALLENGE_ALL (rounds; {','.join(challenged)})"); return
+    print(f"FINGERPRINT={fp}")
     if v != "OK":
         print(f"VERDICT={v} (rounds)"); return
-    r, v = get(s, f"{API}/api/v1/unique-tournament/23/season/76457/events/round/1")
+    r, v = get(s, f"{API}/api/v1/unique-tournament/23/season/76457/events/round/1", fp)
     mid = None
     if v == "OK":
         try:
@@ -58,10 +80,11 @@ def main():
         except Exception:
             pass
     if mid:
-        r, v = get(s, f"{API}/api/v1/event/{mid}/lineups")
+        r, v = get(s, f"{API}/api/v1/event/{mid}/lineups", fp)
         if v != "OK":
             print(f"VERDICT={v} (lineups)"); return
-    print("VERDICT=PASS")
+    print(f"VERDICT=PASS ({fp})" if not challenged
+          else f"VERDICT=PASS ({fp}; challenged {','.join(challenged)})")
 
 
 if __name__ == "__main__":

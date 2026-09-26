@@ -86,6 +86,25 @@ TM_PREFERRED_CC = ["it", "ch", "at"]
 # A pooled IP is considered still-fresh (skip re-probing) within this window.
 FRESH_SECONDS = 6 * 3600
 
+# --- the last resort: a real browser ------------------------------------------
+# When SofaScore refuses every fingerprint curl_cffi can imitate, no exit IP helps
+# and the pool empties for nothing (25/09/2026). The fallback is a real headless
+# Chromium (fetch_worker --transport browser), through the same tunnel. It is
+# heavy on a 1-vCPU box, so it is a MODE with an expiry, not a per-request retry:
+# once curl has failed everywhere and the browser has got through, the next hour
+# goes straight to the browser, and only then is curl given another chance —
+# which is also when a curl_cffi upgrade starts paying off without anyone
+# switching anything back. The state lives next to the pools, where health reads
+# it: "we are on the browser" is an alarm, "Chrome is challenged, we are on
+# Safari" is the warning that comes before it.
+TRANSPORT_FILE = Path(os.environ.get("SOFA_TRANSPORT",
+                                     "/var/lib/vfoot-egress/sofa_transport.json"))
+BROWSER_MODE_SECONDS = 3600
+BROWSER_ROTATIONS = 2       # exits to try the browser through before giving up
+# Chromium installed once for root, outside any home directory, so the path does
+# not depend on who ran `playwright install` (see DEPLOY.md).
+PLAYWRIGHT_BROWSERS = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/ms-playwright")
+
 # --- the lock ---------------------------------------------------------------
 # One netns named `sofa`, one wg interface named `wgsofa`, and `netns_up()` opens
 # by DESTROYING both (see netns_down). So two egress users cannot coexist even
@@ -337,10 +356,17 @@ def load_pool(tgt: Target) -> list[dict]:
     return []
 
 
-def save_pool(tgt: Target, servers: list[dict]) -> None:
+def save_pool(tgt: Target, servers: list[dict], **meta) -> None:
+    """Keys other than the servers (``last_refill``) survive a save that does not
+    mention them: the demote after a failed warm must not erase what the last
+    refill found out."""
     tgt.pool_file.parent.mkdir(parents=True, exist_ok=True)
-    tgt.pool_file.write_text(json.dumps({"target": tgt.name, "updated": _now(),
-                                         "servers": servers}, indent=2))
+    try:
+        doc = json.loads(tgt.pool_file.read_text())
+    except (OSError, ValueError):
+        doc = {}
+    doc.update(meta, target=tgt.name, updated=_now(), servers=servers)
+    tgt.pool_file.write_text(json.dumps(doc, indent=2))
 
 
 def good_servers(servers: list[dict]) -> list[dict]:
@@ -363,6 +389,12 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
     cands = candidate_ips(known=set(by_ip), preferred_cc=tgt.preferred_cc)
     print(f"{len(cands)} fresh candidate IP(s) to try.")
     probes = 0
+    # Exits that refused EVERY fingerprint, and in how many countries. One is a
+    # burned IP; the same verdict from exits in several countries is SofaScore
+    # refusing curl_cffi itself — the 25/09/2026 case, where this loop kept
+    # probing and demoting for a fault no IP could fix.
+    challenged_all = 0
+    countries: set[str] = set()
     for ip, cluster, pub in cands:
         if len(good_servers(servers)) >= want or probes >= max_probes:
             break
@@ -376,6 +408,9 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
                 time.sleep(delay); continue
             exit_ip, verdict = probe_in_netns(tgt)
         print(f"  {ip:16s} {cluster:26s} {verdict:12s} exit={exit_ip}")
+        if verdict.startswith("CHALLENGE_ALL"):
+            challenged_all += 1
+            countries.add(cluster.split("-", 1)[0])
         if passed(verdict):
             rec = by_ip.get(ip) or {"endpoint_ip": ip}
             rec.update({"cluster": cluster, "pubKey": pub, "exit_ip": exit_ip,
@@ -384,8 +419,25 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
                 servers.append(rec); by_ip[ip] = rec
             save_pool(tgt, servers)
         time.sleep(delay)
-    print(f"done: {len(good_servers(servers))} good IP(s) in [{tgt.name}] pool "
-          f"({probes} probed).")
+    n_good = len(good_servers(servers))
+    refused = fingerprint_refused(challenged_all, countries)
+    # Written down as a verdict, not only as counts, so health reads the same rule
+    # instead of keeping its own copy of it.
+    save_pool(tgt, servers, last_refill={
+        "at": _now(), "probed": probes, "good": n_good,
+        "challenged_all": challenged_all, "countries": sorted(countries),
+        "fingerprint_refused": refused})
+    print(f"done: {n_good} good IP(s) in [{tgt.name}] pool ({probes} probed).")
+    if refused:
+        print(f"!! {challenged_all} exits in {len(countries)} countries refused "
+              f"EVERY fingerprint: this is SofaScore against curl_cffi, not IP "
+              f"reputation. Refilling will not help; upgrade curl_cffi.")
+
+
+def fingerprint_refused(challenged_all: int, countries) -> bool:
+    """The refill's verdict on WHAT is being refused. Three exits in two countries:
+    enough that a couple of neighbouring burned IPs cannot fake it."""
+    return challenged_all >= 3 and len(set(countries)) >= 2
 
 
 def _demote(tgt: Target, servers: list[dict], ip: str) -> None:
@@ -397,6 +449,98 @@ def _demote(tgt: Target, servers: list[dict], ip: str) -> None:
     save_pool(tgt, servers)
 
 
+# --- transport state -------------------------------------------------------
+def load_transport() -> dict:
+    try:
+        return json.loads(TRANSPORT_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_transport(state: dict) -> None:
+    TRANSPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TRANSPORT_FILE.write_text(json.dumps(state, indent=2))
+
+
+def worker_report(stdout: str) -> dict:
+    """What the worker said about fingerprints (see fetch_worker's header)."""
+    rep = {"challenged_all": False, "used": None, "challenged": []}
+    for line in (stdout or "").splitlines():
+        if line.startswith("CHALLENGED_ALL"):
+            rep["challenged_all"] = True
+        elif line.startswith("FINGERPRINT "):
+            for tok in line.split()[1:]:
+                k, _, v = tok.partition("=")
+                if k == "used":
+                    rep["used"] = v or None
+                elif k == "challenged":
+                    rep["challenged"] = [x for x in v.split(",") if x]
+    return rep
+
+
+def _note_curl(state: dict, rep: dict, ok: bool) -> None:
+    cur = state.setdefault("curl", {})
+    cur["checked_at"] = _now()
+    if rep["challenged"] or ok:
+        cur["challenged"] = rep["challenged"]
+    if ok:
+        cur["ok_at"] = _now()
+        cur["used"] = rep["used"]
+        # curl got through: whatever browser episode was running is over.
+        state.pop("browser", None)
+    elif rep["challenged_all"]:
+        cur["challenged_all_at"] = _now()
+
+
+def browser_mode(state: dict) -> bool:
+    until = (state.get("browser") or {}).get("until")
+    return bool(until) and _age_seconds(until) < 0
+
+
+def _rescue_candidates(servers: list[dict], state: dict) -> list[dict]:
+    """Exits to try the browser through: the one it last worked on, then the good
+    ones, then the most recently checked. The pool certifies CURL — in the case
+    this exists for, it has been demoted to nothing by a fault no IP caused, so
+    "recently seen" is the best evidence left that an exit is alive."""
+    last = (state.get("browser") or {}).get("ip")
+    order = sorted(servers, key=lambda s: s.get("last_checked") or "", reverse=True)
+    order.sort(key=lambda s: (s["endpoint_ip"] != last, not s.get("last_ok")))
+    return order[:BROWSER_ROTATIONS]
+
+
+class _Warm:
+    """One warm, across both transports. What they share is whether a fetch has
+    already happened: only the FIRST run may purge (a warm is a warm, not a replay
+    of the last one — fetch_worker's header), every later one is the same warm
+    continuing on another exit or transport and must keep what it already got."""
+
+    def __init__(self, worker_args: list[str], cache_dir: Path, wait: float | None):
+        self.args = worker_args
+        self.cache_dir = cache_dir
+        self.wait = wait
+        self.attempted = False
+        self.tgt = target(SOFASCORE)
+        self.priv, self.addr = _client_identity()
+
+    def run_worker(self, srv: dict, transport: str) -> subprocess.CompletedProcess | None:
+        """None when the tunnel came up without a handshake."""
+        ip = srv["endpoint_ip"]
+        with tunnel(ip, srv["pubKey"], self.priv, self.addr, wait=self.wait,
+                    what=f"warm:sofascore:{transport}") as up:
+            if not up:
+                return None
+            env = None
+            if transport == "browser":
+                env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": PLAYWRIGHT_BROWSERS}
+            r = _run(["ip", "netns", "exec", NS, VENV_PY, str(WORKER),
+                      *self.args, "--cache-dir", str(self.cache_dir),
+                      *(["--transport", "browser"] if transport == "browser" else []),
+                      *(["--resume"] if self.attempted else [])], env=env)
+        self.attempted = True
+        sys.stdout.write(r.stdout)
+        return r
+
+
 def _warm(worker_args: list[str], cache_dir: Path, max_rotations: int,
           wait: float | None = 0.0) -> int:
     """Run the fetch worker (with the given args) through a good pooled IP, rotating
@@ -404,27 +548,42 @@ def _warm(worker_args: list[str], cache_dir: Path, max_rotations: int,
     the caller (calendar/scheduler) passes the worker args. Self-validating: a clean
     run confirms the IP (last_ok bumped), a block demotes it and rotates.
 
+    When curl cannot get through anywhere, the browser gets a go before giving up
+    (see BROWSER_MODE_SECONDS), and while its mode lasts it goes first.
+
     ``wait`` is how long to queue for the netns; the tick passes 0 because a
     skipped minute is cheaper than a pile of ticks waiting behind a batch job.
     Returns 4 when it gave up on the lock — distinct from 3 (blocked), because
     "someone else is using the tunnel" and "our IPs are burned" want opposite
     reactions from whoever reads the logs.
     """
-    tgt = target(SOFASCORE)
-    priv, addr = _client_identity()
     cache_dir.mkdir(parents=True, exist_ok=True)
+    w = _Warm(worker_args, cache_dir, wait)
+    state = load_transport()
+    try:
+        if browser_mode(state):
+            print("browser mode: curl was challenged everywhere within the hour — "
+                  "reading with the browser.")
+            if _browser_warm(w, state) == 0:
+                return 0
+            print("the browser failed too; trying curl anyway.")
+        rc = _curl_warm(w, state, max_rotations)
+        if rc != 3:
+            return rc
+        print("curl could not get through; last resort: the browser.")
+        return _browser_warm(w, state)
+    except EgressBusy as exc:
+        print(f"  {exc}; skipping this cycle."); return 4
+
+
+def _curl_warm(w: _Warm, state: dict, max_rotations: int) -> int:
+    tgt = w.tgt
     servers = load_pool(tgt)
     if not good_servers(servers):
         print("pool empty — refilling first.")
         refill(tgt, want=3, max_probes=15, delay=3.0)
         servers = load_pool(tgt)
 
-    # The worker drops what it is about to re-fetch, so a warm is a warm and not a
-    # replay of the last one (see fetch_worker's header). A ROTATION, though, is
-    # this same warm continuing on another IP: it must keep what it already got,
-    # or a block two thirds of the way through a match would cost the whole thing
-    # again on the fresh IP — the one place we can least afford to spend requests.
-    attempted = False
     tried: set[str] = set()
     for _ in range(max_rotations):
         good = [s for s in good_servers(servers) if s["endpoint_ip"] not in tried]
@@ -439,30 +598,59 @@ def _warm(worker_args: list[str], cache_dir: Path, max_rotations: int,
         ip = srv["endpoint_ip"]
         tried.add(ip)
         print(f"using {srv['exit_ip']} via {srv['cluster']} ({ip})")
-        try:
-            with tunnel(ip, srv["pubKey"], priv, addr, wait=wait,
-                        what="warm:sofascore") as up:
-                if not up:
-                    print("  no handshake; demoting + rotating.")
-                    _demote(tgt, servers, ip); continue
-                r = _run(["ip", "netns", "exec", NS, VENV_PY, str(WORKER),
-                          *worker_args, "--cache-dir", str(cache_dir),
-                          *(["--resume"] if attempted else [])])
-            attempted = True
-            sys.stdout.write(r.stdout)
-            if r.returncode == 0:
-                srv["last_ok"] = _now(); srv["fail_count"] = 0
-                save_pool(tgt, servers)
-                print("  OK — cache warmed.")
-                return 0
-            if r.returncode == 3:
-                print("  blocked on this IP; demoting + rotating.")
-                _demote(tgt, servers, ip); continue
-            print(f"  worker error (rc={r.returncode}); not an IP problem:")
-            sys.stderr.write(r.stderr); return r.returncode
-        except EgressBusy as exc:
-            print(f"  {exc}; skipping this cycle."); return 4
+        r = w.run_worker(srv, "curl")
+        if r is None:
+            print("  no handshake; demoting + rotating.")
+            _demote(tgt, servers, ip); continue
+        rep = worker_report(r.stdout)
+        if r.returncode == 0:
+            srv["last_ok"] = _now(); srv["fail_count"] = 0
+            save_pool(tgt, servers)
+            _note_curl(state, rep, ok=True); save_transport(state)
+            print("  OK — cache warmed.")
+            return 0
+        if r.returncode == 3:
+            _note_curl(state, rep, ok=False); save_transport(state)
+            print("  blocked on this IP; demoting + rotating.")
+            _demote(tgt, servers, ip); continue
+        print(f"  worker error (rc={r.returncode}); not an IP problem:")
+        sys.stderr.write(r.stderr); return r.returncode
     print("exhausted rotations."); return 3
+
+
+def _browser_warm(w: _Warm, state: dict) -> int:
+    """The last resort. It never touches the pool: the pool says which exits CURL
+    gets through, and an exit the browser passes on is no evidence of that."""
+    for srv in _rescue_candidates(load_pool(w.tgt), state):
+        print(f"browser via {srv.get('exit_ip')} ({srv['endpoint_ip']})")
+        r = w.run_worker(srv, "browser")
+        if r is None:
+            print("  no handshake; next exit.")
+            continue
+        if r.returncode == 0:
+            prev = state.get("browser") or {}
+            state["browser"] = {
+                "since": prev.get("since") or _now(),
+                # Set once per episode and never pushed forward by a success, or
+                # a browser that keeps working would keep curl out forever.
+                "until": prev.get("until") if browser_mode(state) else
+                datetime.fromtimestamp(time.time() + BROWSER_MODE_SECONDS,
+                                       timezone.utc).isoformat(timespec="seconds"),
+                "last_ok": _now(), "ip": srv["endpoint_ip"],
+            }
+            save_transport(state)
+            print("  OK — cache warmed by the browser.")
+            return 0
+        if r.returncode != 3:
+            # No playwright, no Chromium, a crash: the browser is not there, and
+            # another exit will not bring it.
+            print(f"  browser unavailable (rc={r.returncode}):")
+            sys.stderr.write(r.stderr)
+            break
+        print("  the browser was refused too; next exit.")
+    state.setdefault("browser", {})["failed_at"] = _now()
+    save_transport(state)
+    return 3
 
 
 def fetch(match_ids: str, kind: str, cache_dir: Path, max_rotations: int,

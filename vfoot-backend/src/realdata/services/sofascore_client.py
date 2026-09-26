@@ -1,7 +1,8 @@
 """Controlled SofaScore API client (curl_cffi) for high-volume batch pulls.
 
 SofaScore blocks plain HTTP at the TLS-fingerprint (JA3/Cloudflare) level, so
-this client uses ``curl_cffi`` with Chrome impersonation. Unlike a browser-based
+this client uses ``curl_cffi`` with browser impersonation (see
+``IMPERSONATE_CHAIN``). Unlike a browser-based
 scraper it gives us full control of the request rate, which is what a
 ~13k-request season pull needs to avoid getting rate-blocked:
 
@@ -27,14 +28,23 @@ from typing import Any
 SERIE_A_UNIQUE_TOURNAMENT_ID = 23
 API_BASE = "https://api.sofascore.com"
 SITE_BASE = "https://www.sofascore.com"
-# The TLS fingerprint curl_cffi presents. Since 25/09/2026 SofaScore answers
-# every Chromium one (chrome*, edge*, chrome_android) with
-# `403 {"reason": "challenge"}` from ANY address, residential included, while
-# Safari, Firefox and Tor pass on the same IP in the same minute. It looks
-# exactly like a burned exit, so the refill demoted the whole pool one IP at a
-# time. Keep egress/sofa_probe_netns.py on the same value: a probe that tests
-# another fingerprint than the scraper's certifies IPs the scraper cannot use.
-IMPERSONATE = "safari18_0"
+# The TLS fingerprints curl_cffi may present, in order. A CHAIN, not one value,
+# because SofaScore refuses by fingerprint and moves the line: on 25/09/2026 it
+# started answering `403 {"reason": "challenge"}` to every Chrome curl_cffi 0.15
+# could imitate (up to chrome136) from ANY address, residential included, while
+# Safari, Firefox and Tor passed on the same IP in the same minute — and 0.16.3's
+# chrome150 passed again while chrome142-146 did not. So it is an age threshold on
+# Chrome, and it will rise. It looked exactly like a burned exit, and the refill
+# demoted the whole pool one IP at a time for a fault no IP could fix.
+#
+# Aliases, never pinned versions: an alias follows the installed curl_cffi, so
+# upgrading the library is what refreshes every fingerprint at once. Safari first
+# because it is the one that has never been challenged; Chrome is kept, not
+# dropped, because its newest imitation passes.
+#
+# egress/sofa_probe_netns.py imports this: a probe that certified IPs with another
+# fingerprint than the scraper's would hand it exits it cannot use.
+IMPERSONATE_CHAIN = ("safari", "firefox", "chrome", "tor")
 
 _HEADERS = {
     "Accept": "*/*",
@@ -63,6 +73,27 @@ class SofaScoreBlocked(SofaScoreError):
     """
 
 
+class SofaScoreChallenged(SofaScoreBlocked):
+    """Every fingerprint in the chain was challenged on this exit.
+
+    Still a block — the orchestrator rotates as for any other — but it is the one
+    shape that says something beyond this IP: when it comes back from every exit,
+    the fault is the fingerprint, and no amount of rotating will fix it. The
+    orchestrator counts these to decide when to stop rotating and fall back to a
+    real browser.
+    """
+
+
+def is_challenge(status: int, text: str) -> bool:
+    """SofaScore's refusal of a FINGERPRINT: a 403 whose JSON says ``challenge``.
+
+    Deliberately narrow. A burned exit usually has the handshake cut or gets an
+    empty body, and those must not walk the chain: four fingerprints tried against
+    an IP that answers none of them would be four requests to learn nothing.
+    """
+    return status == 403 and "challenge" in (text or "").lower()
+
+
 class SofaScoreClient:
     def __init__(
         self,
@@ -71,7 +102,7 @@ class SofaScoreClient:
         min_delay: float = 1.5,
         jitter: float = 1.0,
         max_retries: int = 7,
-        impersonate: str = IMPERSONATE,
+        impersonate: str | tuple[str, ...] = IMPERSONATE_CHAIN,
         timeout: float = 20.0,
         tournament_id: int = SERIE_A_UNIQUE_TOURNAMENT_ID,
         logger=None,
@@ -85,7 +116,13 @@ class SofaScoreClient:
         # way to reach ``_raw_get`` without a session is with one injected by a
         # test, and a test's fake transport is not an exit IP to demote.
         self._transport_errors: tuple = ()
-        self._impersonate = impersonate
+        self._chain = (impersonate,) if isinstance(impersonate, str) else tuple(impersonate)
+        self._fp = 0
+        # Every fingerprint refused so far, in the order it happened. The worker
+        # prints it, the orchestrator records it, and health turns it into the
+        # warning that comes BEFORE the outage: "Chrome is challenged, we are on
+        # Safari — upgrade curl_cffi before Safari goes too".
+        self.challenged: list[str] = []
         self._timeout = timeout
         self._cache_dir = Path(cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
@@ -126,20 +163,45 @@ class SofaScoreClient:
                                       cffi_requests.exceptions.Timeout)
         return self._session
 
+    @property
+    def fingerprint(self) -> str:
+        """The fingerprint the next request will present."""
+        return self._chain[self._fp]
+
     def _raw_get(self, path: str) -> Any:
         session = self._ensure_session()
-        try:
-            resp = session.get(API_BASE + path, headers=_HEADERS,
-                               impersonate=self._impersonate, timeout=self._timeout)
-        except self._transport_errors as exc:
-            raise SofaScoreBlocked(
-                f"transport: {type(exc).__name__}: {str(exc)[:120]}") from exc
-        finally:
-            # Stamped whatever happened: a request that died on the wire still
-            # went out, and the throttle exists to space what goes OUT. Stamping
-            # only the successes would let a run that is failing fire as fast as
-            # the failures come back — the worst possible moment to stop pacing.
-            self._last_request = time.monotonic()
+        while True:
+            try:
+                resp = session.get(API_BASE + path, headers=_HEADERS,
+                                   impersonate=self.fingerprint,
+                                   timeout=self._timeout)
+            except self._transport_errors as exc:
+                raise SofaScoreBlocked(
+                    f"transport: {type(exc).__name__}: {str(exc)[:120]}") from exc
+            finally:
+                # Stamped whatever happened: a request that died on the wire still
+                # went out, and the throttle exists to space what goes OUT. Stamping
+                # only the successes would let a run that is failing fire as fast as
+                # the failures come back — the worst possible moment to stop pacing.
+                self._last_request = time.monotonic()
+            if not is_challenge(resp.status_code, resp.text):
+                break
+            # The fingerprint was refused, not the exit: try the next one on the
+            # same request and KEEP it for the rest of the session, so a refused
+            # head costs one request per run and not one per path.
+            refused = self.fingerprint
+            if refused not in self.challenged:
+                self.challenged.append(refused)
+            if self._fp + 1 >= len(self._chain):
+                # Back to the head for whoever retries later (the season pull
+                # backs off and tries again): by then the head may pass.
+                self._fp = 0
+                raise SofaScoreChallenged(
+                    f"HTTP 403 challenge on every fingerprint "
+                    f"({', '.join(self.challenged)})")
+            self._fp += 1
+            self._log(f"  fingerprint {refused} challenged; trying {self.fingerprint}")
+            self._throttle()
         if resp.status_code == 404:
             return None  # legitimately absent (e.g. a match with no shotmap)
         if resp.status_code != 200:
@@ -197,7 +259,11 @@ class SofaScoreClient:
                 json.dump(data, fh)
             tmp.replace(cache_path)
             return data
-        raise SofaScoreBlocked(f"giving up on {path} after {self._max_retries} tries: {last_exc}")
+        # The same KIND of block as the last one: "every fingerprint was refused"
+        # is what tells the orchestrator the fault is not this exit, and wrapping
+        # it in a plain block would erase exactly that.
+        kind = type(last_exc) if isinstance(last_exc, SofaScoreBlocked) else SofaScoreBlocked
+        raise kind(f"giving up on {path} after {self._max_retries} tries: {last_exc}")
 
     # -- season / schedule ----------------------------------------------
 
