@@ -27,6 +27,14 @@ from typing import Any
 SERIE_A_UNIQUE_TOURNAMENT_ID = 23
 API_BASE = "https://api.sofascore.com"
 SITE_BASE = "https://www.sofascore.com"
+# The TLS fingerprint curl_cffi presents. Since 25/09/2026 SofaScore answers
+# every Chromium one (chrome*, edge*, chrome_android) with
+# `403 {"reason": "challenge"}` from ANY address, residential included, while
+# Safari, Firefox and Tor pass on the same IP in the same minute. It looks
+# exactly like a burned exit, so the refill demoted the whole pool one IP at a
+# time. Keep egress/sofa_probe_netns.py on the same value: a probe that tests
+# another fingerprint than the scraper's certifies IPs the scraper cannot use.
+IMPERSONATE = "safari18_0"
 
 _HEADERS = {
     "Accept": "*/*",
@@ -63,7 +71,7 @@ class SofaScoreClient:
         min_delay: float = 1.5,
         jitter: float = 1.0,
         max_retries: int = 7,
-        impersonate: str = "chrome",
+        impersonate: str = IMPERSONATE,
         timeout: float = 20.0,
         tournament_id: int = SERIE_A_UNIQUE_TOURNAMENT_ID,
         logger=None,

@@ -10,6 +10,9 @@ from curl_cffi import requests as cffi
 
 API = "https://api.sofascore.com"
 SITE = "https://www.sofascore.com"
+# Must match sofascore_client.IMPERSONATE (this runs standalone in the netns, so
+# it cannot import it): Chromium fingerprints are challenged from every IP.
+IMPERSONATE = "safari18_0"
 H = {"Accept": "*/*", "Accept-Language": "en-US,en;q=0.9",
      "Referer": SITE + "/", "Origin": SITE}
 MARKERS = ["just a moment", "challenge-platform", "__cf_chl", "cf_chl_opt",
@@ -25,7 +28,7 @@ def exit_ip():
 
 def get(s, url):
     try:
-        r = s.get(url, headers=H, impersonate="chrome", timeout=20)
+        r = s.get(url, headers=H, impersonate=IMPERSONATE, timeout=20)
     except Exception as e:
         return None, f"EXC {type(e).__name__}"
     body = r.text or ""
