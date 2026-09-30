@@ -18,10 +18,13 @@ from curl_cffi import requests as cffi
 sys.path.insert(0, os.path.join(os.path.dirname(__file__),
                                 "..", "src", "realdata", "services"))
 from sofascore_client import (  # noqa: E402
-    IMPERSONATE_CHAIN, is_challenge, simulating_refusal)
+    API_BASE, IMPERSONATE_CHAIN, SITE_BASE, is_challenge, simulating_refusal)
 
-API = "https://api.sofascore.com"
-SITE = "https://www.sofascore.com"
+# The scraper's own host, imported for the same reason as the chain: a probe on
+# another host certifies exits for a door the scraper does not use (29/09/2026:
+# api.sofascore.com closed, www open).
+API = API_BASE
+SITE = SITE_BASE
 H = {"Accept": "*/*", "Accept-Language": "en-US,en;q=0.9",
      "Referer": SITE + "/", "Origin": SITE}
 MARKERS = ["just a moment", "challenge-platform", "__cf_chl", "cf_chl_opt",

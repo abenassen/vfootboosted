@@ -378,10 +378,12 @@ class IlRefillRiconosceLImpronta(_Tmp):
         self.assertFalse(last["fingerprint_refused"])
         self.assertNotIn("not IP", out)
 
-    def test_i_403_ordinari_non_sono_l_impronta(self):
+    def test_un_host_chiuso_con_403_ovunque_non_e_reputazione(self):
+        """Il 29/09: api.sofascore.com risponde 403 "Forbidden" a tutto. Contando
+        solo la sfida, la regola aveva visto "uscite UK bruciate"."""
         last, _ = self._refill(["it-mil.prod", "uk-lon.prod", "es-bcn.prod"],
                                "HTTP_403 (rounds)")
-        self.assertFalse(last["fingerprint_refused"])
+        self.assertTrue(last["fingerprint_refused"])
 
     def test_l_impronta_rifiutata_prepara_subito_le_uscite_del_browser(self):
         with mock.patch.object(E, "refill_browser_pool") as prepara:
@@ -390,7 +392,8 @@ class IlRefillRiconosceLImpronta(_Tmp):
 
     def test_un_refill_normale_non_accende_chromium(self):
         with mock.patch.object(E, "refill_browser_pool") as prepara:
-            self._refill(["it-mil.prod", "uk-lon.prod", "es-bcn.prod"], "HTTP_403 (rounds)")
+            self._refill(["it-mil.prod", "uk-lon.prod", "es-bcn.prod"],
+                         ["HTTP_403 (rounds)", "PASS (safari)", "EXC Timeout (rounds)"])
         prepara.assert_not_called()
 
     def test_il_declassamento_non_cancella_quello_che_il_refill_ha_scoperto(self):

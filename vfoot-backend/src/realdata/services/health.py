@@ -370,7 +370,8 @@ def _check_egress_pool(health: Health, now) -> None:
                        f"e' reputazione degli IP: all'ultimo refill "
                        f"{refill.get('challenged_all')} uscite in "
                        f"{len(refill.get('countries') or [])} paesi hanno rifiutato "
-                       f"TUTTE le impronte di curl_cffi. Il refill non serve. "
+                       f"curl senza che ne passasse nessuna (impronta, o l'host dell'API "
+                       f"che cambia). Il refill non serve. "
                        f"Rimedio: {CURL_UPGRADE}",
                        good=len(good), site=site)
         elif len(good) < low:

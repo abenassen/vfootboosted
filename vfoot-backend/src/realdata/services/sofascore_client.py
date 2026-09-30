@@ -27,8 +27,15 @@ from pathlib import Path
 from typing import Any
 
 SERIE_A_UNIQUE_TOURNAMENT_ID = 23
-API_BASE = "https://api.sofascore.com"
 SITE_BASE = "https://www.sofascore.com"
+# The data API is served SAME-ORIGIN, from the site's own host — where the site's
+# JavaScript reads it. Since 29/09/2026 22:00 UTC the old `api.sofascore.com` host
+# answers `403 {"reason": "Forbidden"}` to every fingerprint curl_cffi has, while
+# the same path on www passes with safari, chrome and tor. It had moved once
+# before (see sofascore_browser_client), which is why the browser fallback, on
+# www all along, kept the site fed through the night. If www ever closes to curl
+# too, that fallback is what is left.
+API_BASE = SITE_BASE
 # The TLS fingerprints curl_cffi may present, in order. A CHAIN, not one value,
 # because SofaScore refuses by fingerprint and moves the line: on 25/09/2026 it
 # started answering `403 {"reason": "challenge"}` to every Chrome curl_cffi 0.15

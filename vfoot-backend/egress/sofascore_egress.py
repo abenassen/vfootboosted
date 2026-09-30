@@ -433,7 +433,11 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
                 time.sleep(delay); continue
             exit_ip, verdict = probe_in_netns(tgt)
         print(f"  {ip:16s} {cluster:26s} {verdict:12s} exit={exit_ip}")
-        if verdict.startswith("CHALLENGE_ALL"):
+        # A plain 403 counts too: on 29/09/2026 SofaScore closed the api. host
+        # with `403 "Forbidden"` to every fingerprint, which the probe reports as
+        # HTTP_403, and a rule that only counted the challenge called it "UK
+        # exits are burned" while nothing passed anywhere.
+        if verdict.startswith(("CHALLENGE_ALL", "HTTP_403")):
             challenged_all += 1
             countries.add(cluster.split("-", 1)[0])
         if passed(verdict):
@@ -456,8 +460,9 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
     print(f"done: {n_good} good IP(s) in [{tgt.name}] pool ({probes} probed).")
     if refused:
         print(f"!! {challenged_all} exits in {len(countries)} countries refused "
-              f"EVERY fingerprint: this is SofaScore against curl_cffi, not IP "
-              f"reputation. Refilling will not help; upgrade curl_cffi.")
+              f"curl and none passed: this is SofaScore against our client (a "
+              f"fingerprint, or the API host), not IP reputation. Refilling will "
+              f"not help.")
         if tgt.name == SOFASCORE:
             # Get the browser its exits NOW, while nobody is waiting on them: the
             # next warm will need them, and a live tick is the worst moment to
@@ -477,8 +482,9 @@ def refill_browser_pool() -> None:
 def fingerprint_refused(challenged_all: int, countries, passed_now: int) -> bool:
     """The refill's verdict on WHAT is being refused.
 
-    The refusal alone does not say it: a burned exit gets the same
-    ``403 "challenge"`` on every fingerprint too (26/09/2026, four London exits in
+    Counts CHALLENGE_ALL and plain HTTP_403 alike — the host closing shows up as
+    the second (29/09/2026). The refusal alone does not say it: a burned exit gets
+    the same ``403 "challenge"`` on every fingerprint too (26/09/2026, four London exits in
     a row, while Milan and Rome passed on Safari). What says it is that NOTHING
     passed in the same run — one exit getting through proves the fingerprint is
     fine — from exits in at least two countries, so one bad neighbourhood cannot
