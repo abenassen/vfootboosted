@@ -516,7 +516,7 @@ def save_transport(state: dict) -> None:
 
 def worker_report(stdout: str) -> dict:
     """What the worker said about fingerprints (see fetch_worker's header)."""
-    rep = {"challenged_all": False, "used": None, "challenged": []}
+    rep = {"challenged_all": False, "used": None, "challenged": [], "host": None}
     for line in (stdout or "").splitlines():
         if line.startswith("CHALLENGED_ALL"):
             rep["challenged_all"] = True
@@ -527,6 +527,8 @@ def worker_report(stdout: str) -> dict:
                     rep["used"] = v or None
                 elif k == "challenged":
                     rep["challenged"] = [x for x in v.split(",") if x]
+                elif k == "host":
+                    rep["host"] = v or None
     return rep
 
 
@@ -538,6 +540,7 @@ def _note_curl(state: dict, rep: dict, ok: bool) -> None:
     if ok:
         cur["ok_at"] = _now()
         cur["used"] = rep["used"]
+        cur["host"] = rep["host"]
         # curl got through: whatever browser episode was running is over.
         state.pop("browser", None)
     elif rep["challenged_all"]:

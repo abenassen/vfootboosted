@@ -1,5 +1,5 @@
 """Compact SofaScore probe for the VPN sweep. Runs inside a netns; prints
-parseable lines: EXITIP=<ip>, FINGERPRINT=<used>, CHALLENGED=<csv> and
+parseable lines: EXITIP=<ip>, HOST=<served>, FINGERPRINT=<used>, CHALLENGED=<csv> and
 VERDICT=<PASS|CHALLENGE_ALL|CHALLENGE|EMPTY|HTTP_n|EXC ...>.
 
 PASS requires the endpoints the scraper actually depends on (a real match's
@@ -18,12 +18,11 @@ from curl_cffi import requests as cffi
 sys.path.insert(0, os.path.join(os.path.dirname(__file__),
                                 "..", "src", "realdata", "services"))
 from sofascore_client import (  # noqa: E402
-    API_BASE, IMPERSONATE_CHAIN, SITE_BASE, is_challenge, simulating_refusal)
+    API_HOSTS, IMPERSONATE_CHAIN, SITE_BASE, is_challenge, simulating_refusal)
 
-# The scraper's own host, imported for the same reason as the chain: a probe on
+# The scraper's own hosts, imported for the same reason as the chain: a probe on
 # another host certifies exits for a door the scraper does not use (29/09/2026:
 # api.sofascore.com closed, www open).
-API = API_BASE
 SITE = SITE_BASE
 H = {"Accept": "*/*", "Accept-Language": "en-US,en;q=0.9",
      "Referer": SITE + "/", "Origin": SITE}
@@ -60,25 +59,38 @@ def get(s, url, fp):
     return r, f"HTTP_{r.status_code}"
 
 
+def _door(s, path):
+    """Walk hosts x fingerprints exactly as the client does. Returns
+    (host, fp, challenged, response, verdict); host is None when every host
+    refused."""
+    for host in API_HOSTS:
+        challenged = []
+        for fp in IMPERSONATE_CHAIN:
+            r, v = get(s, host + path, fp)
+            if v == "FP_CHALLENGE":
+                challenged.append(fp); continue
+            if v == "HTTP_403":
+                break           # the host refuses: next host
+            return host, fp, challenged, r, v
+    return None, None, challenged, None, v
+
+
 def main():
     print(f"EXITIP={exit_ip()}")
     s = cffi.Session()
-    rounds_url = f"{API}/api/v1/unique-tournament/23/season/76457/rounds"
-    challenged = []
-    fp = None
-    for cand in IMPERSONATE_CHAIN:
-        r, v = get(s, rounds_url, cand)
-        if v == "FP_CHALLENGE":
-            challenged.append(cand); continue
-        fp = cand
-        break
+    host, fp, challenged, r, v = _door(
+        s, "/api/v1/unique-tournament/23/season/76457/rounds")
     print(f"CHALLENGED={','.join(challenged)}")
-    if fp is None:
-        print(f"VERDICT=CHALLENGE_ALL (rounds; {','.join(challenged)})"); return
+    if host is None:
+        # Every host refused. CHALLENGE_ALL either way: for the refill it is the
+        # same finding — this exit does not let the scraper in — and the count
+        # across exits is what says whether it is the exit or us.
+        print(f"VERDICT=CHALLENGE_ALL (rounds; {v}; {','.join(challenged)})"); return
+    print(f"HOST={host}")
     print(f"FINGERPRINT={fp}")
     if v != "OK":
         print(f"VERDICT={v} (rounds)"); return
-    r, v = get(s, f"{API}/api/v1/unique-tournament/23/season/76457/events/round/1", fp)
+    r, v = get(s, f"{host}/api/v1/unique-tournament/23/season/76457/events/round/1", fp)
     mid = None
     if v == "OK":
         try:
@@ -86,11 +98,15 @@ def main():
         except Exception:
             pass
     if mid:
-        r, v = get(s, f"{API}/api/v1/event/{mid}/lineups", fp)
+        r, v = get(s, f"{host}/api/v1/event/{mid}/lineups", fp)
         if v != "OK":
             print(f"VERDICT={v} (lineups)"); return
-    print(f"VERDICT=PASS ({fp})" if not challenged
-          else f"VERDICT=PASS ({fp}; challenged {','.join(challenged)})")
+    notes = [fp]
+    if host != API_HOSTS[0]:
+        notes.append(f"host {host}")
+    if challenged:
+        notes.append(f"challenged {','.join(challenged)}")
+    print(f"VERDICT=PASS ({'; '.join(notes)})")
 
 
 if __name__ == "__main__":

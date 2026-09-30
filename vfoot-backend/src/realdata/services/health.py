@@ -39,6 +39,7 @@ from django.utils import timezone
 
 from realdata.models import CompetitionSeason, JobRun, Match
 from realdata.services import roster_integrity, shape_canary
+from realdata.services.sofascore_client import API_HOSTS
 
 # job -> (systemd unit, expected cadence, how late is too late).
 #
@@ -413,6 +414,17 @@ def _check_egress_transport(health: Health, now) -> None:
                    f"ripiego. Rimedio: {CURL_UPGRADE}.",
                    since=browser.get("since"))
         return
+    host = curl.get("host")
+    if (host and host != API_HOSTS[0] and curl.get("ok_at")
+            and not _older(curl.get("checked_at"), now, FINGERPRINT_MEMORY)):
+        # Nothing is broken — the client walked to the next host by itself — but
+        # the first one closing is SofaScore moving its API, and the next move
+        # may leave no host open to curl at all.
+        health.add("warn", "egress:api-host-moved",
+                   f"SofaScore rifiuta {API_HOSTS[0]}: i dati si leggono da {host}. "
+                   f"Il client ci e' passato da solo; se dura, metterlo in testa a "
+                   f"API_HOSTS (sofascore_client) cosi' ogni giro non paga la "
+                   f"richiesta rifiutata.", host=host)
     if refused and curl.get("ok_at") and not _older(curl.get("checked_at"), now,
                                                     FINGERPRINT_MEMORY):
         health.add("warn", "egress:fingerprint-refused",

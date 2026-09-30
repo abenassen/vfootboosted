@@ -21,7 +21,7 @@ Exit codes let the root orchestrator react:
   1  = other error
 
 On the way out it prints ONE line the orchestrator parses, whatever happened:
-``FINGERPRINT used=<fp> challenged=<csv>`` (or ``TRANSPORT=browser``), and before
+``FINGERPRINT used=<fp> challenged=<csv> host=<url>`` (or ``TRANSPORT=browser``), and before
 it ``CHALLENGED_ALL`` when every fingerprint was refused on this exit. That is the
 only channel back: this side never writes state, it runs inside the netns.
 
@@ -189,7 +189,7 @@ def main() -> int:
             client.close()
         else:
             print(f"FINGERPRINT used={client.fingerprint} "
-                  f"challenged={','.join(client.challenged)}")
+                  f"challenged={','.join(client.challenged)} host={client.host}")
 
 
 def _work(client, args, cache_dir: Path, ids: list[int], rounds) -> int:

@@ -33,7 +33,7 @@ from django.test import SimpleTestCase
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "egress"))
 import fetch_worker  # noqa: E402
 import sofascore_egress as E  # noqa: E402
-from sofascore_client import IMPERSONATE_CHAIN  # noqa: E402  (the one fetch_worker uses)
+from sofascore_client import API_HOSTS, IMPERSONATE_CHAIN  # noqa: E402  (the ones fetch_worker uses)
 
 from realdata.services import health  # noqa: E402
 
@@ -73,6 +73,26 @@ class _Session:
 _REAL_CLIENT = fetch_worker.SofaScoreClient   # before any test patches it
 
 
+def _host(url: str) -> str:
+    return url.split("/api/", 1)[0]
+
+
+class _HostSession(_Session):
+    """Risponde secondo l'INDIRIZZO: quelli in ``closed`` danno il 403
+    "Forbidden" del 29/09 a qualunque impronta."""
+
+    def __init__(self, closed=(), refused=()):
+        super().__init__(refused=refused)
+        self.closed = set(closed)
+
+    def get(self, url, *, headers, impersonate, timeout):
+        if _host(url) in self.closed:
+            self.calls.append((impersonate, url))
+            return _Resp(403, '{"error": {"code": 403, "reason": "Forbidden" }}')
+        return super().get(url, headers=headers, impersonate=impersonate,
+                           timeout=timeout)
+
+
 def _client_on(session, cache_dir):
     class _Wire(_REAL_CLIENT):
         def _ensure_session(inner):
@@ -110,23 +130,68 @@ class LaCatenaDiImpronte(_Tmp):
                               fetch_worker.SofaScoreBlocked,
                               "resta un blocco: l'orchestratore deve ruotare")
 
-    def test_un_403_qualunque_non_percorre_la_catena(self):
-        """Un'uscita bruciata che risponde 403 senza la parola 'challenge' non è
-        l'impronta: quattro impronte contro un IP che non ne serve nessuna sono
-        quattro richieste per non imparare niente."""
+    def test_un_403_semplice_non_percorre_le_impronte(self):
+        """Un 403 che non è una sfida è l'indirizzo che rifiuta, non l'impronta:
+        provare le altre tre impronte sullo stesso indirizzo sarebbero tre
+        richieste per non imparare niente. Si cambia indirizzo, con la stessa."""
         s = _Session(refused={"safari", "firefox", "chrome", "tor"},
                      body_for_refused="Forbidden")
         c = _client_on(s, self.dir)
-        with self.assertRaises(fetch_worker.SofaScoreBlocked) as ctx:
+        with self.assertRaises(fetch_worker.SofaScoreChallenged):
             c.get(f"/api/v1/event/{MID}")
-        self.assertNotIsInstance(ctx.exception, fetch_worker.SofaScoreChallenged)
-        self.assertEqual(len(s.calls), 1)
+        self.assertEqual([fp for fp, _ in s.calls], ["safari", "safari"])
+        self.assertEqual([_host(u) for _, u in s.calls], list(API_HOSTS))
 
     def test_la_catena_usa_alias_che_seguono_la_libreria(self):
         """Un numero di versione nella catena congelerebbe l'impronta: e' proprio
         aggiornando curl_cffi che si rinfrescano tutte in una volta."""
         for fp in IMPERSONATE_CHAIN:
             self.assertFalse(any(ch.isdigit() for ch in fp), fp)
+
+
+class LaCatenaDegliIndirizzi(_Tmp):
+    """Il guasto del 29/09/2026: SofaScore chiude api.sofascore.com e serve i dati
+    da www. Il client deve spostarsi da solo, in entrambe le direzioni."""
+
+    def test_l_indirizzo_chiuso_passa_al_successivo_e_ci_resta(self):
+        s = _HostSession(closed={API_HOSTS[0]})
+        c = _client_on(s, self.dir)
+        c.get(f"/api/v1/event/{MID}")
+        c.get(f"/api/v1/event/{MID}/incidents")
+        self.assertEqual([_host(u) for _, u in s.calls],
+                         [API_HOSTS[0], API_HOSTS[1], API_HOSTS[1]],
+                         "l'indirizzo chiuso costa UNA richiesta per giro")
+        self.assertEqual(c.host, API_HOSTS[1])
+        self.assertEqual(c.refused_hosts, [API_HOSTS[0]])
+        self.assertEqual(c.challenged, [])
+
+    def test_tutte_le_impronte_sfidate_su_un_indirizzo_e_l_indirizzo(self):
+        """E al cambio si ricomincia dalla prima impronta, con la memoria pulita:
+        altrimenti la salute direbbe «Safari rifiutata» mentre Safari passa."""
+        class _ChallengeOnFirst(_Session):
+            def get(inner, url, *, headers, impersonate, timeout):
+                if _host(url) == API_HOSTS[0]:
+                    inner.calls.append((impersonate, url))
+                    return _Resp(403, CHALLENGE)
+                return super().get(url, headers=headers, impersonate=impersonate,
+                                   timeout=timeout)
+        s = _ChallengeOnFirst()
+        c = _client_on(s, self.dir)
+        c.get(f"/api/v1/event/{MID}")
+        self.assertEqual(len(s.calls), len(IMPERSONATE_CHAIN) + 1)
+        self.assertEqual((c.host, c.fingerprint, c.challenged),
+                         (API_HOSTS[1], IMPERSONATE_CHAIN[0], []))
+
+    def test_www_e_il_primo(self):
+        """Dove legge il sito: lo stesso percorso che usa il browser del ripiego."""
+        self.assertIn("www.", API_HOSTS[0])
+
+    def test_il_probe_percorre_gli_stessi_indirizzi(self):
+        import sofa_probe_netns as probe
+        verdicts = iter([(None, "HTTP_403"), (_Resp(200, "{}"), "OK")])
+        with mock.patch.object(probe, "get", side_effect=lambda *a: next(verdicts)):
+            host, fp, challenged, _, v = probe._door(None, "/api/v1/x")
+        self.assertEqual((host, fp, v), (API_HOSTS[1], IMPERSONATE_CHAIN[0], "OK"))
 
 
 class IlWorkerRaccontaLImpronta(_Tmp):
@@ -149,6 +214,12 @@ class IlWorkerRaccontaLImpronta(_Tmp):
         rep = E.worker_report(out)
         self.assertEqual((rep["used"], rep["challenged"], rep["challenged_all"]),
                          ("firefox", ["safari"], False))
+
+    def test_dice_anche_da_quale_indirizzo_ha_letto(self):
+        rc, out = self._run(_HostSession(closed={API_HOSTS[0]}),
+                            "--match-ids", str(MID), "--kind", "live")
+        self.assertEqual(rc, 0)
+        self.assertEqual(E.worker_report(out)["host"], API_HOSTS[1])
 
     def test_tutte_rifiutate_esce_3_e_lo_dice(self):
         rc, out = self._run(_Session(refused={"safari", "firefox", "chrome", "tor"}),
@@ -458,6 +529,18 @@ class LaSaluteDistingueIPDaImpronta(_Tmp):
             "checked_at": self._iso(hours=1), "ok_at": self._iso(hours=1),
             "used": "safari", "challenged": []}})
         self.assertEqual(set(checks), set())
+
+    def test_l_indirizzo_cambiato_e_un_avviso(self):
+        checks = self._checks(transport={"curl": {
+            "checked_at": self._iso(hours=1), "ok_at": self._iso(hours=1),
+            "used": "safari", "challenged": [], "host": API_HOSTS[1]}})
+        self.assertEqual(checks["egress:api-host-moved"].level, "warn")
+
+    def test_l_indirizzo_di_sempre_tace(self):
+        checks = self._checks(transport={"curl": {
+            "checked_at": self._iso(hours=1), "ok_at": self._iso(hours=1),
+            "used": "safari", "challenged": [], "host": API_HOSTS[0]}})
+        self.assertNotIn("egress:api-host-moved", checks)
 
     def test_un_rifiuto_di_giorni_fa_e_storia(self):
         checks = self._checks(transport={"curl": {

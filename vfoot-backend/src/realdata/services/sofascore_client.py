@@ -28,14 +28,19 @@ from typing import Any
 
 SERIE_A_UNIQUE_TOURNAMENT_ID = 23
 SITE_BASE = "https://www.sofascore.com"
-# The data API is served SAME-ORIGIN, from the site's own host — where the site's
-# JavaScript reads it. Since 29/09/2026 22:00 UTC the old `api.sofascore.com` host
-# answers `403 {"reason": "Forbidden"}` to every fingerprint curl_cffi has, while
-# the same path on www passes with safari, chrome and tor. It had moved once
-# before (see sofascore_browser_client), which is why the browser fallback, on
-# www all along, kept the site fed through the night. If www ever closes to curl
-# too, that fallback is what is left.
-API_BASE = SITE_BASE
+# The hosts the data API may be served from, in order. A CHAIN, like the
+# fingerprints, because SofaScore moves it: since 29/09/2026 22:00 UTC the old
+# `api.sofascore.com` answers `403 {"reason": "Forbidden"}` to every fingerprint,
+# while the same path SAME-ORIGIN on www — where the site's own JavaScript reads it
+# — passes with safari, chrome and tor. It had moved once before, the other way
+# (see sofascore_browser_client). The client walks to the next host when this one
+# refuses as a HOST — a 403 that is not a challenge, or every fingerprint
+# challenged — and stays there for the session; the worker reports which one
+# served, and health warns when it is not the first.
+#
+# egress/sofa_probe_netns.py imports this, for the same reason as the chain.
+API_HOSTS = (SITE_BASE, "https://api.sofascore.com")
+API_BASE = API_HOSTS[0]
 # The TLS fingerprints curl_cffi may present, in order. A CHAIN, not one value,
 # because SofaScore refuses by fingerprint and moves the line: on 25/09/2026 it
 # started answering `403 {"reason": "challenge"}` to every Chrome curl_cffi 0.15
@@ -98,7 +103,7 @@ class SofaScoreBlocked(SofaScoreError):
 
 
 class SofaScoreChallenged(SofaScoreBlocked):
-    """Every fingerprint in the chain was challenged on this exit.
+    """Every host refused every fingerprint on this exit.
 
     Still a block — the orchestrator rotates as for any other — but it is the one
     shape that says something beyond this IP: when it comes back from every exit,
@@ -111,13 +116,14 @@ class SofaScoreChallenged(SofaScoreBlocked):
 def is_challenge(status: int, text: str) -> bool:
     """SofaScore's challenge: a 403 whose JSON says ``challenge``.
 
-    It is how a refused FINGERPRINT looks, so it is what walks the chain — but not
-    only that: a burned exit can get the very same body on every fingerprint
-    (26/09/2026, four London exits in a row). There it costs a chain's worth of
-    requests before the rotation, which is the price of not being able to tell
-    the two apart from one exit; across exits the refill can
-    (``fingerprint_refused``). Anything else — a cut handshake, an empty body, a
-    bare 403 — is the exit, and does not walk the chain.
+    It is how a refused FINGERPRINT looks, so it is what walks the fingerprint
+    chain — but not only that: a burned exit can get the very same body on every
+    fingerprint (26/09/2026, four London exits in a row). There it costs a chain's
+    worth of requests before the rotation, which is the price of not being able to
+    tell the two apart from one exit; across exits the refill can
+    (``fingerprint_refused``). A bare 403 is a HOST refusing (29/09/2026, "Forbidden"
+    from api.sofascore.com) and walks the host chain instead. A cut handshake or an
+    empty body is the exit, and walks nothing.
     """
     return status == 403 and "challenge" in (text or "").lower()
 
@@ -131,6 +137,7 @@ class SofaScoreClient:
         jitter: float = 1.0,
         max_retries: int = 7,
         impersonate: str | tuple[str, ...] = IMPERSONATE_CHAIN,
+        hosts: tuple[str, ...] = API_HOSTS,
         timeout: float = 20.0,
         tournament_id: int = SERIE_A_UNIQUE_TOURNAMENT_ID,
         logger=None,
@@ -146,6 +153,10 @@ class SofaScoreClient:
         self._transport_errors: tuple = ()
         self._chain = (impersonate,) if isinstance(impersonate, str) else tuple(impersonate)
         self._fp = 0
+        self._hosts = tuple(hosts)
+        self._host = 0
+        # Hosts that refused on this exit, in order — see API_HOSTS.
+        self.refused_hosts: list[str] = []
         # Every fingerprint refused so far, in the order it happened. The worker
         # prints it, the orchestrator records it, and health turns it into the
         # warning that comes BEFORE the outage: "Chrome is challenged, we are on
@@ -196,12 +207,17 @@ class SofaScoreClient:
         """The fingerprint the next request will present."""
         return self._chain[self._fp]
 
+    @property
+    def host(self) -> str:
+        """The host the next request will go to."""
+        return self._hosts[self._host]
+
     def _send(self, session, path: str):
         if simulating_refusal():
             self._last_request = time.monotonic()
             return _SimulatedChallenge()
         try:
-            return session.get(API_BASE + path, headers=_HEADERS,
+            return session.get(self.host + path, headers=_HEADERS,
                                impersonate=self.fingerprint, timeout=self._timeout)
         except self._transport_errors as exc:
             raise SofaScoreBlocked(
@@ -217,24 +233,42 @@ class SofaScoreClient:
         session = self._ensure_session()
         while True:
             resp = self._send(session, path)
-            if not is_challenge(resp.status_code, resp.text):
+            if resp.status_code != 403:
                 break
-            # The fingerprint was refused, not the exit: try the next one on the
-            # same request and KEEP it for the rest of the session, so a refused
-            # head costs one request per run and not one per path.
-            refused = self.fingerprint
-            if refused not in self.challenged:
-                self.challenged.append(refused)
-            if self._fp + 1 >= len(self._chain):
-                # Back to the head for whoever retries later (the season pull
-                # backs off and tries again): by then the head may pass.
+            if is_challenge(resp.status_code, resp.text):
+                # The fingerprint was refused, not the exit: try the next one on
+                # the same request and KEEP it for the rest of the session, so a
+                # refused head costs one request per run and not one per path.
+                refused = self.fingerprint
+                if refused not in self.challenged:
+                    self.challenged.append(refused)
+                if self._fp + 1 < len(self._chain):
+                    self._fp += 1
+                    self._log(f"  fingerprint {refused} challenged; "
+                              f"trying {self.fingerprint}")
+                    self._throttle()
+                    continue
+            # A 403 that is not a challenge, or every fingerprint challenged: this
+            # HOST is refusing. Next host, from the head of the chain.
+            if self.host not in self.refused_hosts:
+                self.refused_hosts.append(self.host)
+            if self._host + 1 < len(self._hosts):
+                self._log(f"  host {self.host} refused; trying "
+                          f"{self._hosts[self._host + 1]}")
+                self._host += 1
                 self._fp = 0
-                raise SofaScoreChallenged(
-                    f"HTTP 403 challenge on every fingerprint "
-                    f"({', '.join(self.challenged)})")
-            self._fp += 1
-            self._log(f"  fingerprint {refused} challenged; trying {self.fingerprint}")
-            self._throttle()
+                # What a fingerprint suffered on a host that is closing says
+                # nothing about the next one; carried over, health would warn
+                # "Safari is refused" when Safari passes fine where we now are.
+                self.challenged = []
+                self._throttle()
+                continue
+            # Back to the heads for whoever retries later (the season pull backs
+            # off and tries again): by then they may pass.
+            self._host = self._fp = 0
+            raise SofaScoreChallenged(
+                f"HTTP 403 on every host ({', '.join(self.refused_hosts)}); "
+                f"fingerprints challenged: {', '.join(self.challenged) or 'none'}")
         if resp.status_code == 404:
             return None  # legitimately absent (e.g. a match with no shotmap)
         if resp.status_code != 200:
