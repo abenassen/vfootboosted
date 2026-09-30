@@ -60,6 +60,20 @@ else:
             SITE_BASE,
         )
 
+# Where the page SITS while we fetch. The requests are in-page ``fetch()`` calls,
+# and all they need from the page is its ORIGIN (www.sofascore.com: cookies, no
+# CORS) — any page of the site gives that. The home is needed once, because its
+# own JavaScript is what produces the ``x-requested-with`` token; after that,
+# staying on it costs a quarter of the Linode's only CPU for as long as the page
+# lives (measured 30/09/2026: 7.6 s of CPU every 30 s on the home, 0.2 s here), and
+# on a cold run the requests queued behind its loading took 23 s for four. So:
+# token from the home, then here.
+LIGHT_PAGE = SITE_BASE + "/robots.txt"
+# Nothing the token depends on: scripts must run, the rest is weight. Measured
+# with the move to LIGHT_PAGE: a cold run from ~28 s and ~15 s of CPU to ~6 s and
+# ~5 s.
+_SKIPPED = ("image", "font", "media", "stylesheet")
+
 # A normal desktop Chrome UA (no "HeadlessChrome" token).
 _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36")
@@ -115,6 +129,9 @@ class SofaScoreBrowserClient(SofaScoreClient):
                 "Referer": SITE_BASE + "/",
             },
         )
+        self._ctx.route("**/*", lambda route: route.abort()
+                        if route.request.resource_type in _SKIPPED
+                        else route.continue_())
         self._page = self._ctx.new_page()
         # Capture the x-requested-with token from the site's own /api/v1/ XHRs.
         def _grab_xrw(req):
@@ -137,15 +154,20 @@ class SofaScoreBrowserClient(SofaScoreClient):
         except Exception as exc:  # noqa: BLE001 - warm-up is best-effort
             self._log(f"  (warm-up nav failed, continuing: {type(exc).__name__})")
         # The homepage fires several /api/v1/ XHRs within a second or two.
-        for _ in range(20):
+        for _ in range(80):
             if self._xrw:
                 break
-            self._page.wait_for_timeout(1000)
+            self._page.wait_for_timeout(250)
         if self._xrw:
             self._log(f"  captured x-requested-with token: {self._xrw}")
         else:
             self._log("  !! could not capture x-requested-with token "
                       "(site made no API calls?) — requests will likely 403")
+        try:
+            self._page.goto(LIGHT_PAGE, wait_until="domcontentloaded",
+                            timeout=int(self._timeout * 1000))
+        except Exception as exc:  # noqa: BLE001 - the home still works, just heavier
+            self._log(f"  (could not move to {LIGHT_PAGE}: {type(exc).__name__})")
 
     def _raw_get(self, path: str):
         page = self._ensure_session()
@@ -171,7 +193,10 @@ class SofaScoreBrowserClient(SofaScoreClient):
                     try {
                         const headers = {'Accept': 'application/json, text/plain, */*'};
                         if (xrw) headers['x-requested-with'] = xrw;
-                        const r = await fetch(url, {headers});
+                        // no-store: SofaScore allows 10 s of caching (60 on a
+                        // round), and a browser that answers from its own cache
+                        // would hand back a live match as it was a moment ago.
+                        const r = await fetch(url, {headers, cache: 'no-store'});
                         const body = await r.text();
                         return {status: r.status, body: body};
                     } catch (e) {
