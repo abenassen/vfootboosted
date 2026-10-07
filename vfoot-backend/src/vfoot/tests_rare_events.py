@@ -73,6 +73,12 @@ ATTESI = {
     # al gol da -0,44 a -0,51, errore che porta a un tiro da -0,08 a -0,16, pallone
     # tolto dalla linea da +0,11 a +0,35. Non sono piu' i valori risolti a mano il
     # 03/09: sono quelli del modello misurato fuori campione.
+    # CONFERMATI L'08/10/2026 (revisione della sosta): la scala del merito e' per
+    # 1,4 (v. bayesian_completion) e i cinque pesi sono stati divisi per 1,4, cosi'
+    # che un'occorrenza valga nel voto quello che valeva — i giudici stanno a
+    # -0,59 sul rigore concesso e a -0,43/-0,48 sull'errore che porta al gol, e
+    # lasciarli crescere con la scala (-1,01 e -0,71) produceva divergenze gravi
+    # (Bartesaghi, Loyola, Marcandalli) che le pagelle testuali non giustificano.
     "clearances_off_line": +0.345,
     "penalties_won": +0.544,
     "penalties_conceded": -0.721,

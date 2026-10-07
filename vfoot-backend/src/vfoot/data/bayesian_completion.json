@@ -1,36 +1,143 @@
 {
  "calibration": {
   "ATT": {
-   "anchor": "neutral_pre_scale",
-   "delta_c": -0.22487922318085019,
-   "scale": 0.619655227762787,
-   "shape": "smoothstep",
-   "tau": 0.5
+   "base": 5.957401,
+   "base_mean_preserving": 5.997401,
+   "base_shift": -0.04,
+   "base_shift_why": "minimo dell'errore medio contro lo Statistico su TUTTE le presenze (griglia 0..-0,10, 25-26): porta gli spezzoni da +0,14 a +0,09 e le presenze intere 0,06-0,09 sotto i giudici (la semantica \u00abcome se 90'\u00bb, accettata)",
+   "n": 467,
+   "scale": 0.867517,
+   "scale_before": 0.619655227762787,
+   "target_mean_90": 5.9788
   },
   "CEN": {
-   "anchor": "neutral_pre_scale",
-   "delta_c": -0.2159401079785583,
-   "scale": 0.5606260149010543,
-   "shape": "smoothstep",
-   "tau": 0.5
+   "base": 5.973459,
+   "base_mean_preserving": 6.013459,
+   "base_shift": -0.04,
+   "base_shift_why": "minimo dell'errore medio contro lo Statistico su TUTTE le presenze (griglia 0..-0,10, 25-26): porta gli spezzoni da +0,14 a +0,09 e le presenze intere 0,06-0,09 sotto i giudici (la semantica \u00abcome se 90'\u00bb, accettata)",
+   "n": 1211,
+   "scale": 0.784876,
+   "scale_before": 0.5606260149010543,
+   "target_mean_90": 6.0367
   },
   "DIF": {
-   "anchor": "neutral_pre_scale",
-   "delta_c": -0.2824972656951691,
-   "scale": 0.6766070469964158,
-   "shape": "smoothstep",
-   "tau": 0.5
+   "base": 5.919529,
+   "base_mean_preserving": 5.959529,
+   "base_shift": -0.04,
+   "base_shift_why": "minimo dell'errore medio contro lo Statistico su TUTTE le presenze (griglia 0..-0,10, 25-26): porta gli spezzoni da +0,14 a +0,09 e le presenze intere 0,06-0,09 sotto i giudici (la semantica \u00abcome se 90'\u00bb, accettata)",
+   "n": 2338,
+   "scale": 0.94725,
+   "scale_before": 0.6766070469964158,
+   "target_mean_90": 5.9717
   }
  },
- "continuous_model": "completamento deterministico col tasso medio del ruolo",
+ "common_factor": {
+  "ATT": 0.0,
+  "CEN": 0.0,
+  "DIF": 0.0
+ },
+ "common_factor_note": "q=0: misurato sulla 25-26 intera, q=0,25 costa 7 divergenze gravi (47 contro 40) e 0,003 di correlazione; la pendenza 1 a meta' partita era un criterio interno al diradamento simulato, non un accordo. Il parametro resta nel modello, a zero.",
+ "continuous_model": "Poisson composti (esposizione, xA, sga_post) con marca del singolo gesto; valore difensivo a incrementi gaussiani",
  "count_model": "Gamma-Poisson: X|lambda,t ~ Poisson(t lambda), lambda ~ Gamma; quattro dispersioni condivise (Var/mu^2)",
- "created_on": "2026-09-11",
- "dispersion_multiplier": 1.0,
+ "created_on": "2026-10-08",
  "dispersions": {
   "circulation": 0.1622920290219694,
   "decisive": 0.1426766190083817,
   "duels_defense": 0.17336655580103116,
   "goalkeeper": 0.18176241965793935
+ },
+ "dispersions_by_role": {
+  "ATT": {
+   "aerials_lost": 0.5074820561833548,
+   "aerials_won": 0.5551875291333499,
+   "ball_recoveries": 0.12257245977453586,
+   "big_chance_created": 1.2842169621801038,
+   "clearances": 0.4323048668503218,
+   "crosses_completed": 1.7570345515937906,
+   "dribbled_past": 0.44018140589569155,
+   "dribbles_attempted": 0.47817942082844106,
+   "dribbles_won": 0.5975615104600677,
+   "duels_lost": 0.07545568463350431,
+   "duels_won": 0.08913889488377277,
+   "errors_bad_passes": 0.1451265469771046,
+   "errors_dispossessed": 0.18424197372878173,
+   "errors_fouls_committed": 0.10014264529341138,
+   "errors_miscontrols": 0.09376473062213785,
+   "goals": 0.13708302897492064,
+   "interceptions": 0.7102050781249993,
+   "key_passes": 0.46371378180901984,
+   "long_balls_completed": 1.0581466624250275,
+   "passes_completed": 0.3916833345588593,
+   "passes_opp_half": 0.4841528888564139,
+   "shots": 0.08085258689656587,
+   "shots_blocked": 0.2906037414965987,
+   "shots_goal": 0.13708302897492064,
+   "shots_off": 0.1332616011538198,
+   "shots_on_target": 0.09993364458605594,
+   "tackles_won": 0.38296516933248376,
+   "touches": 0.15754576017097877,
+   "touches_in_box": 0.22844659325965902,
+   "was_fouled": 0.1360250170578781
+  },
+  "CEN": {
+   "aerials_lost": 0.5268077454005743,
+   "aerials_won": 1.1678395061728397,
+   "ball_recoveries": 0.05572624097550313,
+   "blocks": 0.4738934642378994,
+   "clearances": 0.47572131744047713,
+   "crosses_completed": 1.5826067489867097,
+   "dribbled_past": 0.18210272788040166,
+   "dribbles_attempted": 0.6715972028018665,
+   "dribbles_won": 0.6618774988326925,
+   "duels_lost": 0.10975570047448542,
+   "duels_won": 0.1353983399043418,
+   "errors_bad_passes": 0.08597839041268236,
+   "errors_dispossessed": 0.297155752002574,
+   "errors_fouls_committed": 0.11161539091628926,
+   "errors_miscontrols": 0.1835580909528078,
+   "interceptions": 0.22766059628282292,
+   "key_passes": 0.3437712595374912,
+   "long_balls_completed": 0.5092709633781866,
+   "passes_completed": 0.2219335868437435,
+   "passes_opp_half": 0.3157219477057623,
+   "shots": 0.2702033859416228,
+   "shots_blocked": 0.3320999999999998,
+   "shots_off": 0.2319167664141759,
+   "shots_on_target": 0.27690476190476193,
+   "tackles_won": 0.1874305530192682,
+   "touches": 0.08857250092788965,
+   "touches_in_box": 0.6624325805669519,
+   "was_fouled": 0.29238408967611756
+  },
+  "DIF": {
+   "aerials_lost": 0.3090795993589361,
+   "aerials_won": 0.4631109369539821,
+   "ball_recoveries": 0.06096525374855832,
+   "blocks": 0.4041754536830396,
+   "clearances": 0.2767590031572158,
+   "crosses_completed": 3.0,
+   "dribbled_past": 0.34116597263533605,
+   "dribbles_attempted": 1.297355210485537,
+   "dribbles_won": 1.5451807956104253,
+   "duels_lost": 0.08091838683280189,
+   "duels_won": 0.1203790918476466,
+   "errors_bad_passes": 0.08790288804611515,
+   "errors_dispossessed": 0.4548061575088597,
+   "errors_fouls_committed": 0.07643699403438768,
+   "errors_miscontrols": 0.32592168080537776,
+   "interceptions": 0.1685000599848175,
+   "key_passes": 1.1275057399186976,
+   "long_balls_completed": 0.3617274408333006,
+   "passes_completed": 0.20284127678676164,
+   "passes_opp_half": 0.41893932499149544,
+   "shots": 0.3331075840697817,
+   "shots_off": 0.22743936451686958,
+   "shots_on_target": 0.10681490660744604,
+   "tackles_won": 0.10947572053484231,
+   "touches": 0.07207740104256534,
+   "touches_in_box": 0.4372839566751054,
+   "was_fouled": 0.2851007194511795
+  }
  },
  "event_count_means": {
   "ATT": {
@@ -49,6 +156,13 @@
    "assists": 0.002631578947368421,
    "goals": 0.0
   }
+ },
+ "expressivity": {
+  "assist_factor": 0.75,
+  "expected_assists_x": 1.5,
+  "f": 1.4,
+  "merit_share": 0.25,
+  "sga_post_x": 1.5
  },
  "fit_audit": {
   "circulation": {
@@ -185,16 +299,126 @@
   }
  },
  "fitted_on": {
-  "matchdays": "dispari (prior, dispersioni, pesi)",
   "season": "Serie A 2025-2026",
-  "validated_on": "giornate pari 2025-26; giornate 1-3 2026-27"
+  "what": "prior e dispersioni dallo schema 2 (giornate dispari); marche, dispersioni per ruolo, q e sigma dalle presenze da 90'; base risolta sulla media del merito di produzione a 90'"
  },
- "model": "Bayesiano vincolato: completamento Gamma-Poisson dei minuti non giocati, pesi con zeri e segni del modello precedente, scala affine per ruolo e centro spostato in proporzione ai minuti visti (smoothstep fino al 45')",
- "reference_sha256": "0624e961e72fc917657519a327d428dbd66e43aa3ebd74e1313dccd20c5e8923",
+ "marks": {
+  "ATT": {
+   "_exposure": {
+    "c": 0.1855498887333011,
+    "floor": 0.0,
+    "m1": 0.014707000492524241,
+    "rate": 3.5845824411134903,
+    "var": 0.0004984578517531884
+   },
+   "defensive_value": {
+    "mu": 0.03126338329764454,
+    "var": 0.018035877096047943
+   },
+   "expected_assists": {
+    "c": 0.46371378180901984,
+    "floor": 0.03770702524789601,
+    "m1": 0.056055092520165,
+    "rate": 1.3490364025695931,
+    "var": 0.011446673229086502
+   },
+   "sga_post": {
+    "c": 0.08085258689656587,
+    "floor": 0.0,
+    "m1": 0.011064572974903979,
+    "rate": 2.5460385438972164,
+    "var": 0.03837000389358267
+   }
+  },
+  "CEN": {
+   "_exposure": {
+    "c": 0.0800753587816827,
+    "floor": 0.0,
+    "m1": 0.026009696633088098,
+    "rate": 3.9339388934764656,
+    "var": 0.0012439488243844979
+   },
+   "defensive_value": {
+    "mu": 0.022436003303055327,
+    "var": 0.03772544491350618
+   },
+   "expected_assists": {
+    "c": 0.3437712595374912,
+    "floor": 0.033475976466556236,
+    "m1": 0.049598180879698126,
+    "rate": 0.9834847233691164,
+    "var": 0.00942025933397595
+   },
+   "sga_post": {
+    "c": 0.2702033859416228,
+    "floor": 0.0,
+    "m1": 0.006003061053629011,
+    "rate": 1.171758876961189,
+    "var": 0.030447693270899398
+   }
+  },
+  "DIF": {
+   "_exposure": {
+    "c": 0.09606742308051583,
+    "floor": 0.0,
+    "m1": 0.0456803045013454,
+    "rate": 4.001283147989735,
+    "var": 0.004553101047995586
+   },
+   "defensive_value": {
+    "mu": 0.00818220701454234,
+    "var": 0.11065755961497512
+   },
+   "expected_assists": {
+    "c": 1.1275057399186976,
+    "floor": 0.01767531036819169,
+    "m1": 0.06153107711165234,
+    "rate": 0.5436270316509837,
+    "var": 0.01095622021814081
+   },
+   "sga_post": {
+    "c": 0.3331075840697817,
+    "floor": 0.0,
+    "m1": 0.005102358973462291,
+    "rate": 0.5607356715141146,
+    "var": 0.030612336686297127
+   }
+  }
+ },
+ "model": "Revisione della sosta: base costante, continue come Poisson composti, dispersioni per (ruolo, grandezza), fattore comune, stadio dentro l'attesa, scala x1,4",
+ "predictive_sigma": {
+  "ATT": 0.748442,
+  "CEN": 0.556095,
+  "DIF": 0.506905
+ },
+ "previous_calibration": {
+  "ATT": {
+   "anchor": "neutral_pre_scale",
+   "delta_c": null,
+   "scale": 0.619655227762787,
+   "shape": "smoothstep",
+   "tau": 0.5
+  },
+  "CEN": {
+   "anchor": "neutral_pre_scale",
+   "delta_c": null,
+   "scale": 0.5606260149010543,
+   "shape": "smoothstep",
+   "tau": 0.5
+  },
+  "DIF": {
+   "anchor": "neutral_pre_scale",
+   "delta_c": null,
+   "scale": 0.6766070469964158,
+   "shape": "smoothstep",
+   "tau": 0.5
+  }
+ },
+ "reference_sha256": "dd204c0e0edb6225636d69d353b653c913198c5e8b5f4df5c86891b6500e96e6",
  "reference_weights_fingerprint": "ee48edce4e4bd9bf",
  "role_priors": {
   "ATT": {
-   "assists": 0.07135072044324405,
+   "assists": 0.05351304033243304,
    "exposure90": 890.8888888888889,
    "goals": 0.23186236183258305,
    "n": 1576,
@@ -252,7 +476,7 @@
    }
   },
   "CEN": {
-   "assists": 0.0440401693006465,
+   "assists": 0.03303012697548487,
    "exposure90": 1240.5222222222221,
    "goals": 0.07344079602628861,
    "n": 1842,
@@ -310,7 +534,7 @@
    }
   },
   "DIF": {
-   "assists": 0.02852823304679291,
+   "assists": 0.02139617478509468,
    "exposure90": 1676.8555555555554,
    "goals": 0.04626772161606307,
    "n": 2144,
@@ -426,12 +650,7 @@
    }
   }
  },
- "schema_version": 2,
- "source": {
-  "ceiling": "experiments-voto-minutaggi/free_bayesian_weight_ceiling.py",
-  "report": "experiments-voto-minutaggi/SIGN_RULE_EFFECT.md",
-  "weights_and_calibration": "experiments-voto-minutaggi/ramp_calibration.json / smooth:0.5 (ricerca vincolata, centro a smoothstep)"
- },
+ "schema_version": 3,
  "units": "90 minutes; rates are events per 90, credits are vote points per 90",
  "weights": {
   "weight:ATT:duels_lost": 0.0,
@@ -479,6 +698,6 @@
   "weight:was_fouled": 0.04476268251875272,
   "weight:xg_shots": 0.0
  },
- "weights_fingerprint": "dff2683ba692a846",
+ "weights_fingerprint": "d7c522573a3b5eca",
  "woodwork": 0.6
 }

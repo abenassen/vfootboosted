@@ -709,6 +709,14 @@ class MatchShot(models.Model):
     # campo — le due si distinguono solo ripassando il backfill.
     assist_player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True,
                                       blank=True, related_name="assisted_shots")
+    # DA DOVE E' PARTITO, in metri dalla porta (revisione della sosta, 08/10/2026).
+    # Serve al canale del portiere: un gol a xGOT basso da 25 metri e' il portiere
+    # scavalcato o bucato, lo stesso xGOT da 8 metri e' mischia, e i due giudici
+    # concordano solo su questo modulatore (v. keeper_channel). Dalle
+    # ``playerCoordinates`` della mappa dei tiri (x in % della lunghezza, y della
+    # larghezza, misurate dalla porta attaccata: 105 x 68 m). Null per le righe
+    # importate prima del campo: ``backfill_shot_seconds`` lo riempie dalla cache.
+    distance_m = models.FloatField(null=True, blank=True)
     provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES,
                                 default=PROVIDER_SOFASCORE)
     external_id = models.CharField(max_length=64, blank=True, default="")

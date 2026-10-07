@@ -560,7 +560,7 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
         averages = get_role_averages(match.competition_season_id)
     feats = _per_match_player_totals([match.id])
     mins = _minutes_map([match.id])
-    exposures = defensive_exposure([match.id], mins)
+    exposures, exposure_n = defensive_exposure([match.id], mins, with_counts=True)
     cards = _cards_for_match(match.id)
     missed_pens = _missed_penalties_for_match(match.id)
     saved_pens = _penalties_saved_for_match(match.id)
@@ -643,7 +643,15 @@ def pagella_for_match(match, reference: dict | None = None, league=None,
                           full=full_explanation,
                           # le voci non mostrate, nominate una per una: le chiede
                           # solo chi apre il dettaglio di un voto (v. vote_ledger)
-                          ledger=ledger)
+                          ledger=ledger,
+                          # Dall'08/10/2026: il conteggio degli eventi di
+                          # esposizione (Poisson composto), quanto resta da vedere
+                          # (lo stadio dentro l'attesa) e il canale del portiere
+                          # tiro per tiro. Tutti e tre dalla riga del voto, cosi'
+                          # la spiegazione non puo' raccontare un altro modello.
+                          exposure_events=exposure_n.get(key, 0),
+                          predictive_sigma=row.get("predictive_sigma", 0.0),
+                          keeper_detail=row.get("keeper_detail"))
         line = _line(a, roles.get(a.player_id, ""), vp_rows, cards, conceded, why,
                      missed_pens=missed_pens.get(a.player_id, 0),
                      saved_pens=saved_pens.get(a.player_id, 0),
@@ -856,8 +864,10 @@ def shot_detail(match, player_id: int) -> dict:
     bayesian = bayes.is_active(role)
     t_frac = min(mins, 90) / 90.0
     if bayesian:
-        _, _scala, _ = bayes.calibration(role)
-        _units = {k: fattore * _scala * bayes.unit_for(role, k, reference) for k in _SHOT_FAMILY}
+        # Scala del ruolo E fattore comune k(t) (dall'08/10/2026): a 90' k = 1.
+        _base, _scala = bayes.calibration(role)
+        _k = bayes.common_factor(role, t_frac)
+        _units = {k: fattore * _scala * _k * bayes.unit_for(role, k, reference) for k in _SHOT_FAMILY}
         unit_of = (lambda k: _units[k])
 
     counted = [i for i, s in enumerate(shots) if not s["own_goal"]]
@@ -939,9 +949,14 @@ def shot_detail(match, player_id: int) -> dict:
         t = totals_for(mask)
         t = {**t, **derived_features(t)}
         if bayesian:
+            # Come ``bayes.evidence_terms`` (dall'08/10/2026): z completato MENO il
+            # neutro per intero, e il Poisson composto di sga_post legge quanti tiri
+            # ha visto. Una copia della formula qui e' gia' rimasta indietro una
+            # volta (h * neutro): la sezione tornava col voto di un modello vecchio.
             return sum(weights.get(k, 0.0) * unit_of(k)
-                       * (bayes.completed_z(role, k, t.get(k, 0.0), t_frac, scales)
-                          - (1.0 - t_frac) * bayes.neutral_z(role, k, scales))
+                       * (bayes.completed_z(role, k, t.get(k, 0.0), t_frac, scales,
+                                            n_seen=float(t.get(bayes.COMPOUND_COUNT_OF.get(k, ""), 0.0) or 0.0))
+                          - bayes.neutral_z(role, k, scales))
                        for k in _SHOT_FAMILY)
         return sum(weights.get(k, 0.0) * scored_z(k, t.get(k, 0.0), scales) * unit_of(k)
                    for k in _SHOT_FAMILY)
@@ -1029,247 +1044,43 @@ SAVE_OUTCOME_IT = {False: "parata", True: "gol subito"}
 def save_detail(match, player_id: int) -> dict:
     """I tiri nello specchio che un portiere ha affrontato, con quanto vale CIASCUNO.
 
-    È la mappa dei tiri (v. ``shot_detail``) letta dall'altra parte, e per la stessa
-    ragione: la riga «gol evitati rispetto ai tiri affrontati» è il netto di due
-    feature su tutti i tiri subiti, e da quel numero solo non si capisce se ha fatto
-    una parata vera o tre respinte di routine. Su Vicario in Juventus-Parma la riga
-    dice +0,37 e sotto ci sono un tiro da 0,640 di xGOT e due da 0,046 e 0,172.
-
-    RITORNA LA SEZIONE INTERA — ``saves``, ``baseline`` e ``total`` — che somma alla
-    riga che la intesta. Una tabella che non torna col numero sopra di sé non è un
-    dettaglio, è una contraddizione.
-
-    QUALI TIRI. Solo quelli arrivati NELLO SPECCHIO (parati o entrati) e solo quelli
-    battuti mentre lui era in campo, risolti con ``_keeper_at`` — la stessa funzione
-    che carica i gol al portiere giusto per il malus, così la mappa e il malus non
-    possono raccontare due partite diverse. I tiri fuori e quelli murati non ci sono
-    perché non sono suoi: il canale del portiere legge quello che ha raggiunto la
-    porta, e chi ha guardato quindici conclusioni volare alte ha comunque passato un
-    pomeriggio tranquillo.
-
-    IL VALORE DI UNA PARATA È UNO SHAPLEY, per lo stesso motivo delle conclusioni:
-    ``gk_saves`` passa per la compressione, quindi il contributo di una parata
-    dipende da quante altre ce ne sono accanto — la sesta vale meno della seconda. E
-    dal 30/08/2026 passa anche per il CREDITO PER L'ASSENZA, che sotto la media di
-    ruolo appiattisce del tutto: togliere una parata a chi ne ha fatte due non costa
-    niente su quel conteggio, e la mappa lo mostra invece di nasconderlo in un
-    residuo. ``gk_goals_prevented`` invece è esente da compressione
-    (NO_COMPRESS_FEATURES) e quindi lineare: su di lei lo Shapley coincide con
-    l'xGOT del tiro, che è come dev'essere.
-
-    IL GOL SUBITO È NELLA TABELLA, col suo segno. ``goals_prevented`` è la somma
-    degli xGOT affrontati MENO i gol, quindi togliere un gol dai totali vale
-    +(1 − xGOT): un gol su un tiro da 0,95 costa quasi niente, uno su un tiro da
-    0,15 costa quasi un gol intero. È la cosa che il modello sa dire meglio di
-    chiunque e che la riga da sola non diceva.
-
-    IL METRO (``baseline``) è quanto vale la riga per un portiere a cui non è
-    arrivato NIENTE nello specchio, contro i pari ruolo. Prima del credito per
-    l'assenza era una voragine (non aver parato metteva sotto la media per
-    costruzione); ora è quasi zero, ed è il posto in cui quel cambiamento si vede.
+    Dall'08/10/2026 il canale del portiere E' una somma tiro per tiro (v.
+    keeper_channel): la sezione non ricostruisce niente con uno Shapley, legge le
+    righe che hanno scritto il voto e le riscala in punti di voto. ``saves`` sono
+    parate, gol subiti e rigori; ``baseline`` e' zero (chi non affronta niente non
+    guadagna e non perde niente da questa riga); ``total`` somma alla riga
+    «parate» del pannello per costruzione.
     """
-    from math import factorial
-
-    from vfoot.services.classic_rating import (
-        OWN_GOAL_KEEPER_XGOT_DEFAULT, keeper_shot_value, shrinkage_for,
-        appearance_sides,
-        feature_scales, is_own_goal, raw_feature_values, scored_z, spread_k_for,
-        weights_for_role,
-    )
+    from vfoot.services import keeper_channel as kc
 
     empty = {"saves": [], "baseline": 0.0, "total": 0.0}
-    key = (match.id, player_id)
-    feats = _per_match_player_totals([match.id]).get(key)
-    if not feats:
-        return empty
     reference = get_reference(match.competition_season_id)
     rows = voto_puro_for_match(match, reference)
     row = next((r for r in rows if r["player_id"] == player_id), None) or {}
-    role = row.get("role") or ""
-    mins = _minutes_map([match.id]).get(key, 0)
-    if (role != Player.ROLE_GK or role not in reference or mins <= 0
-            or not reference[role].get("std")):
+    detail = row.get("keeper_detail")
+    if row.get("role") != Player.ROLE_GK or not detail:
         return empty
-
-    sides = appearance_sides([match.id])
-    side = sides.get(key)
-    # I PORTIERI COME LI RICONOSCE LA PAGELLA, non come li tagga il fornitore.
-    # ``_keeper_at`` senza argomenti si fida di ``Player.is_goalkeeper``, e per un
-    # portiere che quel tag non ce l'ha — riconosciuto solo dalle sue feature, che
-    # e' il caso per cui ``keeper_apps`` esiste — la funzione non troverebbe nessuno
-    # per la sua parte e OGNI tiro verrebbe scartato: mappa vuota, senza un errore.
-    # Gli stessi ruoli risolti che usa il malus dei gol subiti, cosi' la mappa e il
-    # malus non possono raccontare due partite diverse.
-    por = {r["player_id"] for r in rows if r.get("role") == Player.ROLE_GK}
-    keeper_apps = [(a["side"], a["player_id"], a["is_starter"], a["minutes_played"])
-                   for a in MatchAppearance.objects.filter(match=match)
-                   .values("side", "player_id", "is_starter", "minutes_played")
-                   if a["player_id"] in por]
-    at = _keeper_at(match.id, keeper_apps)
-    faced = []
-    for sh in (MatchShot.objects.filter(match=match).exclude(team_side=side)
-               .order_by("minute", "id")
-               .values("minute", "xgot", "is_goal", "situation", "shot_type",
-                       "player_id", "team_side")):
-        # nello specchio (parato: un xGOT c'è; oppure entrato) e battuto mentre
-        # c'era LUI fra i pali.
-        if sh["minute"] is None or not ((sh["xgot"] or 0.0) > 0 or sh["is_goal"]):
-            continue
-        if at(side, sh["minute"]) != player_id:
-            continue
-        # L'AUTOGOL DI UN COMPAGNO è in questa lista e non per sbaglio: SofaScore lo
-        # archivia col ``team_side`` della squadra per cui CONTA, cioè l'avversaria,
-        # quindi arriva qui insieme ai tiri veri. Ed è giusto che ci sia — il gol è
-        # entrato nella sua porta e il suo ``goals_prevented`` l'ha pagato.
-        #
-        # Ma NON lo paga per intero: gli viene restituita la difficoltà del tiro
-        # (v. ``_merge_own_goal_relief`` e OWN_GOAL_KEEPER_XGOT_DEFAULT), quindi
-        # l'xGOT con cui la mappa deve contarlo è quello del credito, non zero.
-        # Contandolo a zero la sezione perdeva 0.834 esatti, che finivano nel metro:
-        # il difetto si è presentato da solo, con quel numero, appena il controllo
-        # di riconciliazione è stato acceso.
-        own = is_own_goal(sh["shot_type"], sh["team_side"],
-                          sides.get((match.id, sh["player_id"])))
-        xgot = sh["xgot"] or 0.0
-        faced.append({**sh, "own_goal": own,
-                      "xgot": (xgot or OWN_GOAL_KEEPER_XGOT_DEFAULT) if own else xgot})
-    if not faced:
-        return empty
-
-    scales = feature_scales(gk=True)
-    weights = weights_for_role(role)
-    weight = mins / (mins + shrinkage_for(role))
-    # NIENTE fattore dello stadio finale qui, a differenza della sezione dei tiri
-    # dei giocatori di movimento: il canale del portiere non passa dalla
-    # saturazione (v. classic_rating.ROLE_SATURATION, che non ha una voce POR),
-    # la sua correzione e' gia' dentro centro e dispersione. Aggiungerlo qui
-    # sballerebbe la sezione di ~1.6.
-    per_unit = spread_k_for(role) * weight / reference[role]["std"]
-    n = len(faced)
-
-    # IL PESO DEL MOMENTO, tiro per tiro: serve a togliere da ``gk_goals_prevented``
-    # esattamente quello che il calcolo ci ha messo. Ricostruito qui dallo stesso
-    # stato di punteggio che usa ``_merge_keeper_shot_credit``.
-    _xp = goal_impact.fixed_xp_table()
-    _band, _p95 = goal_impact.fixed_band()
-    _gol = [g for g in (MatchShot.objects.filter(match=match, is_goal=True)
-                        .values("minute", "team_side"))
-            if g["minute"] is not None]
-
-    def _peso(minute):
-        propri = sum(1 for g in _gol if g["team_side"] == side and g["minute"] < minute)
-        altrui = sum(1 for g in _gol if g["team_side"] != side and g["minute"] < minute)
-        return goal_impact.conceded_weight(
-            goal_impact.importance(_xp, minute, propri - altrui - 1), _p95)
-
-    def _removed(mask):
-        """Quanto tolgono, in totale, i tiri SPENTI in ``mask``."""
-        gone = defaultdict(float)
-        for bit, s in enumerate(faced):
-            if mask >> bit & 1:
-                continue
-            # QUANTO VALE QUEL TIRO lo dice ``classic_rating.keeper_shot_value``, la
-            # stessa funzione che lo somma dentro la feature: franchigia e momento
-            # inclusi. Ricalcolarlo qui come ``xgot - gol`` secco — che è quel che
-            # faceva fino al 04/09/2026 — lasciava entrambe le correzioni fuori dalle
-            # righe e mute dentro la riga del metro: la sezione tornava col voto e
-            # mostrava un modello che non gira più.
-            #
-            # L'AUTOGOL RESTA GREZZO, come nel calcolo: ``_merge_keeper_shot_credit``
-            # lo salta (la sua difficoltà la restituisce ``_merge_own_goal_relief``),
-            # quindi qui non gli si può togliere una correzione che non ha ricevuto.
-            if s.get("own_goal"):
-                gone["gk_goals_prevented"] += (s["xgot"] or 0.0) - 1.0
-            else:
-                gone["gk_goals_prevented"] += keeper_shot_value(
-                    s["xgot"] or 0.0, bool(s["is_goal"]), _peso(s["minute"]))
-            if not s["is_goal"]:
-                gone["gk_saves"] += 1.0
-        return gone
-
-    def totals_for(mask):
-        """I totali del portiere coi soli tiri accesi in ``mask``.
-
-        Si SOTTRAE dai totali veri, come per le conclusioni, così a maschera piena
-        si riottiene esattamente l'indice che ha prodotto il voto.
-
-        IL PAVIMENTO A ZERO VALE SOLO PER I CONTEGGI. ``gk_goals_prevented`` è
-        legittimamente negativo — è la firma del portiere battuto su tiri parabili,
-        cioè la cosa che più conta nel suo canale — e schiacciarlo a zero
-        cancellerebbe proprio quella.
-        """
-        gone = _removed(mask)
-        if not gone:
-            return feats
-        t = dict(feats)
-        for k, v in gone.items():
-            floor = k != "gk_goals_prevented"
-            x = (t.get(k) or 0.0) - v
-            t[k] = max(0.0, x) if floor else x
-        return t
-
-    # I DUE ARCHIVI PARLANO DELLA STESSA PARTITA? I totali vengono dalle zone del
-    # fornitore, la mappa da ``MatchShot``. Sulla 25-26 l'identità regge (scarto
-    # mediano esatto, 90,6% entro 0,10) ma nel resto no, e la differenza finisce nel
-    # metro, dove si legge storta. Detto ad alta voce: è un difetto DEI DATI.
-    gap = {k: round((feats.get(k) or 0.0) - v, 3)
-           for k, v in _removed(0).items()
-           if abs((feats.get(k) or 0.0) - v) > 0.02}
-    if gap:
-        log.warning("save map and zone totals disagree for keeper %s in match %s: "
-                    "%s left over after removing every shot on target — the save "
-                    "baseline absorbs it", player_id, match.id, gap)
-
-    def value(mask):
-        """Il SOLO sotto-indice delle parate: l'unica parte che i tiri muovono.
-
-        PASSA PER ``raw_feature_values`` e non legge i totali nudi, come fa invece
-        la mappa dei tiri. Lì la scorciatoia è lecita perché le sei voci delle
-        conclusioni sono tutte TOTALI; qui no: ``gk_saves`` è una densità per 90'
-        (v. GK_PER90_WEIGHTS) e ``gk_goals_prevented`` un totale, quindi la famiglia
-        è mista. Con un portiere uscito al 60' la scorciatoia sbagliava di un terzo,
-        e con uno che gioca i novanta — cioè quasi sempre — non sbagliava affatto:
-        il difetto sarebbe passato inosservato in produzione per mesi.
-        """
-        values = raw_feature_values(totals_for(mask), mins, 0.0, gk=True)
-        return sum(weights.get(k, 0.0) * scored_z(k, values.get(k, 0.0), scales)
-                   for k in _SAVE_FAMILY)
-
-    full = (1 << n) - 1
-    if n <= _SHAPLEY_MAX_SHOTS:
-        vals = [value(mask) for mask in range(full + 1)]
-        coef = [factorial(r) * factorial(n - r - 1) / factorial(n) for r in range(n)]
-        share = [0.0] * n
-        for bit in range(n):
-            b = 1 << bit
-            for sub in range(full + 1):
-                if not sub & b:
-                    share[bit] += coef[sub.bit_count()] * (vals[sub | b] - vals[sub])
-        joint, empty_value = vals[full] - vals[0], vals[0]
-    else:
-        # Ripiego: il leave-one-out riportato al totale. Un portiere oltre i dodici
-        # tiri nello specchio non si è mai visto (massimo di stagione: 13, una volta).
-        empty_value, vfull = value(0), value(full)
-        joint = vfull - empty_value
-        loo = [vfull - value(full & ~(1 << bit)) for bit in range(n)]
-        tot = sum(loo)
-        share = [x * (joint / tot) if tot else joint / n for x in loo]
-
-    out = [{
-        "minute": s["minute"],
-        "outcome": ("autogol di un compagno" if s["own_goal"]
-                    else SAVE_OUTCOME_IT[bool(s["is_goal"])]),
-        "situation": SHOT_SITUATION_IT.get(s["situation"] or "", ""),
-        "xgot": round(s["xgot"] or 0.0, 3),
-        "points": round(share[i] * per_unit, 3),
-    } for i, s in enumerate(faced)]
-
-    mean_terms = get_role_averages(match.competition_season_id).get(role, {})
-    baseline = (empty_value - sum(mean_terms.get(k, 0.0) for k in _SAVE_FAMILY)) * per_unit
-    return {"saves": out, "baseline": round(baseline, 3),
-            "total": round(baseline + joint * per_unit, 3)}
-
-
+    scale = kc.points_per_value()
+    outcome = {"save": "parata", "goal": "gol subito", "rebound": "respinta corta",
+               "penalty": "rigore"}
+    saves = []
+    for s in detail.get("shots") or []:
+        kind = s["kind"]
+        label = outcome.get(kind, kind)
+        if kind == "penalty":
+            label = "rigore subito" if s["is_goal"] else "rigore parato"
+        if s.get("flagged_error"):
+            label += " (errore segnalato)"
+        saves.append({
+            "minute": s.get("minute"),
+            "outcome": label,
+            "situation": s.get("situation") or "",
+            "xgot": round(float(s.get("xgot") or 0.0), 3),
+            "distance_m": s.get("distance_m"),
+            "points": round(scale * s["points"], 3),
+        })
+    total = round(scale * detail.get("shots_value", 0.0), 3)
+    return {"saves": saves, "baseline": 0.0, "total": total}
 def voto_puro_row(match, player_id: int) -> dict | None:
     """La riga del voto di un giocatore, dalla pagella gia' in cache quando c'e'."""
     for r in voto_puro_for_match(match, get_reference(match.competition_season_id)):

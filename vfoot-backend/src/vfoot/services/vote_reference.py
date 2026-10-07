@@ -92,9 +92,21 @@ def weights_fingerprint() -> str:
         # goal, hence the mean and spread of the keeper index: a reference computed
         # under a different default scores those votes on the wrong scale.
         "own_goal_keeper_default": cr.OWN_GOAL_KEEPER_XGOT_DEFAULT,
+        # Il canale del portiere (dall'08/10/2026): la forma tiro per tiro e la
+        # sua calibrazione. Cambiarne un numero cambia ogni voto di portiere.
+        "keeper_channel": _keeper_channel_constants(),
     }
     blob = json.dumps(payload, sort_keys=True).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def _keeper_channel_constants() -> dict:
+    from vfoot.services import keeper_channel as kc
+    return {k: getattr(kc, k) for k in (
+        "SAVE_A", "SAVE_G", "GOAL_B_NEAR", "GOAL_B_FAR", "GOAL_B_MID_M", "GOAL_B_WIDTH_M",
+        "GOAL_D", "PENALTY_K", "ERROR_GOAL_TOTAL", "REBOUND_SECONDS", "REBOUND_BETA",
+        "EXIT_GOOD", "EXIT_PUNCH", "EXIT_BAD", "MOMENT_LAMBDA", "DEFAULT_DISTANCE_M",
+        "CALIBRATION")}
 
 
 # BUMP THIS when the scoring CODE changes in a way that moves votes without any
@@ -183,7 +195,15 @@ def weights_fingerprint() -> str:
 #           per minuto per i tre ruoli di movimento; pesi vincolati, centro e scala
 #           per ruolo. L'artifact e' nell'impronta qui sotto, ma il cambio di
 #           forward e' codice, e va segnato qui.
-SCORING_CODE_VERSION = 12
+#  12 -> 13: LA REVISIONE DELLA SOSTA (08/10/2026). Tre cambi di forward insieme:
+#           il merito allargato (scala x1,4, base costante, continue come Poisson
+#           composti, fattore comune, stadio dentro l'attesa), il credito di gol e
+#           assist per un quarto nel MERITO (goal_impact.goal_credit_for), e il
+#           canale del portiere tiro per tiro (services/keeper_channel). Artifact,
+#           reference e costanti sono nell'impronta, ma la forma del payload cambia
+#           (predictive_sigma, exposure_events, keeper_detail) e la cache su file
+#           di produzione servirebbe la vecchia.
+SCORING_CODE_VERSION = 13
 
 
 def scoring_fingerprint() -> str:

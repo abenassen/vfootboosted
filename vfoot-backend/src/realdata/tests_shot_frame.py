@@ -38,3 +38,32 @@ class ShotFrameTests(SimpleTestCase):
     def test_malformed_coordinates_do_not_raise(self):
         self.assertEqual(_shot_point_xy({}), (None, None))
         self.assertEqual(_shot_point_xy({"x": "n/d", "y": 1}), (None, None))
+
+
+class ShotDistanceTests(SimpleTestCase):
+    """``MatchShot.distance_m`` feeds the keeper channel: a goal from close is
+    forgiven, a goal from far is charged (``keeper_channel.goal_cost_factor``).
+    The distance is read off the shotmap's ``playerCoordinates`` — percent of a
+    105 x 68 pitch, x from the goal line being attacked, y across — so a wrong
+    frame or a wrong unit would move every keeper's vote without an error."""
+
+    def test_the_penalty_spot_is_eleven_metres_out(self):
+        from realdata.services.sofascore_adapter import shot_distance_m
+        self.assertAlmostEqual(shot_distance_m({"x": 11.0 / 1.05, "y": 50.0}), 11.0, places=2)
+        self.assertEqual(shot_distance_m({"x": 0.0, "y": 50.0}), 0.0)
+
+    def test_the_width_counts_too_and_is_symmetric(self):
+        from math import hypot
+        from realdata.services.sofascore_adapter import shot_distance_m
+        self.assertAlmostEqual(shot_distance_m({"x": 20.0, "y": 25.0}),
+                               round(hypot(21.0, 17.0), 2), places=2)
+        self.assertEqual(shot_distance_m({"x": 20.0, "y": 25.0}),
+                         shot_distance_m({"x": 20.0, "y": 75.0}))
+        self.assertEqual(shot_distance_m([20.0, 25.0]), shot_distance_m({"x": 20.0, "y": 25.0}))
+
+    def test_no_coordinates_is_no_distance_not_a_made_up_one(self):
+        """The keeper channel reads None as its default distance; a 0 here would
+        turn every unplaced goal into a point-blank one."""
+        from realdata.services.sofascore_adapter import shot_distance_m
+        for bad in (None, {}, {"x": "n/d", "y": 1}, {"x": float("nan"), "y": 50}, [1]):
+            self.assertIsNone(shot_distance_m(bad), bad)

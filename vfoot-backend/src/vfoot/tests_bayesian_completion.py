@@ -66,42 +66,54 @@ class ForwardTests(SimpleTestCase):
         (``sga_post`` nasce da xG e xGOT: un dizionario scritto a mano la salta)."""
         return cr.raw_feature_values(over, 90, 0.0)
 
-    def test_a_full_match_is_the_calibrated_full_match_vote(self):
-        """A 90 minuti il completamento e' inerte: il voto-indice e' la formula di
-        partita intera (``_raw_vote_from_index`` a 90'), e sopra ci sta solo la
-        calibrazione affine del ruolo."""
+    def test_a_full_match_is_base_plus_scaled_evidence(self):
+        """A 90 minuti il completamento e' inerte: ogni voce e' peso x (z - z0), il
+        voto di merito e' la base del ruolo piu' l'evidenza per la scala, e non
+        c'e' credito atteso."""
         ref = fixed_reference()
         for role in ("DIF", "CEN", "ATT"):
             values = self._values(touches=55.0, passes_completed=40.0, duels_won=6.0,
                                   duels_lost=4.0, clearances=5.0, interceptions=2.0,
                                   shots=2.0, xg_shots=0.2, expected_assists=0.1)
-            totals = dict(touches=55.0, passes_completed=40.0, duels_won=6.0, duels_lost=4.0,
-                          clearances=5.0, interceptions=2.0, shots=2.0, xg_shots=0.2,
-                          expected_assists=0.1)
-            idx = cr.index_for_role(role, totals, 90, 0.0)
-            obs = cr.observed_index(role, totals, 90, 0.0)
-            full = cr._raw_vote_from_index(idx, role, 90, ref, observed=obs)
             bd = bayes.index_vote(role, values, 90, 0, 0, ref)
-            self.assertAlmostEqual(bd["v_index"], full, places=9, msg=role)
-            dc, s, c0 = bayes.calibration(role)
-            self.assertAlmostEqual(bd["unclamped"], c0 + dc + s * (full - c0), places=9)
+            base, scale = bayes.calibration(role)
+            self.assertAlmostEqual(bd["unclamped"], base + scale * bd["evidence"], places=9)
             self.assertEqual(bd["event"], 0.0)
+            self.assertEqual(bd["credit_rest"], 0.0)
+            self.assertEqual(bd["k"], 1.0)
+            self.assertEqual(bd["sigma"], 0.0)
+            scales = cr.feature_scales(gk=False)
+            for key, term in bd["terms"].items():
+                w = bayes.weights_with_exposure(role)[key]
+                z = cr.scored_z(key, values.get(key, 0.0), scales) - bayes.neutral_z(role, key, scales)
+                self.assertAlmostEqual(term, w * z, places=9, msg=(role, key))
 
-    def test_no_minutes_is_exactly_six_after_the_scale(self):
-        """Di chi non si e' visto niente si dice 6: l'ancora neutra passa per la
-        calibrazione (che la lascia dove sta a meno di delta_c) e per lo stadio
-        finale, e il credito medio di gol/assist che porta con se' e' esattamente
-        quello che il credito osservato centrato toglie."""
-        from vfoot.services import goal_impact
+    def test_no_minutes_is_the_base_plus_the_expected_credit(self):
+        """Di chi non si e' visto niente il modello dice la base del ruolo (costante
+        nei minuti: niente rampa) piu' il credito atteso a priori di gol e assist —
+        esattamente quello che il credito osservato centrato toglie subito dopo."""
         ref = fixed_reference()
         for role in ("DIF", "CEN", "ATT"):
             bd = bayes.index_vote(role, self._values(), 0, 0, 0, ref)
-            old_mean = (goal_impact.role_mean_credit().get(role, 0.0)
-                        + goal_impact.role_mean_assist_credit().get(role, 0.0))
-            dc, s, c0 = bayes.calibration(role)
-            self.assertAlmostEqual(bd["v_index"], c0 + old_mean, places=9, msg=role)
-            self.assertAlmostEqual(cr.scale_saturation(c0, role)[0], 6.0, places=9)
+            base, _scale = bayes.calibration(role)
             self.assertEqual(bd["terms"], {})
+            self.assertAlmostEqual(bd["merit"], base, places=9, msg=role)
+            self.assertAlmostEqual(bd["credit_rest"], bayes.expected_credit_rate(role), places=9)
+            self.assertAlmostEqual(bd["sigma"], bayes.predictive_sigma(role, 0.0), places=9)
+
+    def test_the_base_does_not_move_with_the_minutes(self):
+        """La base e' la stessa a 10, 45 e 90 minuti: il ritorno verso la media di
+        chi gioca poco EMERGE dal completamento, non da una curva."""
+        ref = fixed_reference()
+        values = self._values()
+        for role in ("DIF", "CEN", "ATT"):
+            merits = [bayes.index_vote(role, values, m, 0, 0, ref)["merit"] for m in (10, 45, 90)]
+            # senza evidenza il merito e' la base a ogni minuto (le voci sono zero
+            # perche' z completato = z neutro quando non si e' visto niente... a
+            # meno dell'evidenza NEGATIVA di non aver fatto niente in m minuti)
+            self.assertTrue(all(np.isfinite(merits)))
+            base, _ = bayes.calibration(role)
+            self.assertLess(abs(merits[0] - base), abs(merits[2] - base) + 1e-9, msg=role)
 
     def test_the_completion_moves_toward_the_neutral_anchor_as_minutes_shrink(self):
         """Stessi totali visti in meno minuti dicono di piu' (tassi piu' alti) ma
@@ -109,9 +121,26 @@ class ForwardTests(SimpleTestCase):
         neutro deve restare finita e cambiare con continuita'."""
         ref = fixed_reference()
         values = self._values(touches=30.0, passes_completed=20.0, duels_won=4.0, shots=2.0)
-        votes = [bayes.index_vote("CEN", values, m, 0, 0, ref)["v_index"] for m in (10, 30, 60, 90)]
+        votes = [bayes.index_vote("CEN", values, m, 0, 0, ref)["merit"] for m in (10, 30, 60, 90)]
         self.assertTrue(all(np.isfinite(votes)))
         self.assertGreater(max(votes) - min(votes), 0.05)
+
+    def test_the_predictive_width_shrinks_with_the_minutes(self):
+        for role in ("DIF", "CEN", "ATT"):
+            s = [bayes.predictive_sigma(role, t) for t in (0.0, 0.5, 1.0)]
+            self.assertGreater(s[0], s[1])
+            self.assertGreater(s[1], 0.0)
+            self.assertEqual(s[2], 0.0)
+
+    def test_the_stage_inside_the_expectation_lowers_a_high_vote(self):
+        """Sopra il centro lo stadio comprime: l'attesa dello stadio su una
+        predittiva larga sta sotto lo stadio dell'attesa, e sotto il centro
+        (dove la scala e' lineare) coincide."""
+        pre, dopo, _a = cr.ROLE_SATURATION["DIF"]
+        self.assertLess(cr.scale_saturation(pre + 1.0, "DIF", 0.4)[0],
+                        cr.scale_saturation(pre + 1.0, "DIF", 0.0)[0])
+        self.assertAlmostEqual(cr.scale_saturation(pre - 1.0, "DIF", 0.2)[0],
+                               cr.scale_saturation(pre - 1.0, "DIF", 0.0)[0], places=2)
 
     def test_an_early_goal_raises_the_expected_credit_for_the_rest(self):
         ref = fixed_reference()
@@ -122,3 +151,13 @@ class ForwardTests(SimpleTestCase):
         with_goal = bayes.index_vote("ATT", values, 30, 1, 0, ref)["unclamped"]
         without = bayes.index_vote("ATT", values, 30, 0, 0, ref)["unclamped"]
         self.assertGreater(with_goal, without)
+
+    def test_a_compound_feature_neutral_is_the_predictive_mean_not_z_of_the_mean(self):
+        """Il neutro di una continua e' E[z] sulla predittiva (Jensen): per una
+        trasformazione concava sta SOTTO z(media)."""
+        scales = cr.feature_scales(gk=False)
+        for role in ("DIF", "CEN", "ATT"):
+            p = bayes.mark(role, "expected_assists")
+            mean_total = p["rate"] * p["m1"] + p["floor"]
+            self.assertLess(bayes.neutral_z(role, "expected_assists", scales),
+                            cr.scored_z("expected_assists", mean_total, scales) + 1e-9, msg=role)

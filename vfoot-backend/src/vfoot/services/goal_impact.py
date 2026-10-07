@@ -125,6 +125,88 @@ def importance(xp: dict, minute: int, goal_difference_before: int) -> float | No
     return after - before
 
 
+# --- IL MERITO DEL GOL E DELL'ASSIST (revisione della sosta, 08/10/2026) ------
+# Un quarto del credito non si paga piu' per il FATTO ma per il MERITO, e
+# l'occasione si divide: chi la crea prende l'xG del tiro servito (quanto era
+# grande), chi la finalizza prende xGOT - xG (quanto ha aggiunto colpendola
+# cosi'). Normalizzato alla media della stagione (congelata nella reference come
+# la banda) cosi' il credito medio di un gol resta quello di prima: il tap-in a
+# porta vuota (xG 0,8 -> merito 0,5) vale 0,79 invece di 0,90, la conclusione da
+# fuori nell'angolo (xG 0,04 -> merito 1,9) 1,10. Nel voto finito il gol medio
+# resta +1,0 e oscilla da +0,8 (facile) a +1,0 (difficile) per quintile.
+#
+# I giudici sono PIATTI in xG (chi segna prende 7,0 a ogni fascia): e' una
+# scelta nostra contro la loro convenzione, e sul banco (3.177 presenze) costa
+# zero divergenze gravi. La quota resta al 25% per decisione: coi dati che
+# abbiamo (l'xGOT nel singolo tiro e' rumoroso) ogni punto di merito in piu' e'
+# un errore grave in piu' (misurato: al 50% da 13 a 16).
+# Il rigore e il gol senza tiro agganciato valgono il solo fatto (merito 1).
+DEFAULT_MERIT_SHARE = 0.25
+
+
+def merit_settings() -> dict:
+    """{merit_share, goal_merit_mean, assist_merit_mean, mean_goal_credit,
+    mean_assist_credit} dalla reference; senza, il merito non si applica."""
+    from vfoot.services.vote_reference import fixed_goal_impact
+    data = fixed_goal_impact() or {}
+    m = data.get("merit") or {}
+    if not m or not m.get("goal_merit_mean"):
+        return {"merit_share": 0.0}
+    return {"merit_share": float(m.get("merit_share", DEFAULT_MERIT_SHARE)),
+            "goal_merit_mean": float(m["goal_merit_mean"]),
+            "assist_merit_mean": float(m.get("assist_merit_mean") or 0.0),
+            "mean_goal_credit": float(m.get("mean_goal_credit") or 0.0),
+            "mean_assist_credit": float(m.get("mean_assist_credit") or 0.0)}
+
+
+def goal_merit(record: dict, merit_mean: float) -> float:
+    """Il merito di UN gol, media 1: (xGOT - xG) / media. Il fatto (1) per il
+    rigore e per il gol senza tiro."""
+    if not merit_mean or record.get("penalty"):
+        return 1.0
+    xg, xgot = record.get("xg"), record.get("xgot")
+    if xg is None or xgot is None:
+        return 1.0
+    return max(0.0, (float(xgot) - float(xg)) / merit_mean)
+
+
+def assist_merit(record: dict, merit_mean: float) -> float:
+    """Il merito di UN assist, media 1: l'xG del tiro servito / media. Il fatto
+    (1) per l'assist non agganciato a un gol."""
+    if not merit_mean or record.get("unlinked") or record.get("xg") is None:
+        return 1.0
+    return float(record["xg"]) / merit_mean
+
+
+def goal_credit_for(records, band=DEFAULT_BAND, p95: float = DEFAULT_P95) -> float:
+    """I punti di voto per i gol di un giocatore: (1 - quota) di fatto graduato
+    per importanza + quota di merito, gol per gol."""
+    m = merit_settings()
+    share = m.get("merit_share", 0.0)
+    total = 0.0
+    for r in records or []:
+        fact = goal_credit([r.get("importance")], band, p95)
+        if share:
+            total += (1.0 - share) * fact + share * m["mean_goal_credit"] * goal_merit(r, m["goal_merit_mean"])
+        else:
+            total += fact
+    return total
+
+
+def assist_credit_for(records, band=DEFAULT_ASSIST_BAND, p95: float = DEFAULT_P95) -> float:
+    """Come ``goal_credit_for``, per gli assist: il merito e' l'occasione servita."""
+    m = merit_settings()
+    share = m.get("merit_share", 0.0)
+    total = 0.0
+    for r in records or []:
+        fact = goal_credit([r.get("importance")], band, p95)
+        if share:
+            total += (1.0 - share) * fact + share * m["mean_assist_credit"] * assist_merit(r, m["assist_merit_mean"])
+        else:
+            total += fact
+    return total
+
+
 def goal_credit(importances, band=DEFAULT_BAND, p95: float = DEFAULT_P95) -> float:
     """I punti di voto per i gol di un giocatore in una partita.
 
@@ -214,6 +296,8 @@ def assist_phrase(records) -> str:
     imp = r.get("importance")
     if imp is not None and imp < DEAD_RUBBER:
         what += " a partita ormai decisa"
+    what += merit_qualifier(assist_merit(r, merit_settings().get("assist_merit_mean", 0.0)),
+                            "una palla gol servita", "un'occasione da lontano")
     return what
 
 
@@ -248,7 +332,8 @@ def goals_by_player(match) -> dict[int, list[dict]]:
                    .values_list("player_id", "side"))
     timeline = sorted(
         (s for s in MatchShot.objects.filter(match=match, is_goal=True)
-         .values("player_id", "minute", "team_side", "shot_type")
+         .values("player_id", "minute", "team_side", "shot_type", "xg", "xgot",
+                 "situation")
          if s["minute"] is not None),
         key=lambda s: s["minute"])
     out: dict[int, list[float | None]] = defaultdict(list)
@@ -267,6 +352,12 @@ def goals_by_player(match) -> dict[int, list[dict]]:
             "own_after": own + 1,
             "opp_after": opp,
             "importance": importance(xp, shot["minute"], own - opp),
+            # IL MERITO (08/10/2026): quanto la conclusione ha aggiunto
+            # all'occasione (xGOT - xG), e se era un rigore. Il tiro e' la riga
+            # stessa del gol, quindi il merito non va agganciato a niente.
+            "xg": (float(shot["xg"]) if shot.get("xg") is not None else None),
+            "xgot": (float(shot["xgot"]) if shot.get("xgot") is not None else None),
+            "penalty": shot.get("situation") == "penalty",
         })
     return dict(out)
 
@@ -398,7 +489,23 @@ def goal_phrase(records) -> str:
     imp = r.get("importance")
     if imp is not None and imp < DEAD_RUBBER:
         what += " a partita ormai decisa"
+    what += merit_qualifier(goal_merit(r, merit_settings().get("goal_merit_mean", 0.0)),
+                            "con una conclusione difficile", "su un'occasione facile")
     return what
+
+
+# Sopra/sotto queste soglie di merito (media 1) la frase lo dice: fra le due il
+# merito muove il credito di qualche centesimo e non merita una parola.
+MERIT_SAY_ABOVE = 1.6
+MERIT_SAY_BELOW = 0.4
+
+
+def merit_qualifier(merit: float, high: str, low: str) -> str:
+    if merit >= MERIT_SAY_ABOVE:
+        return f", {high}"
+    if merit <= MERIT_SAY_BELOW:
+        return f", {low}"
+    return ""
 
 
 def fixed_xp_table() -> dict:

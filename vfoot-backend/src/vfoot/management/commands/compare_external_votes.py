@@ -38,7 +38,24 @@ EXTERNAL_TEAMS = {
     "atalanta", "bologna", "cagliari", "como", "cremonese", "fiorentina", "genoa",
     "verona", "hellas verona", "inter", "juventus", "lazio", "lecce", "milan",
     "napoli", "parma", "pisa", "roma", "sassuolo", "torino", "udinese",
+    "monza", "venezia", "frosinone",
 }
+
+
+def _is_team_row(row) -> bool:
+    """Una riga di intestazione di squadra nel foglio di fantacalcio.it: il nome nella
+    prima cella e NIENT'ALTRO sulla riga. Si riconosce dalla forma, non da un elenco:
+    con l'elenco fermo alla 25-26, le tre promosse della 26-27 (Monza, Venezia,
+    Frosinone) non venivano viste e i loro giocatori finivano sotto la squadra
+    precedente del foglio (Thiam del Monza letto come portiere del Milan), in
+    silenzio. Le quattro righe di testata del foglio sono frasi lunghe e restano fuori
+    per lunghezza; l'elenco resta come conferma per un nome breve."""
+    c0 = row[0]
+    if not isinstance(c0, str) or not c0.strip():
+        return False
+    if any(x is not None and str(x).strip() != "" for x in row[1:]):
+        return False
+    return norm_name(c0) in EXTERNAL_TEAMS or len(c0.strip()) <= 24
 
 
 def _pearson(xs, ys):
@@ -84,7 +101,7 @@ class Command(BaseCommand):
         out, team = [], None
         for r in ws.iter_rows(values_only=True):
             c0 = r[0]
-            if isinstance(c0, str) and norm_name(c0) in EXTERNAL_TEAMS:
+            if _is_team_row(r):
                 team = c0
                 continue
             if not isinstance(c0, (int, float)) or c0 == "Cod.":

@@ -38,6 +38,8 @@ import logging
 import math
 from collections import defaultdict
 
+import numpy as np
+
 from django.db.models import Sum
 
 from realdata.models import (
@@ -173,7 +175,11 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "expected_assists": 0.057808759370212036,
+    # RIVISTO L'08/10/2026 (revisione della sosta): x1,5 rispetto allo 0,0578 della
+    # ricerca bayesiana. Il merito della CREAZIONE compensa il quarto di credito
+    # dell'assist che ora dipende dall'occasione servita; oltre x1,5 la coda contro
+    # i giudici peggiora, perche' paga anche il passaggio non concretizzato.
+    "expected_assists": 0.08671313905531805,
     # The DISCRETE counterpart of xA, and the creator's side of a big chance —
     # verified as the PASSER's stat, not the shooter's: it never exceeds the
     # player's own key passes (0 violations in 10,067 player-matches), 36% of the
@@ -318,7 +324,12 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "sga_post": 0.03559042538884024,
+    # RIVISTO L'08/10/2026 (revisione della sosta): x1,5 rispetto allo 0,0356 della
+    # ricerca bayesiana. E' il merito della CONCLUSIONE che compensa il quarto di
+    # credito del gol spostato dal fatto al merito (v. goal_impact); a x2-x3 la coda
+    # contro i giudici peggiora (paga anche il tiro parato). Misura in
+    # experiments-revisione-sosta/PROPOSTA_10-10.md.
+    "sga_post": 0.05338563808326036,
     # = β: the mass of chances occupied. NON rialzato insieme a S, quindi β/S passa
     # da 1/3 a 1/4.5. E' una deroga consapevole al rapporto scritto sopra: β/S
     # esiste per l'ORDINAMENTO dei gol (un gol difficile deve battere un tap-in) e
@@ -401,7 +412,16 @@ TOTAL_WEIGHTS = {
     # quanto ci stia in generale. Toglierlo COSTA 0.0006 di correlazione e vale
     # 0.054 di errore su quei giocatori — la Pearson non vede uno scostamento
     # sistematico su 75 righe di 7696, l'utente che apre il pannello si'.
-    "errors_led_to_goal": -0.030608848483054507,  # una occorrenza: -0.85 di voto
+    # GLI EVENTI RARI SONO STATI RISOLTI DI NUOVO L'08/10/2026 (revisione della
+    # sosta): la scala del merito e' per 1,4, e lasciati com'erano questi cinque
+    # valevano 1,4 volte tanto nel voto — rigore concesso -1,01, errore che porta
+    # al gol -0,71 — cioe' piu' dei giudici (-0,59 / -0,43), e la lettura delle
+    # pagelle testuali sulle divergenze gravi lo diceva (Bartesaghi, Loyola,
+    # Marcandalli). Divisi per 1,4, valgono nel voto quello che valevano: gli
+    # ATTESI di tests_rare_events non si muovono. E' il passo «ri-risolvi gli
+    # eventi rari» della catena di ritaratura, fatto per la scala invece che
+    # per la sigma.
+    "errors_led_to_goal": -0.021863463202181792,  # una occorrenza: -0.51 di voto (v. tests_rare_events)
     # Conceding a penalty hands over roughly 0.78 expected goals through a clear
     # individual foul, and — unlike a missed penalty — carries NO fantacalcio
     # malus, so the base vote is the only place it can register at all.
@@ -417,7 +437,7 @@ TOTAL_WEIGHTS = {
     # e' anche marcata come errore che porta a un gol.
     # Stessa storia (v. errors_led_to_goal): l'ottimizzazione lo portava a -0.0409,
     # con 0.312 di scarto sulle 76 presenze che concedono un rigore.
-    "penalties_conceded": -0.04306608342491431,  # una occorrenza: -1.60 di voto
+    "penalties_conceded": -0.03076148816065308,  # una occorrenza: -0.72 di voto (v. tests_rare_events)
     # Winning one is the mirror image and equally unrewarded: the bonus goes to
     # whoever converts, never to the player who earned it.
     # RITARATO IL 04/09/2026: 0.0146 -> 0.0241. Le righe qui sopra raccontano come si
@@ -425,7 +445,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "penalties_won": 0.02645377908306592,  # una occorrenza: +1.40 (v. tests_rare_events)
+    "penalties_won": 0.01889555648790423,  # una occorrenza: +0.54 (v. tests_rare_events)
     # Interventions in a dangerous position. Kept as impact totals, not per-90:
     # their value does not scale with how long you played.
     #
@@ -484,7 +504,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "clearances_off_line": 0.016988120582523778,  # una occorrenza: +0.21 (v. tests_rare_events)
+    "clearances_off_line": 0.012134371844659842,  # una occorrenza: +0.35 (v. tests_rare_events)
     "last_man_tackle": 0.0,
     # An error that let the opponent SHOOT, without a goal following.
     # RITARATO IL 04/09/2026: -0.0113 -> -0.0057. Le righe qui sopra raccontano come si
@@ -492,7 +512,7 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "errors_led_to_shot": -0.016933005036683803,  # una occorrenza: -0.14 (v. tests_rare_events)
+    "errors_led_to_shot": -0.012095003597631288,  # una occorrenza: -0.16 (v. tests_rare_events)
     # RITARATO IL 04/09/2026: 0.0088 -> 0.0016. Le righe qui sopra raccontano come si
     # era arrivati al valore PRECEDENTE; il ragionamento calcistico resta
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
@@ -977,7 +997,16 @@ ROLE_WEIGHTS = {
     # Dall'11/09/2026 i tre valori vengono dalla ricerca bayesiana vincolata (v.
     # services/bayesian_completion): il difensore usa il valore base di PER90_WEIGHTS.
     Player.ROLE_MID: {"duels_lost": -0.07072442870667829, "duels_won": 0.026443242169541713},
-    Player.ROLE_FWD: {"duels_lost": 0.0, "duels_won": 0.042625878910532544},
+    # L'ATTACCANTE NON RISPONDE DEL «CONTRIBUTO DIFENSIVO D'INSIEME» (08/10/2026).
+    # Il valore difensivo del fornitore correla 0,08 col giudice per gli attaccanti
+    # (0,16 per tutto il blocco difesa, 0,44 per il resto del merito), e a zero il
+    # ruolo sta meglio contro entrambe le pagelle (r 0,820 -> 0,823, MAE 0,352 ->
+    # 0,347, stessi scarti gravi). Contrasti, intercetti e recuperi restano: sono
+    # azioni, e azzerare tutto il blocco fa sprofondare chi non difende e non segna
+    # (scarti >= 1,0 da 31 a 39). Lettura di Dybala in Roma-Inter: «poco contributo
+    # difensivo d'insieme -0,15» accanto a sette passaggi chiave stona a chiunque.
+    Player.ROLE_FWD: {"duels_lost": 0.0, "duels_won": 0.042625878910532544,
+                      "defensive_value": 0.0},
 }
 
 
@@ -1604,7 +1633,7 @@ ROLE_SATURATION = {          # ruolo: (centro_pre, centro_dopo, fattore)
 }
 
 
-def scale_saturation(vote: float, ref_key: str) -> tuple[float, float]:
+def scale_saturation(vote: float, ref_key: str, sigma: float = 0.0) -> tuple[float, float]:
     """Il voto dopo lo stadio finale, e DI QUANTO e' stato riscalato.
 
     Il secondo valore serve alla spiegazione: la scomposizione del voto e' additiva
@@ -1620,9 +1649,27 @@ def scale_saturation(vote: float, ref_key: str) -> tuple[float, float]:
         return vote, 1.0
     pre, dopo, a = p
     d = vote - pre
-    compresso = VOTE_SATURATION_T * math.log1p(d / VOTE_SATURATION_T) if d > 0 else d
+    if sigma > 1e-9:
+        # LA PREDITTIVA DENTRO LO STADIO (revisione della sosta, 08/10/2026). A
+        # partita non finita il voto pre-stadio e' un'ATTESA, e lo stadio comprime
+        # sopra il centro: stadio(E[V]) sta sopra E[stadio(V)] tanto piu' quanto
+        # piu' resta da vedere, e il voto medio di partenza derivava anche con un
+        # completamento perfetto (DIF 6,14 al 10' contro 6,08 a 90'). Si integra
+        # sulla gaussiana di larghezza ``sigma`` (Gauss-Hermite, 21 nodi); a
+        # partita intera sigma e' zero e questa riga non esiste.
+        comp = np.array([_saturate(d + math.sqrt(2.0) * sigma * x) for x in _GH21_X])
+        compresso = float((_GH21_W * comp).sum() / math.sqrt(math.pi))
+    else:
+        compresso = _saturate(d)
     out = dopo + a * compresso
     return out, (a * compresso / d if abs(d) > 1e-12 else a)
+
+
+def _saturate(d: float) -> float:
+    return VOTE_SATURATION_T * math.log1p(d / VOTE_SATURATION_T) if d > 0 else d
+
+
+_GH21_X, _GH21_W = np.polynomial.hermite.hermgauss(21)
 
 
 def saturation_linear(ref_key: str) -> tuple[float, float]:
@@ -2232,6 +2279,11 @@ EXTRAP_FLOOR_MINUTES = 55
 # goal-equivalent figure, not a fat-tailed count.
 EXPOSURE_WEIGHT = 0.09648982048859779    # same unit as every other weight: index points per 1σ
 EXPOSURE_KEY = "_exposure"  # its name in the scales/breakdowns (it is not a provider stat)
+# Quanti tiri subiti hanno caricato il giocatore: il CONTEGGIO degli eventi che
+# generano l'esposizione, che il completamento dei minuti legge come Poisson
+# composto (eventi a tasso incerto x marca del singolo tiro). Viaggia accanto
+# alla carica, mai dentro l'indice.
+EXPOSURE_COUNT_KEY = "_n_exposure"
 EXPOSURE_LAMBDA = 0.50      # share of the charge carried by the OUTCOME; 1−λ by xGOT
 EXPOSURE_KERNEL = 0.30      # weight of the four adjacent zones in the presence
 # A woodwork strike carries no provider xGOT, so it is charged on the outcome side
@@ -2358,6 +2410,13 @@ EXPOSURE_CREDIT = 0.0
 # non metterlo (0.341 in entrambi i casi) e non è il difetto in questione.
 ABSENCE_CREDIT = 0.0
 CREDITED_FEATURES = frozenset({
+    # I DUELLI VINTI A CREDITO (08/10/2026): per chi li paga (CEN, ATT) vincerne e'
+    # il segnale di un'occasione importante, non vincerne non e' una colpa — il
+    # duello perso ha gia' la sua voce dove conta. Sotto la media del ruolo il
+    # conteggio vale la media; sopra paga per intero. Per il difensore il peso e'
+    # zero e il discorso si ribalta sui persi, che stanno qui sotto da sempre.
+    # Misurato: ATT r 0,823 -> 0,824, MAE 0,347 -> 0,342, CEN invariato.
+    "duels_won",
     "duels_lost", "aerials_lost", "dribbled_past", "errors_dispossessed",
     "errors_miscontrols", "errors_bad_passes", "errors_fouls_committed",
     # Il canale del portiere: conteggi di volume a peso POSITIVO (v. sopra).
@@ -3441,8 +3500,12 @@ def _charge_of_shot(is_goal: bool, xgot, shot_type: str) -> float:
     return EXPOSURE_LAMBDA * outcome + (1.0 - EXPOSURE_LAMBDA) * (xgot or 0.0)
 
 
-def defensive_exposure(match_ids, minutes: dict) -> dict:
+def defensive_exposure(match_ids, minutes: dict, with_counts: bool = False):
     """{(match_id, player_id): danger conceded where AND WHILE this player played}.
+
+    Con ``with_counts`` restituisce ``(cariche, conteggi)``: quanti tiri subiti
+    hanno caricato ogni giocatore, che il completamento bayesiano dei minuti
+    legge come il numero di eventi del Poisson composto dell'esposizione.
 
     Each conceded shot carries a charge (``_charge_of_shot``) that is split across
     the outfielders on the pitch in proportion to their presence in the zone it
@@ -3483,7 +3546,7 @@ def defensive_exposure(match_ids, minutes: dict) -> dict:
         # stored already mirrored into the DEFENDING side's frame
         conceded[(mid, side)].append((minute, (4 - int(col), 3 - int(row)), charge))
     if not conceded:
-        return {}
+        return ({}, {}) if with_counts else {}
 
     appearances = {(a["match_id"], a["player_id"]): (a["side"], a["is_starter"])
                    for a in MatchAppearance.objects.filter(match_id__in=match_ids)
@@ -3517,6 +3580,7 @@ def defensive_exposure(match_ids, minutes: dict) -> dict:
 
     opposite = {"home": "away", "away": "home"}
     out: dict = {}
+    counts: dict = {}
     for (mid, shooting_side), shots in conceded.items():
         defending = opposite.get(shooting_side)
         squad = squads.get((mid, defending))
@@ -3531,7 +3595,8 @@ def defensive_exposure(match_ids, minutes: dict) -> dict:
             for pid, v in on_pitch:
                 if v:
                     out[(mid, pid)] = out.get((mid, pid), 0.0) + v / total * charge
-    return out
+                    counts[(mid, pid)] = counts.get((mid, pid), 0) + 1
+    return (out, counts) if with_counts else out
 
 
 def on_pitch_goal_difference(match_ids, minutes: dict) -> dict:
@@ -4133,7 +4198,7 @@ def voto_puro_for_match(match, reference: dict,
     """
     totals = _per_match_player_totals([match.id])
     minutes = _minutes_map([match.id])
-    exposure = defensive_exposure([match.id], minutes)
+    exposure, exposure_n = defensive_exposure([match.id], minutes, with_counts=True)
     gd_on = on_pitch_goal_difference([match.id], minutes)
     ga_on = on_pitch_goals_against([match.id], minutes)
     roles = current_role_map()
@@ -4155,12 +4220,12 @@ def voto_puro_for_match(match, reference: dict,
     assist_mean = goal_impact.role_mean_assist_credit()
     goal_credit_detail = goal_impact.goals_by_player(match)
     goal_band, goal_p95 = goal_impact.fixed_band()
-    goal_credit = {
-        pid: goal_impact.goal_credit(goal_impact.importances_of(recs),
-                                     goal_band, goal_p95)
-        for pid, recs in goal_credit_detail.items()}
+    # DALL'08/10/2026 un quarto del credito e' MERITO (la conclusione per il gol,
+    # l'occasione servita per l'assist): v. goal_impact.goal_credit_for.
+    goal_credit = {pid: goal_impact.goal_credit_for(recs, goal_band, goal_p95)
+                   for pid, recs in goal_credit_detail.items()}
     goal_mean = goal_impact.role_mean_credit()
-    assist_credit = {pid: goal_impact.assist_credit(recs, assist_band, goal_p95)
+    assist_credit = {pid: goal_impact.assist_credit_for(recs, assist_band, goal_p95)
                      for pid, recs in assist_detail.items()}
     # the DETAILS, not just the magnitudes: the explanation has to be able to say
     # which sending-off and which kind of own goal produced the drop it reports
@@ -4175,8 +4240,15 @@ def voto_puro_for_match(match, reference: dict,
     # minuti (v. services/bayesian_completion) aggiorna con questi il tasso atteso
     # di chi non ha finito la partita. Non sono il credito (quello e' sopra).
     from vfoot.services import bayesian_completion as bayes
+    from vfoot.services import keeper_channel
     event_counts = {pid_: (g or 0, a or 0) for pid_, g, a in MatchAppearance.objects
                     .filter(match_id=match.id).values_list("player_id", "goals", "assists")}
+    # IL CANALE DEL PORTIERE (dall'08/10/2026): tiro per tiro, non un indice. Il
+    # dettaglio e' calcolato una volta per partita e viaggia nel payload, cosi' la
+    # spiegazione e la mappa delle parate leggono gli stessi numeri del voto.
+    keeper_details = keeper_channel.details_for_matches(
+        [match.id], minutes, totals,
+        keepers={pid_ for pid_, gk in keepers.items() if gk})
 
     results = []
     for (mid, pid), feats in totals.items():
@@ -4199,15 +4271,27 @@ def voto_puro_for_match(match, reference: dict,
         rated = (is_rated(mins, feats) or pid in forcing or pid in always_rate
                  or feats.get("penalties_won", 0.0) > 0
                  or feats.get("penalties_conceded", 0.0) > 0)
-        if bayes.is_active(ref_key):
-            # IL COMPLETAMENTO BAYESIANO DEI MINUTI (dall'11/09/2026): i totali NON
-            # proiettati, e i minuti mancanti li tratta il modello. Restituisce il
-            # voto di merito gia' calibrato; il resto della catena e' identico.
+        sigma = 0.0
+        keeper_detail = None
+        if role == Player.ROLE_GK and (mid, pid) in keeper_details:
+            # IL CANALE DEL PORTIERE: la somma dei tiri affrontati, delle uscite e
+            # degli errori, completata per i minuti non visti (v. keeper_channel).
+            keeper_detail = keeper_details[(mid, pid)]
+            raw = max(VOTE_MIN, min(VOTE_MAX, keeper_channel.vote_for(keeper_detail)))
+            idx = keeper_detail["value"]
+        elif bayes.is_active(ref_key):
+            # IL COMPLETAMENTO BAYESIANO DEI MINUTI (dall'11/09/2026, rifatto
+            # l'08/10/2026): i totali NON proiettati, e i minuti mancanti li tratta
+            # il modello. Restituisce il voto di merito gia' calibrato; il resto
+            # della catena e' identico. ``sigma`` e' quanto resta da vedere, e lo
+            # stadio finale lo integra.
             g_n, a_n = event_counts.get(pid, (0, 0))
-            bayesian = bayes.index_vote(ref_key, raw_feature_values(feats, 90, exp),
-                                        mins, g_n, a_n, reference)
+            values = raw_feature_values(feats, 90, exp)
+            values[EXPOSURE_COUNT_KEY] = float(exposure_n.get((mid, pid), 0))
+            bayesian = bayes.index_vote(ref_key, values, mins, g_n, a_n, reference)
             raw = bayesian["vote"]
             idx = bayesian["index"]
+            sigma = bayesian["sigma"]
         else:
             raw = _raw_vote_from_index(idx, ref_key, mins, reference, spread_k, obs)
         # I GOL, in punti di voto e PRIMA della mitigazione: sono merito, quindi
@@ -4248,7 +4332,7 @@ def voto_puro_for_match(match, reference: dict,
         # accettazione, con la produzione mezzo punto sopra il modello su un voto
         # ogni sette.
         pre_scala = pieno
-        pieno, scala = scale_saturation(pieno, ref_key)
+        pieno, scala = scale_saturation(pieno, ref_key, sigma)
         voto = (_round_half(max(VOTE_MIN, min(VOTE_MAX, pieno)))
                 if rated else None)
         results.append({
@@ -4297,6 +4381,15 @@ def voto_puro_for_match(match, reference: dict,
             # mostrarla come riga a se' (provato l'11/09/2026) faceva leggere una
             # doppietta come «+2,86» e una tassa «−1,45», ed e' stato respinto.
             "voto_pre_scala": pre_scala,
+            # Quanto resta da vedere (larghezza della predittiva, zero a partita
+            # intera): la spiegazione deve integrare lo stadio come il voto.
+            "predictive_sigma": sigma,
+            # Quanti tiri subiti l'hanno caricato: il conteggio del Poisson
+            # composto dell'esposizione, che la spiegazione deve ripassare al
+            # completamento per tornare col voto.
+            "exposure_events": exposure_n.get((mid, pid), 0),
+            # Il canale del portiere, tiro per tiro (None per il movimento).
+            "keeper_detail": keeper_detail,
             "scale_factor": scala,
             "scale_base": (
                 ROLE_SATURATION[ref_key][1]

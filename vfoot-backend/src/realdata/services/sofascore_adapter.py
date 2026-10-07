@@ -274,6 +274,23 @@ def _norm_point(x: Any, y: Any, side: str, flip_away: bool) -> tuple[float, floa
     return min(1.0, max(0.0, nx)), min(1.0, max(0.0, ny))
 
 
+def shot_distance_m(coords: Any) -> float | None:
+    """Metri dalla porta ATTACCATA, dalle ``playerCoordinates`` della mappa dei
+    tiri: x e' la distanza lungo il campo in percento (0 = linea di porta
+    avversaria), y la posizione in larghezza (50 = asse della porta). Campo 105 x
+    68 come il resto del modello. None senza coordinate: nessuna distanza e'
+    meglio di una inventata, e il canale del portiere la tratta come «da
+    lontano quanto la media»."""
+    try:
+        x, y = _point_xy(coords)
+        x, y = float(x), float(y)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(x) or math.isnan(y):
+        return None
+    return round(math.hypot(x * 1.05, (y - 50.0) * 0.68), 2)
+
+
 def _shot_point_xy(coords: Any) -> tuple[Any, Any]:
     """Shot coordinates, brought into the SAME frame as the heatmap.
 
@@ -884,6 +901,8 @@ def _ingest_match(
                              if isinstance(shot.get("timeSeconds"), (int, float))
                              else None),
             xg=_num(shot.get("xg")), xgot=_num(shot.get("xgot")),
+            # La distanza dalla porta, per il canale del portiere (v. MatchShot).
+            distance_m=shot_distance_m(coords),
             is_goal=(str(shot.get("shotType") or "").lower() == "goal"),
             shot_type=str(shot.get("shotType") or "")[:24],
             # Play type (penalty/set-piece/…); a missed penalty needs it (see MatchShot).

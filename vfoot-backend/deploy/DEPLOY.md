@@ -413,6 +413,38 @@ nessun worker registrato.
 
 ## Deployare il CALCOLO DEI VOTI — la parte che i sei passi sopra non coprono
 
+**Dall'08/10/2026 (revisione della sosta, rilascio 1.17) ci sono due passi in più,
+e vanno fatti in quest'ordine subito dopo `migrate`:**
+
+```sh
+# la colonna nuova (0030, nullable) la crea migrate; la riempie questo, dalla cache
+# delle mappe dei tiri che il server ha già (nessuna richiesta di rete)
+manage.py backfill_shot_seconds --season 1     # 25-26
+manage.py backfill_shot_seconds --season 2     # 26-27
+```
+
+Senza, `MatchShot.distance_m` resta nullo e il canale del portiere tratta ogni gol
+come partito da 16 metri: i voti dei portieri sarebbero sbagliati in silenzio. Poi
+`cache.clear()` sulla FileBasedCache come per ogni cambio del voto.
+
+**Il comando va letto, non solo lanciato.** Le ultime due righe sono il controllo:
+`tiri senza coordinate nella mappa` (l'unico motivo legittimo di una distanza che
+manca) e `tiri della stagione senza distanza dopo il passaggio`, che deve essere
+**0**. Atteso al deploy della 1.17 (contato sul server il 08/10, mappe in cache per
+tutte le partite giocate):
+
+```
+--season 1:  shotmap lette: 380/380 (mancanti: 0)   tiri aggiornati: 9381   ... 0 su 9381
+--season 2:  shotmap lette: 50/50 (mancanti: 0)     tiri aggiornati: 1457   ... 0 su 1457
+```
+
+Una `mancante` è una partita giocata senza mappa in cache, e va capita prima di
+andare avanti. Poi, a cache svuotata, il confronto tiro per tiro e presenza per
+presenza con la copia locale del DB di produzione:
+`experiments-revisione-sosta/build/confronto_post_deploy.py` (istruzioni in testa al
+file) deve chiudere con `TUTTO COINCIDE`: stessa impronta, 0 distanze diverse su
+10.838 tiri, 0 voti diversi sulle 1.442 presenze delle giornate 1-5.
+
 **Scritto l'11/08/2026 perché quel giorno il deploy era formalmente corretto e i voti
 in produzione erano diversi da quelli in locale.** Impronte del modello identiche,
 codice identico, e 350 presenze con un ruolo diverso più 218 con un voto diverso su

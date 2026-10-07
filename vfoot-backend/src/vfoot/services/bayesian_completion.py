@@ -13,31 +13,59 @@ sul tasso medio del ruolo. L'osservazione aggiorna il tasso (chi ha fatto molto 
 poco ne ha uno alto, ma la prior lo frena quanto piu' i minuti sono pochi), e i
 minuti mancanti si completano con la DISTRIBUZIONE predittiva del conteggio
 finale: la feature che entra nell'indice e' la media di ``z(x + Y)`` sotto quella
-distribuzione, ``Y`` binomiale negativa. A 90 minuti ``Y`` e' zero e tutto
-coincide col voto di partita intera; a zero minuti il completamento e' esattamente
-l'ancora neutra (il valore che lo stadio finale porta a 6), che la calibrazione del
-ruolo qui sotto sposta poi di ``delta_c`` — circa -0,2 per un difensore: di chi non
-si e' visto niente il modello tarato dice 5,7-5,8, non 6. Le grandezze continue
-(xG, xA, esposizione, indice difensivo) si completano col loro tasso medio, senza
-distribuzione.
+distribuzione, ``Y`` binomiale negativa.
 
-Sopra il completamento stanno i PESI e una CALIBRAZIONE per ruolo (centro e
-scala affini), cercati sulle giornate dispari 2025-26 col vincolo che zeri e
-segni restassero quelli del modello precedente — e' la soluzione ``constrained``
-di ``experiments-voto-minutaggi/sign_rule_effect.py``, misurata fuori campione
-sulle giornate pari e sulle prime tre della 2026-27 (artifact «Il Bayesiano
-vincolato»). I pesi vivono nelle tabelle di ``classic_rating`` come sempre; qui
-stanno prior, dispersioni e calibrazione, in ``data/bayesian_completion.json``.
+DALLA REVISIONE DELLA SOSTA (ottobre 2026, schema 3) la struttura e' quella che
+NON PUO' derivare, per costruzione e per qualunque peso:
 
-IL MODELLO E' TARATO SU UNA REFERENCE PRECISA. Medie, dispersioni e scale della
-reference congelata sono INGRESSI della taratura: la calibrazione affine le ha
-assorbite. Per questo l'artifact pinna l'impronta dei pesi con cui la reference
-fu calibrata e lo sha del file: chi ricalibra la reference o tocca un peso deve
-rifare anche questa taratura, e ``check_pins`` lo dice.
+    V(t) = base_r + s_r * k_r(t) * SUM_k u_k w_k [ z_k(t) - z0_k ]  +  (1 - t) * c90_r + atteso
+
+* ``base_r`` e' COSTANTE nei minuti: spariscono la rampa, lo spostamento del
+  centro, la curva per minuto. Il ritorno verso la media di chi ha giocato poco
+  EMERGE dal completamento (ha 80 minuti di prior), non da una correzione;
+* ``z0_k`` e' la media predittiva A PRIORI della feature, calcolata dal modello
+  coi pesi correnti e non letta da una reference: a zero minuti ogni voce vale
+  esattamente zero, in media vale zero a ogni t (martingala), a 90 minuti e'
+  l'indice meno la sua media;
+* le grandezze CONTINUE (esposizione, xA, sga_post) sono Poisson COMPOSTI: eventi
+  a tasso incerto — tiri subiti nelle proprie zone, passaggi chiave, tiri — per la
+  MARCA del singolo gesto (quota di carica, xA del passaggio, xGOT-xG del tiro),
+  e il neutro e' l'attesa di z sulla predittiva, non z della media (Jensen: la
+  compressione e' concava, e valutare z sulla media sovrastimava di 2-5 centesimi
+  a prior corretto). Il valore difensivo ha incrementi gaussiani indipendenti;
+* le DISPERSIONI sono per (ruolo, grandezza): quelle per famiglia erano sbagliate
+  di un fattore 2 nei due sensi secondo il ruolo;
+* ``k_r(t) = 1 + (1 - t) q / (1 + q t)`` e' il FATTORE COMUNE: ogni voce da sola e'
+  tarata (pendenza ~1 del voto a 90' su quello al minuto m), il totale no, perche'
+  in una buona giornata un giocatore va bene su molte cose insieme e il
+  completamento voce per voce non usa il passaggio riuscito per prevedere il
+  contrasto che verra'. Un parametro per ruolo, stimato senza giudici (q ~ 0,25
+  per tutti e tre), k(1) = 1;
+* lo STADIO FINALE della scala va DENTRO l'attesa (v. ``predictive_sigma`` e
+  ``classic_rating.scale_saturation``): comprime sopra il centro, quindi la media
+  dei voti finali scende man mano che la dispersione cresce coi minuti — anche
+  con un completamento perfetto. Il voto giusto al minuto m e' E[stadio(V90) |
+  visto], con predittiva gaussiana di larghezza sigma_r * sqrt(1 - t).
+
+E l'ESPRESSIVITA': ``s_r`` non minimizza piu' l'errore contro un giudice rumoroso
+(la scala che minimizza l'errore e' correlazione x rapporto delle dispersioni: uno
+schiacciamento da regressione, 0,56-0,68). E' la scala precedente per 1,4, che
+porta la dispersione del voto a quella dei giudici e riempie i 5 e i 4,5 senza
+perdere accordo; ``base_r`` e' risolta perche' la media a 90' di ogni ruolo non si
+muova. La misura e' in experiments-revisione-sosta/PROPOSTA_10-10.md.
+
+Sopra il completamento stanno i PESI (tabelle di ``classic_rating``) e la
+calibrazione per ruolo qui sotto, in ``data/bayesian_completion.json``.
+
+IL MODELLO E' TARATO SU UNA REFERENCE PRECISA. Scale delle feature e dispersioni
+della reference congelata sono INGRESSI della taratura. Per questo l'artifact pinna
+l'impronta dei pesi con cui la reference fu calibrata e lo sha del file: chi
+ricalibra la reference o tocca un peso deve rifare anche questa taratura, e
+``check_pins`` lo dice.
 
 Tutto quel che segue l'indice — credito gol/assist, mitigazione, disciplina,
-saturazione — e' quello di ``classic_rating`` e non e' toccato. Il portiere non
-passa di qui.
+saturazione — e' quello di ``classic_rating``. Il portiere non passa di qui: ha il
+suo canale (``keeper_channel``).
 """
 from __future__ import annotations
 
@@ -52,20 +80,24 @@ from django.conf import settings
 
 from realdata.models import Player
 from vfoot.services import classic_rating as cr
-from vfoot.services import goal_impact
 
 log = logging.getLogger(__name__)
 
 ARTIFACT_PATH = Path(settings.BASE_DIR) / "vfoot" / "data" / "bayesian_completion.json"
+SCHEMA_VERSION = 3
 OUTFIELD = (Player.ROLE_DEF, Player.ROLE_MID, Player.ROLE_FWD)
-# Le grandezze che NON sono conteggi: si completano col tasso medio, senza
-# distribuzione. L'indice difensivo e' un valore atteso normalizzato, xG e xA
-# sono somme di probabilita', sga_post e' una differenza con segno, l'esposizione
-# un pericolo atteso.
+# Le grandezze che NON sono conteggi.
 CONTINUOUS = frozenset({"defensive_value", "expected_assists", "xg_shots", "sga_post",
                         cr.EXPOSURE_KEY})
-# Quattro famiglie di dispersione condivise (Var(lambda)/mu^2), stimate una volta:
-# un conteggio raro e uno frequente non hanno la stessa incertezza sul tasso.
+# I Poisson composti: la grandezza e il CONTEGGIO degli eventi che la generano,
+# come lo porta ``raw_feature_values`` (l'esposizione ha il suo, ``_n_exposure``,
+# che il calcolo dell'esposizione restituisce accanto alla carica).
+COMPOUND_COUNT_OF = {cr.EXPOSURE_KEY: cr.EXPOSURE_COUNT_KEY,
+                     "expected_assists": "key_passes",
+                     "sga_post": "shots"}
+GAUSSIAN = frozenset({"defensive_value"})
+# Quattro famiglie di dispersione condivise: il RIPIEGO per una grandezza che non
+# ha una dispersione per ruolo (evento raro, stimatore dei momenti instabile).
 CIRCULATION = frozenset({"touches", "passes_completed", "long_balls_completed",
                          "errors_bad_passes"})
 DECISIVE = frozenset({"shots", "shots_on_target", "shots_blocked", "clearances_off_line",
@@ -74,6 +106,10 @@ DECISIVE = frozenset({"shots", "shots_on_target", "shots_blocked", "clearances_o
 # Massa di probabilita' trascurata nella somma predittiva.
 TAIL = 1e-11
 _MAX_TERMS = 20000
+# I nodi delle quadrature: Gamma per le marche positive (quantili equispaziati),
+# Gauss-Hermite per quelle con segno e per la gaussiana.
+_GAMMA_Q = (np.arange(24) + 0.5) / 24.0
+_GH_X, _GH_W = np.polynomial.hermite.hermgauss(15)
 
 
 def family(key: str) -> str:
@@ -93,8 +129,8 @@ _neutral: dict[tuple[str, str], float] = {}
 
 
 def artifact() -> dict | None:
-    """Prior, dispersioni e calibrazione, letti una volta. ``None`` se il file
-    manca: allora il voto torna al modello precedente, e lo dice."""
+    """Prior, dispersioni, marche e calibrazione, letti una volta. ``None`` se il
+    file manca: allora il voto torna al modello precedente, e lo dice."""
     global _artifact, _artifact_loaded
     if _artifact_loaded:
         return _artifact
@@ -104,7 +140,7 @@ def artifact() -> dict | None:
                   "col modello precedente (proiezione a 90 e attenuazione).")
         return None
     data = json.loads(ARTIFACT_PATH.read_text())
-    if data.get("schema_version") != 2:
+    if data.get("schema_version") != SCHEMA_VERSION:
         log.error("bayesian_completion.json ha uno schema sconosciuto (%s): ignorato.",
                   data.get("schema_version"))
         return None
@@ -151,40 +187,36 @@ def check_pins(data: dict | None = None) -> list[str]:
 
 def is_active(ref_key: str) -> bool:
     """Il completamento vale per i tre ruoli di movimento con un artifact valido.
-    Il portiere e la scala aggregata (giocatore senza ruolo) restano al modello
-    precedente, che per loro non e' mai stato ritarato."""
+    Il portiere ha il suo canale; la scala aggregata (giocatore senza ruolo)
+    resta al modello precedente, che per lei non e' mai stata ritarata."""
     return ref_key in OUTFIELD and artifact() is not None
 
 
-def calibration(ref_key: str) -> tuple[float, float, float]:
-    """``(delta_c, scala, ancora)``: V = ancora + delta_c + scala * (V_indice - ancora)."""
+def calibration(ref_key: str) -> tuple[float, float]:
+    """``(base, scala)``: V = base + scala * k(t) * evidenza + credito atteso.
+
+    ``base`` e' il voto di merito (pre-stadio) di chi ha fatto ESATTAMENTE la
+    media a priori del ruolo, a qualunque minuto; ``scala`` e' s_r."""
     c = (artifact() or {}).get("calibration", {}).get(ref_key)
-    anchor = cr.neutral_pre_scale(ref_key)
     if not c:
-        return 0.0, 1.0, anchor
-    return float(c["delta_c"]), float(c["scale"]), anchor
+        return cr.neutral_pre_scale(ref_key), 1.0
+    return float(c["base"]), float(c["scale"])
 
 
-def centre_shift(ref_key: str, t: float) -> float:
-    """Di quanto la calibrazione sposta il centro per QUESTA frazione di partita.
+def common_factor(ref_key: str, t: float) -> float:
+    """k(t) = 1 + (1 - t) q / (1 + q t): quanto lo scostamento visto al minuto m
+    dice del resto della partita. k(1) = 1."""
+    q = float((artifact() or {}).get("common_factor", {}).get(ref_key, 0.0))
+    if q <= 0:
+        return 1.0
+    return 1.0 + (1.0 - t) * q / (1.0 + q * t)
 
-    ``delta_c`` e' la correzione di livello del voto costruito sull'evidenza; la
-    forma in ``calibration.shape`` dice quanta ne spetta a chi ha giocato ``t``:
-    ``constant`` la applica intera a tutti (ancora compresa), ``smoothstep``
-    la fa partire da zero a zero minuti — cosi' l'ancora neutra resta 6 — e la
-    porta per intero da ``tau`` in su senza gomiti."""
-    delta_c, _scale, _anchor = calibration(ref_key)
-    c = (artifact() or {}).get("calibration", {}).get(ref_key) or {}
-    shape = c.get("shape", "constant")
-    if shape == "constant":
-        return delta_c
-    tau = float(c.get("tau", 1.0))
-    u = min(max(t / tau, 0.0), 1.0)
-    if shape == "smoothstep":
-        return delta_c * (3 * u * u - 2 * u ** 3)
-    if shape == "ramp":
-        return delta_c * u
-    raise ValueError("forma della calibrazione sconosciuta: %r" % shape)
+
+def predictive_sigma(ref_key: str, t: float) -> float:
+    """La larghezza della predittiva del voto pre-stadio a 90' dato quel che si e'
+    visto fino a t: sigma_r * sqrt(1 - t). Zero a partita intera."""
+    s = float((artifact() or {}).get("predictive_sigma", {}).get(ref_key, 0.0))
+    return s * math.sqrt(max(0.0, 1.0 - t))
 
 
 def _prior(ref_key: str) -> dict:
@@ -195,8 +227,23 @@ def prior_rate(ref_key: str, key: str) -> float:
     return float((_prior(ref_key).get("raw") or {}).get(key, 0.0))
 
 
-def dispersion(key: str) -> float:
-    return float((artifact() or {}).get("dispersions", {}).get(family(key), 0.0))
+def dispersion(key: str, ref_key: str | None = None) -> float:
+    """Var(lambda)/mu^2 di QUESTA grandezza per QUESTO ruolo; la famiglia e' il
+    ripiego per chi non ha una stima propria."""
+    art = artifact() or {}
+    if ref_key:
+        own = (art.get("dispersions_by_role", {}).get(ref_key) or {}).get(key)
+        if own is not None:
+            return float(own)
+    return float(art.get("dispersions", {}).get(family(key), 0.0))
+
+
+def mark(ref_key: str, key: str) -> dict:
+    """La marca del singolo gesto per un Poisson composto: {rate, c, m1, var,
+    floor} — tasso degli eventi per 90, sua dispersione, media e varianza della
+    marca, fondo per 90 (la parte della grandezza che non passa per un evento
+    contato, come la xA senza passaggio chiave)."""
+    return (artifact() or {}).get("marks", {}).get(ref_key, {}).get(key) or {}
 
 
 # ---------------------------------------------------------------- la predittiva
@@ -259,24 +306,102 @@ def _z_vec(key: str, values: np.ndarray, scales: dict) -> np.ndarray:
     return mu + np.where(d >= 0, d, credit * d)
 
 
-def completed_z(ref_key: str, key: str, value: float, t: float, scales: dict) -> float:
+def _expected_z_over(key: str, scales: dict, base: float, mean: float, var: float,
+                     positive: bool) -> float:
+    """E[z(base + Y)] con Y di media e varianza date: Gamma se positiva, Normale
+    altrimenti. A varianza nulla e' z della media."""
+    if var <= 1e-14:
+        return float(_z_vec(key, np.array([base + mean]), scales)[0])
+    if positive and mean > 0:
+        shape = mean * mean / var
+        x, w = _gamma_rule(shape)
+        return float(w @ _z_vec(key, base + (var / mean) * x, scales))
+    y = mean + math.sqrt(2 * var) * _GH_X
+    return float((_GH_W * _z_vec(key, base + y, scales)).sum() / math.sqrt(math.pi))
+
+
+_GAMMA_RULES: dict[float, tuple[np.ndarray, np.ndarray]] = {}
+_GAMMA_NODES = 16
+
+
+def _gamma_rule(shape: float) -> tuple[np.ndarray, np.ndarray]:
+    """Nodi e pesi (normalizzati a 1) per E[g(X)] con X ~ Gamma(shape, 1): la
+    quadratura di Gauss-Laguerre generalizzata, dal problema agli autovalori
+    della matrice di Jacobi (Golub-Welsch). Esatta sui polinomi fino al grado
+    2n - 1, senza scipy, e valida anche per shape < 1. Le forme si arrotondano
+    al millesimo per riusare la regola: il costo e' un eigh 16x16."""
+    k = round(max(shape, 1e-3), 3)
+    rule = _GAMMA_RULES.get(k)
+    if rule is None:
+        alpha = k - 1.0
+        n = _GAMMA_NODES
+        i = np.arange(n, dtype=float)
+        diag = 2 * i + alpha + 1
+        off = np.sqrt(i[1:] * (i[1:] + alpha))
+        jac = np.diag(diag) + np.diag(off, 1) + np.diag(off, -1)
+        vals, vecs = np.linalg.eigh(jac)
+        rule = (np.maximum(vals, 0.0), vecs[0] ** 2)
+        if len(_GAMMA_RULES) > 4096:
+            _GAMMA_RULES.clear()
+        _GAMMA_RULES[k] = rule
+    return rule
+
+
+def compound_z(ref_key: str, key: str, value: float, n_seen: float, t: float,
+               scales: dict) -> float:
+    """E[z(visto + somma delle marche degli eventi che mancano)].
+
+    Eventi mancanti N ~ binomiale negativa (tasso a posteriori dagli eventi
+    VISTI, non dal valore); somma delle marche | N >= 1 ai primi due momenti,
+    Gamma se la marca e' positiva (esposizione, xA), Normale se ha segno
+    (sga_post); atomo in N = 0. Il valore difensivo e' un processo a incrementi
+    gaussiani: Normale(h mu, h var)."""
+    h = 1.0 - t
+    p = mark(ref_key, key)
+    if key in GAUSSIAN:
+        if not p:
+            return float(_z_vec(key, np.array([value]), scales)[0])
+        return _expected_z_over(key, scales, value, h * float(p.get("mu", 0.0)),
+                                h * float(p.get("var", 0.0)), False)
+    if not p or h <= 1e-12:
+        return float(_z_vec(key, np.array([value]), scales)[0])
+    base = value + h * float(p.get("floor", 0.0))
+    mu, c = float(p["rate"]), max(float(p["c"]), 1e-6)
+    a = 1.0 / c + n_seen
+    lam = (mu + c * mu * n_seen) / (1 + c * mu * t)
+    en = h * lam
+    vn = en + en * en / a
+    p0 = (a / (a + en)) ** a                       # P(nessun altro evento)
+    if p0 > 1 - 1e-9:
+        return float(_z_vec(key, np.array([base]), scales)[0])
+    en1 = en / (1 - p0)
+    en2 = (vn + en * en) / (1 - p0)
+    m1, v = float(p["m1"]), float(p["var"])
+    mean = en1 * m1
+    var = en1 * v + (en2 - en1 * en1) * m1 * m1
+    z0 = float(_z_vec(key, np.array([base]), scales)[0])
+    return p0 * z0 + (1 - p0) * _expected_z_over(key, scales, base, mean, var,
+                                                 key != "sga_post")
+
+
+def completed_z(ref_key: str, key: str, value: float, t: float, scales: dict,
+                n_seen: float = 0.0) -> float:
     """La feature come entra nell'indice: osservato piu' completamento predittivo."""
-    mu = prior_rate(ref_key, key)
+    if key in COMPOUND_COUNT_OF or key in GAUSSIAN:
+        return compound_z(ref_key, key, value, n_seen, t, scales)
     if key in CONTINUOUS:
-        return cr.scored_z(key, value + (1.0 - t) * mu, scales)
-    return expected_transform(lambda v: _z_vec(key, v, scales), value, t, mu, dispersion(key))
+        return cr.scored_z(key, value + (1.0 - t) * prior_rate(ref_key, key), scales)
+    return expected_transform(lambda v: _z_vec(key, v, scales), value, t,
+                              prior_rate(ref_key, key), dispersion(key, ref_key))
 
 
 def neutral_z(ref_key: str, key: str, scales: dict) -> float:
-    """La stessa feature per chi non ha giocato un minuto: tutto completamento."""
+    """La stessa feature per chi non ha giocato un minuto: tutto completamento.
+    E' la media predittiva A PRIORI di z, calcolata dal modello: il neutro di ogni
+    voce, a ogni minuto."""
     cache_key = (ref_key, key)
     if cache_key not in _neutral:
-        mu = prior_rate(ref_key, key)
-        if key in CONTINUOUS:
-            _neutral[cache_key] = cr.scored_z(key, mu, scales)
-        else:
-            _neutral[cache_key] = expected_transform(
-                lambda v: _z_vec(key, v, scales), 0.0, 0.0, mu, dispersion(key))
+        _neutral[cache_key] = completed_z(ref_key, key, 0.0, 0.0, scales, 0.0)
     return _neutral[cache_key]
 
 
@@ -296,9 +421,10 @@ def _gain_parts(ref_key: str, reference: dict) -> tuple[float, float, float]:
 
 
 def unit_for(ref_key: str, key: str, reference: dict) -> float:
-    """Punti di voto (prima della calibrazione) per un punto di indice di questa
-    voce. E' la scala della partita intera: i fatti osservati portano in piu' la
-    quota che il voto non attenua (UNSHRUNK_FEATURES), come a 90 minuti."""
+    """Punti di voto (prima della scala del ruolo) per un punto di indice di questa
+    voce. E' la scala della partita intera del modello precedente, conservata
+    perche' la calibrazione e' stata risolta su di lei: i fatti osservati portano
+    la quota in piu' che il voto non attenuava (UNSHRUNK_FEATURES)."""
     gain, u90, obs_scale = _gain_parts(ref_key, reference)
     return gain * (u90 + (obs_scale if key in cr.UNSHRUNK_FEATURES else 0.0))
 
@@ -308,47 +434,40 @@ def rate_unit(ref_key: str, reference: dict) -> float:
     return gain * u90
 
 
-def intercept(ref_key: str, reference: dict) -> float:
-    """Il voto di partita intera a indice zero: la stessa costante di
-    ``_raw_vote_from_index`` a 90 minuti, scritta a parte."""
-    r = reference.get(ref_key) or {}
-    gain, u90, obs_scale = _gain_parts(ref_key, reference)
-    return cr.vote_center_for(ref_key) - gain * (
-        u90 * (r.get("mean", 0.0) + cr.minute_shift(ref_key, 90, reference))
-        + obs_scale * ((r.get("observed_mean") or 0.0)
-                       + cr.minute_shift(ref_key, 90, reference,
-                                         "observed_by_minute", "observed_mean")))
-
-
 def evidence_terms(ref_key: str, values: dict, minutes: int,
                    scales: dict | None = None) -> dict:
-    """{voce: peso * (z completato - h * z neutro)}: cio' che i minuti VISTI hanno
-    aggiunto, voce per voce, rispetto a un giocatore di cui non si e' visto niente.
-    A 90 minuti e' ``peso * z`` come nell'indice di sempre."""
+    """{voce: peso * (z completato - z neutro)}: cio' che i minuti VISTI hanno
+    aggiunto, voce per voce, rispetto alla media a priori del ruolo. A 90 minuti
+    e' ``peso * (z - z0)``, cioe' l'indice di sempre meno la sua media."""
     if minutes <= 0:
         return {}
     scales = cr.feature_scales(gk=False) if scales is None else scales
     t = min(minutes, 90) / 90.0
-    h = 1.0 - t
     out = {}
     for key, w in weights_with_exposure(ref_key).items():
         if not w:
             continue
-        z = completed_z(ref_key, key, values.get(key, 0.0), t, scales)
-        if h > 0:
-            z -= h * neutral_z(ref_key, key, scales)
+        n_seen = float(values.get(COMPOUND_COUNT_OF.get(key, ""), 0.0) or 0.0)
+        z = completed_z(ref_key, key, values.get(key, 0.0), t, scales, n_seen)
+        z -= neutral_z(ref_key, key, scales)
         if z:
             out[key] = w * z
     return out
 
 
+def expected_credit_rate(ref_key: str) -> float:
+    """Il credito di gol e assist per 90 minuti del giocatore medio del ruolo, in
+    punti di voto: quel che i minuti NON visti valgono a priori."""
+    p = _prior(ref_key)
+    return float(p.get("goals", 0.0)) + float(p.get("assists", 0.0))
+
+
 def event_completion(ref_key: str, goals: float, assists: float, t: float) -> float:
-    """Il credito ATTESO per gol e assist nei minuti non giocati, oltre la prior:
+    """Il credito ATTESO per gol e assist nei minuti non giocati, OLTRE la prior:
     chi ha gia' segnato in mezz'ora ha un tasso a posteriori piu' alto e i minuti
     che gli mancano valgono un po' di piu'. Zero a partita intera e a zero minuti."""
     p = _prior(ref_key)
     means = (artifact() or {}).get("event_count_means", {}).get(ref_key) or {}
-    c = dispersion("goals")
     h = 1.0 - t
     if h <= 0:
         return 0.0
@@ -356,38 +475,35 @@ def event_completion(ref_key: str, goals: float, assists: float, t: float) -> fl
     for key, observed in (("goals", goals), ("assists", assists)):
         emu = float(means.get(key, 0.0))
         credit = float(p.get(key, 0.0))
-        post = posterior_rate(float(observed or 0), t, emu, c)
+        post = posterior_rate(float(observed or 0), t, emu, dispersion(key, ref_key))
         rate += credit * (post / emu if emu > 0 else 1.0) - credit
     return h * rate
 
 
-def base_index(ref_key: str, t: float, reference: dict) -> float:
-    """Il voto-indice di chi ha fatto esattamente la media: la costante di partita
-    intera pesata ``t`` e, per la frazione non vista, l'ancora neutra piu' la media
-    del credito gol/assist che il credito osservato (centrato) toglie subito dopo."""
-    old_mean = (goal_impact.role_mean_credit().get(ref_key, 0.0)
-                + goal_impact.role_mean_assist_credit().get(ref_key, 0.0))
-    return t * intercept(ref_key, reference) + (1.0 - t) * (cr.neutral_pre_scale(ref_key) + old_mean)
-
-
 def index_vote(ref_key: str, values: dict, minutes: int, goals: float, assists: float,
                reference: dict, scales: dict | None = None) -> dict:
-    """Il voto di merito PRIMA di credito gol, mitigazione, disciplina e stadio
-    finale, con la sua scomposizione. ``values`` sono ``raw_feature_values`` a 90
-    minuti, cioe' i totali NON proiettati: qui i minuti li tratta il modello."""
+    """Il voto di merito PRIMA di credito gol osservato, mitigazione, disciplina e
+    stadio finale, con la sua scomposizione. ``values`` sono ``raw_feature_values``
+    a 90 minuti, cioe' i totali NON proiettati: qui i minuti li tratta il modello.
+
+    ``credit_rest`` e' il credito atteso di gol e assist nei minuti non visti
+    (prior piu' aggiornamento), FUORI dalla scala del ruolo come lo e' il credito
+    osservato che ``voto_puro_for_match`` somma dopo."""
     scales = cr.feature_scales(gk=False) if scales is None else scales
     t = min(max(minutes, 0), 90) / 90.0
     terms = evidence_terms(ref_key, values, minutes, scales)
     units = {key: unit_for(ref_key, key, reference) for key in terms}
-    base = base_index(ref_key, t, reference)
+    evidence = sum(units[k] * v for k, v in terms.items())
+    base, scale = calibration(ref_key)
+    k = common_factor(ref_key, t)
+    merit = base + scale * k * evidence
     event = event_completion(ref_key, goals, assists, t)
-    v_index = base + event + sum(units[k] * v for k, v in terms.items())
-    delta_c, scale, anchor = calibration(ref_key)
-    shift = centre_shift(ref_key, t)
-    v = anchor + shift + scale * (v_index - anchor)
+    credit_rest = (1.0 - t) * expected_credit_rate(ref_key) + event
+    v = merit + credit_rest
     return {
         "vote": max(cr.VOTE_MIN, min(cr.VOTE_MAX, v)),
-        "unclamped": v, "v_index": v_index, "base_index": base, "event": event,
-        "terms": terms, "units": units, "index": sum(terms.values()),
-        "scale": scale, "delta_c": delta_c, "shift": shift, "anchor": anchor, "t": t,
+        "unclamped": v, "merit": merit, "base": base, "scale": scale, "k": k,
+        "evidence": evidence, "terms": terms, "units": units,
+        "index": sum(terms.values()), "event": event, "credit_rest": credit_rest,
+        "t": t, "sigma": predictive_sigma(ref_key, t),
     }

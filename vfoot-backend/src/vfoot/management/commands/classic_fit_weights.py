@@ -43,6 +43,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from realdata.models import Match, Player, PlayerTeamStint
 from realdata.services.identity import norm_name
+from vfoot.management.commands.compare_external_votes import _is_team_row
 from vfoot.services.classic_rating import (
     EXTRAP_FLOOR_MINUTES, MIN_MINUTES_REFERENCE, PER90_WEIGHTS, TOTAL_WEIGHTS,
     WEIGHTS, _compress, _minutes_map, _per_match_player_totals, build_reference,
@@ -225,7 +226,7 @@ class Command(BaseCommand):
             team = None
             for r in wb[sheet].iter_rows(values_only=True):
                 c0 = r[0]
-                if isinstance(c0, str) and norm_name(c0) in EXTERNAL_TEAMS:
+                if _is_team_row(r):
                     team = c0
                     continue
                 if not isinstance(c0, (int, float)) or c0 == "Cod.":

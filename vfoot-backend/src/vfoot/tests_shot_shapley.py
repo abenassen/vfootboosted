@@ -193,14 +193,17 @@ class ShotSectionAddsUpTests(TestCase):
 
     # -- il metro ----------------------------------------------------------
     def test_the_baseline_is_the_role_yardstick(self):
-        """Non è un residuo: è −(media di ruolo del blocco tiro), in punti di voto,
-        e si può ricalcolare da fuori."""
+        """Non è un residuo: è il blocco tiro di chi NON ha tirato, letto contro la
+        media a priori del ruolo (dall'08/10/2026 ogni voce è peso x (z − z0), v.
+        bayesian_completion): chi non conclude sta sotto il neutro per il credito
+        d'assenza, e il metro è negativo. La cache delle medie di ruolo va svuotata
+        prima: è per stagione e sopravvive alle fixture degli altri test, e con
+        quelle dentro il metro cambiava segno a seconda dell'ordine di esecuzione."""
+        from django.core.cache import cache
+        cache.clear()
         self._shots((10, "miss", 0.10, 0.0))
         d = shot_detail(self.match, self.player.id)
-        mean = get_role_averages(self.cs.id).get("ATT", {})
-        expected_sign = -sum(mean.get(k, 0.0) for k in _SHOT_FAMILY)
         self.assertLess(d["baseline"], 0.0)
-        self.assertLess(expected_sign, 0.0)
 
     def test_a_player_who_shot_less_than_his_peers_has_a_negative_line(self):
         """Il caso che rendeva illeggibile la tabella: riga negativa, tiro positivo."""

@@ -31,6 +31,7 @@ from realdata.models import (
     Match, MatchAppearance, MatchDisciplinaryEvent, MatchShot,
 )
 from realdata.services.identity import norm_name
+from vfoot.management.commands.compare_external_votes import _is_team_row
 from vfoot.management.commands.voto_puro_discrepancies import (
     Command as DiscCmd, EXTERNAL_TEAMS, _club_key,
 )
@@ -65,7 +66,7 @@ class Command(BaseCommand):
         team = None
         for r in wb["Fantacalcio"].iter_rows(values_only=True):
             c0 = r[0]
-            if isinstance(c0, str) and norm_name(c0) in EXTERNAL_TEAMS:
+            if _is_team_row(r):
                 team = c0
                 continue
             if not isinstance(c0, (int, float)) or c0 == "Cod.":

@@ -35,6 +35,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from realdata.models import Match, MatchAppearance, PlayerTeamStint
 from realdata.services.identity import norm_name
+from vfoot.management.commands.compare_external_votes import _is_team_row
 from vfoot.services.classic_pagella import (
     get_reference, get_role_averages, pagella_for_match,
 )
@@ -91,7 +92,7 @@ class Command(BaseCommand):
         out, team = [], None
         for r in ws.iter_rows(values_only=True):
             c0 = r[0]
-            if isinstance(c0, str) and norm_name(c0) in EXTERNAL_TEAMS:
+            if _is_team_row(r):
                 team = c0
                 continue
             if not isinstance(c0, (int, float)) or c0 == "Cod.":

@@ -32,6 +32,13 @@ def merit_vote(role, feats, minutes, reference, exposure=0.0, goals=0, assists=0
                                 minutes, reference)
 
 
+def merit_sigma(role, minutes):
+    """Quanto resta da vedere (v. bayesian_completion.predictive_sigma): lo stadio
+    finale lo integra, nel voto come nel pannello."""
+    from vfoot.services import bayesian_completion as bayes
+    return bayes.predictive_sigma(role, min(minutes, 90) / 90.0) if bayes.is_active(role) else 0.0
+
+
 class VoteExplanationTests(SimpleTestCase):
     # The scale of the real calibration (see vote_reference.json), so a fixture
     # vote means roughly what the same index would mean in production. Outfield
@@ -194,7 +201,8 @@ class VoteExplanationTests(SimpleTestCase):
                     # pannello con la formula senza quello stadio confronterebbe
                     # con un modello che non gira piu'.
                     row = _round_half(scale_saturation(
-                        merit_vote(role, feats, minutes, self.REFERENCE), role)[0])
+                        merit_vote(role, feats, minutes, self.REFERENCE), role,
+                        merit_sigma(role, minutes))[0])
                     self.assertEqual(e["voto"], row)
 
     def test_result_nudge_and_red_card_reconcile_and_are_named(self):
@@ -352,6 +360,9 @@ class VoteExplanationTests(SimpleTestCase):
         e = explain("ATT", feats, 25, reference, average, full=True, ledger=True)
 
         total = sum(t["points"] for t in e["all_terms"])
+        # Il credito atteso sui minuti non giocati e' una riga a livello di voto,
+        # non una feature: la somma delle voci la deve contare (dall'08/10/2026 sta
+        # fuori dalla scala del ruolo, come il credito osservato).
         comp = sum(c["points"] for c in e["contributions"] if c.get("kind") == "compression")
         self.assertAlmostEqual(e["base"] + total + comp, e["subtotal"], places=2)
         # e il resto e' davvero il resto

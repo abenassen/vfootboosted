@@ -203,9 +203,11 @@ class SaveSectionAddsUpTests(TestCase):
         self.assertGreater(imparabile, -0.1)
         self.assertLess(parabile, imparabile - 0.2)
 
-    def test_a_teammates_own_goal_is_counted_at_its_difficulty(self):
-        """Senza questo, la sezione perdeva esattamente OWN_GOAL_KEEPER_XGOT_DEFAULT
-        e lo nascondeva nel metro — che è come il difetto si è presentato."""
+    def test_a_teammates_own_goal_is_not_the_keepers(self):
+        """Dall'08/10/2026 il canale del portiere e' una somma sui tiri che LUI ha
+        affrontato (v. keeper_channel): l'autogol di un compagno non e' un tiro
+        affrontato, non sta nella mappa e non muove il voto. Il gol subito in quanto
+        tale lo paga il malus del fantavoto, come per tutti."""
         scorer = Player.objects.create(full_name="Difensore Sfortunato",
                                        short_name="Sfortunato", classic_role_seed="DIF")
         MatchAppearance.objects.create(
@@ -221,9 +223,7 @@ class SaveSectionAddsUpTests(TestCase):
         self._faced((12, "save", 0.30), (33, "save", 0.55), (55, "own", 0.0),
                     scorer=scorer)
         d = save_detail(self.match, self.keeper.id)
-        rows = {s["minute"]: s for s in d["saves"]}
-        self.assertEqual(rows[55]["outcome"], "autogol di un compagno")
-        self.assertAlmostEqual(rows[55]["xgot"], OWN_GOAL_KEEPER_XGOT_DEFAULT, places=3)
+        self.assertEqual([s["minute"] for s in d["saves"]], [12, 33])
         self.assertAlmostEqual(sum(s["points"] for s in d["saves"]) + d["baseline"],
                                d["total"], places=2)
         self.assertAlmostEqual(d["total"], self._summary_line(), delta=0.0051)

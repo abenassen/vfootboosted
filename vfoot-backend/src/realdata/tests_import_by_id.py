@@ -131,6 +131,32 @@ class ImportByIdTests(TestCase):
         self.assertEqual(match.appearances.count(), 3)
         self.assertTrue(PlayerZoneFeature.objects.filter(match=match).exists())
 
+    def test_an_imported_shot_carries_its_distance_from_goal(self):
+        """The keeper channel prices a goal by how far it was struck from
+        (``MatchShot.distance_m``); the importer must fill it from the shotmap's
+        ``playerCoordinates`` at import time, or every live match of the season
+        would be scored at the 16 m default until somebody ran the backfill."""
+        from realdata.models import MatchShot
+        self.client_.payloads[f"/api/v1/event/{MATCH_ID}/shotmap"] = {"shotmap": [
+            {"id": 901, "isHome": True, "time": 12, "timeSeconds": 700,
+             "player": {"id": 1, "name": "Primo", "shortName": "Primo"},
+             "xg": 0.3, "xgot": 0.5, "shotType": "save", "situation": "regular",
+             "playerCoordinates": {"x": 11.0 / 1.05, "y": 50.0}},
+            {"id": 902, "isHome": False, "time": 70, "timeSeconds": 4200,
+             "player": {"id": 3, "name": "Terzo", "shortName": "Terzo"},
+             "xg": 0.05, "xgot": 0.1, "shotType": "miss", "situation": "regular",
+             "playerCoordinates": {"x": 30.0, "y": 50.0}},
+        ]}
+        ingest_sofascore_matches(
+            scraper=self.client_, year="26/27", match_ids=[MATCH_ID],
+            only_finished=False, skip_existing=False, logger=lambda _m: None)
+        match = Match.objects.get(external_source=PROVIDER_SOFASCORE,
+                                  external_id=str(MATCH_ID))
+        by_id = {s.external_id: s for s in MatchShot.objects.filter(match=match)}
+        self.assertEqual(set(by_id), {"901", "902"})
+        self.assertAlmostEqual(by_id["901"].distance_m, 11.0, places=2)
+        self.assertAlmostEqual(by_id["902"].distance_m, 31.5, places=2)
+
     def test_only_finished_still_reads_the_status_from_the_event(self):
         """Finalization asks for a finished match; the per-id event is what answers,
         so the guard has to survive the change of route."""

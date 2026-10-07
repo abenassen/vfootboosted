@@ -21,6 +21,7 @@ after the voto puro, in the open, and the user can already see them.
 from __future__ import annotations
 
 from vfoot.services.classic_rating import (
+    EXPOSURE_COUNT_KEY,
     DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
     GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, scale_saturation,
     shrinkage_for, TOTAL_WEIGHTS,
@@ -745,7 +746,7 @@ def _all_terms(role: str, terms: dict, mean_terms: dict, unit_of,
             # the same for the AVERAGE player in this role — the yardstick, because
             # what explains a 6.5 rather than a 6 is only the departure from peers
             "index_avg": round(mean_terms.get(key, 0.0), 4),
-            "points": round((terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * unit_of(key), 3),
+            "points": round((terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * unit_of(key), 4),
         })
     # Left in the order of the weight tables — the same order the tuner spreadsheet
     # lists them in, so a row here can be found there. Callers that want the drivers
@@ -754,7 +755,7 @@ def _all_terms(role: str, terms: dict, mean_terms: dict, unit_of,
 
 
 def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0,
-           scales: dict | None = None) -> dict:
+           scales: dict | None = None, exposure_events: float = 0.0) -> dict:
     """Each feature's contribution to the index, before comparison to the role mean.
 
     Reads the feature values and the standardisation from ``classic_rating`` rather
@@ -776,8 +777,9 @@ def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0,
     # hanno aggiunto rispetto a chi non ha giocato. I totali entrano NON proiettati.
     from vfoot.services import bayesian_completion as bayes
     if not is_gk and bayes.is_active(role):
-        return bayes.evidence_terms(role, raw_feature_values(totals, 90, exposure),
-                                    minutes, scales)
+        values = raw_feature_values(totals, 90, exposure)
+        values[EXPOSURE_COUNT_KEY] = float(exposure_events or 0.0)
+        return bayes.evidence_terms(role, values, minutes, scales)
     values = raw_feature_values(totals, minutes, exposure, gk=is_gk)
     out = {}
     for key, w in weights.items():
@@ -830,7 +832,9 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
             full: bool = False,
             ledger: bool = False,
             red_detail: dict | None = None, own_goal_detail: dict | None = None,
-            assists: int = 0) -> dict:
+            assists: int = 0,
+            exposure_events: float = 0.0, predictive_sigma: float = 0.0,
+            keeper_detail: dict | None = None) -> dict:
     """Why this vote, decomposed so it ADDS UP to the vote.
 
     The vote is 6 + spread * shrink * (index - role_mean) / std. Every feature is
@@ -858,7 +862,17 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     enorme e una tassa misteriosa. RESPINTA dall'utente: la ripartizione
     proporzionale, che qui torna, e' quella che si legge.
     """
-    terms = _terms(role, totals, minutes, exposure)
+    if role == Player.ROLE_GK and keeper_detail is not None:
+        # IL PORTIERE (dall'08/10/2026) non e' un indice: e' una somma tiro per
+        # tiro, e la sua spiegazione e' quella somma, riga per riga.
+        return explain_keeper(keeper_detail, minutes, goal_adjustment=goal_adjustment,
+                              assist_adjustment=assist_adjustment,
+                              red_adjustment=red_adjustment,
+                              own_goal_adjustment=own_goal_adjustment,
+                              penalty_adjustment=penalty_adjustment,
+                              red_detail=red_detail, own_goal_detail=own_goal_detail,
+                              goal_detail=goal_detail, top=top, ledger=ledger)
+    terms = _terms(role, totals, minutes, exposure, exposure_events=exposure_events)
     ref = reference.get(role)
     if not terms or not ref or not ref.get("std"):
         return {"positives": [], "negatives": [], "contributions": [],
@@ -877,8 +891,11 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # pesata t. Il portiere resta al modello precedente.
     from vfoot.services import bayesian_completion as bayes
     bayesian = role != Player.ROLE_GK and bayes.is_active(role)
-    bd = (bayes.index_vote(role, raw_feature_values(totals, 90, exposure), minutes,
-                           goals, assists, reference) if bayesian else None)
+    bd = None
+    if bayesian:
+        _values = raw_feature_values(totals, 90, exposure)
+        _values[EXPOSURE_COUNT_KEY] = float(exposure_events or 0.0)
+        bd = bayes.index_vote(role, _values, minutes, goals, assists, reference)
     if bayesian:
         mean_terms = {k: bd["t"] * v for k, v in mean_terms.items()}
     # Lo stesso restringimento che applica il voto: quanto ha giocato. Scala ogni
@@ -901,7 +918,10 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     _pre = max(VOTE_MIN, min(VOTE_MAX, merit + goal_adjustment + assist_adjustment))
     _pre = max(VOTE_MIN, min(VOTE_MAX, _pre + result_nudge + red_adjustment
                              + own_goal_adjustment + penalty_adjustment))
-    _fin, scale_factor = scale_saturation(_pre, role)
+    # Lo stadio finale DENTRO L'ATTESA, come nel voto: ``predictive_sigma`` e'
+    # quanto resta da vedere (zero a partita intera, v. bayesian_completion).
+    _sigma = (bd["sigma"] if bayesian else float(predictive_sigma or 0.0))
+    _fin, scale_factor = scale_saturation(_pre, role, _sigma)
     scale_base = _fin - scale_factor * (_pre - vote_center_for(role))
     per_unit = scale_factor * spread_k_for(role) * weight / ref["std"]
     # I FATTI OSSERVATI HANNO LA LORO SCALA, perche' il voto li attenua MENO (v.
@@ -924,9 +944,10 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     unit_of = (lambda key: per_unit_obs if key in UNSHRUNK_FEATURES else per_unit)
     if bayesian:
         # Scala di partita intera per ogni voce (i fatti osservati con la loro quota
-        # in piu'), per la scala del ruolo e per la retta dello stadio finale.
-        per_unit = scale_factor * bd["scale"] * bayes.rate_unit(role, reference)
-        unit_of = (lambda key: scale_factor * bd["scale"]
+        # in piu'), per la scala del ruolo, per il fattore comune k(t) e per la
+        # retta dello stadio finale.
+        per_unit = scale_factor * bd["scale"] * bd["k"] * bayes.rate_unit(role, reference)
+        unit_of = (lambda key: scale_factor * bd["scale"] * bd["k"]
                    * bayes.unit_for(role, key, reference))
 
     points_by_key = {key: (terms.get(key, 0.0) - mean_terms.get(key, 0.0)) * unit_of(key)
@@ -938,6 +959,12 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # fine for an analysis page and wasteful in a match-detail API response.
     all_terms = (_all_terms(role, terms, mean_terms, unit_of, totals, minutes,
                             exposure) if full else [])
+    if full and bayesian and bd["event"]:
+        # Il credito atteso sui minuti non giocati sta nel registro COMPLETO anche
+        # quando e' sotto la soglia della riga: il registro deve sommare al voto
+        # esattamente, e senza questa riga mancavano fino a cinque millesimi.
+        all_terms.append({"key": "_completion", "label": "attesa sui minuti non giocati",
+                          "points": round(bd["event"] * scale_factor, 4)})
 
     # The raw value the phrasing quotes comes from the SAME builder the index uses,
     # so a derived feature (sga_post) or the exposure is quoted as what it actually
@@ -1023,14 +1050,15 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                                                "observed_by_minute", "observed_mean")
     ) / ref["std"]
     if bayesian:
-        # Il voto-indice di chi ha fatto la media del ruolo per la frazione vista e
-        # niente per quella non vista (l'ancora neutra), calibrato come il voto.
-        # Il metro somma su TUTTE le voci pesate, non solo su quelle in cui questo
-        # giocatore ha evidenza: altrimenti la base cambierebbe da un giocatore
-        # all'altro con lo stesso ruolo e gli stessi minuti.
-        centre = (bd["anchor"] + bd["shift"] + bd["scale"] * (
-            bd["base_index"] + sum(v * bayes.unit_for(role, k, reference) for k, v in mean_terms.items())
-            - bd["anchor"]))
+        # Il voto di chi ha fatto la media del ruolo nella frazione vista (la base
+        # costante piu' l'evidenza media, riscalata) e la media nel resto (il
+        # credito atteso a priori di gol e assist). Il metro somma su TUTTE le voci
+        # pesate, non solo su quelle in cui questo giocatore ha evidenza:
+        # altrimenti la base cambierebbe da un giocatore all'altro con lo stesso
+        # ruolo e gli stessi minuti.
+        centre = (bd["base"] + bd["scale"] * bd["k"] * sum(
+            v * bayes.unit_for(role, k, reference) for k, v in mean_terms.items())
+            + (1.0 - bd["t"]) * bayes.expected_credit_rate(role))
     # La base nella scala finale. Il voto grezzo parte da ``vote_center_for``, ma lo
     # stadio finale comprime attorno a un ALTRO punto (il baricentro misurato del
     # ruolo): la differenza fra i due, riscalata, e' una costante che appartiene alla
@@ -1047,7 +1075,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                    raw + result_nudge + red_adjustment + own_goal_adjustment
                    + penalty_adjustment))
     # ...e poi lo stadio finale, esattamente dove lo mette lo scorer.
-    subtotal = max(VOTE_MIN, min(VOTE_MAX, scale_saturation(subtotal, role)[0]))
+    subtotal = max(VOTE_MIN, min(VOTE_MAX, scale_saturation(subtotal, role, _sigma)[0]))
     voto = round(subtotal * 2) / 2
     # Le correzioni post-indice, nella scala in cui si MOSTRANO: sono state sommate
     # prima dello stadio finale, quindi nel voto finito valgono ``scale_factor``
@@ -1167,8 +1195,10 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # aspetta nella parte di partita non vista, oltre la media del ruolo. Vale
     # qualcosa solo per chi ha gia' segnato o servito in uno spezzone: il suo tasso
     # a posteriori e' piu' alto della prior. Zero a partita intera.
-    if bayesian and abs(bd["event"] * bd["scale"] * scale_factor) >= 0.005:
-        contributions.append(entry(bd["event"] * bd["scale"] * scale_factor,
+    # Dall'08/10/2026 il credito atteso sta FUORI dalla scala del ruolo, come
+    # quello osservato: solo la retta dello stadio finale lo riscala.
+    if bayesian and abs(bd["event"] * scale_factor) >= 0.005:
+        contributions.append(entry(bd["event"] * scale_factor,
                                    "attesa sui minuti non giocati", kind="completion"))
     if abs(p_nudge) >= 0.005:
         contributions.append(entry(p_nudge,
@@ -1193,7 +1223,10 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                      else "rigore sbagliato")
         contributions.append(entry(p_pen, pen_label, kind="penalty"))
     shown_rounded = sum(c["points"] for c in contributions)
-    other_points = round(subtotal - centre - shown_rounded, 2)
+    # Il resto chiude il conto sul subtotale MOSTRATO (due decimali), cosi' base +
+    # voci + resto e' esattamente quel numero: arrotondarlo a sua volta lasciava
+    # fino a un centesimo di scarto fra la somma e il subtotale scritto sotto.
+    other_points = round(round(subtotal, 2) - centre - shown_rounded, 4)
 
     # THE LEDGER BEHIND "altre N voci". The summary keeps three lines; on a game
     # that was good at everything the rest is not a tail but most of the vote —
@@ -1265,7 +1298,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # The remainder is what the printed rows do not account for: the sub-hundredth
     # entries AND the rounding of everything above them. It is carried as one line
     # so the open ledger still adds up to the fold it opened.
-    tiny_points = round(other_points - sum(r["points"] for r in other_terms), 2)
+    tiny_points = round(other_points - sum(r["points"] for r in other_terms), 4)
     low = minutes < SHORT_APPEARANCE_MINUTES
     note = ""
     if low:
@@ -1349,3 +1382,168 @@ def to_sentence(explanation: dict) -> str:
     if note:
         core += " " + note
     return core
+
+
+# --- IL PORTIERE, tiro per tiro (dall'08/10/2026) -----------------------------
+# Il canale del portiere e' una somma (v. keeper_channel): la spiegazione e' la
+# stessa somma, riga per riga, moltiplicata per la scala del canale. Niente
+# indice, niente z, niente stadio finale: ``base`` e' il voto di chi non ha
+# affrontato niente nei minuti visti e ha fatto la media nel resto, e ogni riga
+# e' un gesto o un evento che si puo' nominare.
+KEEPER_SHOT_FAMILY = "parate"
+
+
+def _keeper_shots_phrase(rows: list[dict]) -> str:
+    saves = sum(1 for r in rows if r["kind"] in ("save", "rebound"))
+    goals = sum(1 for r in rows if r["kind"] == "goal")
+    pens = [r for r in rows if r["kind"] == "penalty"]
+    parts = []
+    if saves:
+        parts.append("una parata" if saves == 1 else f"{saves} parate")
+    if goals:
+        parts.append("un gol subito" if goals == 1 else f"{goals} gol subiti")
+    for r in pens:
+        parts.append("un rigore parato" if not r["is_goal"] else "un rigore subito")
+    if not parts:
+        return "nessun tiro nello specchio da respingere"
+    big = [r for r in rows if r["kind"] == "save" and r["xgot"] >= 0.5]
+    rebounds = [r for r in rows if r["kind"] == "rebound"]
+    flagged = [r for r in rows if r.get("flagged_error")]
+    cheap = [r for r in rows if r["kind"] == "goal" and r["xgot"] <= 0.15 and not r.get("flagged_error")]
+    extra = []
+    if big:
+        extra.append("una parata difficile" if len(big) == 1 else f"{len(big)} parate difficili")
+    if flagged:
+        extra.append("un errore che costa il gol")
+    elif cheap:
+        extra.append("un gol subito su un tiro parabile" if len(cheap) == 1
+                     else f"{len(cheap)} gol subiti su tiri parabili")
+    if rebounds:
+        extra.append("una respinta corta che regala il gol")
+    out = ", ".join(parts)
+    if extra:
+        out += " (" + ", ".join(extra) + ")"
+    return out
+
+
+def explain_keeper(detail: dict, minutes: int, *, goal_adjustment: float = 0.0,
+                   assist_adjustment: float = 0.0, red_adjustment: float = 0.0,
+                   own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
+                   red_detail: dict | None = None, own_goal_detail: dict | None = None,
+                   goal_detail: list | None = None, top: int = 3,
+                   ledger: bool = False) -> dict:
+    """La scomposizione del voto del portiere, che somma al voto esattamente
+    come la somma lo ha scritto (v. keeper_channel.vote_for)."""
+    from vfoot.services import keeper_channel as kc
+    scale = kc.points_per_value()
+    base = kc.base_vote(minutes)
+    rows = detail.get("shots") or []
+    scored = []            # (points, key, phrase, family)
+    shots_pts = scale * detail.get("shots_value", 0.0)
+    if rows or abs(shots_pts) >= 1e-9:
+        scored.append((shots_pts, "gk_shots", _keeper_shots_phrase(rows),
+                       (KEEPER_SHOT_FAMILY, len(rows))))
+    ex = detail.get("exits") or {}
+    exits_pts = scale * detail.get("exits_value", 0.0)
+    if abs(exits_pts) >= 1e-9:
+        good = int(round(ex.get("good", 0.0)))
+        bad = int(round(ex.get("bad", 0.0)))
+        punch = int(round(ex.get("punch", 0.0)))
+        bits = []
+        if good:
+            bits.append("un'uscita riuscita" if good == 1 else f"{good} uscite riuscite")
+        if punch:
+            bits.append("una respinta di pugno" if punch == 1 else f"{punch} respinte di pugno")
+        if bad:
+            bits.append("un cross non trattenuto" if bad == 1 else f"{bad} uscite mancate")
+        scored.append((exits_pts, "gk_exits", ", ".join(bits) or "uscite", None))
+    orphan_pts = scale * detail.get("orphan_value", 0.0)
+    if abs(orphan_pts) >= 1e-9:
+        n = int(detail.get("orphan_errors", 0))
+        scored.append((orphan_pts, "errors_led_to_goal",
+                       "un errore che regala un gol" if n == 1 else f"{n} errori che regalano un gol", None))
+    err_shot_pts = scale * detail.get("err_shot_value", 0.0)
+    if abs(err_shot_pts) >= 1e-9:
+        n = int(round(detail.get("errors_to_shot", 0.0)))
+        scored.append((err_shot_pts, "errors_led_to_shot",
+                       "un errore che concede un tiro" if n == 1 else f"{n} errori che concedono un tiro", None))
+
+    merit = base + sum(p for p, _k, _ph, _f in scored)
+    raw = max(VOTE_MIN, min(VOTE_MAX, merit))
+    raw = max(VOTE_MIN, min(VOTE_MAX, raw + goal_adjustment + assist_adjustment))
+    subtotal = max(VOTE_MIN, min(VOTE_MAX, raw + red_adjustment + own_goal_adjustment
+                                 + penalty_adjustment))
+    voto = round(subtotal * 2) / 2
+
+    def entry(pts, label, family=None, kind=None):
+        out = {"label": label, "points": round(pts, 2)}
+        if family:
+            out["family"], out["family_size"] = family
+        if kind:
+            out["kind"] = kind
+        return out
+
+    nameable = sorted(scored, key=lambda x: x[0], reverse=True)
+    named = [x for x in nameable if abs(x[0]) >= NAMEABLE_MIN_POINTS]
+    positives = ([] if voto < POSITIVES_MIN_VOTE else [x for x in named[:top] if x[0] > 0])
+    negatives = ([] if voto > NEGATIVES_MAX_VOTE else [x for x in named[-top:][::-1] if x[0] < 0])
+    shown = positives + negatives
+    flat = not shown and not any(abs(p) >= NAMEABLE_MIN_POINTS for p, _k, _ph, _f in scored)
+    if not shown:
+        positives = [x for x in nameable[:1] if x[0] > 0]
+        negatives = [x for x in nameable[-1:] if x[0] < 0]
+        shown = positives + negatives
+    contributions = [entry(p, ph, fam) for p, _k, ph, fam in shown]
+    if abs(goal_adjustment) >= 0.005 and goal_detail:
+        contributions.insert(0, entry(goal_adjustment, goal_impact.goal_phrase(goal_detail), kind="goal"))
+    if abs(red_adjustment) >= 0.005:
+        contributions.append(entry(red_adjustment, red_card_phrase(red_detail), kind="red"))
+    if abs(own_goal_adjustment) >= 0.005:
+        contributions.append(entry(own_goal_adjustment, own_goal_phrase(own_goal_detail), kind="own_goal"))
+    if abs(penalty_adjustment) >= 0.005:
+        contributions.append(entry(penalty_adjustment, "rigore sbagliato", kind="penalty"))
+    shown_rounded = sum(c["points"] for c in contributions)
+    other_points = round(round(subtotal, 2) - base - shown_rounded, 4)
+    other_terms, tiny = [], 0
+    if ledger:
+        shown_keys = {k for _p, k, _ph, _f in shown}
+        for p, k, ph, fam in sorted(scored, key=lambda x: x[0], reverse=True):
+            if k in shown_keys:
+                continue
+            if abs(round(p, 2)) < 0.005:
+                tiny += 1
+                continue
+            row = {"key": k, "label": ph, "points": round(p, 2)}
+            if fam:
+                row["family"], row["family_size"] = fam
+            other_terms.append(row)
+    tiny_points = round(other_points - sum(r["points"] for r in other_terms), 4)
+    low = minutes < SHORT_APPEARANCE_MINUTES
+    note = ""
+    if low:
+        note = ("Per la parte di partita non giocata si assume una prestazione nella "
+                "media del ruolo: con pochi minuti il voto resta piu' vicino al 6.")
+    if flat:
+        note = ((note + " ") if note else "") + (
+            "Nessun intervento si stacca dalla media del suo ruolo: le voci qui sopra "
+            "sono le piu' grandi di una partita senza sporgenze.")
+    return {
+        "assist_note": "",
+        "positives": [entry(p, ph, fam) for p, _k, ph, fam in positives],
+        "negatives": [entry(p, ph, fam) for p, _k, ph, fam in negatives],
+        "contributions": contributions,
+        "all_terms": [],
+        "other_terms": other_terms,
+        "other_groups": group_ledger(other_terms) if ledger else [],
+        "other_tiny": {"count": tiny, "points": tiny_points},
+        "per_unit": round(scale, 6),
+        "base": base,
+        "other_points": other_points,
+        "other_count": max(0, len(scored) - len(shown)),
+        "subtotal": round(subtotal, 2),
+        "voto": voto,
+        "minutes": minutes,
+        "low_minutes": low,
+        "flat": flat,
+        "note": note,
+    }

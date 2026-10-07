@@ -237,6 +237,39 @@ and a completely determined role. `role_margin` re-aggregates the co-association
 mass BY ROLE and reports the gap to the runner-up; below `ROLE_MARGIN_REVIEW` it
 goes to a human. See `role_inference.role_margins`.
 
+## The classic vote, after the October 2026 revision (rilascio 1.17)
+
+Three facts an agent needs before touching a vote (the measures are in
+`experiments-revisione-sosta/PROPOSTA_10-10.md`, the design in each module's docstring):
+
+-   **The outfield vote is `base_r + s_r · Σ u_k w_k (ž_k(t) − z⁰_k) + credito`**
+    (`services/bayesian_completion.py`, schema 3). `base_r` is CONSTANT in the minutes —
+    no ramp, no minute curve, no centre shift; `z⁰_k` is the prior predictive mean of
+    each feature, computed by the model, so a player of whom nothing was seen sits at
+    the base; the continuous features (exposure, xA, sga_post) are compound Poisson
+    processes and need the COUNT of their events (`EXPOSURE_COUNT_KEY` travels next to
+    the exposure charge: `defensive_exposure(..., with_counts=True)`); the final stage
+    is integrated over what is still to be seen (`scale_saturation(v, role, sigma)`).
+    `s_r` is 1.4 × the error-minimising scale on purpose: the scale that minimises the
+    error against a noisy judge is correlation × dispersion ratio, i.e. regression
+    shrinkage, and it is what flattened the votes. Rebuild with
+    `experiments-revisione-sosta/build/build_artifact_v3.py`; the rare-event weights are
+    divided by the same 1.4 so that `tests_rare_events.ATTESI` do not move.
+-   **A quarter of a goal's (and an assist's) credit is MERIT, not fact**
+    (`goal_impact.goal_credit_for`): (xGOT − xG) of the finish for the scorer, xG of the
+    chance for the assister, each normalised to its season mean frozen in
+    `vote_reference.json["goal_impact"]["merit"]`. The judges are flat in xG; this is a
+    product choice, measured to cost zero serious divergences at 25% and to cost tails
+    beyond it. Do not raise the share.
+-   **The keeper is a SUM over the shots he faced** (`services/keeper_channel.py`), not an
+    index: save `0.8·p^1.3`, goal `−B(dist)·(1−p)²` with `B` from 0.45 (close) to 1.0
+    (far), penalty `1.25·(p − goal)`, the flagged error capped at 1.2 in total, the
+    rebound within 5 s charged, exits as their own channel. It needs
+    `MatchShot.distance_m` (migration 0030, `backfill_shot_seconds` fills it from the
+    cached shotmaps: a null distance is read as 16 m). Its calibration is frozen in
+    `keeper_channel.CALIBRATION` (`portieri/build_keeper_calibration.py`); it goes
+    through neither the saturation stage nor the result mitigation.
+
 ## Invariants (Hard Constraints)
 
 Agents must NEVER:

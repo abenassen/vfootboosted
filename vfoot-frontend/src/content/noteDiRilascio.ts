@@ -62,6 +62,59 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-17',
+    versione: '1.17',
+    data: '9 ottobre 2026',
+    titolo: 'Il voto si allarga: tornano i 5 e i 7,5, e un gol vale per com’è fatto',
+    sommario:
+      'La revisione della sosta. Il voto di chi non segna si era schiacciato attorno al 6 inseguendo le pagelle; ora si muove quanto si muovono loro, in su e in giù. Un gol e un assist pagano per un quarto in base a com’è nato il gol. Il portiere è giudicato tiro per tiro. Un voto su quattro delle prime cinque giornate cambia di mezzo punto, due su millequattrocento di più.',
+    voci: [
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Il voto di gioco (tutto quello che non è gol o assist) pesa il 40% in più: una partita buona vale di più, una brutta vale di meno. La media di ogni ruolo non si muove. I voti sotto il 5 raddoppiano, soprattutto fra i difensori, e tornano quanti ne danno le pagelle.',
+        caso:
+          'Sulle prime cinque giornate della 26-27 i difensori con un voto fino a 5 passano dal 4,8% al 10,3% (le pagelle: 11,5%); la dispersione dei voti dei difensori da 0,50 a 0,59 (le pagelle: 0,59).',
+      },
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Un gol vale un quarto per come è fatto e tre quarti per quanto ha cambiato la partita: la conclusione difficile (da fuori, nell’angolo) paga più del tocco a porta vuota. Lo stesso per l’assist, letto sull’occasione che ha creato. Il gol medio vale quanto prima, circa un punto.',
+        caso:
+          'Politano in Inter-Napoli (giornata 3), gol da un’occasione da 0,17 messa a 0,58: 7,5 invece di 7,0. Un tocco a porta vuota su un’occasione da 0,8 vale circa 0,9 invece di 1,0.',
+      },
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Il merito della conclusione e della creazione (quanto hai aggiunto al tiro, quanto valeva il passaggio) pesa una volta e mezza: è quello che compensa il quarto di gol spostato dal fatto al merito.',
+      },
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Un attaccante non risponde più del «contributo difensivo d’insieme», e i duelli vinti gli valgono a credito: vincerne paga, non vincerne non costa. Contrasti, intercetti e recuperi restano. Per un difensore non cambia niente: lì conta il duello perso.',
+        caso:
+          'Dybala in Roma-Inter (giornata 5): sette passaggi chiave e «poco contributo difensivo d’insieme −0,15» nella stessa riga. Misurato sulla 25-26: per gli attaccanti quella voce correla 0,08 con le pagelle, toglierla migliora l’accordo di un filo.',
+      },
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Il portiere è giudicato tiro per tiro. Le parate di routine valgono poco e salgono con la difficoltà senza scalini; il gol subito costa in proporzione a quanto era parabile e da quanto lontano è partito; la papera segnalata costa 1,2 in tutto, non si somma al gol; la respinta corta che regala il tap-in si paga; le uscite riuscite valgono un poco, quelle sbagliate di più. Niente più conteggio delle parate accanto all’xGOT.',
+        caso:
+          'Thiam (giornata 2): 4,0 → 5,0. Mandas (giornata 1): 7,5 → 8,0. Sulle prime cinque giornate 39 voti di portiere su 100 cambiano, di mezzo punto.',
+      },
+      {
+        tipo: 'migliorato',
+        testo:
+          'Chi gioca una parte di partita parte dalla stessa base di chi la gioca tutta: niente più rampa sui minuti, il ritorno verso la media di uno spezzone viene dal completamento con la media del ruolo, e il voto a metà partita in diretta non scende più per poi risalire.',
+      },
+      {
+        tipo: 'migliorato',
+        testo:
+          'Nel pannello del voto il gol dice quando la conclusione era difficile o l’occasione facile; per il portiere le righe sono i suoi interventi (parate, gol subiti, rigori, uscite), e la mappa delle parate mostra anche la distanza del tiro.',
+      },
+    ],
+  },
+  {
     id: 'v-1-16',
     versione: '1.16',
     data: '15 settembre 2026',
