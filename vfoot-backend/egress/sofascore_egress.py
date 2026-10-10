@@ -104,6 +104,15 @@ FRESH_SECONDS = 6 * 3600
 TRANSPORT_FILE = Path(os.environ.get("SOFA_TRANSPORT",
                                      "/var/lib/vfoot-egress/sofa_transport.json"))
 BROWSER_MODE_SECONDS = 3600
+# How many DIFFERENT exits curl must have been refused on before the browser is
+# called. One refusal is one burned IP, which is the commonest thing that happens
+# here: on 10/10/2026 the probable-lineups warm (max_rotations=1, by design: on a
+# block it gives up rather than spend good IPs) met one burned exit, "exhausted"
+# its single rotation, and that was read as "curl gets through nowhere" — a
+# browser boot, an hour of browser mode, and an alarm saying SofaScore refused
+# every fingerprint, all for one IP. The refill's own verdict
+# (``fingerprint_refused``) is the other way to qualify.
+BROWSER_AFTER_REFUSALS = 2
 # The browser has a pool of its OWN (target "sofascore-browser"): the curl pool
 # says which exits curl gets through, and in the case the browser exists for it
 # has just been demoted to nothing. Without its own pool the fallback could only
@@ -581,6 +590,8 @@ class _Warm:
         self.cache_dir = cache_dir
         self.wait = wait
         self.attempted = False
+        # Distinct exits curl was refused on in this warm (see BROWSER_AFTER_REFUSALS).
+        self.curl_refused = 0
         self.tgt = target(SOFASCORE)
         self.priv, self.addr = _client_identity()
 
@@ -629,7 +640,12 @@ def _warm(worker_args: list[str], cache_dir: Path, max_rotations: int,
         rc = _curl_warm(w, state, max_rotations)
         if rc != 3:
             return rc
-        print("curl could not get through; last resort: the browser.")
+        if (w.curl_refused < BROWSER_AFTER_REFUSALS
+                and not _refill_blames_curl(w.tgt)):
+            print(f"curl refused on {w.curl_refused} exit(s) only: that is a burned "
+                  f"IP, not curl. Not calling the browser for it.")
+            return 3
+        print(f"curl refused on {w.curl_refused} exits; last resort: the browser.")
         return _browser_warm(w, state)
     except EgressBusy as exc:
         print(f"  {exc}; skipping this cycle."); return 4
@@ -669,6 +685,7 @@ def _curl_warm(w: _Warm, state: dict, max_rotations: int) -> int:
             print("  OK — cache warmed.")
             return 0
         if r.returncode == 3:
+            w.curl_refused += 1
             _note_curl(state, rep, ok=False); save_transport(state)
             print("  blocked on this IP; demoting + rotating.")
             _demote(tgt, servers, ip); continue
@@ -700,7 +717,7 @@ def _browser_warm(w: _Warm, state: dict) -> int:
                 continue
             if r.returncode == 0:
                 _vouch(btgt, bpool, srv)
-                _enter_browser_mode(state, ip)
+                _enter_browser_mode(state, ip, w.curl_refused)
                 print("  OK — cache warmed by the browser.")
                 return 0
             if r.returncode != 3:
@@ -717,6 +734,16 @@ def _browser_warm(w: _Warm, state: dict) -> int:
     return _browser_failed(state)
 
 
+def _refill_blames_curl(tgt: Target, within: float = 3600) -> bool:
+    """Did a recent refill conclude it is curl, not the exits? (``fingerprint_refused``
+    over several exits and countries: evidence a single warm cannot gather.)"""
+    try:
+        last = json.loads(tgt.pool_file.read_text()).get("last_refill") or {}
+    except (OSError, ValueError):
+        return False
+    return bool(last.get("fingerprint_refused")) and _age_seconds(last.get("at", "")) < within
+
+
 def _vouch(tgt: Target, servers: list[dict], srv: dict) -> None:
     rec = next((s for s in servers if s["endpoint_ip"] == srv["endpoint_ip"]), None)
     if rec is None:
@@ -726,7 +753,7 @@ def _vouch(tgt: Target, servers: list[dict], srv: dict) -> None:
     save_pool(tgt, servers)
 
 
-def _enter_browser_mode(state: dict, ip: str) -> None:
+def _enter_browser_mode(state: dict, ip: str, curl_refused: int = 0) -> None:
     prev = state.get("browser") or {}
     state["browser"] = {
         "since": prev.get("since") or _now(),
@@ -736,6 +763,9 @@ def _enter_browser_mode(state: dict, ip: str) -> None:
         datetime.fromtimestamp(time.time() + BROWSER_MODE_SECONDS,
                                timezone.utc).isoformat(timespec="seconds"),
         "last_ok": _now(), "ip": ip,
+        # The evidence the episode started on, for health to quote rather than
+        # overstate. Zero when the browser ran because its mode was already on.
+        "curl_refused_on": prev.get("curl_refused_on") or curl_refused,
     }
     save_transport(state)
 

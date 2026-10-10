@@ -406,12 +406,15 @@ def _check_egress_transport(health: Health, now) -> None:
     curl = state.get("curl") or {}
     refused = ", ".join(curl.get("challenged") or [])
     if browser.get("last_ok") and not _older(browser["last_ok"], now, FINGERPRINT_MEMORY):
+        refused_on = browser.get("curl_refused_on")
         health.add("alarm", "egress:browser-fallback",
-                   f"SofaScore rifiuta tutte le impronte di curl_cffi"
-                   + (f" ({refused})" if refused else "")
-                   + f": dal {_local(browser.get('since'))} si legge con un browser "
+                   f"curl non passa: rifiutato su "
+                   + (f"{refused_on} uscite diverse" if refused_on else "piu' uscite")
+                   + (f" (ultime impronte sfidate: {refused})" if refused else "")
+                   + f". Dal {_local(browser.get('since'))} si legge con un browser "
                    f"vero, lento e pesante sul Linode. Il sito regge, ma e' il "
-                   f"ripiego. Rimedio: {CURL_UPGRADE}.",
+                   f"ripiego. Prima cosa: provare dal laptop api. contro www. e le "
+                   f"impronte; poi {CURL_UPGRADE}.",
                    since=browser.get("since"))
         return
     host = curl.get("host")

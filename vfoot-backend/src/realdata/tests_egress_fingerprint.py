@@ -386,6 +386,44 @@ class IlRipiegoSulBrowser(_Tmp):
         self.assertNotIn(E.SOFASCORE_BROWSER,
                          [c.args[0].name for c in self.refill.call_args_list])
 
+    def _warm_one(self) -> int:
+        """Il giro delle probabili: UNA rotazione, per scelta."""
+        def up(ip, *a, **kw):
+            self.pinned = ip
+            return True
+        with mock.patch.object(E, "_run", side_effect=self._fake_run), \
+             mock.patch.object(E, "netns_up", side_effect=up), \
+             redirect_stdout(io.StringIO()):
+            return E._warm(["--match-ids", str(MID), "--kind", "probable"],
+                           self.dir / "cache", max_rotations=1)
+
+    def test_un_ip_solo_rifiutato_non_e_curl(self):
+        """Il falso allarme del 10/10: le probabili provano un IP solo, quello era
+        bruciato, e il ripiego l'ha letto come «curl non passa da nessuna parte»:
+        browser, un'ora di modalità browser e l'allarme «rifiuta tutte le
+        impronte». Era un IP."""
+        self.assertEqual(self._warm_one(), 3)
+        self.assertEqual(self._browser_calls(), 0)
+        self.assertNotIn("browser", E.load_transport())
+
+    def test_ma_se_il_refill_ha_gia_dato_la_colpa_a_curl_si(self):
+        tgt = E.target(E.SOFASCORE)
+        E.save_pool(tgt, E.load_pool(tgt), last_refill={
+            "at": E._now(), "fingerprint_refused": True})
+        self.assertEqual(self._warm_one(), 0)
+        self.assertEqual(self._browser_calls(), 1)
+
+    def test_il_verdetto_di_un_refill_vecchio_non_vale(self):
+        tgt = E.target(E.SOFASCORE)
+        E.save_pool(tgt, E.load_pool(tgt), last_refill={
+            "at": "2000-01-01T00:00:00+00:00", "fingerprint_refused": True})
+        self.assertEqual(self._warm_one(), 3)
+        self.assertEqual(self._browser_calls(), 0)
+
+    def test_la_modalita_browser_ricorda_su_quante_uscite_curl_e_caduto(self):
+        self._warm()
+        self.assertEqual(E.load_transport()["browser"]["curl_refused_on"], 3)
+
     def test_un_ip_bruciato_normale_non_scomoda_il_browser(self):
         """La rotazione ordinaria: il primo IP è bruciato, il secondo passa."""
         results = iter([_done(3, "BLOCKED: transport\nFINGERPRINT used=safari challenged=\n"),
@@ -523,6 +561,8 @@ class LaSaluteDistingueIPDaImpronta(_Tmp):
             "browser": {"since": self._iso(hours=3), "last_ok": self._iso(minutes=5),
                         "until": self._iso(minutes=-30)}})
         self.assertEqual(checks["egress:browser-fallback"].level, "alarm")
+        self.assertNotIn("tutte le impronte", checks["egress:browser-fallback"].message,
+                         "l'allarme dice quello che sa, non di più")
 
     def test_tutto_a_posto_tace(self):
         checks = self._checks(transport={"curl": {
