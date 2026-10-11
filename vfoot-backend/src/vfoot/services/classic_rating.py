@@ -1657,16 +1657,44 @@ def scale_saturation(vote: float, ref_key: str, sigma: float = 0.0) -> tuple[flo
         # completamento perfetto (DIF 6,14 al 10' contro 6,08 a 90'). Si integra
         # sulla gaussiana di larghezza ``sigma`` (Gauss-Hermite, 21 nodi); a
         # partita intera sigma e' zero e questa riga non esiste.
-        comp = np.array([_saturate(d + math.sqrt(2.0) * sigma * x) for x in _GH21_X])
-        compresso = float((_GH21_W * comp).sum() / math.sqrt(math.pi))
+        compresso = _saturate_expected(d, sigma)
+        # IL FATTORE SI MISURA DAL CENTRO DELLA CURVA INTEGRATA, non da zero.
+        # Integrata, la curva non passa piu' per l'origine: E[stadio(sigma X)] e'
+        # negativo (si comprime solo sopra), quindi chi sta appena sopra il centro
+        # esce SOTTO, e il rapporto secante compresso/d cambiava segno ed esplodeva
+        # vicino a d = 0 (DIF a sigma 0,5: -1,92 a d = +0,02). Ogni voce del
+        # pannello, moltiplicata per quel fattore, si capovolgeva: «nessun gol né
+        # assist» a favore, il pericolo concesso a favore (Cambiaso, 11/10/2026).
+        # Misurato da g(0) il rapporto e' la pendenza media di una funzione
+        # crescente, quindi sempre fra 0 e ``a``; lo spostamento a*g(0) e' una
+        # costante della presenza e finisce nella base (v. ``scale_base``), dove
+        # sta gia' tutto cio' che non e' merito di nessuna voce.
+        zero = _saturate_expected(0.0, sigma)
     else:
         compresso = _saturate(d)
+        zero = 0.0
     out = dopo + a * compresso
-    return out, (a * compresso / d if abs(d) > 1e-12 else a)
+    return out, (a * (compresso - zero) / d if abs(d) > 1e-12
+                 else a * _saturate_slope_expected(sigma))
 
 
 def _saturate(d: float) -> float:
     return VOTE_SATURATION_T * math.log1p(d / VOTE_SATURATION_T) if d > 0 else d
+
+
+def _saturate_expected(d: float, sigma: float) -> float:
+    """E[_saturate(d + sigma X)], X normale standard (Gauss-Hermite, 21 nodi)."""
+    comp = np.array([_saturate(d + math.sqrt(2.0) * sigma * x) for x in _GH21_X])
+    return float((_GH21_W * comp).sum() / math.sqrt(math.pi))
+
+
+def _saturate_slope_expected(sigma: float) -> float:
+    """La pendenza in d = 0 della curva integrata: il limite del fattore."""
+    if sigma <= 1e-9:
+        return 1.0
+    xs = math.sqrt(2.0) * sigma * _GH21_X
+    slope = np.where(xs > 0, 1.0 / (1.0 + xs / VOTE_SATURATION_T), 1.0)
+    return float((_GH21_W * slope).sum() / math.sqrt(math.pi))
 
 
 _GH21_X, _GH21_W = np.polynomial.hermite.hermgauss(21)
@@ -4391,10 +4419,11 @@ def voto_puro_for_match(match, reference: dict,
             # Il canale del portiere, tiro per tiro (None per il movimento).
             "keeper_detail": keeper_detail,
             "scale_factor": scala,
-            "scale_base": (
-                ROLE_SATURATION[ref_key][1]
-                + scala * (vote_center_for(ref_key) - ROLE_SATURATION[ref_key][0])
-                if ref_key in ROLE_SATURATION else vote_center_for(ref_key)),
+            # Come la ricava la spiegazione: la retta di pendenza ``scala`` che
+            # passa per (pre_scala, pieno). Scritta col centro della retta del
+            # ruolo era giusta solo a sigma zero (v. scale_saturation).
+            "scale_base": (pieno - scala * (pre_scala - vote_center_for(ref_key))
+                           if ref_key in ROLE_SATURATION else vote_center_for(ref_key)),
             "voto_puro": voto,
         })
     results.sort(key=lambda d: (d["voto_puro"] is None, -(d["voto_puro"] or 0)))

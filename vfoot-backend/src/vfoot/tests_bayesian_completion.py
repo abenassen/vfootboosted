@@ -142,6 +142,24 @@ class ForwardTests(SimpleTestCase):
         self.assertAlmostEqual(cr.scale_saturation(pre - 1.0, "DIF", 0.2)[0],
                                cr.scale_saturation(pre - 1.0, "DIF", 0.0)[0], places=2)
 
+    def test_the_explanation_factor_never_flips_the_lines(self):
+        """Il fattore con cui la spiegazione riscala ogni voce resta positivo e
+        limitato anche appena sopra il centro: prima, a predittiva larga, il
+        rapporto secante cambiava segno (-1,92 a d = +0,02, sigma 0,5) e il
+        pannello capovolgeva tutte le voci (Cambiaso, 11/10/2026). E la retta
+        che usa torna col voto: base + fattore x scostamento = voto."""
+        for role in ("DIF", "CEN", "ATT"):
+            pre, _dopo, a = cr.ROLE_SATURATION[role]
+            for sigma in (0.0, 0.2, 0.5, 0.8):
+                for d in (-0.6, -0.1, -0.01, 0.0, 0.01, 0.02, 0.1, 0.4, 1.0):
+                    _v, f = cr.scale_saturation(pre + d, role, sigma)
+                    self.assertGreater(f, 0.0, (role, sigma, d))
+                    self.assertLessEqual(f, a + 1e-9, (role, sigma, d))
+                # continuo attraverso il centro
+                f_minus = cr.scale_saturation(pre - 1e-6, role, sigma)[1]
+                f_zero = cr.scale_saturation(pre, role, sigma)[1]
+                self.assertAlmostEqual(f_minus, f_zero, places=4)
+
     def test_an_early_goal_raises_the_expected_credit_for_the_rest(self):
         ref = fixed_reference()
         values = self._values(touches=20.0)
