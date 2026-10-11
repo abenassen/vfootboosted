@@ -968,6 +968,16 @@ class VoteExplanationTests(SimpleTestCase):
         for l in detto:
             self.assertNotIn("value", rows[l], f"numero scritto due volte: {l}")
 
+    def test_zero_exposure_in_favour_is_named_as_little(self):
+        """Il pericolo concesso a zero pesa a favore e non ha un «nessun …»: nel
+        registro si chiama «poco pericolo concesso», non col sostantivo nudo
+        accanto a un + (Cambiaso, 11/10/2026)."""
+        from vfoot.services.vote_explanation import ledger_phrase
+        self.assertEqual(ledger_phrase("DIF", "_exposure", 0.06, 0.0),
+                         "poco pericolo concesso nella sua zona")
+        self.assertEqual(ledger_phrase("DIF", "_exposure", 0.06, 0.2),
+                         "poco pericolo concesso nella sua zona")
+
     def test_a_continuous_quantity_never_carries_a_count(self):
         """Un indice normalizzato o un valore atteso non e' un numero di cose:
         "pericolo concesso nella sua zona · 0" su un'esposizione di 0,004 afferma

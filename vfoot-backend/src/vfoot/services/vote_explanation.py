@@ -570,6 +570,13 @@ def ledger_phrase(role: str, key: str, term_delta: float, raw_value: float,
     if (entry is not None and entry[0] == COUNT and abs(raw_value) < 0.005
             and key in COUNT_NONE):
         return COUNT_NONE[key]
+    # Lo stesso zero su una grandezza che NON si conta (il pericolo concesso): non
+    # ha un «nessun …», e il sostantivo nudo accanto a un + non diceva in che verso
+    # pesava — «pericolo concesso nella sua zona +0,06» (Cambiaso, 11/10/2026). Si
+    # dice col quantificatore basso, come la stessa voce quando non e' zero.
+    if (entry is not None and entry[0] == COUNT and abs(raw_value) < 0.005
+            and term_delta > 0):
+        return f"{QUANTIFIERS.get(entry[2], QUANTIFIERS['mp'])[1]} {entry[1]}"
     return LEDGER_LABELS.get(key) or readable_label(key) or key
 
 
