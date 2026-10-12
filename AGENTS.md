@@ -253,14 +253,25 @@ Three facts an agent needs before touching a vote (the measures are in
     `s_r` is 1.4 × the error-minimising scale on purpose: the scale that minimises the
     error against a noisy judge is correlation × dispersion ratio, i.e. regression
     shrinkage, and it is what flattened the votes. Rebuild with
-    `experiments-revisione-sosta/build/build_artifact_v3.py`; the rare-event weights are
+    `experiments-revisione-sosta/build/build_artifact_v4.py` (v3 is the 1.17 build); the rare-event weights are
     divided by the same 1.4 so that `tests_rare_events.ATTESI` do not move.
--   **A quarter of a goal's (and an assist's) credit is MERIT, not fact**
-    (`goal_impact.goal_credit_for`): (xGOT − xG) of the finish for the scorer, xG of the
-    chance for the assister, each normalised to its season mean frozen in
-    `vote_reference.json["goal_impact"]["merit"]`. The judges are flat in xG; this is a
-    product choice, measured to cost zero serious divergences at 25% and to cost tails
-    beyond it. Do not raise the share.
+-   **Goals and assists are paid at 70% of the FACT, and nothing else** (release 1.18,
+    12/10/2026, `goal_impact.goal_credit_for`): the goal band in
+    `vote_reference.json["goal_impact"]["band"]` is the calibrated one (`band_original`) at
+    mean ×0.7 and importance spread ×1.25, the assist band is the original ×0.7, and there
+    is NO merit share (the `merit` key is gone, `DEFAULT_MERIT_SHARE` is 0). How a shot was
+    struck (xGOT − xG) is paid ONCE, in `sga_post` (×2 the Bayesian-search weight), for
+    every shot, saved or scored. 1.17 had paid it a second time on scored shots as "a
+    quarter of merit", and a goal still moved an attacker's vote by +1.4 as before; the
+    decision was a vote LESS tied to goals and assists, which are already fantacalcio
+    bonuses — deliberately below the judges (scorer gap ATT +1.17 vs +1.30/+1.25 on 26-27
+    G1-5, r −0.015). Measures and the Kolo Muani case in
+    `experiments-revisione-sosta/NOTA_1-18.md`. Two things to know before touching it:
+    the stored `role_mean_credit` SCALE with the band and are not remeasured (remeasured
+    today they are higher — ATT 0.170 vs 0.135 — because the role level was tuned with
+    the stored ones; correcting them is a level change, not a weight change); and
+    `build_artifact_v4.py` scales the artifact's goal/assist priors on every run, so it is
+    rebuilt FROM the 1.17 artifact (commit 6983d53), never from its own output.
 -   **The keeper is a SUM over the shots he faced** (`services/keeper_channel.py`), not an
     index: save `0.8·p^1.3`, goal `−B(dist)·(1−p)²` with `B` from 0.45 (close) to 1.0
     (far), penalty `1.25·(p − goal)`, the flagged error capped at 1.2 in total, the

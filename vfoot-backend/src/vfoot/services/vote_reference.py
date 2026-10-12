@@ -203,7 +203,7 @@ def _keeper_channel_constants() -> dict:
 #           reference e costanti sono nell'impronta, ma la forma del payload cambia
 #           (predictive_sigma, exposure_events, keeper_detail) e la cache su file
 #           di produzione servirebbe la vecchia.
-SCORING_CODE_VERSION = 13
+SCORING_CODE_VERSION = 14
 
 
 def scoring_fingerprint() -> str:

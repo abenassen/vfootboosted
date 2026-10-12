@@ -62,6 +62,35 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-18',
+    versione: '1.18',
+    data: '16 ottobre 2026',
+    titolo: 'Un gol pesa meno nel voto, perché è già un bonus: conta di più come hai giocato',
+    sommario:
+      'Nel voto puro gol e assist valgono il 70% di quello che valevano come fatto, e il quarto «per com’è fatto» introdotto una settimana fa non c’è più: come si è calciato si paga nella mappa dei tiri, per ogni tiro, entrato o parato. Il voto dipende meno dall’episodio e più dai novanta minuti; chi segna scende di mezzo punto in un caso su quattro, chi tira bene senza segnare sale.',
+    voci: [
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Il credito di un gol nel voto puro scende al 70% del suo valore di fatto (da circa +0,9 a +0,65 prima della scala, graduato come sempre su quanto ha cambiato la partita), e lo stesso per l’assist. Lo scarto fra un attaccante che segna e uno che non segna passa da +1,4 a +1,2; le pagelle stanno a +1,3. È una scelta: il gol è già il bonus del fantacalcio, il voto puro deve dire come hai giocato.',
+        caso:
+          'Kolo Muani in Cagliari-Juventus (giornata 6): 7,5 → 7,0. Lo stesso tiro parato dal portiere varrebbe 6,5 in tutt’e due le versioni: a cambiare è quanto vale il gol, non la sua partita. Sulle prime cinque giornate cambiano 108 voti su 1.438, 75 in giù e 33 in su, nessuno di un punto intero; i portieri non si muovono.',
+      },
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Il quarto di gol «per com’è fatto» è tolto: la qualità della battuta (dove è finito il tiro rispetto a dove è partito) è già pagata nella mappa dei tiri, per ogni conclusione, e sui gol la stessa cosa veniva contata due volte. Ora si paga lì, una volta, con un peso doppio rispetto a prima della sosta: tirare bene senza segnare vale di più.',
+        caso:
+          'Cristante e Luis Milla alla prima giornata: 6,5 → 7,0. Dybala alla prima giornata, tre assist: 8,0 → 7,5 (le pagelle 8,5 e 8,0). Pisilli, gol in undici minuti: 7,5 → 7,0.',
+      },
+      {
+        tipo: 'migliorato',
+        testo:
+          'Nel pannello del voto la riga del gol non dice più «con una conclusione difficile» o «su un’occasione facile»: quel giudizio sta nella mappa dei tiri, riga per riga, dove si vede anche per i tiri che non sono entrati.',
+      },
+    ],
+  },
+  {
     id: 'v-1-17',
     versione: '1.17',
     data: '9 ottobre 2026',

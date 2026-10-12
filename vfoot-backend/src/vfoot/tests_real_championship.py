@@ -8,7 +8,8 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 
 from vfoot.services.classic_rating import (
-    _raw_vote_from_index, _round_half, index_for_role, scale_saturation)
+    _raw_vote_from_index, _round_half, index_for_role, scale_saturation, raw_feature_values,
+)
 from vfoot.services.goal_impact import (
     role_mean_assist_credit, role_mean_credit)
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
@@ -828,18 +829,34 @@ class LeagueRoleDoesNotRescoreTests(TestCase):
 
         def ancora(secchio):
             """Il voto che uscirebbe scoring l'indice di QUESTO giocatore contro
-            quel secchio, rifacendo la strada dello scorer: indice, voto grezzo,
-            media di ruolo del credito (non ha segnato), stadio finale."""
-            idx = index_for_role(secchio, {"touches": 60.0}, 90)
-            v = _raw_vote_from_index(idx, secchio, 90, self.reference)
+            quel secchio, rifacendo la strada dello scorer: voto di merito (il
+            completamento bayesiano, quando e' attivo per il ruolo: e' la strada
+            che scrive il voto, v. voto_puro_for_match), media di ruolo del
+            credito (non ha segnato), stadio finale. Fino al 12/10/2026 l'ancora
+            passava dalla formula legacy ``_raw_vote_from_index``, che con questo
+            fixture cadeva a un centesimo dal bordo del 5,75: la 1.18 ha mosso le
+            medie di ruolo del credito di due centesimi e l'ancora e' saltata a
+            6,0 mentre lo scorer, sull'altra strada, restava a 5,5."""
+            from vfoot.services import bayesian_completion as bayes
+            feats = {"touches": 60.0}
+            if bayes.is_active(secchio):
+                values = raw_feature_values(feats, 90, 0.0)
+                v = bayes.index_vote(secchio, values, 90, 0, 0, self.reference)["merit"]
+            else:
+                idx = index_for_role(secchio, feats, 90)
+                v = _raw_vote_from_index(idx, secchio, 90, self.reference)
             v -= (role_mean_credit().get(secchio, 0.0)
                   + role_mean_assist_credit().get(secchio, 0.0))
-            return _round_half(scale_saturation(v, secchio)[0])
+            # Al centesimo, non al mezzo punto: sulla strada bayesiana i due
+            # secchi differiscono per i prior e per la media di ruolo del credito
+            # (qualche centesimo), e l'arrotondamento a mezzo punto li confonde.
+            return scale_saturation(v, secchio)[0]
 
-        self.assertNotEqual(ancora("CEN"), ancora("ATT"),
+        self.assertNotEqual(round(ancora("CEN"), 2), round(ancora("ATT"), 2),
                             "il fixture non distingue piu' i due secchi: il test "
                             "non proverebbe nulla")
-        self.assertEqual(in_league["voto_puro"], ancora("CEN"))
+        self.assertAlmostEqual(in_league["explanation"]["subtotal"], ancora("CEN"), places=2)
+        self.assertEqual(in_league["voto_puro"], _round_half(ancora("CEN")))
 
 
 class ChampionshipWithoutALeagueTests(TestCase):

@@ -325,11 +325,16 @@ TOTAL_WEIGHTS = {
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
     # RIVISTO L'08/10/2026 (revisione della sosta): x1,5 rispetto allo 0,0356 della
-    # ricerca bayesiana. E' il merito della CONCLUSIONE che compensa il quarto di
-    # credito del gol spostato dal fatto al merito (v. goal_impact); a x2-x3 la coda
-    # contro i giudici peggiora (paga anche il tiro parato). Misura in
-    # experiments-revisione-sosta/PROPOSTA_10-10.md.
-    "sga_post": 0.05338563808326036,
+    # ricerca bayesiana. E DI NUOVO IL 12/10/2026 (rilascio 1.18): x2 rispetto allo
+    # 0,0356, cioe' x1,33 rispetto all'1.17. E' qui, e SOLO qui, che si paga come
+    # e' battuto un tiro. Il quarto di merito sul credito del gol (1.17) pagava
+    # xGOT-xG una seconda volta sui soli tiri entrati, e il gol restava +1,4 di
+    # scarto come prima; ora gol e assist valgono il 70% del fatto e la battuta si
+    # paga nella mappa dei tiri, parata o segnata che sia (v. goal_impact). A
+    # x2,5-x3 la coda contro i giudici peggiora, perche' paga anche il tiro parato:
+    # misura in experiments-revisione-sosta/PROPOSTA_10-10.md (1.17) e
+    # experiments-revisione-sosta/NOTA_1-18.md.
+    "sga_post": 0.07118085077768048,
     # = β: the mass of chances occupied. NON rialzato insieme a S, quindi β/S passa
     # da 1/3 a 1/4.5. E' una deroga consapevole al rapporto scritto sopra: β/S
     # esiste per l'ORDINAMENTO dei gol (un gol difficile deve battere un tap-in) e

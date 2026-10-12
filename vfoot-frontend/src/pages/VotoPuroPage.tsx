@@ -112,10 +112,11 @@ export default function VotoPuroPage() {
           .
         </p>
         <Callout>
-          Il voto puro <b>non contiene</b> il gol, l'assist o il cartellino: quelli si sommano dopo,
-          in chiaro. Se un attaccante ha 6,0 di voto puro e ha segnato, il suo fantavoto è 9,0.
-          Contare il gol automaticamente nel voto puro sarebbe un doppio conteggio, e non lo
-          facciamo. Noi valutiamo invece <b>quanto merito ci sia in quel gol</b>.
+          Il voto puro <b>non contiene</b> il bonus del gol, dell'assist o del cartellino: quelli
+          si sommano dopo, in chiaro. Se un attaccante ha 6,0 di voto puro e ha segnato, il suo
+          fantavoto è 9,0. Nel voto puro il gol entra solo per <b>quanto ha cambiato la partita</b>,
+          e per il 70% di quello che varrebbe come fatto: il resto è già nel bonus. Come è stato
+          calciato lo leggiamo a parte, tiro per tiro, entrato o parato che sia.
         </Callout>
         {/* IL RIFERIMENTO, DETTO UNA VOLTA SOLA E SUBITO. Sta qui e non più in
             fondo perché le pastiglie «Redazione» e «Statistico» compaiono già nel
@@ -277,8 +278,8 @@ export default function VotoPuroPage() {
             <b className="text-ink">L'autogol</b> non è tutto uguale: distinguiamo la deviazione
             dalla frittata. Se arriva nello stesso istante di un tiro avversario è una palla
             deviata, sfortuna, e il calo è minimo (due decimi); se è un errore in solitaria pesa di
-            più (mezzo punto). Per dare un metro: un gol <i>fatto</i> vale fra tre decimi e mezzo e
-            otto decimi di voto, secondo quanto ha cambiato la partita — quindi nemmeno l'autogol
+            più (mezzo punto). Per dare un metro: un gol <i>fatto</i> vale fra mezzo punto e sette
+            decimi di voto, secondo quanto ha cambiato la partita — quindi nemmeno l'autogol
             peggiore costa quanto rende un gol che decide. Quando
             non abbiamo il tempo al secondo non pretendiamo di distinguere: applichiamo un unico
             calo piccolo, invece di attribuire una gravità che non possiamo misurare.

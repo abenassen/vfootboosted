@@ -445,6 +445,18 @@ presenza con la copia locale del DB di produzione:
 file) deve chiudere con `TUTTO COINCIDE`: stessa impronta, 0 distanze diverse su
 10.838 tiri, 0 voti diversi sulle 1.442 presenze delle giornate 1-5.
 
+**Rilascio 1.18 (gol e assist al 70% del fatto, `sga_post` ×2; nota in
+`experiments-revisione-sosta/NOTA_1-18.md`)**: nessuna migrazione e nessun
+riempimento, ma reference, artifact e snapshot del listone cambiano insieme al
+codice, quindi dopo il `git pull` vanno svuotate le cache (chiave con l'impronta
+nuova, ma la cache su file non si pulisce da sola) e riavviato il servizio, poi il
+frontend (note di rilascio 1.18). La verifica è
+`experiments-revisione-sosta/build/confronto_post_deploy_118.py <voti_2627_1_18.pkl>`:
+impronta identica e 0 voti diversi sulle presenze in comune delle partite finite
+26-27 (il pkl dello scratchpad è il calcolo locale sulla copia di produzione, chiave
+giornata+nome+ruolo+minuti; le grafie diverse dei nomi restano fuori e si contano).
+I portieri non devono muoversi di un centesimo.
+
 **Scritto l'11/08/2026 perché quel giorno il deploy era formalmente corretto e i voti
 in produzione erano diversi da quelli in locale.** Impronte del modello identiche,
 codice identico, e 350 presenze con un ruolo diverso più 218 con un voto diverso su

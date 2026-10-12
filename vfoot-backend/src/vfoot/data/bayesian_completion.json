@@ -1,8 +1,8 @@
 {
  "calibration": {
   "ATT": {
-   "base": 5.957401,
-   "base_mean_preserving": 5.997401,
+   "base": 5.961292,
+   "base_mean_preserving": 6.001292,
    "base_shift": -0.04,
    "base_shift_why": "minimo dell'errore medio contro lo Statistico su TUTTE le presenze (griglia 0..-0,10, 25-26): porta gli spezzoni da +0,14 a +0,09 e le presenze intere 0,06-0,09 sotto i giudici (la semantica \u00abcome se 90'\u00bb, accettata)",
    "n": 467,
@@ -11,8 +11,8 @@
    "target_mean_90": 5.9788
   },
   "CEN": {
-   "base": 5.973459,
-   "base_mean_preserving": 6.013459,
+   "base": 5.974477,
+   "base_mean_preserving": 6.014477,
    "base_shift": -0.04,
    "base_shift_why": "minimo dell'errore medio contro lo Statistico su TUTTE le presenze (griglia 0..-0,10, 25-26): porta gli spezzoni da +0,14 a +0,09 e le presenze intere 0,06-0,09 sotto i giudici (la semantica \u00abcome se 90'\u00bb, accettata)",
    "n": 1211,
@@ -21,8 +21,8 @@
    "target_mean_90": 6.0367
   },
   "DIF": {
-   "base": 5.919529,
-   "base_mean_preserving": 5.959529,
+   "base": 5.920513,
+   "base_mean_preserving": 5.960513,
    "base_shift": -0.04,
    "base_shift_why": "minimo dell'errore medio contro lo Statistico su TUTTE le presenze (griglia 0..-0,10, 25-26): porta gli spezzoni da +0,14 a +0,09 e le presenze intere 0,06-0,09 sotto i giudici (la semantica \u00abcome se 90'\u00bb, accettata)",
    "n": 2338,
@@ -39,7 +39,7 @@
  "common_factor_note": "q=0: misurato sulla 25-26 intera, q=0,25 costa 7 divergenze gravi (47 contro 40) e 0,003 di correlazione; la pendenza 1 a meta' partita era un criterio interno al diradamento simulato, non un accordo. Il parametro resta nel modello, a zero.",
  "continuous_model": "Poisson composti (esposizione, xA, sga_post) con marca del singolo gesto; valore difensivo a incrementi gaussiani",
  "count_model": "Gamma-Poisson: X|lambda,t ~ Poisson(t lambda), lambda ~ Gamma; quattro dispersioni condivise (Var/mu^2)",
- "created_on": "2026-10-08",
+ "created_on": "2026-10-12",
  "dispersions": {
   "circulation": 0.1622920290219694,
   "decisive": 0.1426766190083817,
@@ -158,11 +158,13 @@
   }
  },
  "expressivity": {
-  "assist_factor": 0.75,
+  "assist_factor": 0.7,
   "expected_assists_x": 1.5,
   "f": 1.4,
-  "merit_share": 0.25,
-  "sga_post_x": 1.5
+  "goal_factor": 0.7,
+  "goal_spread": 1.25,
+  "merit_share": 0.0,
+  "sga_post_x": 2.0
  },
  "fit_audit": {
   "circulation": {
@@ -385,7 +387,7 @@
    }
   }
  },
- "model": "Revisione della sosta: base costante, continue come Poisson composti, dispersioni per (ruolo, grandezza), fattore comune, stadio dentro l'attesa, scala x1,4",
+ "model": "Revisione della sosta: base costante, continue come Poisson composti, dispersioni per (ruolo, grandezza), fattore comune, stadio dentro l'attesa, scala x1,4; 1.18: gol e assist al 70% del fatto, nessuna quota di merito, sga_post x2 (prior di gol e assist scalati di conseguenza)",
  "predictive_sigma": {
   "ATT": 0.748442,
   "CEN": 0.556095,
@@ -414,13 +416,13 @@
    "tau": 0.5
   }
  },
- "reference_sha256": "dd204c0e0edb6225636d69d353b653c913198c5e8b5f4df5c86891b6500e96e6",
- "reference_weights_fingerprint": "ee48edce4e4bd9bf",
+ "reference_sha256": "2d2c277fdfe2b63b1a6e8423789a70c089b1afec68bfc8386d79154963c2b278",
+ "reference_weights_fingerprint": "21a099402ff13855",
  "role_priors": {
   "ATT": {
-   "assists": 0.05351304033243304,
+   "assists": 0.04994550431027083,
    "exposure90": 890.8888888888889,
-   "goals": 0.23186236183258305,
+   "goals": 0.1623036723049338,
    "n": 1576,
    "raw": {
     "_exposure": 0.039870480484945875,
@@ -476,9 +478,9 @@
    }
   },
   "CEN": {
-   "assists": 0.03303012697548487,
+   "assists": 0.030828118510452546,
    "exposure90": 1240.5222222222221,
-   "goals": 0.07344079602628861,
+   "goals": 0.051408563243528486,
    "n": 1842,
    "raw": {
     "_exposure": 0.09570845208234287,
@@ -534,9 +536,9 @@
    }
   },
   "DIF": {
-   "assists": 0.02139617478509468,
+   "assists": 0.019969763132755034,
    "exposure90": 1676.8555555555554,
-   "goals": 0.04626772161606307,
+   "goals": 0.03238740892707547,
    "n": 2144,
    "raw": {
     "_exposure": 0.15758754641717534,
@@ -687,7 +689,7 @@
   "weight:passes_opp_half": 0.0,
   "weight:penalties_conceded": -0.04306608342491431,
   "weight:penalties_won": 0.02645377908306592,
-  "weight:sga_post": 0.03559042538884024,
+  "weight:sga_post": 0.07118085077768048,
   "weight:shots": 0.021493926659463473,
   "weight:shots_blocked": 0.0027988060767783615,
   "weight:shots_off": 0.0,
@@ -698,6 +700,6 @@
   "weight:was_fouled": 0.04476268251875272,
   "weight:xg_shots": 0.0
  },
- "weights_fingerprint": "d7c522573a3b5eca",
+ "weights_fingerprint": "21a099402ff13855",
  "woodwork": 0.6
 }

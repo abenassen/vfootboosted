@@ -125,23 +125,27 @@ def importance(xp: dict, minute: int, goal_difference_before: int) -> float | No
     return after - before
 
 
-# --- IL MERITO DEL GOL E DELL'ASSIST (revisione della sosta, 08/10/2026) ------
-# Un quarto del credito non si paga piu' per il FATTO ma per il MERITO, e
-# l'occasione si divide: chi la crea prende l'xG del tiro servito (quanto era
-# grande), chi la finalizza prende xGOT - xG (quanto ha aggiunto colpendola
-# cosi'). Normalizzato alla media della stagione (congelata nella reference come
-# la banda) cosi' il credito medio di un gol resta quello di prima: il tap-in a
-# porta vuota (xG 0,8 -> merito 0,5) vale 0,79 invece di 0,90, la conclusione da
-# fuori nell'angolo (xG 0,04 -> merito 1,9) 1,10. Nel voto finito il gol medio
-# resta +1,0 e oscilla da +0,8 (facile) a +1,0 (difficile) per quintile.
+# --- IL MERITO DEL GOL E DELL'ASSIST: TOLTO (rilascio 1.18, 12/10/2026) ------
+# Dall'08/10 al 12/10 un quarto del credito si pagava per il MERITO della battuta
+# (xGOT - xG del tiro entrato) invece che per il fatto. Ma la battuta e' gia'
+# pagata nella mappa dei tiri (``sga_post``) per OGNI tiro, parata o segnata: sul
+# gol la stessa quantita' entrava due volte, e il gol pesava come prima (+1,4 di
+# scarto fra chi segna e chi no per un attaccante, come i giudici). La decisione
+# di Andrea era un'altra: gol e assist sono gia' bonus del fantacalcio, e il voto
+# deve dipendere meno dal fatto e piu' da come si e' giocato. Quindi: credito del
+# gol e dell'assist al 70% del fatto (banda ridotta nella reference, spread per
+# importanza x1,25), nessuna quota di merito, ``sga_post`` x2 (v. classic_rating).
+# Misurato sulla 25-26 a 90': scarto per un gol ATT da +1,37 a +1,16 (giudici
+# +1,42), r 0,771 -> 0,764, gravi 13/15 -> 13/18, quota del voto che viene dal
+# gioco 39% -> 55%. Kolo Muani a Cagliari (26-27, g6): 7,5 -> 7,0, e lo stesso
+# tiro parato vale 6,5 in entrambe.
 #
-# I giudici sono PIATTI in xG (chi segna prende 7,0 a ogni fascia): e' una
-# scelta nostra contro la loro convenzione, e sul banco (3.177 presenze) costa
-# zero divergenze gravi. La quota resta al 25% per decisione: coi dati che
-# abbiamo (l'xGOT nel singolo tiro e' rumoroso) ogni punto di merito in piu' e'
-# un errore grave in piu' (misurato: al 50% da 13 a 16).
-# Il rigore e il gol senza tiro agganciato valgono il solo fatto (merito 1).
-DEFAULT_MERIT_SHARE = 0.25
+# Il codice del merito resta (``goal_merit``, ``merit_qualifier``) e si riaccende
+# solo da ``vote_reference.json["goal_impact"]["merit"]``, che la 1.18 ha tolto:
+# a quota zero ``merit_settings`` non porta la media e la frase «con una
+# conclusione difficile» non compare, perche' descriverebbe un merito che non si
+# paga. Il rigore e il gol senza tiro agganciato valevano gia' il solo fatto.
+DEFAULT_MERIT_SHARE = 0.0
 
 
 def merit_settings() -> dict:
