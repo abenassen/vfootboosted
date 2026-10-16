@@ -203,6 +203,16 @@ def _keeper_channel_constants() -> dict:
 #           reference e costanti sono nell'impronta, ma la forma del payload cambia
 #           (predictive_sigma, exposure_events, keeper_detail) e la cache su file
 #           di produzione servirebbe la vecchia.
+#  13 -> 14: IL GOL VALE IL 70% DEL FATTO E LA BATTUTA SI PAGA UNA VOLTA SOLA
+#           (rilascio 1.18, 12/10/2026). Il quarto di merito di 13 pagava xGOT−xG
+#           del tiro segnato due volte (mappa dei tiri + goal_credit_for), e il gol
+#           muoveva l'attaccante di +1,4 come prima. Ora goal_credit_for e' solo
+#           la banda del fatto (originale a media x0,7, spread x1,25; assist x0,7),
+#           la chiave ``merit`` non c'e' piu' nella reference e l'esecuzione si
+#           paga una volta, in sga_post (x2 del peso cercato), parata o segnata.
+#           Banda, pesi e artifact sono nell'impronta; il forward di goal_impact
+#           cambia (niente qualificatore «con una conclusione difficile»), e va
+#           segnato qui.
 SCORING_CODE_VERSION = 14
 
 
