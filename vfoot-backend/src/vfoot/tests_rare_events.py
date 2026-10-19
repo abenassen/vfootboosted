@@ -79,7 +79,9 @@ ATTESI = {
     # -0,59 sul rigore concesso e a -0,43/-0,48 sull'errore che porta al gol, e
     # lasciarli crescere con la scala (-1,01 e -0,71) produceva divergenze gravi
     # (Bartesaghi, Loyola, Marcandalli) che le pagelle testuali non giustificano.
-    "clearances_off_line": +0.345,
+    # ALZATO IL 20/10/2026 a +0.45 (da +0.345): fuori campione sulla 26-27 chi
+    # salvava sulla linea stava ~0.4 sotto i giudici (v. il peso in classic_rating).
+    "clearances_off_line": +0.450,
     "penalties_won": +0.544,
     "penalties_conceded": -0.721,
     "errors_led_to_goal": -0.507,

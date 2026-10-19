@@ -509,7 +509,16 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "clearances_off_line": 0.012134371844659842,  # una occorrenza: +0.35 (v. tests_rare_events)
+    # ALZATO IL 20/10/2026: 0.012134 -> 0.015850 (x1.306), un'occorrenza da +0.345
+    # a +0.45 di voto per un difensore a 90'. Fuori campione sulla 26-27 (giornate
+    # 1-5 e 7, 11 presenze) chi salvava sulla linea stava +0.36/+0.40 sotto i
+    # giudici rispetto agli altri delle stesse partite; sulla 25-26, in campione,
+    # -0.03/-0.02. E' un gesto che tutti vedono (Ramon in Fiorentina-Como: 6,0
+    # contro 7/7), e si e' scelto di seguire l'indizio fuori campione pagando sulla
+    # 25-26 circa 0.15 di generosita' su quei 53 casi. Il peso nell'artifact
+    # bayesiano (``weight:clearances_off_line``) e' la traccia del fit, x1.4, e non
+    # lo legge nessuno: resta quello del fit.
+    "clearances_off_line": 0.01585041314977338,  # una occorrenza: +0.45 (v. tests_rare_events)
     "last_man_tackle": 0.0,
     # An error that let the opponent SHOOT, without a goal following.
     # RITARATO IL 04/09/2026: -0.0113 -> -0.0057. Le righe qui sopra raccontano come si
