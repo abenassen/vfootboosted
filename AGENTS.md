@@ -274,7 +274,7 @@ Three facts an agent needs before touching a vote (the measures are in
     rebuilt FROM the 1.17 artifact (commit 6983d53), never from its own output.
 -   **The keeper is a SUM over the shots he faced** (`services/keeper_channel.py`), not an
     index: save `0.8·p^1.3`, goal `−B(dist)·(1−p)²` with `B` from 0.45 (close) to 1.0
-    (far), penalty `1.25·(p − goal)`, the flagged error capped at 1.2 in total, the
+    (far), penalty saved `1.25·p` but penalty conceded only `−(0.5/scale)·(1−p)` (19/10/2026: the judges do not charge it as the mirror of the save, `PENALTY_GOAL_K`), the flagged error capped at 1.2 in total, the
     rebound within 5 s charged, exits as their own channel. It needs
     `MatchShot.distance_m` (migration 0030, `backfill_shot_seconds` fills it from the
     cached shotmaps: a null distance is read as 16 m). Its calibration is frozen in

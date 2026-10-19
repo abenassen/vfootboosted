@@ -15,7 +15,8 @@ OGNI TIRO AFFRONTATO vale, prima della scala:
 
     parata        + A * p^G                       p = xGOT (calibrato: parte 3)
     gol subito    - B(dist) * (1 - p)^D           B da 0,45 (vicino) a 1,0 (lontano), logistica a 18 m
-    rigore        K * (p - gol)                   escursione amplificata, nessun premio fisso
+    rigore parato + K * p                         escursione amplificata, nessun premio fisso
+    rigore subito - K_g * (1 - p)                 K_g ~ un terzo di K: v. PENALTY_GOAL_K
 
 Le tre proprieta' che contano:
 
@@ -77,6 +78,18 @@ GOAL_B_MID_M = 18.0
 GOAL_B_WIDTH_M = 3.0
 GOAL_D = 2.0
 PENALTY_K = 1.25
+# Il gol su rigore NON e' il rovescio della parata (19/10/2026, caso Carnesecchi in
+# Milan-Atalanta: −0,41 per un rigore subito a xGOT 0,72). Fino ad allora il rigore era
+# simmetrico, K*(p − gol), a valore atteso zero; ma i giudici non lo sono: la parata la
+# pagano come noi (+0,98 a xGOT 0,75) e il gol lo fanno pagare 0,47/0,77 punti di voto
+# per unita' di (1 − xGOT), senza livello fisso — un premio medio di +0,10 a rigore
+# affrontato, cioe' +0,013 a partita, invisibile. Dentro il rigore l'xGOT distingue
+# poco (fra 0,6 e 0,9 la quota di segnati e' piatta) e non vede lo spiazzamento.
+# Simmetrico, chi subiva un rigore stava 0,13-0,14 sotto entrambi i giudici (71 casi,
+# 25-26 incrociata); con 0,5 punti di voto lo scarto va a +0,04/+0,03 e la coda resta
+# quella (``experiments-revisione-sosta/portieri/penalty_kg.py``). Scritto in punti
+# di voto e diviso per la scala CONGELATA: la calibrazione non si rifa' per questo.
+PENALTY_GOAL_K = 0.5 / 1.1596
 ERROR_GOAL_TOTAL = 1.2
 REBOUND_SECONDS = 5
 REBOUND_BETA = 0.5
@@ -116,10 +129,11 @@ def shot_value(xgot: float, is_goal: bool, distance_m: float | None = None,
                is_penalty: bool = False) -> float:
     """Quanto vale UN tiro affrontato, prima della scala e prima delle regole di
     partita (ribattuta, tetto sull'errore). Equo: su un tiro a xGOT p, il valore
-    atteso di parata e gol e' circa zero."""
+    atteso di parata e gol e' circa zero — tranne il rigore, che i giudici non
+    trattano cosi' (v. ``PENALTY_GOAL_K``)."""
     p = min(max(float(xgot or 0.0), 0.0), 1.0)
     if is_penalty:
-        return PENALTY_K * (p - (1.0 if is_goal else 0.0))
+        return -PENALTY_GOAL_K * (1.0 - p) if is_goal else PENALTY_K * p
     if is_goal:
         return -goal_cost_factor(distance_m) * (1.0 - p) ** GOAL_D
     return SAVE_A * p ** SAVE_G

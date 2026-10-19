@@ -104,7 +104,7 @@ def _keeper_channel_constants() -> dict:
     from vfoot.services import keeper_channel as kc
     return {k: getattr(kc, k) for k in (
         "SAVE_A", "SAVE_G", "GOAL_B_NEAR", "GOAL_B_FAR", "GOAL_B_MID_M", "GOAL_B_WIDTH_M",
-        "GOAL_D", "PENALTY_K", "ERROR_GOAL_TOTAL", "REBOUND_SECONDS", "REBOUND_BETA",
+        "GOAL_D", "PENALTY_K", "PENALTY_GOAL_K", "ERROR_GOAL_TOTAL", "REBOUND_SECONDS", "REBOUND_BETA",
         "EXIT_GOOD", "EXIT_PUNCH", "EXIT_BAD", "MOMENT_LAMBDA", "DEFAULT_DISTANCE_M",
         "CALIBRATION")}
 
