@@ -221,7 +221,7 @@ export default function VotoPuroPage() {
               <li>Come è stato calciato il tiro: dove è finito rispetto a com'era l'occasione.</li>
               <li>Occupare occasioni: tirare da posizioni pericolose, stare nell'area.</li>
               <li>Creare per gli altri, anche quando l'assist non arriva.</li>
-              <li>Duelli e duelli aerei vinti, dribbling riusciti, falli subiti.</li>
+              <li>Duelli e duelli aerei vinti, dribbling riusciti, punizioni conquistate.</li>
               <li>Giocare nella metà campo avversaria: portare la squadra avanti.</li>
               <li>Intercetti, respinte, contrasti, salvataggi sulla linea, palloni recuperati.</li>
               <li>Il rigore conquistato — che di solito non paga nulla a chi lo guadagna.</li>

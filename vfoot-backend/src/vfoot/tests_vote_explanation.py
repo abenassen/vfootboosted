@@ -927,7 +927,7 @@ class VoteExplanationTests(SimpleTestCase):
         self.assertEqual(ph("ATT", "errors_fouls_committed", -0.01, 1.3, count=1),
                          "1 fallo commesso")
         self.assertEqual(ph("ATT", "was_fouled", +0.01, 2.6, count=2),
-                         "2 falli subiti")
+                         "2 punizioni conquistate")
         # Era ``key_passes``, che dal 01/09/2026 ha peso ZERO: la direzione della
         # frase si legge dal segno del termine CONFRONTATO col segno del peso, e con
         # peso nullo quella combinazione (termine positivo) non esiste piu'. Serve
@@ -950,10 +950,10 @@ class VoteExplanationTests(SimpleTestCase):
         self.assertEqual(ph("ATT", "passes_completed", +0.01, 49.0, count=37),
                          "tanti passaggi riusciti")
         # e senza count (il riassunto parlato) il comportamento e' quello di sempre
-        self.assertEqual(ph("ATT", "was_fouled", +0.01, 2.6), "tanti falli subiti")
+        self.assertEqual(ph("ATT", "was_fouled", +0.01, 2.6), "tante punizioni conquistate")
 
     def test_the_number_is_not_written_twice(self):
-        """"2 falli subiti · 2" e "nessun gol · 0" scrivono lo stesso numero due
+        """"2 punizioni conquistate · 2" e "nessun gol · 0" scrivono lo stesso numero due
         volte: quando la frase lo DICE gia', la colonna del conteggio tace."""
         average = self._averages("DIF", {"clearances": 8.0, "touches": 60.0,
                                          "was_fouled": 4.0, "duels_won": 6.0})

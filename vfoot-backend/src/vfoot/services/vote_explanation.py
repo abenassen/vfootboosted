@@ -85,7 +85,7 @@ COUNT_NONE = {
     "long_balls_completed": "nessun lancio lungo riuscito",
     "crosses_completed": "nessun cross riuscito",
     "passes_completed": "nessun passaggio riuscito",
-    "was_fouled": "nessun fallo subito",
+    "was_fouled": "nessuna punizione conquistata",
     "touches": "nessun pallone giocato",
     "errors_bad_passes": "nessun passaggio sbagliato",
     "errors_dispossessed": "nessun pallone perso in conduzione",
@@ -210,7 +210,7 @@ LABELS = {
     "long_balls_completed": (COUNT, "lanci lunghi riusciti", "mp"),
     "crosses_completed": (COUNT, "cross riusciti", "mp"),
     "passes_completed": (COUNT, "passaggi riusciti", "mp"),
-    "was_fouled": (COUNT, "falli subiti", "mp"),
+    "was_fouled": (COUNT, "punizioni conquistate", "fp"),
     "touches": (COUNT, "palloni giocati", "mp"),
     "errors_bad_passes": (COUNT, "passaggi sbagliati", "mp"),
     "errors_dispossessed": (COUNT, "palloni persi in conduzione", "mp"),
@@ -1287,7 +1287,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                 # "nessun gol (0)" e "nessun duello aereo perso (0)" hanno lo
                 # zero scritto due volte: quando la frase DICE gia' che non e'
                 # successo, il numero accanto e' rumore. Lo stesso vale per il ramo
-                # numerico ("2 falli subiti · 2").
+                # numerico ("2 punizioni conquistate · 2").
                 n = round(count)
                 # Un EVENT porta SEMPRE il conteggio dentro la frase ("3 gol",
                 # "nessun assist"), a qualunque numero; una COUNT solo sotto la
