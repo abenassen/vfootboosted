@@ -40,7 +40,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
 from realdata.models import (
     CARD_RED, CARD_SECOND_YELLOW,
@@ -1035,7 +1035,9 @@ def weights_for_role(role: str) -> dict:
 # completezza e ispezione. Il commento diceva il contrario fino al 29/08/2026.
 SHOT_TYPE_TO_FEATURE = {"post": "shots_post", "goal": "shots_goal",
                         "save": "shots_saved", "miss": "shots_off",
-                        "block": "shots_blocked"}
+                        "block": "shots_blocked",
+                        # il salvato sulla linea col suo nome (v. is_goal_line_save)
+                        "blocked-off-line": "shots_saved"}
 SHOT_DETAIL_FEATURES = frozenset(SHOT_TYPE_TO_FEATURE.values())
 
 # --- Derived features ---------------------------------------------------------
@@ -4059,6 +4061,22 @@ def unshrunk_weight(ref_key: str, minutes: int, reference: dict) -> float:
     return w + UNSHRINK_GAMMA * (1.0 - w)
 
 
+# Dal 13/09/2026 SofaScore da' al tiro salvato sulla linea un tipo suo invece di
+# ``save`` con xGOT 0: sei righe nella 26-27 fino al 18/10, tutte contate dal
+# fornitore nello specchio (``onTargetScoringAttempt`` = parati + gol + 1 in sei casi
+# su sei). E' lo stesso tiro con un altro nome; finche' il codice riconosceva solo il
+# vecchio, il tiratore tornava a pagare −xg (Viery in Fiorentina-Como, 7a giornata).
+SHOT_TYPE_OFF_LINE = "blocked-off-line"
+
+
+def is_goal_line_save(shot_type: str, xgot) -> bool:
+    """Il tiro nello specchio fermato sulla linea da un uomo di movimento, nelle due
+    forme in cui il fornitore l'ha scritto: ``save`` senza xGOT (fino al 13/09/2026)
+    e ``blocked-off-line`` (da allora). La firma e' UNA, letta da totali, mappa dei
+    tiri e controfattuale — v. ``effective_xgot`` per cosa significa."""
+    return shot_type == SHOT_TYPE_OFF_LINE or (shot_type == "save" and not (xgot or 0.0))
+
+
 def effective_xgot(shot_type: str, xgot, xg) -> float:
     """L'xGOT che il modello CONSUMA, che non sempre e' quello che arriva.
 
@@ -4089,7 +4107,7 @@ def effective_xgot(shot_type: str, xgot, xg) -> float:
     E' conservativo anche sui FALSI POSITIVI della firma (il 5% sono parate vere del
     portiere a cui manca l'xGOT): non premia nessuno, si limita a non punire.
     """
-    if shot_type == "save" and not (xgot or 0.0):
+    if is_goal_line_save(shot_type, xgot):
         return float(xg or 0.0)
     return float(xgot or 0.0)
 
@@ -4104,8 +4122,9 @@ def _credit_goal_line_saves(out: dict, match_ids) -> None:
     sides = appearance_sides(match_ids)
     credited = 0.0
     for mid, pid, st, ts, xg, xgot in (MatchShot.objects
-                                       .filter(match_id__in=match_ids,
-                                               shot_type="save", xgot=0,
+                                       .filter(Q(shot_type="save", xgot=0)
+                                               | Q(shot_type=SHOT_TYPE_OFF_LINE),
+                                               match_id__in=match_ids,
                                                player_id__isnull=False)
                                        .values_list("match_id", "player_id",
                                                     "shot_type", "team_side",

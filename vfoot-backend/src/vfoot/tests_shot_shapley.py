@@ -90,7 +90,8 @@ class ShotSectionAddsUpTests(TestCase):
             n += 1
             xg += x
             xgot += xo
-            on += 1 if kind in ("goal", "save") else 0
+            # come il fornitore: il salvato sulla linea e' nello specchio
+            on += 1 if kind in ("goal", "save", "blocked-off-line") else 0
         for feature_key, value in (("shots", float(n)), ("xg_shots", xg),
                                    ("xg_on_target", xgot),
                                    ("shots_on_target", float(on))):
@@ -167,6 +168,21 @@ class ShotSectionAddsUpTests(TestCase):
         riga = shot_detail(self.match, self.player.id)["shots"][0]
         self.assertEqual(riga["xgot"], 0.31)
         self.assertFalse(riga["xgot_office"])
+
+    def test_the_off_line_label_is_the_same_shot(self):
+        """Dal 13/09/2026 SofaScore scrive il salvato sulla linea come
+        ``blocked-off-line`` invece che ``save`` con xGOT 0. Riconoscendo solo il
+        vecchio nome, il tiratore tornava a pagarlo −xg (Viery, Fiorentina-Como):
+        il nome nuovo deve dare la stessa riga del vecchio, e la sezione deve
+        sommare ancora."""
+        self._shots((42, "blocked-off-line", 0.14, 0.0))
+        d = shot_detail(self.match, self.player.id)
+        riga = d["shots"][0]
+        self.assertEqual(riga["xgot"], 0.14)
+        self.assertTrue(riga["xgot_office"])
+        self.assertEqual(riga["added"], 0.0)
+        self.assertEqual(riga["outcome"], "salvato sulla linea")
+        self.assertAlmostEqual(riga["points"] + d["baseline"], d["total"], places=2)
 
     def test_it_holds_for_a_single_shot_too(self):
         """Con un tiro solo Shapley e leave-one-out coincidono, ma il metro no:

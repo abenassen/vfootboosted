@@ -213,7 +213,12 @@ def _keeper_channel_constants() -> dict:
 #           Banda, pesi e artifact sono nell'impronta; il forward di goal_impact
 #           cambia (niente qualificatore «con una conclusione difficile»), e va
 #           segnato qui.
-SCORING_CODE_VERSION = 14
+#  14 -> 15: IL SALVATO SULLA LINEA HA UN NOME NUOVO (19/10/2026). Dal 13/09 SofaScore
+#           lo scrive ``blocked-off-line`` invece di ``save`` con xGOT 0, e l'xGOT
+#           d'ufficio del 05/09 (10 -> 11) aveva smesso di scattare: il tiratore
+#           tornava a pagare −xg. ``classic_rating.is_goal_line_save`` riconosce le
+#           due forme; nessuna costante cambia, quindi va segnato qui.
+SCORING_CODE_VERSION = 15
 
 
 def scoring_fingerprint() -> str:

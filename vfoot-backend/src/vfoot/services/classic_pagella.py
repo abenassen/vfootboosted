@@ -711,7 +711,8 @@ def _mark_substitutions(match_id: int, buckets: dict) -> dict[str, list[dict]]:
 # sotto una chiave nostra: chiamarlo "gol" nel pannello di chi l'ha subito era il
 # modo piu' rapido di far perdere fiducia a tutto il resto.
 SHOT_OUTCOME_IT = {"goal": "gol", "save": "parato", "post": "legno",
-                   "block": "murato", "miss": "fuori", "own": "autogol"}
+                   "block": "murato", "miss": "fuori", "own": "autogol",
+                   "blocked-off-line": "salvato sulla linea"}
 # E da dove veniva.
 SHOT_SITUATION_IT = {
     "regular": "azione", "assisted": "su assist", "fast-break": "in contropiede",
@@ -722,7 +723,7 @@ SHOT_SITUATION_IT = {
 # Le feature che UN TIRO muove. Toglierlo dai totali significa togliergli queste.
 _SHOT_TYPE_FEATURE = {"post": "shots_post", "goal": "shots_goal",
                       "save": "shots_saved", "miss": "shots_off",
-                      "block": "shots_blocked"}
+                      "block": "shots_blocked", "blocked-off-line": "shots_saved"}
 # Le sei voci che COMPONGONO la riga «conclusioni» del riassunto. Sono le stesse
 # di ``MERGES`` in vote_explanation e devono restarlo: questa e' la quantita' a cui
 # i tiri devono sommare, e se le due liste divergessero la sezione tornerebbe a non
@@ -797,7 +798,7 @@ def shot_detail(match, player_id: int) -> dict:
     from vfoot.services.classic_rating import (
         shrinkage_for, appearance_sides, derived_features, feature_scales,
         is_own_goal, scored_z, spread_k_for, unshrunk_weight, weights_for_role,
-        effective_xgot,
+        effective_xgot, is_goal_line_save,
     )
 
     empty = {"shots": [], "baseline": 0.0, "total": 0.0}
@@ -895,7 +896,8 @@ def shot_detail(match, player_id: int) -> dict:
             # strutturalmente vale -0.14. L'esito e' anche la definizione del
             # fornitore: su 1721 righe della 25-26 goal+save coincide col suo
             # ``onTargetScoringAttempt`` 1715 volte, contro 1689 di «xgot > 0».
-            if s["is_goal"] or s["shot_type"] == "save":
+            if (s["is_goal"] or s["shot_type"] == "save"
+                    or is_goal_line_save(s["shot_type"], s["xgot"])):
                 gone["shots_on_target"] += 1
             feat = _SHOT_TYPE_FEATURE.get(s["shot_type"])
             if feat:
@@ -1006,8 +1008,7 @@ def shot_detail(match, player_id: int) -> dict:
             # tabella stampa in nota. Mostrare lo zero grezzo accanto a «parato»
             # era la contraddizione da cui e' partita tutta questa storia.
             "xgot": round(effective_xgot(s["shot_type"], s["xgot"], s["xg"]), 3),
-            "xgot_office": (not own and s["shot_type"] == "save"
-                            and not (s["xgot"] or 0.0)),
+            "xgot_office": (not own and is_goal_line_save(s["shot_type"], s["xgot"])),
             # xGOT − xG: quanto la conclusione ha aggiunto (o tolto) alla palla che
             # aveva. E' la grandezza su cui il modello giudica il tiro, quindi si
             # mostra invece di lasciarla ricavare a chi legge.
