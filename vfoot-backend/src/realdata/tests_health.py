@@ -131,6 +131,30 @@ class ControlliDiSalute(TestCase):
         self.assertIn("poll_transfermarkt:players-collapsed", codes)
         self.assertNotIn("poll_transfermarkt:clubs_scraped-collapsed", codes)
 
+    def test_uno_scrape_parziale_si_chiama_parziale_e_non_pagina_cambiata(self):
+        """Il 21/10/2026: 8 club su 20, ciascuno con la rosa intera. Il rapporto
+        diceva «una pagina che non contiene piu' quello che leggevamo», ed era
+        falso: mancavano club, non giocatori."""
+        for i in range(6):
+            self._run("poll_transfermarkt", minutes_ago=(i + 1) * 720,
+                      did={"clubs_scraped": 20, "clubs_failed": 0, "players": 579})
+        self._run("poll_transfermarkt", minutes_ago=10,
+                  did={"clubs_scraped": 8, "clubs_failed": 12, "players": 242})
+
+        self.assertIn("poll_transfermarkt:partial", self._codes("warn"))
+        self.assertEqual(self._codes("alarm"), set())
+
+    def test_parziale_e_rose_svuotate_insieme_restano_un_allarme(self):
+        # Il parziale non deve coprire il guasto vero: 8 club letti, ma da 5
+        # giocatori l'uno.
+        for i in range(6):
+            self._run("poll_transfermarkt", minutes_ago=(i + 1) * 720,
+                      did={"clubs_scraped": 20, "clubs_failed": 0, "players": 579})
+        self._run("poll_transfermarkt", minutes_ago=10,
+                  did={"clubs_scraped": 8, "clubs_failed": 12, "players": 40})
+
+        self.assertIn("poll_transfermarkt:players-collapsed", self._codes("alarm"))
+
     def test_senza_storia_non_si_grida_al_crollo(self):
         # Due passate non fanno una mediana: al primo giro sul server ogni numero
         # sarebbe "anomalo" rispetto al nulla che lo precede.

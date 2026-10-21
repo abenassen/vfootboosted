@@ -870,7 +870,8 @@ def tm_squads(competition: str, season: int, cache_dir: Path, *, delay: float,
         print(f"clubs.json illeggibile: {exc}"); return 1
     print(f"{len(clubs)} club da leggere, una pagina ogni ~{delay:.0f}s.")
 
-    scraped = failed = 0
+    scraped = 0
+    failures: list[dict] = []
     for i, club in enumerate(clubs, 1):
         # The gap is not politeness to Transfermarkt — 21 pages a day never
         # tripped anything there (the 202 was a reputation rule on the datacenter
@@ -886,9 +887,16 @@ def tm_squads(competition: str, season: int, cache_dir: Path, *, delay: float,
         if rc == 0:
             scraped += 1
         else:
-            failed += 1
+            failures.append({"id": club.get("id"), "name": club.get("name", "?"),
+                             "rc": rc, "reason": tail[:200]})
         print(f"  [{i}/{len(clubs)}] {club.get('name', '?')}: {tail}")
-    print(f"fatto: {scraped} club letti, {failed} falliti.")
+    print(f"fatto: {scraped} club letti, {len(failures)} falliti.")
+    # Il PERCHE' dei club mancati va su file, accanto alle rose. Fino al 21/10/2026
+    # stava solo su questo stdout, che il lato Django registra soltanto quando
+    # l'uscita non e' zero — e uno scrape parziale esce zero apposta (sotto). Dodici
+    # club persi quella notte e nessuna riga che dicesse perche'.
+    (cache_dir / "failures.json").write_text(
+        json.dumps(failures, ensure_ascii=False, indent=2))
     # A partial scrape is NOT a failure here: the import downstream already treats
     # an unread club as a blank in our knowledge rather than an empty squad, and
     # zero clubs is the case that raises. Exiting non-zero on 19/20 would throw

@@ -69,6 +69,16 @@ JOBS: dict[str, tuple[str, timedelta, timedelta]] = {
 WATCHED_COUNTERS = {
     "poll_transfermarkt": ("clubs_scraped", "players"),
 }
+# Jobs that report their own misses: (failed counter, done counter). When the last
+# run SAYS it missed some units, a drop in the totals is that miss and not a
+# changed page, and the two need different words: on 21/10/2026 twelve clubs went
+# unread and the report blamed the page format, while each club it did read had a
+# full squad. So a partial run is reported as partial, with the reasons the job
+# noted, and the format check moves to the density — players per club READ — which
+# is the number a changed page would actually move.
+PARTIAL_COUNTERS = {
+    "poll_transfermarkt": ("clubs_failed", "clubs_scraped"),
+}
 MIN_FIXTURES_PER_ROUND = 5   # Serie A ships 10; half of that is already a symptom
 DROP_RATIO = 0.6          # a counter at <60% of its own median is a collapse
 DROP_MIN_HISTORY = 4      # ...but only once there is a median worth the name
@@ -235,16 +245,34 @@ def _check_counters(health: Health, now) -> None:
         if len(runs) < DROP_MIN_HISTORY + 1:
             continue
         last, history = runs[0], runs[1:]
+        failed_key, done_key = PARTIAL_COUNTERS.get(job, (None, None))
+        missed = last.did.get(failed_key) or 0 if failed_key else 0
+        if missed:
+            done = last.did.get(done_key, 0)
+            health.add("warn", f"{job}:partial",
+                       f"{job}: {missed} unita' non lette su {missed + done} "
+                       f"(«{failed_key}»). Le altre sono state importate e chi "
+                       f"manca non e' stato trattato come partito. "
+                       f"{last.note or 'Nessun motivo registrato.'}",
+                       missed=missed, done=done)
         for key in keys:
+            if missed and key == done_key:
+                continue        # already said, in its own words
             past = [r.did.get(key) for r in history if r.did.get(key) is not None]
+            value = last.did.get(key, 0)
+            if missed:
+                # Per unit read: a partial run lowers the total by construction.
+                past = [r.did[key] / r.did[done_key] for r in history
+                        if r.did.get(key) is not None and r.did.get(done_key)]
+                value = value / done if done else 0
             if len(past) < DROP_MIN_HISTORY:
                 continue
             baseline = median(past)
-            value = last.did.get(key, 0)
             if baseline > 0 and value < DROP_RATIO * baseline:
+                label = f"{key} per {done_key}" if missed else key
                 health.add("alarm", f"{job}:{key}-collapsed",
-                           f"{job}: «{key}» e' sceso a {value:g}, contro una "
-                           f"mediana di {baseline:g} sulle {len(past)} passate "
+                           f"{job}: «{label}» e' sceso a {value:.3g}, contro una "
+                           f"mediana di {baseline:.3g} sulle {len(past)} passate "
                            f"precedenti. Il comando e' andato a buon fine lo "
                            f"stesso: e' il segno di una pagina che risponde ma "
                            f"non contiene piu' quello che leggevamo.",

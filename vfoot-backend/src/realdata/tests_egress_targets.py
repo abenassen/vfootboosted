@@ -276,6 +276,24 @@ class IlPollingPassaDallEgress(TestCase):
         self.assertEqual(run.did.get("clubs_failed"), 3)
         self.assertEqual(run.did.get("players"), 17 * 20)
 
+    def test_il_motivo_dei_club_mancati_arriva_nel_journal_e_nella_nota(self):
+        """L'egress esce 0 su uno scrape parziale, quindi il suo stdout non viene
+        registrato: il motivo deve viaggiare su file, accanto alle rose."""
+        scrivi = self._fake_egress(20, 17)
+
+        def _con_motivi(cache_dir, competition, season, **kw):
+            ok = scrivi(cache_dir, competition, season, **kw)
+            mancati = self._clubs(20)[17:]
+            (Path(cache_dir) / "failures.json").write_text(json.dumps(
+                [{"id": c["id"], "name": c["name"], "rc": 1,
+                  "reason": "ReadTimeout: read timed out"} for c in mancati]))
+            return ok
+
+        txt = self._poll_ok(_con_motivi)
+        self.assertIn("ReadTimeout", txt)
+        run = JobRun.objects.filter(job="poll_transfermarkt").latest("id")
+        self.assertIn("ReadTimeout: read timed out (3:", run.note)
+
     def test_uno_scrape_parziale_importa_lo_stesso(self):
         """Diciassette club letti non pagano per i tre mancati: l'uscita non zero
         butterebbe via diciassette rose buone per un timeout."""

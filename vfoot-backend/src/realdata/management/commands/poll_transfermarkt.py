@@ -45,6 +45,36 @@ from realdata.services import egress_client, job_log, roster_integrity
 from realdata.services.scrape_transfermarkt_squads import TM
 
 
+def _read_failures(out: Path) -> list[dict]:
+    """The clubs the egress could not read, with why (``failures.json``).
+
+    Empty when the file is missing — an egress older than the file, or a run that
+    never reached the clubs — which only means "no reasons on record", never "no
+    failures": the count still comes from the files, as above.
+    """
+    try:
+        rows = json.loads((out / "failures.json").read_text())
+    except (OSError, ValueError):
+        return []
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def _failure_summary(failures: list[dict]) -> str:
+    """The reasons for the note, grouped: the note holds 300 characters and twelve
+    clubs failing for the same reason should cost one line, not twelve."""
+    if not failures:
+        return ""
+    by_reason: dict[str, list[str]] = {}
+    for f in failures:
+        by_reason.setdefault(f.get("reason") or f"rc={f.get('rc')}", []).append(
+            f.get("name", "?"))
+    parts = [f"{reason[:90]} ({len(names)}: {', '.join(names[:3])}"
+             f"{'…' if len(names) > 3 else ''})"
+             for reason, names in sorted(by_reason.items(),
+                                         key=lambda kv: -len(kv[1]))]
+    return " — " + "; ".join(parts)
+
+
 class Command(BaseCommand):
     help = "Scrape Transfermarkt rosters and import them (one unattended poll)."
 
@@ -153,7 +183,8 @@ class Command(BaseCommand):
             all_present = (failed == 0 and expected and scraped == expected)
             if not all_present:
                 run.note(f"scrape incompleto ({scraped}/{expected} club): "
-                         f"partenze controllate solo sui club letti")
+                         f"partenze controllate solo sui club letti"
+                         + _failure_summary(getattr(self, "failures", [])))
                 self.stdout.write(self.style.WARNING(
                     f"Incomplete scrape ({scraped}/{expected} clubs, {failed} "
                     f"failed): departures are checked ONLY for the clubs actually "
@@ -228,6 +259,7 @@ class Command(BaseCommand):
         club that does not exist, and the poll would call a half scrape complete.
         """
         scraped = players = 0
+        self.failures = _read_failures(out)
         for f in sorted(out.glob("club_*.json")):
             try:
                 roster = json.loads(f.read_text()).get("players") or []
@@ -241,6 +273,10 @@ class Command(BaseCommand):
             listed = 0
         self.stdout.write(f"{listed} club elencati, {scraped} letti, "
                           f"{players} giocatori.")
+        for f in self.failures:
+            self.stdout.write(self.style.WARNING(
+                f"  non letto: {f.get('name', '?')} (rc={f.get('rc')}): "
+                f"{f.get('reason', '')}"))
         return scraped, max(0, listed - scraped), players
 
     def _scrape_in_process(self, out: Path, competition: str, season: int,
