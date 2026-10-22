@@ -17,9 +17,6 @@
 # save money, `kimi-k2.6` is the model to point it at, not k3.
 set -eu
 
-REPO=/srv/vfoot-app
-cd "$REPO" || exit 1
-
 export ANTHROPIC_BASE_URL="https://api.moonshot.ai/anthropic"
 export ANTHROPIC_AUTH_TOKEN="${KIMI_API_KEY:?KIMI_API_KEY non impostata}"
 export ANTHROPIC_MODEL="${KIMI_MODEL:-kimi-k3}"
@@ -29,7 +26,8 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL="$ANTHROPIC_MODEL"
 export CLAUDE_CODE_SUBAGENT_MODEL="$ANTHROPIC_MODEL"
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW="1048576"   # k3 ha 1M di contesto
 
-exec claude -p "$(cat)" \
-    --append-system-prompt "$(cat "$REPO/vfoot-backend/deploy/agent/prompt.md")" \
-    --allowedTools 'Read,Grep,Glob,Bash(git *),Bash(*manage.py test*)' \
-    --output-format json
+# Same worktree, same tools, same prompt: only the endpoint changes. The effort
+# flag is left out — it is not part of what Moonshot's endpoint promises to honour.
+export VFOOT_AGENT_MODEL="$ANTHROPIC_MODEL"
+export VFOOT_AGENT_EFFORT=""
+exec "$(dirname "$0")/vfoot-agent-claude"

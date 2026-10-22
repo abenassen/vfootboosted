@@ -53,6 +53,12 @@ non tornare a mani vuote è peggio di nessuna proposta.
 
 ## Se proponi una patch
 
+- Lavori nella directory corrente, una copia di lavoro tua già posizionata su
+  `main`: non è il checkout del server, e non devi mai scrivere in `/srv/vfoot-app`.
+  Il branch lo crei con `git switch -c fix/<nome>` e lo chiudi con un commit; non
+  serve altro, il resto lo fa l'esecutore. La copia non ha un suo ambiente Python:
+  i test si lanciano da `vfoot-backend/src` con
+  `/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py test <app>`.
 - Il branch sta sotto `fix/`, parte da `main`, e **non tocca `migrations/`**. Il
   ripristino automatico rimette il codice e non lo schema: una patch che migra al
   volo lascerebbe una banca dati che il codice ripristinato non si aspetta.

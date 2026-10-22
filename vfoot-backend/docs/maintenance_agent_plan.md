@@ -221,7 +221,21 @@ exec claude -p "$(cat)" \
      --output-format json
 ```
 
-### Quale modello (deciso 11/08/2026)
+### Quale modello (RIVISTO 22/10/2026: Sonnet 5.5, effort `high`)
+
+Rivisto sullo storico 11/08-22/10: il lavoro reale è leggere un guasto già nominato,
+scegliere fra quattro azioni chiuse e al massimo scrivere una patch di una riga; i
+guasti gravi della stagione (WAF di TM, impronta TLS rifiutata) erano fuori portata
+per mancanza di STRUMENTI, non di intelligenza. Con un risveglio per episodio sono
+3-5 passate al mese, e la differenza di costo fra i modelli smette di essere il
+criterio. Prezzi di ottobre: Sonnet 5.5 $2/$10, Opus 5.5 $4/$20 — Sonnet costa ormai
+meno di `kimi-k3`. Si può anche usare l'abbonamento (`claude setup-token` →
+`CLAUDE_CODE_OAUTH_TOKEN`), a patto di NON avere anche `ANTHROPIC_API_KEY`
+nell'ambiente, che vince. L'agente lavora in una worktree sua
+(`/srv/vfoot-data/agent-work`), mai nel checkout servito. Quello che segue è la
+decisione di agosto, lasciata per la storia.
+
+#### Decisione dell'11/08/2026 (superata)
 
 **Claude Opus 5** (`claude-opus-5`), effort `xhigh`. Il lavoro dell'agente — leggere,
 cercare, far girare i test, scrivere una patch — è il profilo agentico/coding, dove
