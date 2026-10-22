@@ -22,9 +22,11 @@ import logo from '../assets/logo.png';
  *  conosce la materia prima di considerarlo definitivo.
  */
 
-// Da completare prima di pubblicare: chi risponde dei dati e dove scrivergli.
-const TITOLARE = '[DA COMPLETARE: nome e cognome o ragione sociale, città]';
-const CONTATTO = '[DA COMPLETARE: indirizzo email]';
+// Nessuna società dietro: il titolare è una persona fisica (art. 4.7 GDPR). Il
+// contatto è un alias del dominio inoltrato alla casella personale, così la
+// casella non è pubblica e chi subentra cambia solo l'inoltro.
+const TITOLARE = 'Andrea De Luca';
+const CONTATTO = 'privacy@vfoot.it';
 const AGGIORNATA = '22 ottobre 2026';
 
 export default function PrivacyPage() {
@@ -62,7 +64,7 @@ export default function PrivacyPage() {
           <Blocco titolo="Chi risponde dei tuoi dati">
             <p>
               Il titolare del trattamento è <b className="text-ink">{TITOLARE}</b>. Per qualunque
-              domanda o richiesta sui tuoi dati scrivi a <b className="text-ink">{CONTATTO}</b>.
+              domanda o richiesta sui tuoi dati scrivi a <Mail />.
             </p>
           </Blocco>
 
@@ -192,8 +194,8 @@ export default function PrivacyPage() {
             <p>
               Puoi chiederci in qualunque momento di vedere i dati che abbiamo su di te, di
               correggerli, di cancellarli insieme all'account, di riceverne una copia, o di opporti a
-              un trattamento basato sul nostro legittimo interesse. Basta scrivere a{' '}
-              <b className="text-ink">{CONTATTO}</b>: rispondiamo entro un mese.
+              un trattamento basato sul nostro legittimo interesse. Basta scrivere a <Mail />:
+              rispondiamo entro un mese.
             </p>
             <p>
               Se pensi che trattiamo i tuoi dati in modo scorretto puoi rivolgerti al{' '}
@@ -211,6 +213,14 @@ export default function PrivacyPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function Mail() {
+  return (
+    <a href={`mailto:${CONTATTO}`} className="font-semibold text-accent underline decoration-dotted">
+      {CONTATTO}
+    </a>
   );
 }
 
