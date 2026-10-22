@@ -267,6 +267,13 @@ export default function ProfilePage() {
           </Button>
         </div>
       </Card>
+      <p className="px-1 text-xs text-ink-faint">
+        Quali dati teniamo e come chiederne la cancellazione:{' '}
+        <Link to="/privacy" className="font-semibold underline decoration-dotted hover:text-ink">
+          informativa privacy
+        </Link>
+        .
+      </p>
     </div>
   );
 }

@@ -36,6 +36,7 @@ import MaintenancePage from './pages/MaintenancePage';
 import VotoPuroPage from './pages/VotoPuroPage';
 import AggiornamentiPage from './pages/AggiornamentiPage';
 import VotoPubblicoPage from './pages/VotoPubblicoPage';
+import PrivacyPage from './pages/PrivacyPage';
 import CountdownPage, { isLaunched, rememberBypass, wantsBypass } from './pages/CountdownPage';
 
 function RequireAuth({ children }: { children: ReactElement }) {
@@ -94,6 +95,8 @@ export default function App() {
           l'ordine sbagliato. È la versione breve; quella lunga resta dentro, a
           `/voto-puro`, dove la si apre da una pagella con una domanda precisa. */}
       <Route path="/come-nasce-il-voto" element={<VotoPubblicoPage />} />
+      {/* FUORI da RequireAuth: va letta PRIMA di iscriversi. */}
+      <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/verifica-email" element={<VerifyEmailPage />} />
       <Route path="/recupera-password" element={<ForgotPasswordPage />} />
       <Route path="/nuova-password" element={<NewPasswordPage />} />

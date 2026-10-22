@@ -346,6 +346,15 @@ export default function LandingPage() {
                 text={mode === 'register' ? 'signup_with' : 'signin_with'}
               />
             </div>
+            {/* Un'informazione, non un consenso: l'iscrizione si regge sul contratto
+                (art. 6.1.b), e una casella da spuntare farebbe credere il contrario. */}
+            <p className="mt-4 text-center text-xs text-ink-faint">
+              Come usiamo i tuoi dati:{' '}
+              <Link to="/privacy" className="font-semibold underline decoration-dotted hover:text-ink">
+                informativa privacy
+              </Link>
+              .
+            </p>
           </Card>
         </div>
       </div>
