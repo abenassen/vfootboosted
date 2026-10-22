@@ -462,3 +462,67 @@ class ApiDellaPagina(TestCase):
             r = self._get(f"/api/v1/maintenance/proposals/{p.id}/", self.t_gestore)
         self.assertEqual(r.status_code, 200)
         self.assertIn("+riga", r.json()["diff"])
+
+
+@override_settings(**SIMULATED)
+class UnRisveglioPerEpisodio(TestCase):
+    """Il timer chiede ogni ora; il modello si paga solo quando c'è qualcosa di
+    nuovo. Il 19-22/10/2026 un avviso innocuo rimasto nella sua finestra avrebbe
+    comprato ~96 passate, tutte per rispondere «già visto»."""
+
+    def _ora(self, *controlli):
+        """Una passata oraria con questo rapporto; torna quante volte, in tutto,
+        l'agente è stato chiamato."""
+        from io import StringIO
+        from django.core.management import call_command
+        from realdata.services import health
+
+        rapporto = health.Health()
+        for level, code in controlli:
+            rapporto.add(level, code, f"{code}, ora {MaintenanceRun.objects.count()}")
+        with patch("realdata.services.health.report", return_value=rapporto):
+            call_command("maintenance_run", stdout=StringIO())
+        return MaintenanceRun.objects.count()
+
+    def test_lo_stesso_guasto_un_ora_dopo_non_lo_richiama(self):
+        self.assertEqual(self._ora(("warn", "provider:missing-xgot")), 1)
+        self.assertEqual(self._ora(("warn", "provider:missing-xgot")), 1)
+        self.assertEqual(self._ora(("warn", "provider:missing-xgot"),
+                                   ("info", "egress:pool")), 1)
+
+    def test_un_problema_nuovo_si(self):
+        self._ora(("warn", "provider:missing-xgot"))
+        self.assertEqual(self._ora(("warn", "provider:missing-xgot"),
+                                   ("alarm", "poll_transfermarkt:drop")), 2)
+
+    def test_meno_problemi_di_prima_non_e_una_notizia(self):
+        self._ora(("warn", "a"), ("alarm", "b"))
+        self.assertEqual(self._ora(("alarm", "b")), 1)
+
+    def test_un_avviso_che_diventa_allarme_si(self):
+        self._ora(("warn", "calendar:thin"))
+        self.assertEqual(self._ora(("alarm", "calendar:thin")), 2)
+
+    def test_dopo_un_ora_verde_e_un_episodio_nuovo(self):
+        self._ora(("alarm", "egress:pool-low"))
+        self._ora()
+        self.assertEqual(self._ora(("alarm", "egress:pool-low")), 2)
+
+    def test_una_passata_fallita_non_conta_come_vista(self):
+        self._ora(("alarm", "x"))
+        MaintenanceRun.objects.update(ok=False)
+        self.assertEqual(self._ora(("alarm", "x")), 2)
+
+    def test_dopo_la_finestra_si_richiede(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        self._ora(("alarm", "x"))
+        MaintenanceRun.objects.update(started_at=timezone.now() - timedelta(days=15))
+        self.assertEqual(self._ora(("alarm", "x")), 2)
+
+    def test_a_mano_si_chiede_sempre(self):
+        from io import StringIO
+        from django.core.management import call_command
+        self._ora(("alarm", "x"))
+        call_command("maintenance_run", force=True, stdout=StringIO())
+        self.assertEqual(MaintenanceRun.objects.count(), 2)

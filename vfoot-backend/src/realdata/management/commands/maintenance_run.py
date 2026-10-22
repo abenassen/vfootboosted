@@ -10,6 +10,14 @@ morning whether everything is fine will, sooner or later, reassure you about a
 morning when it is not. The deterministic layer is the eye that watches; the agent
 is what you call once that eye has seen something.
 
+ONE PASS PER EPISODE, NOT ONE PER HOUR. The timer asks every hour, which is what
+lets a fault born at nine in the evening be seen before morning — but the same
+fault still open an hour later is not news, and the model would be paid to read it
+again and answer "already seen". So the agent is called only when the report shows
+a problem (a ``level:code`` pair) that the last successful pass did not see, or the
+first time anything shows up after a green hour. Measured on 19-22/10/2026: one
+harmless warning, still in its window, would have bought ~96 passes.
+
 This command writes proposals and stops. Executing them is ``maintenance_tick``, and
 between the two sits either a human or the auto tier — which ships off.
 """
@@ -18,14 +26,47 @@ from __future__ import annotations
 import json
 import logging
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from realdata.models import MaintenanceProposal, MaintenanceRun
+from realdata.models import JobRun, MaintenanceProposal, MaintenanceRun
 from realdata.services import agent_client, health, job_log, maintenance
 
 log = logging.getLogger(__name__)
+
+# Written on the hourly row when the verdict is green: it is what closes an episode,
+# so that the same problem coming back later is a new one.
+GREEN_NOTE = "verdetto verde"
+# How long a pass covers the problems it saw. The same as the retention of the quiet
+# ``JobRun`` rows (``JobRun.prune``): past it, the green row that would prove the
+# episode closed may already be gone, so the only safe reading is to ask again.
+SEEN_FOR = timedelta(days=14)
+
+
+def problems(report) -> set[str]:
+    """What the report complains about, as ``level:code``. The message is left out
+    on purpose — it carries counts and ages that change every hour — and the level
+    is kept, so a warning that becomes an alarm is news."""
+    return {f"{c.level}:{c.code}" for c in report.checks if c.level != "info"}
+
+
+def already_seen(report, *, now=None) -> MaintenanceRun | None:
+    """The last pass that already saw everything this report shows, if the episode
+    it belongs to is still open. ``None`` means the agent has something new to read."""
+    now = now or timezone.now()
+    last = (MaintenanceRun.objects.filter(ok=True, started_at__gte=now - SEEN_FOR)
+            .order_by("-started_at").first())
+    if last is None:
+        return None
+    if JobRun.objects.filter(job="maintenance_run", note=GREEN_NOTE,
+                             started_at__gt=last.started_at).exists():
+        return None     # it went green in between: this is a new episode
+    seen = {f"{c['level']}:{c['code']}" for c in last.context.get("checks", [])
+            if c.get("level") != "info"}
+    return last if problems(report) <= seen else None
 
 
 class Command(BaseCommand):
@@ -52,8 +93,19 @@ class Command(BaseCommand):
             else MaintenanceRun.TRIGGER_ALARM)
 
         if report.verdict == "ok" and not opts["force"]:
+            job.note(GREEN_NOTE)
             self.stdout.write("verdetto verde: l'agente non viene svegliato.")
             return
+
+        if trigger == MaintenanceRun.TRIGGER_ALARM:
+            seen = already_seen(report)
+            if seen is not None:
+                job.note(f"gia' visto dalla passata {seen.id}")
+                self.stdout.write(
+                    f"niente di nuovo rispetto alla passata {seen.id} del "
+                    f"{timezone.localtime(seen.started_at):%d/%m %H:%M}: l'agente "
+                    f"non viene svegliato.")
+                return
 
         job.due(agent_pass=1)
         # The same report the gate used, reused: the shape canary reads files off

@@ -56,7 +56,13 @@ Il turno del modello viene dopo: perché si è rotto, e qual è la correzione.
 
 Da qui discende anche **quando gira**: lo sveglia il verdetto rosso di
 `health_report`, non un orologio. Più una passata settimanale a prescindere, per le
-derive lente che nessuna soglia prende. Un agente che ogni notte legge dati sani è un
+derive lente che nessuna soglia prende.
+
+**Una passata per episodio, non una all'ora** (22/10/2026). Il timer controlla ogni
+ora, ma il modello si chiama solo se il rapporto mostra un problema (`livello:codice`)
+che l'ultima passata riuscita non aveva visto, o se nel frattempo c'è stata un'ora
+verde. Prima no: misurato sullo storico, un solo avviso innocuo (l'xGOT del 19-22/10)
+avrebbe comprato ~96 passate. Vedi `maintenance_run.already_seen`. Un agente che ogni notte legge dati sani è un
 agente che prima o poi rassicura su qualcosa che non va.
 
 ## L'agente propone, il codice esegue
