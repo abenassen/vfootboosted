@@ -110,6 +110,13 @@ SETTLE_AFTER = timedelta(hours=4)   # from kickoff, by when a match should be re
 # vedere un ritmo (una giornata sono dieci partite), abbastanza poco da non
 # rileggere mezza stagione a ogni report.
 MISSING_XGOT_WINDOW = timedelta(days=14)
+# Da quante righe nella finestra il buco diventa giallo. Il ritmo di fondo e' una
+# riga su 11903 (25-26): in due settimane, ~600 presenze, se ne aspetta 0,05. Tre
+# insieme non sono piu' il fornitore che salta un campo (Poisson: ~2e-5), sono un
+# cambio di payload. Sotto la soglia la riga resta in ``info``: una sola presenza
+# tappata accendeva il giallo, e quindi la mail, ogni giorno per quattordici
+# giorni, per un caso che i voti avevano gia' assorbito.
+MISSING_XGOT_WARN_AT = 3
 # Quanto indietro guardare per chi ha giocato senza essere in nessuna rosa. Dieci
 # giorni, cioe' due turni con un infrasettimanale in mezzo: chi gioca in giornate
 # consecutive — la forma di una meta' spezzata — resta acceso, chi e' stato
@@ -667,7 +674,8 @@ def _check_missing_xgot(health: Health, now) -> None:
     rows = missing_xgot_rows(recent)
     if not rows:
         return
-    health.add("warn", "provider:missing-xgot",
+    level = "warn" if len(rows) >= MISSING_XGOT_WARN_AT else "info"
+    health.add(level, "provider:missing-xgot",
                f"{len(rows)} presenze delle ultime {_human(MISSING_XGOT_WINDOW)} "
                f"senza expectedGoalsOnTarget dal fornitore: l'xGOT e' stato messo "
                f"d'ufficio dalla mappa dei tiri (il piu' grosso "

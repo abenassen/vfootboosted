@@ -252,9 +252,17 @@ class ControlliDiSalute(TestCase):
     def test_lxgot_mancante_e_un_avviso_non_un_allarme(self):
         """Il buco è già tappato, quindi nessun voto è sbagliato: quello che il
         canarino sorveglia è il ritmo con cui il fornitore lo lascia."""
-        self._match_with_a_shot(xgot_zone=False)
+        for days_ago in (1, 2, 3):
+            self._match_with_a_shot(xgot_zone=False, days_ago=days_ago)
         self.assertIn("provider:missing-xgot", self._codes("warn"))
         self.assertNotIn("provider:missing-xgot", self._codes("alarm"))
+
+    def test_una_riga_sola_resta_informazione(self):
+        """Un campo saltato una volta è il ritmo di fondo del fornitore: si
+        conta, ma non accende il giallo (e la mail) per quattordici giorni."""
+        self._match_with_a_shot(xgot_zone=False)
+        self.assertIn("provider:missing-xgot", self._codes("info"))
+        self.assertNotIn("provider:missing-xgot", self._codes("warn"))
 
     def test_lxgot_che_arriva_non_fa_rumore(self):
         self._match_with_a_shot(xgot_zone=True)
