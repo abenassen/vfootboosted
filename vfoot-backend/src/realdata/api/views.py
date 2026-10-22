@@ -16,6 +16,8 @@ is broken, the mail still arrives and the terminal still works.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -25,10 +27,13 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from realdata.models import MaintenanceProposal, MaintenanceRun
+from realdata.models import HealthSnapshot, MaintenanceProposal, MaintenanceRun
 from realdata.services import health, maintenance
 
 PENDING = MaintenanceProposal.STATUS_PROPOSED
+# Quanti mattini mostrare: abbastanza da vedere se un giallo è di oggi o di due
+# settimane, pochi abbastanza da stare in una schermata di telefono.
+HISTORY_WINDOW = timedelta(days=30)
 
 
 def _brief(p: MaintenanceProposal) -> dict:
@@ -73,6 +78,13 @@ class MaintenanceStateView(APIView):
             # Shown on the page so its state is never a guess: with the auto tier
             # off, "approved" means you approved it.
             "auto_enabled": bool(getattr(settings, "VFOOT_MAINTENANCE_AUTO", False)),
+            # The mornings, so the page can answer "is it the first time?".
+            "history": [{
+                "at": h.at.isoformat(),
+                "verdict": h.verdict,
+                "checks": h.checks,
+            } for h in HealthSnapshot.objects.filter(
+                at__gte=timezone.now() - HISTORY_WINDOW)],
         })
 
 

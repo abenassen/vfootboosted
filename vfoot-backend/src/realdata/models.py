@@ -511,6 +511,38 @@ class JobRun(models.Model):
         return gone
 
 
+class HealthSnapshot(models.Model):
+    """Il verdetto del rapporto quotidiano, tenuto.
+
+    ``health_report`` calcola tutto da capo e lo dimentica: finiva nel journal e,
+    se non verde, in una mail. Il journal sul server tiene tre settimane, la mail
+    sta in una casella che non è l'app, e la pagina Manutenzione poteva mostrare
+    solo il verdetto di ADESSO — cioè non poteva rispondere alla prima domanda
+    che ci si fa aprendola: «è la prima volta, o è da giorni?».
+
+    Una riga al giorno, scritta solo dalla passata ufficiale (``--record``, la
+    mette l'unità ``vfoot-health``): un ``health_report`` lanciato a mano per
+    curiosità non deve comparire nello storico come se fosse un mattino.
+    """
+
+    KEEP_DAYS = 90
+
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+    verdict = models.CharField(max_length=8)
+    checks = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["-at"]
+
+    def __str__(self) -> str:  # pragma: no cover - comodità per l'admin
+        return f"{self.at:%d/%m/%Y %H:%M} {self.verdict}"
+
+    @classmethod
+    def prune(cls) -> int:
+        return cls.objects.filter(
+            at__lt=timezone.now() - timedelta(days=cls.KEEP_DAYS)).delete()[0]
+
+
 class MaintenanceRun(models.Model):
     """One pass of the maintenance agent: what woke it, and what it concluded.
 

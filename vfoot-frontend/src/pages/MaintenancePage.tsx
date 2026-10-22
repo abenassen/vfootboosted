@@ -7,6 +7,7 @@ import {
   getMaintenanceState,
 } from '../api/backend';
 import type {
+  HealthSnapshot,
   MaintenanceCheck,
   MaintenanceState,
   ProposalBrief,
@@ -52,6 +53,42 @@ function CheckLine({ check }: { check: MaintenanceCheck }) {
         ? 'border-warn/40 bg-warn-bg text-warn'
         : 'border-line bg-surface text-ink-soft';
   return <li className={`rounded-xl border px-3 py-2 text-sm ${tone}`}>{check.message}</li>;
+}
+
+const DOT: Record<string, string> = { ok: 'bg-good', warn: 'bg-warn', alarm: 'bg-bad' };
+
+/** I mattini passati: un giorno per riga, aperto in linea. Serve a rispondere
+ *  alla domanda che il verdetto di adesso non sa fare — «è la prima volta, o è da
+ *  giorni?». Si mostrano solo i controlli non informativi: le righe «info» sono
+ *  il contesto di OGGI, e ripetute per trenta giorni coprirebbero il resto. */
+function HistoryRow({ day }: { day: HealthSnapshot }) {
+  const problems = day.checks.filter((c) => c.level !== 'info');
+  const when = new Date(day.at).toLocaleDateString('it-IT', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+  });
+  return (
+    <li>
+      <details className="rounded-xl border border-line bg-surface px-3 py-2 text-sm">
+        <summary className="flex cursor-pointer list-none items-center gap-2">
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[day.verdict] ?? 'bg-warn'}`} />
+          <span className="w-24 shrink-0 text-ink-soft">{when}</span>
+          <span className="min-w-0 flex-1 truncate text-ink-soft">
+            {problems.length === 0 ? 'tutto a posto' : problems[0].message}
+          </span>
+          {problems.length > 1 && <span className="shrink-0 text-xs text-ink-faint">+{problems.length - 1}</span>}
+        </summary>
+        {problems.length > 0 && (
+          <ul className="mt-2 space-y-2">
+            {problems.map((c) => (
+              <CheckLine key={c.code} check={c} />
+            ))}
+          </ul>
+        )}
+      </details>
+    </li>
+  );
 }
 
 /** Il dettaglio, aperto in linea: su un telefono una seconda schermata per due
@@ -245,6 +282,17 @@ export default function MaintenancePage() {
           Livello automatico spento: ogni proposta passa da qui. Le patch non entrano
           nell’automatico a nessuna impostazione.
         </p>
+      )}
+
+      {state.history.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold">Ultimi mattini</h2>
+          <ul className="space-y-1.5">
+            {state.history.map((day) => (
+              <HistoryRow key={day.at} day={day} />
+            ))}
+          </ul>
+        </section>
       )}
 
       {state.runs.length > 0 && (

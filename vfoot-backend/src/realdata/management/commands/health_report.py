@@ -27,7 +27,7 @@ import json
 
 from django.core.management.base import BaseCommand
 
-from realdata.models import JobRun
+from realdata.models import HealthSnapshot, JobRun
 from realdata.services import alerting, health
 
 LEVEL_STYLE = {"alarm": "ERROR", "warn": "WARNING", "info": "SUCCESS"}
@@ -59,15 +59,22 @@ class Command(BaseCommand):
         parser.add_argument("--skip-shape", action="store_true",
                             help="Skip the data-shape canary (it reads the cache "
                                  "from disk; this makes the run pure DB).")
+        parser.add_argument("--record", action="store_true",
+                            help="Keep this verdict in the history the "
+                                 "maintenance page shows (the daily unit does).")
         parser.add_argument("--prune", action="store_true",
                             help="Also drop run rows past their retention.")
 
     def handle(self, *args, **opts):
         report = health.report(skip_shape=opts["skip_shape"])
 
+        if opts["record"]:
+            HealthSnapshot.objects.create(at=report.at, verdict=report.verdict,
+                                          checks=report.as_dict()["checks"])
+
         pruned = None
         if opts["prune"]:
-            pruned = JobRun.prune()
+            pruned = JobRun.prune() + HealthSnapshot.prune()
 
         if opts["json"]:
             payload = report.as_dict()

@@ -16,4 +16,4 @@ WorkingDirectory=/srv/vfoot-app/vfoot-backend/src
 # smette di essere letta come un allarme nel giro di due giorni. La notizia la porta
 # la mail; l'esito dell'unita' resta 0 e il rapporto sta nel journal.
 ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python manage.py health_report \
-  --mail --prune
+  --mail --prune --record

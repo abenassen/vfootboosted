@@ -64,12 +64,21 @@ export interface MaintenanceRunBrief {
   error: string;
 }
 
+/** One morning's verdict, as the daily health report left it. */
+export interface HealthSnapshot {
+  at: string;
+  verdict: MaintenanceVerdict;
+  checks: MaintenanceCheck[];
+}
+
 export interface MaintenanceState {
   verdict: MaintenanceVerdict;
   checks: MaintenanceCheck[];
   pending: ProposalBrief[];
   runs: MaintenanceRunBrief[];
   auto_enabled: boolean;
+  /** Newest first, the last 30 days. */
+  history: HealthSnapshot[];
 }
 
 export interface DecideResponse {

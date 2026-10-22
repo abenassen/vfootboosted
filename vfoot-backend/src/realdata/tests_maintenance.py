@@ -418,6 +418,25 @@ class ApiDellaPagina(TestCase):
         # Lo stato del livello automatico è scritto, non lasciato indovinare.
         self.assertFalse(r.json()["auto_enabled"])
 
+    def test_lo_storico_dei_mattini_e_nella_pagina(self):
+        """Il verdetto di oggi da solo non dice se un giallo è nuovo o vecchio di
+        due settimane: lo storico è la risposta a quella domanda."""
+        from datetime import timedelta
+        from io import StringIO
+        from django.core.management import call_command
+        from django.utils import timezone
+        from realdata.models import HealthSnapshot
+
+        HealthSnapshot.objects.create(at=timezone.now() - timedelta(days=45),
+                                      verdict="alarm", checks=[])
+        call_command("health_report", record=True, skip_shape=True, stdout=StringIO())
+        call_command("health_report", skip_shape=True, stdout=StringIO())  # a mano: non conta
+
+        storia = self._get("/api/v1/maintenance/state/", self.t_gestore).json()["history"]
+        self.assertEqual(len(storia), 1)            # il vecchio è fuori finestra
+        self.assertIn(storia[0]["verdict"], ("ok", "warn", "alarm"))
+        self.assertIsInstance(storia[0]["checks"], list)
+
     def test_decidere_richiede_lo_staff(self):
         r = self.client.post(f"/api/v1/maintenance/proposals/{self.p.id}/decide/",
                              {"decision": "approve"},
