@@ -161,6 +161,10 @@ REST_FRAMEWORK = {
         # che tiene un gettone rubato lontano dall'unica vCPU. Contato per IP —
         # più installazioni dietro la stessa uscita di rete ci stanno comunque.
         "push_relevance": os.environ.get("DJANGO_PUSH_RELEVANCE_RATE", "60/min"),
+        # Il registro delle pagine: una chiamata per cambio di pagina. Trecento
+        # all'ora sono una pagina ogni dodici secondi per un'ora intera, cioè più
+        # di chiunque stia leggendo; oltre è un ciclo, non una persona.
+        "usage": os.environ.get("DJANGO_USAGE_RATE", "300/hour"),
     },
 }
 
@@ -456,6 +460,12 @@ VFOOT_HEALTH_EMAIL = os.environ.get("VFOOT_HEALTH_EMAIL", "")
 # scoperta in un elenco è una segnalazione persa. Vuota: nessuna mail, e le
 # segnalazioni si leggono solo dall'admin (restano salvate comunque).
 VFOOT_FEEDBACK_EMAIL = os.environ.get("VFOOT_FEEDBACK_EMAIL", "") or VFOOT_HEALTH_EMAIL
+
+
+# --- Registro delle pagine (vfoot/models/usage.py) ------------------------
+# SPENTO per default: le righe sono anonime ma su pochi iscritti restano vicine
+# alle persone, e si accende dopo aver deciso cosa dirne nell'informativa.
+VFOOT_USAGE_LOG = _env_bool("VFOOT_USAGE_LOG", False)
 
 
 # --- Maintenance agent ----------------------------------------------------

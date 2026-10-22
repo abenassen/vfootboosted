@@ -14,7 +14,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 
 from vfoot.models import (
-    CrestImage, CrestReport, Feedback, LiveEventNotice, ProductNews,
+    CrestImage, CrestReport, Feedback, LiveEventNotice, PageVisit, ProductNews,
 )
 
 
@@ -156,4 +156,19 @@ class LiveEventNoticeAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+
+@admin.register(PageVisit)
+class PageVisitAdmin(admin.ModelAdmin):
+    """Per guardarci dentro a mano; il riassunto vero lo farà il codice."""
+    list_display = ("day", "route", "visible_ms", "device", "standalone", "live",
+                    "signed_in")
+    list_filter = ("device", "standalone", "live", "signed_in", "day")
+    search_fields = ("route",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False

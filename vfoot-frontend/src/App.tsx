@@ -20,6 +20,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import NewPasswordPage from './pages/NewPasswordPage';
 import JoinLeaguePage from './pages/JoinLeaguePage';
 import { useAuth } from './auth/AuthContext';
+import { usePageTracking } from './usage/usePageTracking';
 import { LeagueProvider } from './league/LeagueContext';
 import { CompetitionProvider } from './league/CompetitionContext';
 import { ChampionshipProvider } from './league/ChampionshipContext';
@@ -84,6 +85,7 @@ function PublicEntry() {
 }
 
 export default function App() {
+  usePageTracking();
   return (
     <Routes>
       <Route path="/" element={<PublicEntry />} />

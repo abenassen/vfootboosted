@@ -106,6 +106,25 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Token ${token}` };
 }
 
+/** Il registro delle pagine (``usage/visits``). Fuori dal giro di ``request``
+ *  apposta: niente errori da mostrare, niente ritentativi, e ``keepalive`` perché
+ *  l'ultimo tratto parte mentre la scheda si sta chiudendo — è l'unico modo di
+ *  spedirlo che porti anche l'intestazione col token, che ``sendBeacon`` non sa
+ *  mandare (e senza la quale il server non riconoscerebbe gli staff da scartare). */
+export function postUsageVisits(visits: unknown[]): void {
+  if (visits.length === 0) return;
+  try {
+    void fetch(`${baseUrl()}/usage/visits`, {
+      method: 'POST',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ visits }),
+    }).catch(() => undefined);
+  } catch {
+    // Una misura persa non deve mai diventare un errore per chi usa l'app.
+  }
+}
+
 /** An API failure carrying the HTTP status and the raw server payload, while its
  *  ``message`` is a sentence meant for the user. */
 export class ApiError extends Error {

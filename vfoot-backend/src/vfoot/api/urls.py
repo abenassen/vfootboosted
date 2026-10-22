@@ -1,6 +1,7 @@
 from django.urls import path
 
 from vfoot.api.news_views import NewsSeenView, NewsView
+from vfoot.api.usage_views import PageVisitView
 from vfoot.api.league_views import (
     AuctionAssignView,
     AuctionCancelNominationView,
@@ -244,6 +245,7 @@ urlpatterns = [
     path("real-seasons/<int:season_id>/fixtures", SeasonRealFixturesView.as_view(), name="season-real-fixtures"),
     path("news", NewsView.as_view(), name="news"),
     path("news/seen", NewsSeenView.as_view(), name="news-seen"),
+    path("usage/visits", PageVisitView.as_view(), name="usage-visits"),
     path("real-matches/<int:match_id>/probable-lineups",
          RealMatchProbableLineupsView.as_view(), name="real-match-probable-lineups"),
     path("real-seasons/<int:season_id>/matches/<int:match_id>", SeasonRealMatchDetailView.as_view(), name="season-real-match-detail"),

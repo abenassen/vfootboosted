@@ -38,11 +38,13 @@ from vfoot.models.heatmap import HeatmapGrid
 from vfoot.models.lineup import SavedLineupSnapshot
 from vfoot.models.presence import PlayerZonePresence, ZoneDuel
 from vfoot.models.push import LiveEventNotice, PushSubscription
+from vfoot.models.usage import PageVisit
 from vfoot.models.zones import Zone, ZoneSet
 
 __all__ = [
     "SocialAccount",
     "ProductNews",
+    "PageVisit",
     "UserProfile",
     "AuctionBid",
     "AwardedPrize",
