@@ -62,6 +62,37 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-19',
+    versione: '1.19',
+    data: '26 ottobre 2026',
+    titolo: 'Conta anche quante occasioni ti procuri, e un attaccante non paga i gol subiti',
+    sommario:
+      'Tre ritocchi nati da una partita sola, Udinese-Milan: arrivare al tiro vale qualcosa anche se poi sbagli, un attaccante non perde più voto per il pericolo che la sua squadra ha concesso, e un tiro che non è nemmeno partito non conta come occasione sprecata. Sulle prime otto giornate cambiano 90 voti su 2.297, tutti di mezzo punto: 50 in su e 40 in giù.',
+    voci: [
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Procurarsi un’occasione vale, oltre a come la calci: prima il voto pagava solo l’esecuzione, quindi chi arrivava spesso al tiro e sbagliava ne usciva soltanto in perdita. Il peso è piccolo, un terzo e mezzo di quello della conclusione, e la media di ogni ruolo non si muove.',
+        caso:
+          'Lautaro Martínez in Cagliari-Inter (giornata 2), dieci tiri per 1,22 di xG e nessun gol: 5,5 → 6,0. Anguissa in Inter-Napoli (giornata 3), 1,27 di xG senza segnare: 4,5 → 5,0. Chi tira poco scende un filo: sulle prime otto giornate questa voce da sola fa salire 38 voti (in media 0,54 di xG) e scendere 43 (0,02), sempre di mezzo punto.',
+      },
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Un attaccante non risponde più del «pericolo concesso nella sua zona»: senza un gesto difensivo era solo il conto dei gol subiti dalla squadra, e la mappa della partita intera gli addebitava anche i contropiede per i minuti passati in area sui calci piazzati. Difensori e centrocampisti restano come prima.',
+        caso:
+          'Gonçalo Ramos in Lazio-Milan (giornata 4): 5,0 → 5,5. Vale nei due sensi: chi giocava in una squadra che non ha concesso niente non prende più il piccolo credito che ne veniva — Malen in Torino-Roma (giornata 4), 7,0 → 6,5. In tutto cambiano 18 voti di attaccanti in otto giornate.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Un tiro fuori fermato alle spalle di chi calciava — un compagno sulla traiettoria, una conclusione mai partita — non conta più come occasione sprecata: nella mappa dei tiri si chiama «ostacolato» e non toglie né aggiunge. Capita una ventina di volte a stagione.',
+        caso:
+          'Bartesaghi in Udinese-Milan (giornata 8): al 40’ un tiro da 0,78 di xG, ostacolato da Pulisic, gli costava mezzo punto. 6,0 → 6,5 (le pagelle 6,5 e 7). Nella stessa partita Pavlović, 6,5 → 7,0. Sono 17 tiri nelle prime otto giornate.',
+      },
+    ],
+  },
+  {
     id: 'v-1-18',
     versione: '1.18',
     data: '16 ottobre 2026',
