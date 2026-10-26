@@ -291,6 +291,24 @@ def shot_distance_m(coords: Any) -> float | None:
     return round(math.hypot(x * 1.05, (y - 50.0) * 0.68), 2)
 
 
+def shot_interception_m(shot: dict) -> float | None:
+    """Metri lungo il campo dal punto di tiro al punto in cui il pallone e' stato
+    fermato (``blockCoordinates``): positivo verso la porta, negativo DIETRO il
+    tiratore. Stessa x della distanza (percento di 105 m dalla porta attaccata).
+    None senza punto di blocco. V. ``MatchShot.interception_m``."""
+    if not isinstance(shot, dict) or not shot.get("blockCoordinates"):
+        return None
+    try:
+        px, _ = _point_xy(shot.get("playerCoordinates") or {})
+        bx, _ = _point_xy(shot.get("blockCoordinates"))
+        px, bx = float(px), float(bx)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(px) or math.isnan(bx):
+        return None
+    return round((px - bx) * 1.05, 2)
+
+
 def _shot_point_xy(coords: Any) -> tuple[Any, Any]:
     """Shot coordinates, brought into the SAME frame as the heatmap.
 
@@ -903,6 +921,8 @@ def _ingest_match(
             xg=_num(shot.get("xg")), xgot=_num(shot.get("xgot")),
             # La distanza dalla porta, per il canale del portiere (v. MatchShot).
             distance_m=shot_distance_m(coords),
+            # Dove e' stato fermato, rispetto a chi calciava (v. MatchShot).
+            interception_m=shot_interception_m(shot),
             is_goal=(str(shot.get("shotType") or "").lower() == "goal"),
             shot_type=str(shot.get("shotType") or "")[:24],
             # Play type (penalty/set-piece/…); a missed penalty needs it (see MatchShot).

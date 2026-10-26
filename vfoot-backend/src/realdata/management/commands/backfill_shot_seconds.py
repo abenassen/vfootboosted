@@ -1,4 +1,4 @@
-"""Backfill MatchShot.elapsed_seconds, .situation and .distance_m from the cached SofaScore shotmaps.
+"""Backfill MatchShot.elapsed_seconds, .situation, .distance_m and .interception_m from the cached SofaScore shotmaps.
 
 New imports capture the shot's ``timeSeconds`` and ``situation`` (see
 sofascore_adapter), but rows imported before that lack them. This reads the shotmaps
@@ -24,7 +24,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from realdata.models import CompetitionSeason, Match, MatchShot
-from realdata.services.sofascore_adapter import shot_distance_m
+from realdata.services.sofascore_adapter import shot_distance_m, shot_interception_m
 
 
 class Command(BaseCommand):
@@ -57,7 +57,7 @@ class Command(BaseCommand):
                 missing += 1
                 continue
             data = json.loads(f.read_text())
-            meta = {}  # shot id -> (timeSeconds|None, situation|"", distance_m|None)
+            meta = {}  # shot id -> (timeSeconds|None, situation|"", distance_m|None, interception_m|None)
             for s in (data.get("shotmap") or []):
                 sid = s.get("id")
                 if sid is None:
@@ -67,13 +67,14 @@ class Command(BaseCommand):
                 if dist is None:
                     no_coords += 1
                 meta[str(sid)] = (int(ts) if isinstance(ts, (int, float)) else None,
-                                  str(s.get("situation") or "")[:24], dist)
+                                  str(s.get("situation") or "")[:24], dist,
+                                  shot_interception_m(s))
             to_update = []
             for shot in MatchShot.objects.filter(match=m).exclude(external_id=""):
                 info = meta.get(shot.external_id)
                 if not info:
                     continue
-                ts, sit, dist = info
+                ts, sit, dist, cut = info
                 dirty = False
                 if ts is not None and shot.elapsed_seconds != ts:
                     shot.elapsed_seconds = ts; dirty = True
@@ -82,12 +83,15 @@ class Command(BaseCommand):
                 # La distanza dalla porta (08/10/2026), per il canale del portiere.
                 if dist is not None and shot.distance_m != dist:
                     shot.distance_m = dist; dirty = True
+                # Dove e' stato fermato (26/10/2026): v. classic_rating.is_interrupted_shot.
+                if shot.interception_m != cut:
+                    shot.interception_m = cut; dirty = True
                 if dirty:
                     to_update.append(shot)
             filled += len(to_update)
             if to_update and not o["dry_run"]:
                 MatchShot.objects.bulk_update(to_update, ["elapsed_seconds", "situation",
-                                                          "distance_m"])
+                                                          "distance_m", "interception_m"])
             read += 1
 
         verb = "sarebbero aggiornati" if o["dry_run"] else "aggiornati"
@@ -100,6 +104,8 @@ class Command(BaseCommand):
         season_shots = MatchShot.objects.filter(match__competition_season_id=o["season"])
         left = season_shots.filter(distance_m__isnull=True).count()
         self.stdout.write(f"tiri senza coordinate nella mappa: {no_coords}")
+        self.stdout.write("tiri fuori fermati dietro il tiratore: %d" % season_shots.filter(
+            shot_type="miss", interception_m__lt=0).count())
         line = (f"tiri della stagione senza distanza dopo il passaggio: {left} "
                 f"su {season_shots.count()}")
         self.stdout.write(self.style.SUCCESS(line) if left == 0 or o["dry_run"]

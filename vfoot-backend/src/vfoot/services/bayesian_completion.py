@@ -407,7 +407,7 @@ def neutral_z(ref_key: str, key: str, scales: dict) -> float:
 
 # ---------------------------------------------------------------- l'indice
 def weights_with_exposure(ref_key: str) -> dict:
-    return {**cr.weights_for_role(ref_key), cr.EXPOSURE_KEY: -cr.EXPOSURE_WEIGHT}
+    return {**cr.weights_for_role(ref_key), cr.EXPOSURE_KEY: -cr.exposure_weight_for(ref_key)}
 
 
 def _gain_parts(ref_key: str, reference: dict) -> tuple[float, float, float]:

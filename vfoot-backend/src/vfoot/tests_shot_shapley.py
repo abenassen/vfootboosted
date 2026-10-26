@@ -74,7 +74,7 @@ class ShotSectionAddsUpTests(TestCase):
             zone_key="Z_0_1", value=40.0, team_side="home")
         return p
 
-    def _shots(self, *specs):
+    def _shots(self, *specs, interception_m=None):
         """Crea i tiri E i totali di zona che li rispecchiano, insieme.
 
         I due archivi vanno tenuti coerenti a mano perché nella realtà non sempre
@@ -86,6 +86,7 @@ class ShotSectionAddsUpTests(TestCase):
                 match=self.match, player=self.player, team_side="home",
                 minute=minute, zone_key="Z_4_1", xg=x, xgot=xo,
                 is_goal=kind == "goal", shot_type=kind, situation="regular",
+                interception_m=interception_m,
                 provider="sofascore", external_id=f"s{i}")
             n += 1
             xg += x
@@ -183,6 +184,26 @@ class ShotSectionAddsUpTests(TestCase):
         self.assertEqual(riga["added"], 0.0)
         self.assertEqual(riga["outcome"], "salvato sulla linea")
         self.assertAlmostEqual(riga["points"] + d["baseline"], d["total"], places=2)
+
+    def test_a_shot_stopped_behind_the_shooter_is_not_an_execution(self):
+        """Il «tiro» fuori fermato DIETRO chi calciava non e' partito (26/10/2026):
+        Bartesaghi in Udinese-Milan, ostacolato da Pulisic, pagava −0,49 per
+        un'occasione da 0,78. Prende l'xGOT d'ufficio come il salvato sulla linea —
+        non aggiunge e non toglie — col suo nome nella tabella, e la sezione somma."""
+        self._shots((40, "miss", 0.78, 0.0), interception_m=-3.26)
+        d = shot_detail(self.match, self.player.id)
+        riga = d["shots"][0]
+        self.assertEqual(riga["outcome"], "ostacolato")
+        self.assertEqual(riga["xgot"], 0.78)
+        self.assertTrue(riga["xgot_office"])
+        self.assertEqual(riga["added"], 0.0)
+        self.assertAlmostEqual(riga["points"] + d["baseline"], d["total"], places=2)
+        # lo stesso tiro fermato DAVANTI resta un tiro fuori: la palla e' partita
+        MatchShot.objects.filter(match=self.match).update(interception_m=2.0)
+        riga = shot_detail(self.match, self.player.id)["shots"][0]
+        self.assertEqual(riga["outcome"], "fuori")
+        self.assertEqual(riga["added"], -0.78)
+        self.assertLess(riga["points"], -0.3)
 
     def test_it_holds_for_a_single_shot_too(self):
         """Con un tiro solo Shapley e leave-one-out coincidono, ma il metro no:

@@ -220,14 +220,22 @@ class DefensiveExposureTests(TestCase):
 
 
 class ExposureInTheIndexTests(TestCase):
-    def test_every_outfield_role_carries_the_charge(self):
-        """Attackers used to be exempt: they computed a share and did not pay it,
-        an asymmetry with no argument behind it."""
+    def test_defenders_and_midfielders_carry_the_charge(self):
+        """Il pericolo passato dalla loro zona e' loro (v. EXPOSURE_ROLE_FACTOR)."""
         feats = {"touches": 60.0}
-        for role in ("DIF", "CEN", "ATT"):
+        for role in ("DIF", "CEN"):
             self.assertLess(index_for_role(role, feats, 90, 0.9),
                             index_for_role(role, feats, 90, 0.0),
                             msg=f"{role} should pay for the danger in his zone")
+
+    def test_the_attacker_does_not(self):
+        """Dal 26/10/2026 l'attaccante non paga: «tanto pericolo concesso nella sua
+        zona» senza un gesto difensivo, solo perche' la squadra ha preso gol, e' un
+        messaggio confuso — e la heatmap della partita intera gli addossava i gol in
+        contropiede per i minuti passati in area sui calci piazzati (Raimondo)."""
+        feats = {"touches": 60.0}
+        self.assertEqual(index_for_role("ATT", feats, 90, 0.9),
+                         index_for_role("ATT", feats, 90, 0.0))
 
     def test_the_keeper_does_not(self):
         """His own channel already answers for what reached him (goals prevented =

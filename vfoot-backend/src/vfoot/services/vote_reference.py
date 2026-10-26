@@ -45,6 +45,8 @@ def weights_fingerprint() -> str:
         # roles' mean and spread: same invalidation as any other weight.
         "role_weights": cr.ROLE_WEIGHTS,
         "exposure": cr.EXPOSURE_WEIGHT, "exposure_lambda": cr.EXPOSURE_LAMBDA,
+        # Chi la paga (26/10/2026: non l'attaccante).
+        "exposure_role_factor": cr.EXPOSURE_ROLE_FACTOR,
         "exposure_kernel": cr.EXPOSURE_KERNEL,
         # Changes the exposure the INDEX consumes, hence the per-role mean and spread
         # of the index: a change here invalidates the reference exactly as a weight
@@ -218,7 +220,12 @@ def _keeper_channel_constants() -> dict:
 #           d'ufficio del 05/09 (10 -> 11) aveva smesso di scattare: il tiratore
 #           tornava a pagare −xg. ``classic_rating.is_goal_line_save`` riconosce le
 #           due forme; nessuna costante cambia, quindi va segnato qui.
-SCORING_CODE_VERSION = 15
+#  15 -> 16: L'OCCASIONE PROCURATA, L'ATTACCANTE SENZA ESPOSIZIONE, IL TIRO INTERROTTO
+#           (rilascio 1.19, 26/10/2026, caso Bartesaghi). ``xg_shots`` 0 -> 0,02 e
+#           ``EXPOSURE_ROLE_FACTOR`` sono nell'impronta dei pesi; la regola del tiro
+#           fuori fermato dietro il tiratore (``is_interrupted_shot``) no — legge un
+#           campo nuovo di MatchShot, ``interception_m`` — e va segnata qui.
+SCORING_CODE_VERSION = 16
 
 
 def scoring_fingerprint() -> str:

@@ -749,6 +749,17 @@ class MatchShot(models.Model):
     # larghezza, misurate dalla porta attaccata: 105 x 68 m). Null per le righe
     # importate prima del campo: ``backfill_shot_seconds`` lo riempie dalla cache.
     distance_m = models.FloatField(null=True, blank=True)
+    # DOVE E' STATO FERMATO, in metri lungo il campo a partire dal punto di tiro
+    # (26/10/2026): positivo = verso la porta, NEGATIVO = dietro il tiratore. Dalle
+    # ``blockCoordinates`` della mappa dei tiri, che il fornitore manda quando il
+    # pallone e' stato toccato o fermato da qualcuno (sui ``save`` e' il portiere).
+    # Serve a riconoscere il «tiro» che un tiro non e' stato: un ``miss`` fermato
+    # DIETRO chi calciava (21 a stagione) e' un compagno sulla traiettoria o una
+    # conclusione mai partita — Bartesaghi in Udinese-Milan, ostacolato da Pulisic,
+    # pagava −0,49 per un'occasione da 0,78 di xG. V. classic_rating.is_interrupted_shot.
+    # Null = nessun punto di blocco, oppure riga importata prima del campo:
+    # ``backfill_shot_seconds`` lo riempie dalla cache.
+    interception_m = models.FloatField(null=True, blank=True)
     provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES,
                                 default=PROVIDER_SOFASCORE)
     external_id = models.CharField(max_length=64, blank=True, default="")

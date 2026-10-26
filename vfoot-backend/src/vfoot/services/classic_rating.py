@@ -346,7 +346,15 @@ TOTAL_WEIGHTS = {
     # valido, la cifra a cui conduceva no. Il modello vecchio con tutte le
     # sue motivazioni sta in experiments-scrape-whoscored/dati_modello/
     # modello_precedente_2026-09-01.py.
-    "xg_shots": 0.0,
+    # RIACCESO IL 26/10/2026 a 0.02. Lo zero veniva dal fit vincolato, non da una
+    # scelta: e dopo la 1.18 (gol al 70% del fatto, sga x2) il voto non pagava piu'
+    # l'essersi procurati l'occasione, solo l'averla sbagliata. Il caso: Bartesaghi
+    # in Udinese-Milan, 0,93 di xG da terzino fatto ala, contati zero. Banco sulla
+    # 25-26 a 90' (experiments-revisione-sosta/partecipazione/banco.py): Statistico
+    # 0,7592 -> 0,7638, Redazione 0,7243 -> 0,7291, errore medio giu' su entrambi,
+    # gravi 11 -> 10, SofaScore piatto; a 0,05 peggiora. 0,02 e' S/3,5, cioe' il
+    # rapporto beta/S scritto qui sopra. Sulla 26-27 (363 presenze) non conclusivo.
+    "xg_shots": 0.02,
     # RIAZZERATO il 01/09/2026, dopo essere stato acceso a 0.100 il 25/08 (e prima
     # ancora 0.181, poi 0 senza motivazione scritta).
     #
@@ -2304,9 +2312,10 @@ EXTRAP_FLOOR_MINUTES = 55
 #   EXPOSURE_KERNEL blurs the presence into the adjacent zones, so a shot landing
 #   just across a grid boundary is not charged to the wrong man.
 #
-# * TO WHICH ROLES. Every outfield role, attackers included. They are the ones who
-#   lost the ball or failed to track back, and exempting them was an asymmetry with
-#   no argument behind it: they were computing a share and not paying it.
+# * TO WHICH ROLES. Defenders and midfielders — NOT the attacker, since 26/10/2026
+#   (see EXPOSURE_ROLE_FACTOR). Until then every outfield role paid, on the argument
+#   that the forwards "lost the ball or failed to track back"; the argument does not
+#   survive the heatmap being of the WHOLE match.
 #
 # Result: the defender vote goes from r 0.517 to 0.621 against the Statistico
 # (MAE 0.448 -> 0.406), and its correlation with goals conceded while on the pitch
@@ -2322,6 +2331,28 @@ EXTRAP_FLOOR_MINUTES = 55
 # Applied LINEARLY, unlike the √-compressed volume block: it is already a small
 # goal-equivalent figure, not a fat-tailed count.
 EXPOSURE_WEIGHT = 0.09648982048859779    # same unit as every other weight: index points per 1σ
+# L'ATTACCANTE NON PAGA IL PERICOLO CONCESSO (26/10/2026, decisione dell'utente).
+# La ragione e' prima di tutto COMUNICATIVA: un attaccante che perde voto per
+# «tanto pericolo concesso nella sua zona» senza un solo gesto difensivo, solo
+# perche' la squadra ha preso gol, riceve un messaggio confuso — Raimondo in
+# Atalanta-Frosinone, −0,17. E il caso mostra il difetto di fondo: la heatmap e'
+# della partita INTERA, quindi chi rientra sui calci piazzati (il 6% della sua
+# partita nella propria area) prende una quota anche dei gol in contropiede.
+# I numeri non si oppongono: per l'attaccante il termine ha una dispersione di 0,04
+# di voto a 90' (sotto −0,15 nel 2% dei casi), e toglierlo vale r ATT 0,816 -> 0,819
+# con lo Statistico sulla 25-26, −2 voti sulla 26-27. Stessa famiglia della decisione
+# dell'08/10 su ``defensive_value`` (v. ROLE_WEIGHTS). Il centrocampista resta.
+# Il pericolo che l'attaccante NON paga non si ridistribuisce: le quote restano
+# calcolate su tutti gli undici, cosi' quella del difensore non si gonfia.
+EXPOSURE_ROLE_FACTOR = {Player.ROLE_FWD: 0.0}
+
+
+def exposure_weight_for(role: str) -> float:
+    """Il peso dell'esposizione per QUESTO ruolo: indice, completamento e
+    spiegazione leggono tutti da qui, come i pesi da ``weights_for_role``."""
+    return EXPOSURE_WEIGHT * EXPOSURE_ROLE_FACTOR.get(role, 1.0)
+
+
 EXPOSURE_KEY = "_exposure"  # its name in the scales/breakdowns (it is not a provider stat)
 # Quanti tiri subiti hanno caricato il giocatore: il CONTEGGIO degli eventi che
 # generano l'esposizione, che il completamento dei minuti legge come Poisson
@@ -2872,9 +2903,9 @@ def index_for_role(role: str, totals: dict, minutes: int, exposure: float = 0.0,
     Goalkeepers go through their own feature channel and weights; every outfield
     role shares one weight vector (the roles differ only in the mean/σ the index is
     z-scored against). ``exposure`` — the danger the opponent created in the zones
-    this player occupied — applies to every outfield role, an attacker included,
-    and to none of the keeper's, whose own channel already answers for what
-    reached him.
+    this player occupied — applies to defenders and midfielders (not to the
+    attacker since 26/10/2026, v. EXPOSURE_ROLE_FACTOR) and to none of the keeper's,
+    whose own channel already answers for what reached him.
     """
     if minutes <= 0:
         return 0.0
@@ -2885,7 +2916,7 @@ def index_for_role(role: str, totals: dict, minutes: int, exposure: float = 0.0,
     idx = sum(w * scored_z(k, values.get(k, 0.0), scales)
               for k, w in weights.items() if w)
     if not gk:
-        idx -= EXPOSURE_WEIGHT * exposure_z(values.get(EXPOSURE_KEY, 0.0), scales)
+        idx -= exposure_weight_for(role) * exposure_z(values.get(EXPOSURE_KEY, 0.0), scales)
     return idx
 
 
@@ -4086,7 +4117,28 @@ def is_goal_line_save(shot_type: str, xgot) -> bool:
     return shot_type == SHOT_TYPE_OFF_LINE or (shot_type == "save" and not (xgot or 0.0))
 
 
-def effective_xgot(shot_type: str, xgot, xg) -> float:
+def is_interrupted_shot(shot_type: str, interception_m) -> bool:
+    """Il «tiro» fuori fermato DIETRO chi calciava: una conclusione mai partita.
+
+    Il caso che l'ha motivata (26/10/2026): Bartesaghi in Udinese-Milan, 40', xG
+    0,78 da cinque metri, ostacolato da Pulisic — a vederlo non ne esce nemmeno un
+    tiro. Il fornitore lo scrive ``miss`` con xGOT 0, e ``sga_post`` lo leggeva
+    come l'occasione nitida sprecata: −0,49, cioe' tutto lo scarto del suo 6 dal
+    6,5 dello Statistico. Nello stesso record c'e' pero' il punto in cui il pallone
+    e' stato fermato, e stava TRE METRI DIETRO il tiratore.
+
+    La firma e' stretta di proposito: 21 tiri fuori a stagione su ~4.200, tutti
+    ``miss``. Chi l'ha fermato il record non lo dice, ma i totali si': i muri dei
+    difensori (``outfielderBlock``) coincidono coi soli ``block`` in 681
+    partite-lato su 868 della 25-26, quindi un ``miss`` col punto di blocco non e'
+    mai un muro avversario. I tiri fuori fermati DAVANTI al tiratore (~720 a
+    stagione: deviazioni, tocchi del portiere) e i murati restano come sono — li'
+    la palla e' partita, e il murato costa l'xG per una ragione misurata (v.
+    SGA_POST_BLOCKED)."""
+    return shot_type == "miss" and interception_m is not None and interception_m < 0
+
+
+def effective_xgot(shot_type: str, xgot, xg, interception_m=None) -> float:
     """L'xGOT che il modello CONSUMA, che non sempre e' quello che arriva.
 
     IL TIRO SALVATO SULLA LINEA. Un tiro nello specchio fermato da un uomo di
@@ -4115,8 +4167,13 @@ def effective_xgot(shot_type: str, xgot, xg) -> float:
 
     E' conservativo anche sui FALSI POSITIVI della firma (il 5% sono parate vere del
     portiere a cui manca l'xGOT): non premia nessuno, si limita a non punire.
+
+    IL TIRO INTERROTTO (26/10/2026, v. ``is_interrupted_shot``) prende lo stesso
+    valore d'ufficio, per la stessa ragione: dopo il punto in cui e' stato fermato
+    nessuno ha misurato niente, e una conclusione che non e' partita non e' stata
+    eseguita male. Restano il tiro e l'occasione procurata (``xg_shots``).
     """
-    if is_goal_line_save(shot_type, xgot):
+    if is_goal_line_save(shot_type, xgot) or is_interrupted_shot(shot_type, interception_m):
         return float(xg or 0.0)
     return float(xgot or 0.0)
 
@@ -4130,20 +4187,22 @@ def _credit_goal_line_saves(out: dict, match_ids) -> None:
     """
     sides = appearance_sides(match_ids)
     credited = 0.0
-    for mid, pid, st, ts, xg, xgot in (MatchShot.objects
-                                       .filter(Q(shot_type="save", xgot=0)
-                                               | Q(shot_type=SHOT_TYPE_OFF_LINE),
-                                               match_id__in=match_ids,
-                                               player_id__isnull=False)
-                                       .values_list("match_id", "player_id",
-                                                    "shot_type", "team_side",
-                                                    "xg", "xgot")):
+    for mid, pid, st, ts, xg, xgot, cut in (MatchShot.objects
+                                            .filter(Q(shot_type="save", xgot=0)
+                                                    | Q(shot_type=SHOT_TYPE_OFF_LINE)
+                                                    # e i tiri interrotti (v. is_interrupted_shot)
+                                                    | Q(shot_type="miss", interception_m__lt=0),
+                                                    match_id__in=match_ids,
+                                                    player_id__isnull=False)
+                                            .values_list("match_id", "player_id",
+                                                         "shot_type", "team_side",
+                                                         "xg", "xgot", "interception_m")):
         if is_own_goal(st, ts, sides.get((mid, pid))):
             continue
         row = out.get((mid, pid))
         if row is None:
             continue
-        credit = effective_xgot(st, xgot, xg)
+        credit = effective_xgot(st, xgot, xg, cut)
         if not credit:
             continue
         row["xg_on_target"] = _round_sum((row.get("xg_on_target") or 0.0) + credit)

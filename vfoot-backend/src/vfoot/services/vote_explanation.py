@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from vfoot.services.classic_rating import (
     EXPOSURE_COUNT_KEY,
-    DERIVED_FEATURES, EXPOSURE_KEY, EXPOSURE_WEIGHT, GK_PER90_WEIGHTS,
+    DERIVED_FEATURES, EXPOSURE_KEY, GK_PER90_WEIGHTS, exposure_weight_for,
     GK_TOTAL_WEIGHTS, GK_WEIGHTS, PER90_WEIGHTS, scale_saturation,
     shrinkage_for, TOTAL_WEIGHTS,
     UNSHRUNK_FEATURES, VOTE_CENTER, VOTE_MAX, VOTE_MIN, WEIGHTS,
@@ -400,7 +400,7 @@ def _weight_of(role: str, key: str) -> float:
     zero per i difensori e 0,026 per i centrocampisti, e con lo zero globale la
     frase di un centrocampista si rovesciava."""
     if key == EXPOSURE_KEY:
-        return -EXPOSURE_WEIGHT
+        return -exposure_weight_for(role)
     return weights_for_role(role).get(key, 0.0)
 
 
@@ -710,7 +710,7 @@ def _all_terms(role: str, terms: dict, mean_terms: dict, unit_of,
     weights = dict(GK_WEIGHTS if is_gk else WEIGHTS)
     total_keys = set(GK_TOTAL_WEIGHTS if is_gk else TOTAL_WEIGHTS)
     if not is_gk:
-        weights[EXPOSURE_KEY] = -EXPOSURE_WEIGHT
+        weights[EXPOSURE_KEY] = -exposure_weight_for(role)
     scales = feature_scales(gk=is_gk)
     values = raw_feature_values(totals, minutes, exposure, gk=is_gk)
 
@@ -799,8 +799,8 @@ def _terms(role: str, totals: dict, minutes: int, exposure: float = 0.0,
         # exposure_z, not _feature_z: the asymmetric credit (EXPOSURE_CREDIT) is
         # part of what the index consumed, so the breakdown must apply it too.
         z = exposure_z(values.get(EXPOSURE_KEY, 0.0), scales)
-        if z:
-            out[EXPOSURE_KEY] = -EXPOSURE_WEIGHT * z
+        if z and exposure_weight_for(role):
+            out[EXPOSURE_KEY] = -exposure_weight_for(role) * z
     return out
 
 

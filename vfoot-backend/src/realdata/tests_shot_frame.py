@@ -67,3 +67,30 @@ class ShotDistanceTests(SimpleTestCase):
         from realdata.services.sofascore_adapter import shot_distance_m
         for bad in (None, {}, {"x": "n/d", "y": 1}, {"x": float("nan"), "y": 50}, [1]):
             self.assertIsNone(shot_distance_m(bad), bad)
+
+
+class ShotInterceptionTests(SimpleTestCase):
+    """``MatchShot.interception_m``: dove il pallone e' stato fermato, in metri dal
+    punto di tiro verso la porta. Negativo = dietro il tiratore, la firma del tiro
+    che non e' partito (v. classic_rating.is_interrupted_shot)."""
+
+    def test_behind_the_shooter_is_negative(self):
+        from realdata.services.sofascore_adapter import shot_interception_m
+        # il 40' di Bartesaghi in Udinese-Milan, coordinate del fornitore
+        shot = {"playerCoordinates": {"x": 4.5, "y": 47.1}, "blockCoordinates": {"x": 7.6, "y": 47.3}}
+        self.assertAlmostEqual(shot_interception_m(shot), -3.25, places=2)
+        shot["blockCoordinates"] = {"x": 2.5, "y": 48}
+        self.assertAlmostEqual(shot_interception_m(shot), 2.1, places=2)
+
+    def test_no_block_point_is_none(self):
+        from realdata.services.sofascore_adapter import shot_interception_m
+        self.assertIsNone(shot_interception_m({"playerCoordinates": {"x": 4.5, "y": 47.1}}))
+        self.assertIsNone(shot_interception_m({"playerCoordinates": {"x": 4.5},
+                                               "blockCoordinates": {"x": "n/d"}}))
+
+    def test_only_a_miss_behind_the_shooter_is_interrupted(self):
+        from vfoot.services.classic_rating import is_interrupted_shot
+        self.assertTrue(is_interrupted_shot("miss", -0.5))
+        self.assertFalse(is_interrupted_shot("miss", 0.5))
+        self.assertFalse(is_interrupted_shot("miss", None))
+        self.assertFalse(is_interrupted_shot("block", -0.5))

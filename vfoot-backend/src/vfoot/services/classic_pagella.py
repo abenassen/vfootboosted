@@ -712,7 +712,10 @@ def _mark_substitutions(match_id: int, buckets: dict) -> dict[str, list[dict]]:
 # modo piu' rapido di far perdere fiducia a tutto il resto.
 SHOT_OUTCOME_IT = {"goal": "gol", "save": "parato", "post": "legno",
                    "block": "murato", "miss": "fuori", "own": "autogol",
-                   "blocked-off-line": "salvato sulla linea"}
+                   "blocked-off-line": "salvato sulla linea",
+                   # chiave nostra, come l'autogol: il fornitore lo chiama ``miss``
+                   # (v. classic_rating.is_interrupted_shot)
+                   "interrupted": "ostacolato"}
 # E da dove veniva.
 SHOT_SITUATION_IT = {
     "regular": "azione", "assisted": "su assist", "fast-break": "in contropiede",
@@ -798,7 +801,7 @@ def shot_detail(match, player_id: int) -> dict:
     from vfoot.services.classic_rating import (
         shrinkage_for, appearance_sides, derived_features, feature_scales,
         is_own_goal, scored_z, spread_k_for, unshrunk_weight, weights_for_role,
-        effective_xgot, is_goal_line_save,
+        effective_xgot, is_goal_line_save, is_interrupted_shot,
     )
 
     empty = {"shots": [], "baseline": 0.0, "total": 0.0}
@@ -809,7 +812,7 @@ def shot_detail(match, player_id: int) -> dict:
     shots = list(MatchShot.objects.filter(match=match, player_id=player_id)
                  .order_by("minute", "id")
                  .values("minute", "xg", "xgot", "is_goal", "shot_type", "situation",
-                         "team_side"))
+                         "team_side", "interception_m"))
     if not shots:
         return empty
     # L'AUTOGOL non e' una conclusione del giocatore, e i totali non lo contano
@@ -886,7 +889,8 @@ def shot_detail(match, player_id: int) -> dict:
             # ``effective_xgot`` e non il campo grezzo: sul tiro salvato sulla linea
             # i totali portano l'xGOT d'ufficio (v. classic_rating), e togliere il
             # tiro deve togliere quello, o la sezione non torna piu' con la riga.
-            gone["xg_on_target"] += effective_xgot(s["shot_type"], s["xgot"], s["xg"])
+            gone["xg_on_target"] += effective_xgot(s["shot_type"], s["xgot"], s["xg"],
+                                                   s["interception_m"])
             # NELLO SPECCHIO LO DICE L'ESITO, non l'xGOT. Il test era «xgot > 0», e
             # su un tiro parato a cui il fornitore non manda l'xGOT (86 parati su
             # 3414 nella 25-26) toglieva il tiro lasciando indietro il suo
@@ -996,9 +1000,11 @@ def shot_detail(match, player_id: int) -> dict:
     out = []
     for i, s in enumerate(shots):
         own = s["own_goal"]
+        cut = is_interrupted_shot(s["shot_type"], s["interception_m"])
         out.append({
             "minute": s["minute"],
             "outcome": (SHOT_OUTCOME_IT["own"] if own else
+                        SHOT_OUTCOME_IT["interrupted"] if cut else
                         SHOT_OUTCOME_IT.get(s["shot_type"], s["shot_type"] or "tiro")),
             "situation": SHOT_SITUATION_IT.get(s["situation"] or "", ""),
             "xg": round(s["xg"] or 0.0, 3),
@@ -1007,12 +1013,14 @@ def shot_detail(match, player_id: int) -> dict:
             # mostrato e' quello d'ufficio: si dichiara con ``xgot_office``, che la
             # tabella stampa in nota. Mostrare lo zero grezzo accanto a «parato»
             # era la contraddizione da cui e' partita tutta questa storia.
-            "xgot": round(effective_xgot(s["shot_type"], s["xgot"], s["xg"]), 3),
-            "xgot_office": (not own and is_goal_line_save(s["shot_type"], s["xgot"])),
+            "xgot": round(effective_xgot(s["shot_type"], s["xgot"], s["xg"], s["interception_m"]), 3),
+            # La nota della tabella («fermato prima della porta [...] non conta come
+            # occasione sprecata») vale alla lettera anche per il tiro interrotto.
+            "xgot_office": (not own and (is_goal_line_save(s["shot_type"], s["xgot"]) or cut)),
             # xGOT − xG: quanto la conclusione ha aggiunto (o tolto) alla palla che
             # aveva. E' la grandezza su cui il modello giudica il tiro, quindi si
             # mostra invece di lasciarla ricavare a chi legge.
-            "added": round(effective_xgot(s["shot_type"], s["xgot"], s["xg"])
+            "added": round(effective_xgot(s["shot_type"], s["xgot"], s["xg"], s["interception_m"])
                            - (s["xg"] or 0.0), 3),
             "points": 0.0 if own else round(points.get(i, 0.0), 3),
         })

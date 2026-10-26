@@ -140,7 +140,7 @@ class Bench:
             if k in self.idx_of:
                 w[self.idx_of[k]] = val
         if cr.EXPOSURE_KEY in self.idx_of:
-            w[self.idx_of[cr.EXPOSURE_KEY]] = cr.EXPOSURE_WEIGHT
+            w[self.idx_of[cr.EXPOSURE_KEY]] = cr.exposure_weight_for(role)
         return w
 
     # ----------------------------------------------------------- indice e riferimento
