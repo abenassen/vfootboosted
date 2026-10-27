@@ -505,10 +505,10 @@ class RealChampionshipTests(TestCase):
         self.assertFalse(line["sv"])
 
     def test_short_uninvolved_cameo_is_still_senza_voto(self):
-        """The counterpart: the touch gate must keep working where it belongs —
-        the 14-16' window, after the thresholds were set from fantacalcio's own
-        s.v. set (see MIN_MINUTES_RATED). At 18' the minutes alone now decide,
-        as they do for the pagelle we are agreeing with."""
+        """The counterpart: the gate must keep working where it belongs — a 15'
+        cameo with 4 touches is 15.6 equivalent minutes, under the 19.5 the soft
+        gate asks for (``classic_rating.RATED_SCORE_MINUTES``). From 20' the
+        minutes alone decide, as they do for the pagelle we are agreeing with."""
         cameo = Player.objects.create(full_name="Cameo One", short_name="C. One",
                                       classic_role_seed="ATT")
         MatchAppearance.objects.create(match=self.match, player=cameo,
@@ -522,6 +522,51 @@ class RealChampionshipTests(TestCase):
                     ["bench"] if l["player_id"] == cameo.id)
         self.assertTrue(line["sv"])
         self.assertEqual(line["sv_reason"], "impiego_insufficiente")
+
+    def _bench_line(self, name, minutes, touches):
+        who = Player.objects.create(full_name=name, short_name=name,
+                                    classic_role_seed="ATT")
+        MatchAppearance.objects.create(match=self.match, player=who,
+                                       team_season=self.home_ts, side="home",
+                                       minutes_played=minutes, is_starter=False)
+        PlayerZoneFeature.objects.create(
+            match=self.match, player=who, provider="sofascore",
+            feature_key="touches", zone_key="z0101", value=float(touches),
+            team_side="home")
+        return who
+
+    def _line_of(self, who):
+        pag = pagella_for_match(self.match, self.reference)["home"]
+        return next(l for l in pag["starters"] + pag["bench"] if l["player_id"] == who.id)
+
+    def test_a_cameo_that_contributes_more_needs_fewer_minutes(self):
+        """The gate is soft below 20': 15' and 40 touches is 15 + 0.15*40 = 21
+        equivalent minutes, so he has a vote; the same 15' with 4 touches does not."""
+        busy = self._bench_line("Busy Cameo", 15, 40)
+        self.assertFalse(self._line_of(busy)["sv"])
+
+    def test_stoppage_time_counts_for_whoever_is_on_the_pitch_at_the_whistle(self):
+        """A substitute on at the 80th has 10 provider minutes and played 15: the
+        announced five of stoppage count for him, and ONLY for him — not for a
+        player taken off before the whistle, whose clock stopped when he left."""
+        from realdata.models import PlayerOnPitchInterval
+        self.match.added_time_second_half = 5
+        self.match.save(update_fields=["added_time_second_half"])
+        stayed = self._bench_line("Stayed On", 10, 18)   # 10 + 5 + 2.7 = 17.7 -> no
+        stayed2 = self._bench_line("Stayed Busy", 10, 40)  # 10 + 5 + 6 = 21 -> yes
+        left = self._bench_line("Left Early", 10, 40)      # 10 + 0 + 6 = 16 -> no
+        for who, reason in ((stayed, "final_whistle"), (stayed2, "final_whistle"),
+                            (left, "substitution_off")):
+            PlayerOnPitchInterval.objects.create(
+                match=self.match, player=who, team_season=self.home_ts,
+                team_side="home", start_period=2, start_minute=80, start_second=0,
+                start_elapsed_seconds=4800, end_period=2, end_minute=90,
+                end_second=0, end_elapsed_seconds=5400,
+                start_reason="substitution_on", end_reason=reason,
+                provider="sofascore")
+        self.assertTrue(self._line_of(stayed)["sv"])
+        self.assertFalse(self._line_of(stayed2)["sv"])
+        self.assertTrue(self._line_of(left)["sv"])
 
     def _booked_cameo(self, card_type):
         """A 10' substitute with 4 touches who picks up ``card_type`` at the 90th."""

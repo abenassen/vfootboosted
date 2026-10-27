@@ -126,6 +126,7 @@ class Command(BaseCommand):
         # re-injection here (it would re-count own goals as goals scored).
         totals = cr._per_match_player_totals(mids)
         minutes = cr._minutes_map(mids)
+        gate = cr.gate_minutes_map(mids, minutes)
         expo = cr.defensive_exposure(mids, minutes)
         gd_on_map = cr.on_pitch_goal_difference(mids, minutes)
 
@@ -177,7 +178,7 @@ class Command(BaseCommand):
                 continue
             m = minutes.get((mid, pid), 0)
             gp2mp[(md_of.get(mid), pid)] = (mid, pid)
-            if m < cr.MIN_MINUTES_REFERENCE or not cr.is_rated(m, tot):
+            if m < cr.MIN_MINUTES_REFERENCE or not cr.is_rated(gate.get((mid, pid), m), tot):
                 continue
             ex = expo.get((mid, pid), 0.0)
             pop[role].append(zvec(tot, m, ex))

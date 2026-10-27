@@ -121,6 +121,7 @@ class Command(BaseCommand):
                 f"{cs}: no zone features, so nothing can be scored — this check "
                 "needs a full database (see export_dev_db)")
         minutes = cr._minutes_map(match_ids)
+        gate = cr.gate_minutes_map(match_ids, minutes)
         exposure = cr.defensive_exposure(match_ids, minutes)
         goals_against = cr.on_pitch_goals_against(match_ids, minutes)
         roles = cr.current_role_map(only_declared=True)
@@ -132,7 +133,7 @@ class Command(BaseCommand):
             if not role:
                 continue
             mins = minutes.get((mid, pid), 0)
-            if mins <= 0 or not cr.is_rated(mins, feats):
+            if mins <= 0 or not cr.is_rated(gate.get((mid, pid), mins), feats):
                 continue
             idx = cr.index_for_role(role, feats, mins, exposure.get((mid, pid), 0.0))
             r = ref.get(role)

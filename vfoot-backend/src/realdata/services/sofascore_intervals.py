@@ -38,6 +38,22 @@ from realdata.models import (
 
 FULL_TIME = 90
 
+
+def second_half_added_minutes(incidents_rows: Iterable[Mapping[str, Any]]) -> int | None:
+    """Il recupero ANNUNCIATO a fine secondo tempo, dall'incidente ``injuryTime`` a 90'.
+
+    None se il fornitore non l'ha (ancora) pubblicato: a partita in corso compare
+    verso l'85', e un 0 inventato qui direbbe «nessun recupero» invece di «non lo
+    sappiamo». E' il recupero annunciato, non quello giocato, che di solito e' un
+    minuto o due piu' lungo: una stima per difetto, dichiarata."""
+    for inc in incidents_rows:
+        if inc.get("incidentType") == "injuryTime" and inc.get("time") == FULL_TIME:
+            length = inc.get("length")
+            if isinstance(length, (int, float)) and length >= 0:
+                return int(length)
+    return None
+
+
 _RED_CLASSES = ("red", "redyellow", "yellowred")
 
 

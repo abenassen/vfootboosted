@@ -187,6 +187,7 @@ class Bench:
                     .values_list("id", flat=True))
         totals = cr._per_match_player_totals(mids)
         minutes = cr._minutes_map(mids)
+        gate = cr.gate_minutes_map(mids, minutes)
         exposure = cr.defensive_exposure(mids, minutes)
         roles = cr.current_role_map()
         maschera_oss = np.array([1.0 if k in cr.UNSHRUNK_FEATURES else 0.0
@@ -197,7 +198,7 @@ class Bench:
             if role is None or role == Player.ROLE_GK:
                 continue
             mins = minutes.get((mid, pid), 0)
-            if not mins or not cr.is_rated(mins, feats):
+            if not mins or not cr.is_rated(gate.get((mid, pid), mins), feats):
                 continue
             chiavi.append((mid, pid)); ruoli.append(role); mm.append(mins)
             zz.append(self._z_vector(role, feats, mins, exposure.get((mid, pid), 0.0)))

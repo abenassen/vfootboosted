@@ -46,7 +46,7 @@ from realdata.services.identity import norm_name
 from vfoot.management.commands.compare_external_votes import _is_team_row
 from vfoot.services.classic_rating import (
     EXTRAP_FLOOR_MINUTES, MIN_MINUTES_REFERENCE, PER90_WEIGHTS, TOTAL_WEIGHTS,
-    WEIGHTS, _compress, _minutes_map, _per_match_player_totals, build_reference,
+    WEIGHTS, _compress, _minutes_map, gate_minutes_map, _per_match_player_totals, build_reference,
     is_rated, current_role_map, voto_puro_for_match,
 )
 
@@ -272,6 +272,7 @@ class Command(BaseCommand):
                            .values_list("id", "matchday"))
         totals = _per_match_player_totals(match_ids)
         minutes = _minutes_map(match_ids)
+        gate = gate_minutes_map(match_ids, minutes)
         # Fit within the SAME disambiguated role buckets the reference uses, or the
         # within-role least squares would learn against the wrong role membership.
         roles = current_role_map(only_declared=True)
@@ -297,7 +298,7 @@ class Command(BaseCommand):
             if role not in ROLES:
                 continue
             mins = minutes.get((mid, pid), 0)
-            if mins < opts["min_minutes"] or not is_rated(mins, feats):
+            if mins < opts["min_minutes"] or not is_rated(gate.get((mid, pid), mins), feats):
                 continue
             key = (md_by_match[mid], pid)
             if key not in tgt or key not in our_pred:

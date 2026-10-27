@@ -48,13 +48,14 @@ class GoalkeeperBench:
                     .values_list("id", flat=True))
         totals = cr._per_match_player_totals(mids)
         minutes = cr._minutes_map(mids)
+        gate = cr.gate_minutes_map(mids, minutes)
         roles = cr.current_role_map(only_declared=True)
         val_z, val_minutes = [], []
         for (mid, pid), feats in totals.items():
             if roles.get(pid) != Player.ROLE_GK:
                 continue
             mins = minutes.get((mid, pid), 0)
-            if mins <= 0 or not cr.is_rated(mins, feats):
+            if mins <= 0 or not cr.is_rated(gate.get((mid, pid), mins), feats):
                 continue
             val_z.append(self.vector(feats, mins)); val_minutes.append(mins)
         self.curve_z = np.asarray(val_z, dtype=float)

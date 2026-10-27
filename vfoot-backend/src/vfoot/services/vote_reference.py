@@ -255,8 +255,9 @@ def scoring_fingerprint() -> str:
         "bayesian_completion": _bayesian_artifact_sha(),
         # The calibrated scale, not just the weights that produced it.
         "reference": _load() or {},
-        "gates": [cr.MIN_MINUTES_RATED, cr.MIN_TOUCHES_RATED,
-                  cr.ALWAYS_RATED_MINUTES],
+        "gates": [cr.ALWAYS_RATED_MINUTES, cr.RATED_SCORE_MINUTES,
+                  cr.RATED_CONTRIBUTION_MINUTES,
+                  sorted(cr.RATED_CONTRIBUTION_WEIGHTS.items())],
         # Le correzioni APPLICATE DOPO l'indice: mitigazione del risultato, rosso,
         # autogol, rigore sbagliato. Non stanno nel fingerprint dei pesi perché non
         # entrano nella calibrazione — l'indice non le vede, quindi la reference

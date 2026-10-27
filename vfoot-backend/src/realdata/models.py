@@ -293,6 +293,14 @@ class Match(models.Model):
     # measures the +15min / +1h finalization windows from this, so it must be the
     # real observed FT, not an estimate from kickoff + nominal duration.
     finished_at = models.DateTimeField(null=True, blank=True)
+    # Minutes of stoppage time the referee ANNOUNCED at the end of the second half
+    # (the provider's ``injuryTime`` incident at 90'). The on-pitch intervals and
+    # ``MatchAppearance.minutes_played`` stop at 90 by construction, so a substitute
+    # who came on at the 80th has played 10 of them by those counts and 15 in fact.
+    # Only the senza-voto gate reads this (``classic_rating.gate_minutes_map``); the
+    # vote itself still sees the provider's minutes. Null = not read yet (matches
+    # imported before it existed): the gate then assumes the usual five.
+    added_time_second_half = models.PositiveSmallIntegerField(null=True, blank=True)
 
     external_source = models.CharField(max_length=50, blank=True, default="")
     external_id = models.CharField(max_length=100, blank=True, default="")

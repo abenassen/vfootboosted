@@ -43,6 +43,7 @@ import numpy as np
 from django.db.models import Q, Sum
 
 from realdata.models import (
+    INTERVAL_FINAL_WHISTLE,
     CARD_RED, CARD_SECOND_YELLOW,
     MatchAppearance, Match, MatchDisciplinaryEvent, MatchShot, Player,
     PlayerOnPitchInterval, PlayerZoneFeature, PROVIDER_SOFASCORE,
@@ -2518,7 +2519,7 @@ SOFA_GK_POSITION = "G"
 # PostgreSQL restituisce 9.999999999999998 dove SQLite dà 10.0. Confrontando i voti
 # della 2025-26 fra portatile e produzione, con dati bit-identici, quel rumore ha
 # prodotto quattro «senza voto» diversi — un giocatore con esattamente 6 tocchi che
-# in produzione ne aveva 5.999999999999999, sotto la soglia MIN_TOUCHES_RATED — e
+# in produzione ne aveva 5.999999999999999, sotto la soglia dei tocchi del cancello — e
 # uno scarto di ruolo su un giocatore di confine, perché anche la matrice del
 # clustering nasce da queste somme.
 #
@@ -2531,32 +2532,47 @@ def _round_sum(value):
     """Una somma del database, ripulita dal rumore dell'ordine degli addendi."""
     return value if value is None else round(float(value), PROVIDER_SUM_DECIMALS)
 
-MIN_MINUTES_RATED = 14
-MIN_TOUCHES_RATED = 6
-# Above this many minutes, minutes ALONE decide: the touch count is a proxy for
-# "was he involved enough to judge", and that question only makes sense for a
-# cameo. Anyone who is on the pitch this long has been judged by every pagella
-# that exists, however little he saw of the ball — he gets a LOW vote, not no
-# vote. Without this, 119 appearances a season (four of them full 90') were
-# declared unrated purely on a touch count.
-ALWAYS_RATED_MINUTES = 16
-# Set 2026-07-29 from the only evidence that can settle it: WHO fantacalcio leaves
-# without a vote, over the 11.819 appearances of 2025-26 we can match to their
-# sheet. Read as a rule, their s.v. rate by minutes played is
-#     1-10'  93-98%   10-12'  87%   12-15'  55%   15-18'  13%   18-20'  2%   20'+  0%
-# i.e. the cut sits at about a quarter of an hour and the tail is short. Ours sat at
-# 12'/12 touches with the minutes override at 20', which said s.v. for 53% of the
-# 15-18' band and 45% of the 18-20' one against their 13% and 2% — 348 appearances a
-# season silenced that they graded, nearly all substitutes (166 attackers, 109
-# midfielders).
-# 14 / 6 / 16 raises the agreement on WHO gets a vote from 96.2% to 98.0% (F1 on the
-# s.v. class 81.6% -> 89.3%) with the two error directions balanced (143 s.v. only
-# ours, 95 only theirs). It also improves the VOTES, which is the check that
-# mattered: the 231 appearances that stop being silent get our 5.77 against their
-# 5.86, MAE 0.214 — better than our season average of 0.34 — so the overall vote MAE
-# ticks down to 0.342 on 205 more comparisons. We were withholding the easy ones.
-# The touch gate survives, narrowed to the 14-16' window: a player who comes on for a
-# quarter of an hour and touches the ball five times has genuinely not been seen.
+# 'A voto' vs 'senza voto': UN CANCELLO MORBIDO SOTTO UN TAGLIO NETTO (27/10/2026).
+#
+# Oltre ALWAYS_RATED_MINUTES, i minuti da soli decidono: il contributo serve a
+# giudicare se uno SPEZZONE e' stato visto abbastanza, e quella domanda non ha senso
+# per chi e' rimasto in campo tanto. Chiunque sia stato in campo cosi' a lungo e'
+# stato giudicato da ogni pagella che esista, per poco che abbia toccato palla: prende
+# un voto BASSO, non nessun voto (119 presenze a stagione, quattro di 90', erano
+# dichiarate senza voto solo per i tocchi).
+ALWAYS_RATED_MINUTES = 20
+# Sotto il taglio, il voto c'e' se i minuti effettivi PIU' il contributo, in minuti
+# equivalenti, arrivano a RATED_SCORE_MINUTES: chi ha toccato e tirato di piu' ha
+# mostrato di piu' in meno tempo. Ogni tocco vale RATED_CONTRIBUTION_MINUTES minuti, e
+# ogni tiro (e ogni tiro nello specchio, che si somma al tiro) il doppio.
+RATED_SCORE_MINUTES = 19.5
+RATED_CONTRIBUTION_MINUTES = 0.15
+RATED_CONTRIBUTION_WEIGHTS = {"touches": 1.0, "shots": 2.0, "shots_on_target": 2.0}
+# MINUTI COL RECUPERO. Sono minuti giocati VERAMENTE: per chi e' in campo al fischio
+# finale il cancello legge ``minutes_played + recupero annunciato``
+# (``gate_minutes_map``), perche' un subentrato al 79' ha giocato 15 minuti e non 10 —
+# il fornitore e i nostri intervalli si fermano al 90'. Il voto continua a vedere i
+# minuti del fornitore: questo tocca solo CHI RESTA SENZA VOTO. Non si conta il
+# recupero di chi e' uscito prima del fischio, ne' quello del primo tempo.
+#
+# Come si e' arrivati qui, misurato contro fantacalcio.it (11.844 presenze 2025-26 e
+# 1.585 del 2026-27, G1-5), su chi viene lasciato senza voto:
+#  * le soglie del 29/07 (14' / 6 tocchi / 16') erano tarate su minuti TRONCATI al
+#    90': 98,2% di accordo. Applicate ai minuti col recupero scendono al 95,1%;
+#  * ritarate sui minuti col recupero (18' / 6 tocchi / 20') tornano al 98,1% e
+#    99,1% (2026-27, fuori campione): alla pari, e il recupero entra per principio;
+#  * la forma morbida di oggi, a parita' di tutto il resto: 220 errori contro 215 sul
+#    2025-26 (2.122 presenze corte) e 15 contro 13 sul 2026-27 (281) — indistinguibili
+#    — con il vantaggio di non avere un gradino fra 17' e 18' e di premiare chi ha
+#    giocato bene. Il contributo vale: senza, il meglio sono 253 errori. I tocchi
+#    portano quasi tutto il merito; i tiri aggiungono poco ma sono parte di cio' che
+#    si vuole premiare. Passaggi chiave e duelli non cambiano nulla e non ci sono.
+# Resta fuori, e si sa: la decisione di fantacalcio nella fascia 10-13' e' molto
+# imprevedibile (il 13% dei cameo viene votato, e nessuna statistica del fornitore li
+# separa con una precisione sopra il 50%); Spinazzola in Napoli-Roma e' uno di loro.
+# Storia: il 29/07/2026 la soglia a 12'/12 tocchi (con il taglio a 20') lasciava senza
+# voto il 53% della fascia 15-18' contro il 13% di fantacalcio; 14/6/16 portava
+# l'accordo dal 96,2% al 98,0% e anche il MAE dei voti scendeva (0,342).
 
 # Reference bucket for a player we could rate but whose ROLE we don't know (his
 # Player row has no classic_role_seed because the squad import never matched him).
@@ -2621,14 +2637,52 @@ def current_role_map(*, only_declared: bool = False) -> dict:
     return roles
 
 
-def is_rated(minutes: int, totals: dict) -> bool:
-    """Minutes/involvement gate for 'a voto' vs senza voto. NOT the whole story:
+# Recupero che si assume per una partita in cui il fornitore non l'ha (ancora)
+# pubblicato: il valore piu' frequente nella 2025-26 (5' nel 40% delle partite).
+DEFAULT_ADDED_MINUTES = 5
+
+
+def gate_minutes_map(match_ids, minutes: dict | None = None) -> dict:
+    """{(match_id, player_id): minuti per il cancello del senza voto}.
+
+    I minuti del fornitore piu', per chi era in campo al FISCHIO FINALE, il recupero
+    annunciato a fine secondo tempo. Chi e' uscito prima non ne ha, e chi non ha un
+    intervallo (partita senza incidenti) resta sui minuti del fornitore. E' l'unico
+    posto dove il recupero entra: il voto, la reference e gli intervalli di
+    esposizione continuano a leggere ``_minutes_map``."""
+    minutes = minutes if minutes is not None else _minutes_map(match_ids)
+    added = {m: (a if a is not None else DEFAULT_ADDED_MINUTES)
+             for m, a in Match.objects.filter(id__in=list(match_ids))
+             .values_list("id", "added_time_second_half")}
+    to_whistle = set(PlayerOnPitchInterval.objects
+                     .filter(match_id__in=list(match_ids),
+                             end_reason=INTERVAL_FINAL_WHISTLE)
+                     .values_list("match_id", "player_id"))
+    return {key: mins + (added.get(key[0], 0) if key in to_whistle and mins > 0 else 0)
+            for key, mins in minutes.items()}
+
+
+def gate_contribution(totals: dict) -> float:
+    """Quanto ha messo in partita, in unita' pesate: tocchi + 2 per tiro + 2 per tiro
+    nello specchio. Lo stesso numero che il cancello trasforma in minuti equivalenti."""
+    return sum(w * (totals.get(k, 0.0) or 0.0)
+               for k, w in RATED_CONTRIBUTION_WEIGHTS.items())
+
+
+def is_rated(minutes: float, totals: dict) -> bool:
+    """Minutes/involvement gate for 'a voto' vs senza voto. ``minutes`` are the
+    minutes WITH stoppage time (``gate_minutes_map``). Sharp above
+    ``ALWAYS_RATED_MINUTES``; below it the minutes plus the contribution, in
+    equivalent minutes, must reach ``RATED_SCORE_MINUTES``. NOT the whole story:
     a player involved in a decisive event is rated even below this — see
     ``rating_forcing_event_players`` and how ``voto_puro_for_match`` combines them."""
     if minutes >= ALWAYS_RATED_MINUTES:
         return True
-    return (minutes >= MIN_MINUTES_RATED
-            and totals.get("touches", 0.0) >= MIN_TOUCHES_RATED)
+    if minutes <= 0:
+        return False
+    # arrotondato: a due database lo stesso float non esce uguale (v. PROVIDER_SUM_DECIMALS)
+    return round(minutes + RATED_CONTRIBUTION_MINUTES * gate_contribution(totals),
+                 9) >= RATED_SCORE_MINUTES
 
 
 # A SENDING-OFF forces a rating; a plain booking does NOT. Measured, not assumed:
@@ -3757,6 +3811,7 @@ def _reference_population(competition_season_id: int, with_key: bool = False):
                      .values_list("id", flat=True))
     totals = _per_match_player_totals(match_ids)
     minutes = _minutes_map(match_ids)
+    gate = gate_minutes_map(match_ids, minutes)
     exposure = defensive_exposure(match_ids, minutes)
     roles = current_role_map(only_declared=True)
     for (mid, pid), feats in totals.items():
@@ -3764,7 +3819,7 @@ def _reference_population(competition_season_id: int, with_key: bool = False):
         if not role:
             continue
         mins = minutes.get((mid, pid), 0)
-        if mins < MIN_MINUTES_REFERENCE or not is_rated(mins, feats):
+        if mins < MIN_MINUTES_REFERENCE or not is_rated(gate.get((mid, pid), mins), feats):
             continue
         row = (role, feats, mins, exposure.get((mid, pid), 0.0))
         yield ((mid, pid), *row) if with_key else row
@@ -3863,6 +3918,7 @@ def build_minute_curves(competition_season_id: int, reference: dict,
                      .values_list("id", flat=True))
     totals = _per_match_player_totals(match_ids)
     minutes = _minutes_map(match_ids)
+    gate = gate_minutes_map(match_ids, minutes)
     exposure = defensive_exposure(match_ids, minutes)
     roles = current_role_map()
     idx_by = defaultdict(lambda: defaultdict(list))
@@ -3873,7 +3929,7 @@ def build_minute_curves(competition_season_id: int, reference: dict,
         if role is None or role == Player.ROLE_GK:
             continue
         mins = minutes.get((mid, pid), 0)
-        if not mins or not is_rated(mins, feats):
+        if not mins or not is_rated(gate.get((mid, pid), mins), feats):
             continue
         exp = exposure.get((mid, pid), 0.0)
         chan = (scales or {}).get("outfield")
@@ -4318,6 +4374,7 @@ def voto_puro_for_match(match, reference: dict,
     """
     totals = _per_match_player_totals([match.id])
     minutes = _minutes_map([match.id])
+    gate_minutes = gate_minutes_map([match.id], minutes)
     exposure, exposure_n = defensive_exposure([match.id], minutes, with_counts=True)
     gd_on = on_pitch_goal_difference([match.id], minutes)
     ga_on = on_pitch_goals_against([match.id], minutes)
@@ -4388,7 +4445,8 @@ def voto_puro_for_match(match, reference: dict,
         # (goal/assist/own goal/sending-off), OR won/conceded a penalty, OR the
         # caller says the gate does not apply to him yet (he is still on the pitch
         # of a match in progress — see ``always_rate``).
-        rated = (is_rated(mins, feats) or pid in forcing or pid in always_rate
+        rated = (is_rated(gate_minutes.get((mid, pid), mins), feats)
+                 or pid in forcing or pid in always_rate
                  or feats.get("penalties_won", 0.0) > 0
                  or feats.get("penalties_conceded", 0.0) > 0)
         sigma = 0.0

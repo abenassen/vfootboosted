@@ -779,7 +779,7 @@ class Command(BaseCommand):
         elif r["our"] is None:
             why = {"impiego_insufficiente":
                    f'Senza voto: impiego sotto la soglia '
-                   f'({cr.MIN_MINUTES_RATED}′ o {cr.MIN_TOUCHES_RATED} palloni giocati).',
+                   f'({cr.RATED_SCORE_MINUTES}′ tra minuti e contributo).',
                    "dati_mancanti": "Senza voto: dati della partita mancanti."}.get(
                        r["sv_reason"], "Senza voto.")
             inner = f'<p class="lead">{esc(why)}</p>'
@@ -885,8 +885,9 @@ class Command(BaseCommand):
             "non entra in nessun confronto di questa pagina. La domanda giusta sui "
             "senza voto e' un'altra: <b>lasciamo fuori le stesse persone?</b> "
             "La nostra regola e' "
-            f"&ge;{cr.ALWAYS_RATED_MINUTES}′, oppure &ge;{cr.MIN_MINUTES_RATED}′ con "
-            f"almeno {cr.MIN_TOUCHES_RATED} palloni giocati, piu' l'obbligo di voto "
+            f"&ge;{cr.ALWAYS_RATED_MINUTES}′ (recupero compreso), oppure minuti + "
+            f"{cr.RATED_CONTRIBUTION_MINUTES} per ogni tocco (il doppio per tiro) "
+            f"&ge;{cr.RATED_SCORE_MINUTES}′, piu' l'obbligo di voto "
             "per chi ha fatto gol, assist, autogol, un rigore o ha preso un "
             "cartellino.</p>"
             f'<div class="mx-wrap">{matrix(af, "vs Redazione")}'
@@ -1169,8 +1170,8 @@ def _foot_index(cov, sf, ss):
         f"Copertura: {cov['matched']} righe su {cov['tot']} agganciate al nostro "
         f"archivio ({100*cov['matched']/max(cov['tot'],1):.1f}%); confronti utili "
         f"{sf['n']} sulla Redazione e {ss['n']} sullo Statistico. Escluse le righe "
-        f"in cui uno dei due dice s.v. (per noi meno di {cr.MIN_MINUTES_RATED}′ o "
-        f"{cr.MIN_TOUCHES_RATED} palloni giocati; per loro il '6*'). "
+        f"in cui uno dei due dice s.v. (per noi meno di {cr.RATED_SCORE_MINUTES}′ "
+        f"tra minuti e contributo; per loro il '6*'). "
         f"Il nostro voto base e' 6 + {cr.VOTE_SPREAD_K} · (min/(min+"
         f"{cr.SHRINKAGE_MINUTES})) · z(indice) nel ruolo — il portiere ha la sua "
         f"scala, {cr.GK_SPREAD_K}, e in piu' lo smorzamento per quanta partita gli "

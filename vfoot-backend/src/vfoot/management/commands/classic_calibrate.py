@@ -68,8 +68,9 @@ class Command(BaseCommand):
         ref = build_reference(cs_id, pooled_std=opts["pooled_std"])
         self.stdout.write(f"spread_k={spread_k}  pooled_std={opts['pooled_std']}  "
                           f"shrinkage_min={cr.SHRINKAGE_MINUTES}  "
-                          f"s.v. gate: min>={cr.MIN_MINUTES_RATED} & "
-                          f"touches>={cr.MIN_TOUCHES_RATED}")
+                          f"s.v. gate: min>={cr.ALWAYS_RATED_MINUTES} or "
+                          f"min + {cr.RATED_CONTRIBUTION_MINUTES}*contrib "
+                          f">={cr.RATED_SCORE_MINUTES}")
         for role in ("DIF", "CEN", "ATT"):
             r = ref.get(role)
             if r:

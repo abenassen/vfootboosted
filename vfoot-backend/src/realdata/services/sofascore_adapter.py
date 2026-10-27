@@ -75,7 +75,9 @@ from realdata.models import (
 from realdata.services.statsbomb_adapter import (
     BOX_X_MIN, BOX_Y_MIN, BOX_Y_MAX, _zone_key)
 from realdata.services.sofascore_client import SofaScoreBlocked
-from realdata.services.sofascore_intervals import build_intervals, replace_intervals
+from realdata.services.sofascore_intervals import (
+    build_intervals, replace_intervals, second_half_added_minutes,
+)
 from realdata.services.identity import (
     is_placeholder_dob, is_synthetic_sofascore_id, matches_by_surname, norm_name,
     spell_out_particles,
@@ -689,6 +691,13 @@ def _ingest_intervals(incidents_rows, match, player_cache, *, finished: bool) ->
     rows, _skipped = build_intervals(match, incidents_rows, appearances, ext_to_local,
                                      finished=finished)
     replace_intervals(match, rows)
+    # Il recupero annunciato, dagli stessi incidenti: serve al cancello del senza
+    # voto (v. ``Match.added_time_second_half``). Si scrive solo se il fornitore l'ha
+    # pubblicato, cosi' un giro leggero che non lo vede non cancella quello noto.
+    added = second_half_added_minutes(incidents_rows)
+    if added is not None and match.added_time_second_half != added:
+        match.added_time_second_half = added
+        match.save(update_fields=["added_time_second_half"])
     return len(rows)
 
 
