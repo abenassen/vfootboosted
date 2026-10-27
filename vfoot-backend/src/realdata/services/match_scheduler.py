@@ -23,6 +23,14 @@ Two windows:
   is the authority on the final numbers — so sitting in the window re-scraping
   every minute buys nothing. It used to: 45 full imports per match, ~1.650
   requests, and not one of them ever moved a vote.
+* LATE CHECK — one more look at a match that is ALREADY ``data_ready``, the morning
+  after. ``data_ready`` means "the provider has stopped changing this", and that is
+  a bet made at +1h, not a fact: SofaScore corrects authorship of a goal (Sassuolo
+  -Lazio, 27/10/2026: a goal given to Thorstvedt turned into Sutalo's own goal) well
+  after the confirmation, and nothing read the match again. The look is cheap (the
+  light fetch, compared with what is stored) and does NOT touch ``data_ready``.
+  Anything later than ``LATE_CHECK_UNTIL`` is a human's call: ``manage.py
+  recheck_match``.
 """
 from __future__ import annotations
 
@@ -73,6 +81,14 @@ def live_heavy_interval() -> timedelta:
 FINAL_CHECK_AFTER = timedelta(minutes=15)
 FINAL_CONFIRM_AFTER = timedelta(minutes=60)
 
+# The late look at a match that is already data_ready: it comes due at +12h (the
+# morning after an evening match) and stops being the tick's business at +48h.
+# The upper bound is not tidiness: the first tick after a deploy would otherwise
+# find every finished match of the season "not imported since +12h" and re-read the
+# lot. Past it, ``manage.py recheck_match`` is the tool.
+LATE_CHECK_AFTER = timedelta(hours=12)
+LATE_CHECK_UNTIL = timedelta(hours=48)
+
 # Action kinds
 STAMP_FT = "stamp_ft"          # first time seen finished -> record finished_at
 LIVE_ROUND = "live_round"      # one live round: status, score and the votes
@@ -90,6 +106,9 @@ class TickPlan:
     live_heavy: list[Match] = field(default_factory=list)
     final_check: list[Match] = field(default_factory=list)
     final_confirm: list[Match] = field(default_factory=list)
+    # Deliberately NOT part of is_empty(): a late look is the lowest-priority work
+    # there is, and "the plan is empty" is what lets it (and the forecasts) run.
+    late_check: list[Match] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not (self.stamp_ft or self.live_round
@@ -99,7 +118,8 @@ class TickPlan:
         return (f"stamp_ft={len(self.stamp_ft)} live_round={len(self.live_round)} "
                 f"(heavy={len(self.live_heavy)}) "
                 f"final_check={len(self.final_check)} "
-                f"final_confirm={len(self.final_confirm)}")
+                f"final_confirm={len(self.final_confirm)} "
+                f"late_check={len(self.late_check)}")
 
 
 def _in_live_window(match: Match, now: datetime) -> bool:
@@ -149,6 +169,34 @@ def plan_tick(now: datetime, matches) -> TickPlan:
                 plan.final_check.append(m)
 
     return plan
+
+
+def late_check_candidates(now: datetime):
+    """Matches that MAY be due a late look: finalized, recently. The exact due time
+    is ``plan_late_check``'s; this only bounds the query to the last two days."""
+    return (Match.objects
+            .filter(status=Match.STATUS_FINISHED, data_ready=True,
+                    finished_at__isnull=False,
+                    finished_at__lte=now - LATE_CHECK_AFTER,
+                    finished_at__gt=now - LATE_CHECK_UNTIL)
+            .exclude(competition_season__external_id="")
+            .select_related("competition_season", "home_team__team",
+                            "away_team__team")
+            .order_by("finished_at"))
+
+
+def plan_late_check(now: datetime, matches) -> list[Match]:
+    """Which of ``matches`` are due their one late look at ``now``.
+
+    "Once" is once SUCCESSFULLY, as for the final check: the tick stamps
+    ``data_imported_at`` only after a look that went through, so a blocked egress
+    leaves the checkpoint unmet and the next tick tries again.
+    """
+    return [m for m in matches
+            if m.status == Match.STATUS_FINISHED and m.data_ready
+            and m.finished_at is not None
+            and m.finished_at + LATE_CHECK_AFTER <= now < m.finished_at + LATE_CHECK_UNTIL
+            and _not_imported_since(m, m.finished_at + LATE_CHECK_AFTER)]
 
 
 def _not_imported_since(match: Match, moment: datetime) -> bool:

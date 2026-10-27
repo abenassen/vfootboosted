@@ -177,3 +177,66 @@ def live_round(match, *, heavy: bool) -> bool:
     if event is not None:
         _apply_status(match, event)
     return _import_warm(match, only_finished=False, heavy=heavy)
+
+
+def _facts(match) -> dict:
+    """What a provider correction can move, read off the DATABASE: the score, each
+    player's goals/assists/own goals, and who struck each goal and for which side.
+
+    The goal shots are in the set on purpose. The tabellino and the shot map are two
+    separate reads of the provider and the vote reads BOTH (the fantavoto bonus the
+    first, the credit and ``is_own_goal`` the second), so a correction that reached
+    only one of them is exactly the case this has to see.
+    """
+    from realdata.models import MatchAppearance, MatchShot
+    match.refresh_from_db(fields=["home_goals", "away_goals"])
+    apps = {}
+    for pid, goals, assists, raw in MatchAppearance.objects.filter(
+            match=match).values_list("player_id", "goals", "assists", "raw_stats"):
+        og = int((raw or {}).get("ownGoals") or 0)
+        if goals or assists or og:
+            apps[pid] = (goals, assists, og)
+    shots = sorted(MatchShot.objects.filter(match=match, shot_type="goal")
+                   .values_list("player_id", "team_side", "minute"))
+    return {"score": (match.home_goals, match.away_goals), "players": apps,
+            "goal_shots": shots}
+
+
+def _describe(before: dict, after: dict) -> list[str]:
+    out = []
+    if before["score"] != after["score"]:
+        out.append(f"punteggio {before['score']} -> {after['score']}")
+    for pid in sorted(set(before["players"]) | set(after["players"])):
+        b = before["players"].get(pid, (0, 0, 0))
+        a = after["players"].get(pid, (0, 0, 0))
+        if a != b:
+            out.append(f"giocatore {pid}: (gol, assist, autogol) {b} -> {a}")
+    if before["goal_shots"] != after["goal_shots"]:
+        out.append("mappa dei tiri: i gol non sono piu' gli stessi")
+    return out
+
+
+def late_check(match) -> tuple[bool, list[str]]:
+    """One late look at a match that is already ``data_ready``.
+
+    Returns ``(ok, changes)``: ``ok`` False when the egress was blocked (nothing was
+    read, the caller must not stamp and the next tick retries), ``changes`` the
+    list of what moved — empty when the provider still says what we stored.
+
+    The look is the LIGHT one (four requests, no heatmaps) compared with what the
+    database held beforehand. Only if something moved does the match get the full
+    ``finalize`` again, so the positional half is re-read too: a correction is rare,
+    and then it is worth the twenty-odd extra requests. ``data_ready`` is never
+    touched — it says "the provider has stopped changing this", and one late
+    correction does not turn a finished match back into a live one.
+    """
+    before = _facts(match)
+    if not live_round(match, heavy=False):
+        return False, []
+    changes = _describe(before, _facts(match))
+    if changes:
+        # Best effort: the light import already wrote the correction, so a blocked
+        # heavy re-read costs only the heatmaps, which a change of authorship
+        # does not move.
+        finalize(match)
+    return True, changes

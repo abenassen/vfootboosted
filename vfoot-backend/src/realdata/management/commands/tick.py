@@ -9,7 +9,10 @@ asks the DB "what is due now?" and acts:
   round is HEAVY: it also pulls a heatmap per player, and with them the positional
   half of the model;
 * runs the post-FT finalization — one scrape at +15min and one at +1h, and no
-  more than that — promoting a match to ``data_ready`` at the confirmation.
+  more than that — promoting a match to ``data_ready`` at the confirmation;
+* gives a ``data_ready`` match ONE more look the morning after (+12h), because the
+  provider sometimes corrects authorship of a goal after the confirmation. Lowest
+  priority: it runs only when nothing live or final is due, one match per tick.
 
 It is also where the two ways of telling somebody are triggered, and they are not
 interchangeable. The WebSocket nudge goes to pages that are OPEN, after any import
@@ -33,7 +36,8 @@ from realdata.models import Match
 from realdata.services import alerting, health, job_log, live_ingest
 from realdata.services import probable_lineups as forecasts
 from realdata.services.match_scheduler import (
-    candidate_matches, clock_drift, human_gap, plan_tick,
+    candidate_matches, clock_drift, human_gap, late_check_candidates,
+    plan_late_check, plan_tick,
 )
 
 
@@ -72,6 +76,7 @@ class Command(BaseCommand):
     def _tick(self, now, dry, run) -> None:
         matches = list(candidate_matches())
         plan = plan_tick(now, matches)
+        plan.late_check = plan_late_check(now, list(late_check_candidates(now)))
 
         # Stated from the PLAN, before acting: what follows is only readable next
         # to it. Zero imports with zero due is a quiet Tuesday; zero imports with
@@ -79,7 +84,8 @@ class Command(BaseCommand):
         run.due(stamp_ft=len(plan.stamp_ft), live_round=len(plan.live_round),
                 live_heavy=len(plan.live_heavy),
                 final_check=len(plan.final_check),
-                final_confirm=len(plan.final_confirm))
+                final_confirm=len(plan.final_confirm),
+                late_check=len(plan.late_check))
         run.did(candidates=len(matches))
 
         mode = "DRY-RUN" if dry else "APPLY"
@@ -111,6 +117,11 @@ class Command(BaseCommand):
         #    gira qui lo stesso, perche' la sua previsione e quella di SofaScore
         #    vanno lette insieme e non ha senso averne una fresca e una vecchia.
         if plan.is_empty():
+            if plan.late_check:
+                # Prima delle probabili e al posto loro, per questo giro: un solo
+                # match per tick, e solo quando non c'e' un voto che aspetta.
+                self._late_check(plan.late_check[0], now, dry, run)
+                return
             if dry:
                 self.stdout.write("  nothing due (le probabili non girano in dry-run)")
                 return
@@ -247,6 +258,39 @@ class Command(BaseCommand):
         if not dry:
             self._alarm_if_blind(now, run)
             self.stdout.write(self.style.SUCCESS("  applied"))
+
+    def _late_check(self, m, now, dry, run) -> None:
+        """L'unico sguardo tardivo su una partita gia' ``data_ready``.
+
+        ``data_ready`` resta com'e': dice che il fornitore, di norma, ha smesso, e
+        una rettifica a ore di distanza non fa tornare una partita «provvisoria».
+        Il timbro ``data_imported_at`` e' quello che chiude il controllo (v.
+        ``plan_late_check``) e si scrive solo se la lettura e' andata a buon fine.
+        """
+        if dry:
+            self.stdout.write(f"  [late-check] {m} — would re-read and compare")
+            return
+        from vfoot.services import live_updates
+        ok, changes = live_ingest.late_check(m)
+        if not ok:
+            run.did(egress_blocked=1)
+            self.stdout.write(f"  [late-check] {m} — egress blocked; will retry")
+            return
+        m.data_checked_at = now
+        m.data_imported_at = now
+        m.save(update_fields=["data_checked_at", "data_imported_at"])
+        run.did(late_checked=1)
+        if not changes:
+            self.stdout.write(f"  [late-check] {m} — invariata")
+            return
+        run.did(late_corrected=1)
+        run.note(f"rettifica tardiva su {m.external_id}")
+        self.stdout.write(self.style.WARNING(
+            f"  [late-check] {m} — RETTIFICATA: " + "; ".join(changes)))
+        nudge = live_updates.leagues_to_nudge(m)
+        if nudge:
+            live_updates.broadcast_leagues(nudge)
+            run.did(leagues_nudged=len(nudge))
 
     def _alarm_if_blind(self, now, run) -> None:
         """Una mail per episodio, non una al minuto.

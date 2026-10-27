@@ -14,9 +14,13 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 
 from realdata.models import (
-    Competition, CompetitionSeason, JobRun, Match, Season, Team, TeamSeason,
+    Competition, CompetitionSeason, JobRun, Match, MatchAppearance, MatchShot,
+    Player, Season, Team, TeamSeason,
 )
 from realdata.services import alerting, egress_client, live_ingest
+from realdata.services.match_scheduler import (
+    LATE_CHECK_AFTER, LATE_CHECK_UNTIL, plan_late_check,
+)
 from realdata.services.sofascore_adapter import SofaIngestResult
 
 _RESOLVED = SofaIngestResult(matches=1)
@@ -420,3 +424,173 @@ class QuandoLEgressFallisceLoDiceTests(TestCase):
              self.assertLogs("realdata.services.egress_client", "WARNING") as reg:
             self.assertFalse(egress_client.run_egress(["fetch"]))
         self.assertIn("non eseguibile", "\n".join(reg.output))
+
+
+class _LateBase(_Base):
+    """Una partita finita ieri sera, gia' data_ready: il caso del Sassuolo-Lazio."""
+    NOW = datetime(2026, 10, 28, 9, 0, tzinfo=timezone.utc)
+
+    def _finished(self, hours_ago=13, **kw):
+        ft = self.NOW - timedelta(hours=hours_ago)
+        return self._match(status=Match.STATUS_FINISHED, data_ready=True,
+                           finished_at=ft, data_imported_at=ft + timedelta(hours=1),
+                           data_checked_at=ft + timedelta(hours=1), **kw)
+
+
+class LateCheckPlanTests(_LateBase):
+    def test_non_e_dovuto_prima_delle_dodici_ore(self):
+        m = self._finished(hours_ago=11)
+        self.assertEqual(plan_late_check(self.NOW, [m]), [])
+
+    def test_e_dovuto_dopo_le_dodici_ore(self):
+        m = self._finished(hours_ago=13)
+        self.assertEqual(plan_late_check(self.NOW, [m]), [m])
+
+    def test_oltre_le_quarantotto_ore_non_e_piu_del_tick(self):
+        """Il tick non riapre tutta la stagione al primo giro dopo un deploy."""
+        m = self._finished(hours_ago=49)
+        self.assertEqual(plan_late_check(self.NOW, [m]), [])
+
+    def test_una_volta_sola_dopo_uno_sguardo_riuscito(self):
+        m = self._finished(hours_ago=13)
+        m.data_imported_at = self.NOW - timedelta(minutes=5)
+        self.assertEqual(plan_late_check(self.NOW, [m]), [])
+
+    def test_una_partita_non_data_ready_non_e_di_questo_passo(self):
+        m = self._finished(hours_ago=13)
+        m.data_ready = False
+        self.assertEqual(plan_late_check(self.NOW, [m]), [])
+
+    def test_la_finestra_e_dichiarata(self):
+        self.assertEqual(LATE_CHECK_AFTER, timedelta(hours=12))
+        self.assertEqual(LATE_CHECK_UNTIL, timedelta(hours=48))
+
+
+class LateCheckTests(_LateBase):
+    def _sassuolo_lazio(self):
+        """Thorstvedt (casa) segna al 7': il gol e' suo sia nel tabellino che nella
+        mappa dei tiri."""
+        m = self._finished()
+        thor = Player.objects.create(full_name="Kristian Thorstvedt")
+        sut = Player.objects.create(full_name="Josip Sutalo")
+        MatchAppearance.objects.create(match=m, player=thor, team_season=self.home,
+                                       side="home", goals=1)
+        MatchAppearance.objects.create(match=m, player=sut, team_season=self.away,
+                                       side="away")
+        MatchShot.objects.create(match=m, player=thor, team_side="home",
+                                 zone_key="x", minute=7, shot_type="goal",
+                                 is_goal=True, provider="sofascore")
+        return m, thor, sut
+
+    def _correct(self, m, thor, sut):
+        """Cio' che fa l'import dopo la rettifica del fornitore."""
+        MatchAppearance.objects.filter(match=m, player=thor).update(goals=0)
+        MatchAppearance.objects.filter(match=m, player=sut).update(
+            raw_stats={"ownGoals": 1})
+        MatchShot.objects.filter(match=m).update(player=sut)
+        return True
+
+    def test_una_rettifica_dell_autore_si_vede_e_rilancia_il_completo(self):
+        m, thor, sut = self._sassuolo_lazio()
+        with mock.patch.object(live_ingest, "live_round",
+                               side_effect=lambda mm, heavy: self._correct(m, thor, sut)), \
+             mock.patch.object(live_ingest, "finalize", return_value=True) as fin:
+            ok, changes = live_ingest.late_check(m)
+        self.assertTrue(ok)
+        self.assertTrue(any(str(thor.id) in c for c in changes))
+        self.assertTrue(any(str(sut.id) in c for c in changes))
+        fin.assert_called_once()
+
+    def test_il_solo_tabellino_corretto_senza_la_mappa_si_vede_lo_stesso(self):
+        m, thor, sut = self._sassuolo_lazio()
+        def only_card(mm, heavy):
+            MatchAppearance.objects.filter(match=m, player=thor).update(goals=0)
+            return True
+        with mock.patch.object(live_ingest, "live_round", side_effect=only_card), \
+             mock.patch.object(live_ingest, "finalize", return_value=True):
+            ok, changes = live_ingest.late_check(m)
+        self.assertEqual(len(changes), 1)
+
+    def test_se_il_fornitore_non_ha_cambiato_niente_non_si_rilegge_tutto(self):
+        m, *_ = self._sassuolo_lazio()
+        with mock.patch.object(live_ingest, "live_round", return_value=True), \
+             mock.patch.object(live_ingest, "finalize") as fin:
+            ok, changes = live_ingest.late_check(m)
+        self.assertTrue(ok)
+        self.assertEqual(changes, [])
+        fin.assert_not_called()
+
+    def test_egress_bloccato_non_e_uno_sguardo(self):
+        m, *_ = self._sassuolo_lazio()
+        with mock.patch.object(live_ingest, "live_round", return_value=False):
+            ok, changes = live_ingest.late_check(m)
+        self.assertFalse(ok)
+        self.assertEqual(changes, [])
+
+    def test_lo_sguardo_e_quello_leggero_senza_heatmap(self):
+        m, *_ = self._sassuolo_lazio()
+        with mock.patch.object(live_ingest, "live_round", return_value=True) as rnd:
+            live_ingest.late_check(m)
+        self.assertIs(rnd.call_args.kwargs["heavy"], False)
+
+
+class LateCheckTickTests(_LateBase):
+    def test_il_tick_lo_fa_quando_non_c_e_altro_e_chiude_il_controllo(self):
+        m = self._finished()
+        with mock.patch.object(live_ingest, "late_check",
+                               return_value=(True, [])) as lc:
+            call_command("tick", "--now", _iso(self.NOW))
+            call_command("tick", "--now", _iso(self.NOW + timedelta(minutes=1)))
+        lc.assert_called_once()   # il secondo giro non lo ripete
+        m.refresh_from_db()
+        self.assertTrue(m.data_ready)
+        self.assertEqual(m.data_imported_at, self.NOW)
+
+    def test_data_ready_non_si_tocca_nemmeno_se_corregge(self):
+        m = self._finished()
+        with mock.patch.object(live_ingest, "late_check",
+                               return_value=(True, ["giocatore 1: x"])):
+            call_command("tick", "--now", _iso(self.NOW))
+        m.refresh_from_db()
+        self.assertTrue(m.data_ready)
+        self.assertEqual(JobRun.objects.latest("id").did.get("late_corrected"), 1)
+
+    def test_un_egress_bloccato_non_timbra_e_si_riprova(self):
+        m = self._finished()
+        before = m.data_imported_at
+        with mock.patch.object(live_ingest, "late_check", return_value=(False, [])):
+            call_command("tick", "--now", _iso(self.NOW))
+        m.refresh_from_db()
+        self.assertEqual(m.data_imported_at, before)
+
+    def test_una_partita_in_corso_ha_la_precedenza(self):
+        self._finished()
+        self._match(ext="222", status=Match.STATUS_LIVE,
+                    kickoff=self.NOW - timedelta(minutes=30))
+        with mock.patch.object(live_ingest, "late_check") as lc, \
+             mock.patch.object(live_ingest, "live_round", return_value=True):
+            call_command("tick", "--now", _iso(self.NOW))
+        lc.assert_not_called()
+
+    def test_dry_run_non_tocca_l_egress(self):
+        self._finished()
+        with mock.patch.object(live_ingest, "late_check") as lc:
+            call_command("tick", "--now", _iso(self.NOW), "--dry-run")
+        lc.assert_not_called()
+
+
+class RecheckMatchCommandTests(_LateBase):
+    def test_rilegge_per_id_sofascore_e_riferisce(self):
+        m = self._finished(ext="16285065")
+        with mock.patch.object(live_ingest, "late_check",
+                               return_value=(True, ["giocatore 1: x"])) as lc:
+            call_command("recheck_match", "16285065")
+        lc.assert_called_once()
+        m.refresh_from_db()
+        self.assertTrue(m.data_ready)
+
+    def test_rifiuta_una_partita_non_finita(self):
+        from django.core.management.base import CommandError
+        self._match(ext="9", status=Match.STATUS_LIVE)
+        with self.assertRaises(CommandError):
+            call_command("recheck_match", "9")
