@@ -33,7 +33,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone as djtz
 
 from realdata.models import Match
-from realdata.services import alerting, health, job_log, live_ingest
+from realdata.services import alerting, health, job_log, live_ingest, revision_probe
 from realdata.services import probable_lineups as forecasts
 from realdata.services.match_scheduler import (
     candidate_matches, clock_drift, human_gap, late_check_candidates,
@@ -122,6 +122,15 @@ class Command(BaseCommand):
                 # match per tick, e solo quando non c'e' un voto che aspetta.
                 self._late_check(plan.late_check[0], now, dry, run)
                 return
+            # A measurement, not a step: off unless VFOOT_REVISION_PROBE=1, and below
+            # the late check. One reading per tick, nothing imported.
+            if revision_probe.enabled():
+                due = revision_probe.plan(now, list(revision_probe.candidates(now)),
+                                          revision_probe.done_readings())
+                run.due(revision_probe=len(due))
+                if due:
+                    self._probe(due[0], now, dry, run)
+                    return
             if dry:
                 self.stdout.write("  nothing due (le probabili non girano in dry-run)")
                 return
@@ -291,6 +300,20 @@ class Command(BaseCommand):
         if nudge:
             live_updates.broadcast_leagues(nudge)
             run.did(leagues_nudged=len(nudge))
+
+    def _probe(self, due, now, dry, run) -> None:
+        """Una lettura della misura delle rettifiche (v. ``revision_probe``). Non
+        importa nulla: scrive una riga in un file suo."""
+        m, label = due
+        if dry:
+            self.stdout.write(f"  [probe] {m} +{label} — would read")
+            return
+        if not revision_probe.take(m, label, now):
+            run.did(egress_blocked=1)
+            self.stdout.write(f"  [probe] {m} +{label} — egress blocked; will retry")
+            return
+        run.did(probe_readings=1)
+        self.stdout.write(f"  [probe] {m} +{label} — read")
 
     def _alarm_if_blind(self, now, run) -> None:
         """Una mail per episodio, non una al minuto.

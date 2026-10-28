@@ -342,6 +342,13 @@ VFOOT_DATA_DIR = Path(os.environ.get("VFOOT_DATA_DIR", str(REPO_ROOT)))
 VFOOT_SOFASCORE_CACHE = str(VFOOT_DATA_DIR / "historical-data" / "serie-a"
                             / "sofascore" / "cache")
 
+# A MEASUREMENT, off by default: read every finished match at several offsets (1h..48h)
+# to find when SofaScore stops revising xG/xGOT. Never imports, never touches the
+# app's cache. See realdata/services/revision_probe.py and the analyze command.
+VFOOT_REVISION_PROBE = os.environ.get("VFOOT_REVISION_PROBE", "0") == "1"
+VFOOT_REVISION_PROBE_DIR = str(Path(os.environ.get(
+    "VFOOT_REVISION_PROBE_DIR", str(VFOOT_DATA_DIR / "revision-probe"))))
+
 # Percorso del browser per lo scraping. Sul server usiamo il Chromium di SISTEMA
 # (pacchettizzato da Debian) invece di far scaricare a Playwright una copia
 # separata: stessa funzione, ~150 MB e un aggiornamento in meno da gestire.
