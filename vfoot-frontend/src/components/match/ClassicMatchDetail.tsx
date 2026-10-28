@@ -1536,12 +1536,17 @@ function SaveMap({
               <td className={cell(s.points)}>{fmtPts(s.points)}</td>
             </tr>
           ))}
-          <tr className="border-t border-line/60">
-            <td className="py-0.5 pr-2 text-ink-faint" colSpan={2}>
-              per un portiere a cui non arriva niente
-            </td>
-            <td className={cell(baseline)}>{fmtPts(baseline)}</td>
-          </tr>
+          {/* Dall'08/10/2026 il voto di partenza del portiere e' gia' il suo sei e
+              la baseline e' sempre zero: la riga diceva «0.00» e basta. Si mostra
+              solo se un giorno tornasse non nulla, perche' il totale deve sommare. */}
+          {Math.abs(baseline) >= 0.005 ? (
+            <tr className="border-t border-line/60">
+              <td className="py-0.5 pr-2 text-ink-faint" colSpan={2}>
+                per un portiere a cui non arriva niente
+              </td>
+              <td className={cell(baseline)}>{fmtPts(baseline)}</td>
+            </tr>
+          ) : null}
           <tr className="border-t border-line">
             <td className="py-0.5 pr-2 font-semibold text-ink-soft" colSpan={2}>
               totale
