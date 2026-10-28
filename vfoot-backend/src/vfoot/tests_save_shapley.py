@@ -136,6 +136,14 @@ class SaveSectionAddsUpTests(TestCase):
         self.assertAlmostEqual(sum(s["points"] for s in d["saves"]) + d["baseline"],
                                d["total"], places=2)
 
+    def test_the_situation_is_shown_in_italian_like_in_the_shot_lists(self):
+        """Il pannello del portiere mostrava «fast-break» grezzo (28/10/2026)."""
+        self._keeper()
+        self._faced((12, "save", 0.64), (40, "save", 0.05))
+        MatchShot.objects.filter(external_id="f0").update(situation="fast-break")
+        d = save_detail(self.match, self.keeper.id)
+        self.assertEqual([r["situation"] for r in d["saves"]], ["in contropiede", "azione"])
+
     def test_the_section_total_is_the_summary_line(self):
         self._keeper()
         self._faced((12, "save", 0.64), (40, "save", 0.05), (77, "save", 0.17))

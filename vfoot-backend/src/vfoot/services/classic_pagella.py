@@ -1083,7 +1083,9 @@ def save_detail(match, player_id: int) -> dict:
         saves.append({
             "minute": s.get("minute"),
             "outcome": label,
-            "situation": s.get("situation") or "",
+            # Tradotta come negli elenchi dei tiri (riga ~1009): qui usciva grezza,
+            # «fast-break» invece di «in contropiede».
+            "situation": SHOT_SITUATION_IT.get(s.get("situation") or "", ""),
             "xgot": round(float(s.get("xgot") or 0.0), 3),
             "distance_m": s.get("distance_m"),
             "points": round(scale * s["points"], 3),
