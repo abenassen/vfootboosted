@@ -741,6 +741,23 @@ _SHOT_FAMILY = ("sga_post", "xg_shots", "shots_on_target", "shots",
 _SHAPLEY_MAX_SHOTS = 12
 
 
+def minute_label(minute, elapsed_seconds) -> str | None:
+    """Il minuto come si legge in tabellino: «90+4», non «90».
+
+    SofaScore tiene ``time`` fermo a 45 e a 90 per tutto il recupero, e il
+    recupero lo porta in secondi (``timeSeconds``, tempo giocato continuo): due
+    tiri al 90+1 e al 90+4 arrivavano entrambi come «90». ``minute`` resta intero
+    perche' i conti lo leggono cosi'; l'etichetta e' solo per chi guarda.
+    """
+    if minute is None:
+        return None
+    for boundary in (45, 90):
+        if minute == boundary and elapsed_seconds is not None \
+                and elapsed_seconds >= boundary * 60:
+            return f"{boundary}+{(elapsed_seconds - boundary * 60) // 60 + 1}"
+    return str(minute)
+
+
 def shot_detail(match, player_id: int) -> dict:
     """I tiri di un giocatore in una partita, con quanto vale CIASCUNO.
 
@@ -810,8 +827,8 @@ def shot_detail(match, player_id: int) -> dict:
     if not feats:
         return empty
     shots = list(MatchShot.objects.filter(match=match, player_id=player_id)
-                 .order_by("minute", "id")
-                 .values("minute", "xg", "xgot", "is_goal", "shot_type", "situation",
+                 .order_by("minute", "elapsed_seconds", "id")
+                 .values("minute", "elapsed_seconds", "xg", "xgot", "is_goal", "shot_type", "situation",
                          "team_side", "interception_m"))
     if not shots:
         return empty
@@ -1003,6 +1020,7 @@ def shot_detail(match, player_id: int) -> dict:
         cut = is_interrupted_shot(s["shot_type"], s["interception_m"])
         out.append({
             "minute": s["minute"],
+            "minute_label": minute_label(s["minute"], s["elapsed_seconds"]),
             "outcome": (SHOT_OUTCOME_IT["own"] if own else
                         SHOT_OUTCOME_IT["interrupted"] if cut else
                         SHOT_OUTCOME_IT.get(s["shot_type"], s["shot_type"] or "tiro")),
@@ -1082,6 +1100,7 @@ def save_detail(match, player_id: int) -> dict:
             label += " (errore segnalato)"
         saves.append({
             "minute": s.get("minute"),
+            "minute_label": minute_label(s.get("minute"), s.get("seconds")),
             "outcome": label,
             # Tradotta come negli elenchi dei tiri (riga ~1009): qui usciva grezza,
             # «fast-break» invece di «in contropiede».

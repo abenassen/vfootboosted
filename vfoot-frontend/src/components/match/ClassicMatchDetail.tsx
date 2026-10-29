@@ -1440,7 +1440,7 @@ function ShotMap({
           {shots.map((s, i) => (
             <tr key={`${s.minute}-${i}`} className="border-t border-line/60">
               <td className="py-0.5 pr-2 text-ink-soft">
-                {s.minute != null ? <span className="text-ink-faint">{s.minute}′ </span> : null}
+                {s.minute != null ? <span className="text-ink-faint">{s.minute_label ?? s.minute}′ </span> : null}
                 {s.outcome}
                 {s.situation ? <span className="text-ink-faint"> {s.situation}</span> : null}
               </td>
@@ -1528,7 +1528,7 @@ function SaveMap({
           {saves.map((s, i) => (
             <tr key={`${s.minute}-${i}`} className="border-t border-line/60">
               <td className="py-0.5 pr-2 text-ink-soft">
-                {s.minute != null ? <span className="text-ink-faint">{s.minute}′ </span> : null}
+                {s.minute != null ? <span className="text-ink-faint">{s.minute_label ?? s.minute}′ </span> : null}
                 {s.outcome}
                 {s.situation ? <span className="text-ink-faint"> {s.situation}</span> : null}
               </td>

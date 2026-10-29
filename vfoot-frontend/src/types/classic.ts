@@ -162,6 +162,8 @@ export interface VoteLedgerGroup {
 
 export interface ShotDetail {
   minute: number | null;
+  /** «90+4» nel recupero; se manca si ricade su `minute`. */
+  minute_label?: string | null;
   /** gol / parato / legno / murato / fuori */
   outcome: string;
   /** da dove veniva: su assist, in contropiede, su corner… vuoto se non si sa. */
@@ -185,6 +187,8 @@ export interface ShotDetail {
  *  dall'altra parte. Solo quelli arrivati in porta — i tiri fuori non sono suoi. */
 export interface SaveDetail {
   minute: number | null;
+  /** «90+4» nel recupero; se manca si ricade su `minute`. */
+  minute_label?: string | null;
   /** parata / gol subito */
   outcome: string;
   /** da dove veniva: su assist, su corner, su rigore… vuoto se non si sa. */
