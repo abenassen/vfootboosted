@@ -27,6 +27,8 @@ would be unbearable.
 """
 from __future__ import annotations
 
+import logging
+
 from datetime import datetime, timezone
 
 from django.conf import settings
@@ -40,6 +42,9 @@ from realdata.services.match_scheduler import (
     candidate_matches, clock_drift, human_gap, late_check_candidates,
     plan_late_check, plan_tick,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -301,6 +306,29 @@ class Command(BaseCommand):
         if nudge:
             live_updates.broadcast_leagues(nudge)
             run.did(leagues_nudged=len(nudge))
+        self._flag_concluded_rounds(m, changes, run)
+
+    def _flag_concluded_rounds(self, m, changes, run) -> None:
+        """Un FATTO corretto su una giornata che una lega ha gia' concluso: la si
+        segna e se ne avvisano gli admin (v. ``provider_corrections``). Il solo xG
+        rivisto resta nel log. Avvolto come la sorveglianza: un avviso che non
+        parte non puo' fermare il tick."""
+        facts = live_ingest.fact_changes(changes)
+        if not facts:
+            return
+        try:
+            from vfoot.services import provider_corrections
+            flagged = provider_corrections.flag_concluded_rounds(m, facts)
+        except Exception:                                 # noqa: BLE001
+            log.exception("Segnalazione della rettifica fallita su %s", m.external_id)
+            return
+        for f in flagged:
+            run.did(rounds_flagged=1)
+            moving = f["fixtures_moving"]
+            self.stdout.write(self.style.WARNING(
+                f"    giornata {f['matchday']} di «{f['league']}» gia' conclusa: "
+                + ("anteprima non riuscita" if moving is None
+                   else f"{moving} sfide cambierebbero") + ", admin avvisati"))
 
     def _probe(self, due, now, dry, run) -> None:
         """Una lettura della misura delle rettifiche (v. ``revision_probe``). Non

@@ -68,3 +68,14 @@ class Command(BaseCommand):
         if nudge:
             live_updates.broadcast_leagues(nudge)
             self.stdout.write(f"  {len(nudge)} leghe avvisate")
+        # E le giornate gia' concluse, come fa il tick: un fatto corretto le segna e
+        # avvisa gli admin; il solo xG rivisto no (v. provider_corrections).
+        facts = live_ingest.fact_changes(changes)
+        if facts:
+            from vfoot.services import provider_corrections
+            for f in provider_corrections.flag_concluded_rounds(m, facts):
+                moving = f["fixtures_moving"]
+                self.stdout.write(
+                    f"  giornata {f['matchday']} di «{f['league']}» gia' conclusa: "
+                    + ("anteprima non riuscita" if moving is None
+                       else f"{moving} sfide cambierebbero") + ", admin avvisati")

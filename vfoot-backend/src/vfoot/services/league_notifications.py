@@ -255,6 +255,52 @@ def notify_conclusions_pending(league, matchdays, admins) -> None:
     _send([_message(u, subject, body) for u in users])
 
 
+def notify_provider_correction(league, md, match_label: str, facts: list[str],
+                               moving: list[dict] | None, admins) -> None:
+    """The provider corrected a fact of a round this league has ALREADY concluded.
+
+    To the admins only, because the decision is theirs (v.
+    ``provider_corrections``): the frozen result does not move until somebody
+    re-scores the round. The message says what changed and which fixtures would
+    move, so that a correction that changes nothing for this league can be read and
+    left — and one that turns a result is not missed.
+    """
+    if not _enabled() or not admins:
+        return
+    users = [a for a in admins if a.email and a.is_active]
+    if not users:
+        return
+    from vfoot.services.provider_corrections import _describe_fixture
+    subject = f"Rettifica sulla giornata {md.real_matchday} · {league.name}"
+    if moving is None:
+        effect = "Non siamo riusciti a calcolare in anticipo quali sfide cambierebbero."
+        short = "controlla se va ricalcolata."
+    elif not moving:
+        effect = "Per la tua lega non cambia nessun risultato: puoi anche lasciarla com'è."
+        short = "per la tua lega non cambia nessun risultato."
+    else:
+        effect = ("Ricalcolandola cambierebbero queste sfide:\n"
+                  + "\n".join(f"  - {_describe_fixture(f)}" for f in moving))
+        short = (f"ricalcolandola cambierebbe{'ro' if len(moving) > 1 else ''} "
+                 f"{len(moving)} sfid{'e' if len(moving) > 1 else 'a'}.")
+    _push(users, title=subject,
+          body=f"{match_label}: il fornitore ha corretto i dati, {short}",
+          tag=f"correction-{league.id}-{md.id}", url="/league-admin?tab=matchdays")
+    base = str(getattr(settings, "VFOOT_FRONTEND_BASE_URL", "")).rstrip("/")
+    body = (
+        "{greeting}\n\n"
+        f"Nella lega \"{league.name}\" la giornata {md.real_matchday} è già conclusa, "
+        f"ma il fornitore dei dati ha corretto {match_label}:\n"
+        + "\n".join(f"  - {f}" for f in facts) + "\n\n"
+        + effect + "\n\n"
+        "Il risultato registrato non cambia da solo: decidi tu se ricalcolare la "
+        "giornata («Ricalcola… con regole congelate»). Ricalcolare può spostare "
+        "risultati, classifica e premi.\n\n"
+        f"Giornate della lega: {base}/league-admin?tab=matchdays\n"
+    )
+    _send([_message(u, subject, body) for u in users])
+
+
 def notify_lineup_repaired(league, manager, out_player_id, in_player_id, matchdays,
                            cause: str = "market") -> None:
     """His acquisition landed in a lineup he had already sent.

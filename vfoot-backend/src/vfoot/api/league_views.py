@@ -132,7 +132,7 @@ from vfoot.services.player_ratings import (
 from vfoot.services.match_resolver import matchday_fixtures_by_team
 from vfoot.services import (
     currency, honours, knockout, league_economy, lineup_baseline, lineup_deadline,
-    lineup_repair, lineup_suggest, matchday_state,
+    lineup_repair, lineup_suggest, matchday_state, provider_corrections,
 )
 from vfoot.services.live_realtime import broadcast_live
 
@@ -3547,6 +3547,13 @@ class LeagueMatchdayListView(APIView):
                     "decides": decides.get(md.real_matchday, []),
                     "concluded_at": md.concluded_at.isoformat() if md.concluded_at else None,
                     "concluded_by": md.concluded_by.username if md.concluded_by_id else None,
+                    # Il fornitore ha corretto un fatto dopo la conclusione (v.
+                    # services/provider_corrections): il risultato congelato non si
+                    # muove da solo, e qui si dice all'admin cosa cambierebbe.
+                    "correction_pending": ({
+                        "at": md.correction_pending_at.isoformat(),
+                        "note": md.correction_note,
+                    } if md.correction_pending_at else None),
                 }
             )
         return Response(payload)
@@ -3998,6 +4005,9 @@ class LeagueMatchdayRecomputeView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # Ricalcolata sui dati di adesso: una rettifica del fornitore in sospeso su
+        # questa giornata e' applicata, qualunque regolamento si sia scelto.
+        provider_corrections.clear(md)
         # Un ricalcolo puo' spostare un trofeo gia' assegnato. Prima veniva
         # riscritto in silenzio (l'albo era derivato, quindi cambiava da solo e
         # nessuno lo vedeva accadere); ora si dice a chi ha premuto il pulsante.

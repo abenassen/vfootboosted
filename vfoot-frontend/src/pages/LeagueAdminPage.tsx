@@ -1778,8 +1778,39 @@ export default function LeagueAdminPage() {
                               </div>
                             ) : null}
 
+                            {/* Una rettifica del fornitore arrivata DOPO la chiusura.
+                                Il risultato congelato non si muove da solo: ricalcolare
+                                può ribaltare una sfida, la classifica e un turno di coppa
+                                già sorteggiato, e quella è una decisione dell'admin.
+                                Qui si dice cosa cambierebbe, e il ricalcolo a regole
+                                congelate — quello giusto per un dato corretto — la
+                                applica e fa sparire il riquadro. */}
+                            {md.phase === 'concluded' && md.correction_pending ? (
+                              <div className="mt-2 rounded-lg border border-warn/40 bg-warn-bg px-2.5 py-2 text-xs text-ink-soft">
+                                <div className="font-semibold text-warn">
+                                  Dati corretti dopo la conclusione
+                                </div>
+                                <div className="mt-0.5 whitespace-pre-line">{md.correction_pending.note}</div>
+                                <div className="mt-1 text-ink-faint">
+                                  Il risultato registrato non cambia finché non ricalcoli la giornata.
+                                </div>
+                              </div>
+                            ) : null}
+
                             {md.phase === 'concluded' ? (
                               <div className="mt-2 flex flex-wrap items-center gap-2">
+                                {md.correction_pending ? (
+                                  <Button
+                                    size="sm"
+                                    disabled={busy}
+                                    onClick={() => {
+                                      if (window.confirm(`Ricalcolare la giornata ${md.real_matchday} con i dati corretti? Il regolamento resta quello congelato alla conclusione; risultati, classifica e premi possono cambiare.`))
+                                        void run(() => recomputeAction(md, 'snapshot'));
+                                    }}
+                                  >
+                                    Applica la correzione
+                                  </Button>
+                                ) : null}
                                 <Button
                                   size="sm"
                                   variant="secondary"

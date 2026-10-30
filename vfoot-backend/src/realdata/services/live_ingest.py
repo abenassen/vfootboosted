@@ -182,6 +182,7 @@ def live_round(match, *, heavy: bool) -> bool:
 # Below this, a revision of a shot's xG + xGOT is nothing a vote can show: a fifth
 # of one half-point of xGOT on a single shot (the same eps as ``revision_probe``).
 SHOT_REVISION_EPS = 0.02
+REVISION_PREFIX = "xG/xGOT rivisti"
 
 
 def _facts(match) -> dict:
@@ -216,14 +217,24 @@ def _facts(match) -> dict:
 
 
 def _describe(before: dict, after: dict) -> list[str]:
+    """What moved, in words an admin can act on: they go into the log AND into the
+    message that asks a league to re-score a closed round."""
+    from realdata.models import Player
     out = []
     if before["score"] != after["score"]:
-        out.append(f"punteggio {before['score']} -> {after['score']}")
-    for pid in sorted(set(before["players"]) | set(after["players"])):
+        (bh, ba), (ah, aa) = before["score"], after["score"]
+        out.append(f"risultato {bh}-{ba} -> {ah}-{aa}")
+    moved = sorted(pid for pid in set(before["players"]) | set(after["players"])
+                   if before["players"].get(pid, (0, 0, 0))
+                   != after["players"].get(pid, (0, 0, 0)))
+    names = {pid: (short or full) for pid, short, full in Player.objects.filter(
+        id__in=moved).values_list("id", "short_name", "full_name")}
+    for pid in moved:
         b = before["players"].get(pid, (0, 0, 0))
         a = after["players"].get(pid, (0, 0, 0))
-        if a != b:
-            out.append(f"giocatore {pid}: (gol, assist, autogol) {b} -> {a}")
+        parts = [f"{label} {x} -> {y}" for label, x, y in
+                 zip(("gol", "assist", "autogol"), b, a) if x != y]
+        out.append(f"{names.get(pid, 'giocatore')} (#{pid}): " + ", ".join(parts))
     if before["goal_shots"] != after["goal_shots"]:
         out.append("mappa dei tiri: i gol non sono piu' gli stessi")
     # The revision the +8h confirmation waits for. Seen at +24h it is the exception
@@ -234,9 +245,21 @@ def _describe(before: dict, after: dict) -> list[str]:
               for k in old.keys() & new.keys()]
     moved = [d for d in deltas if d > SHOT_REVISION_EPS]
     if moved:
-        out.append(f"xG/xGOT rivisti su {len(moved)} tiri (il piu' grosso "
+        out.append(f"{REVISION_PREFIX} su {len(moved)} tiri (il piu' grosso "
                    f"{max(moved):.3f})")
     return out
+
+
+def fact_changes(changes: list[str]) -> list[str]:
+    """The changes that are FACTS — score, goals, assists, own goals, authorship —
+    out of what ``late_check`` reported.
+
+    The split is the league's policy, not tidiness: a fact moves a bonus (three
+    points for a goal), can turn a result and is worth asking a league to re-score
+    a closed round for. A late re-estimate of xG moves decimals that the half-point
+    rounding nearly always swallows, and is only logged.
+    """
+    return [c for c in changes if not c.startswith(REVISION_PREFIX)]
 
 
 def late_check(match) -> tuple[bool, list[str]]:

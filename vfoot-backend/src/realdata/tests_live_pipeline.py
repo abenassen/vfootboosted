@@ -585,6 +585,26 @@ class LateCheckTickTests(_LateBase):
         self.assertTrue(m.data_ready)
         self.assertEqual(JobRun.objects.latest("id").did.get("late_corrected"), 1)
 
+    def test_un_fatto_corretto_segnala_le_giornate_gia_concluse(self):
+        from vfoot.services import provider_corrections
+        m = self._finished()
+        xg = f"{live_ingest.REVISION_PREFIX} su 3 tiri (il piu' grosso 0.050)"
+        with mock.patch.object(live_ingest, "late_check",
+                               return_value=(True, ["Sutalo (#2): autogol 0 -> 1", xg])), \
+             mock.patch.object(provider_corrections, "flag_concluded_rounds",
+                               return_value=[]) as flag:
+            call_command("tick", "--now", _iso(self.NOW))
+        flag.assert_called_once_with(m, ["Sutalo (#2): autogol 0 -> 1"])
+
+    def test_il_solo_xg_rivisto_resta_nel_log(self):
+        from vfoot.services import provider_corrections
+        self._finished()
+        xg = f"{live_ingest.REVISION_PREFIX} su 3 tiri (il piu' grosso 0.050)"
+        with mock.patch.object(live_ingest, "late_check", return_value=(True, [xg])), \
+             mock.patch.object(provider_corrections, "flag_concluded_rounds") as flag:
+            call_command("tick", "--now", _iso(self.NOW))
+        flag.assert_not_called()
+
     def test_un_egress_bloccato_non_timbra_e_si_riprova(self):
         m = self._finished()
         before = m.data_imported_at

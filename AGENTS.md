@@ -578,7 +578,13 @@ tutto il progetto che parla a tutti insieme, e va letta da lui prima che parta.
         on the final numbers; `data_ready` is when the league may close the round.
         The one look after it (+24h, `late_check`) is the net for the exception —
         a goal re-attributed — and says what moved, xG included, instead of
-        "invariata". Whoever touches `plan_tick`:
+        "invariata". A corrected FACT on a round a league has already CONCLUDED
+        does not re-score it: it flags the round (`FantasyMatchday.
+        correction_pending_at`), mails/pushes the admins which fixtures would move,
+        and waits for the recompute ("regole congelate"), which clears the flag —
+        a re-score can turn a result, the table and a cup round drawn since, and
+        that is the admin's call (`services/provider_corrections.py`, decided
+        30/10/2026). A late xG re-estimate alone is only logged. Whoever touches `plan_tick`:
         `final_check` needs its guard (`_not_imported_since`) or it silently
         becomes a window again.
     The reasoning, with the measured costs, is in

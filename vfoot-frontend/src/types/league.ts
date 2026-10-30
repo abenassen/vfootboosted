@@ -817,6 +817,10 @@ export interface LeagueMatchdayItem {
   decides?: MatchdayImpact[];
   concluded_at: string | null;
   concluded_by: string | null;
+  /** Il fornitore ha corretto un fatto (un gol, un assist, il risultato) dopo che la
+   *  giornata era già conclusa. Il risultato congelato non cambia da solo: `note` dice
+   *  cosa è cambiato e quali sfide si muoverebbero, il ricalcolo lo applica. */
+  correction_pending?: { at: string; note: string } | null;
 }
 
 /** A phase that cannot be drawn until a given matchday is counted. */

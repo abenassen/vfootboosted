@@ -445,6 +445,14 @@ class FantasyMatchday(models.Model):
     # recompute so a concluded matchday stays interpretable even if the league's live
     # settings change afterwards. Empty until the matchday is scored by the classic engine.
     ruleset_snapshot = models.JSONField(default=dict, blank=True)
+    # The provider corrected a FACT of this round (a goal re-attributed, an assist, the
+    # score) after the league had already concluded it. The frozen totals do not move
+    # by themselves — a re-score can turn a result, a table and a cup round played
+    # since, which is a decision for the league's admin and not for a job at night —
+    # so the round is flagged here, the admin is told, and the manual recompute
+    # clears both. See ``services/provider_corrections.py``.
+    correction_pending_at = models.DateTimeField(null=True, blank=True)
+    correction_note = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
