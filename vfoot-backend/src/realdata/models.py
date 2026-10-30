@@ -290,7 +290,7 @@ class Match(models.Model):
     # round never happens outside a round.
     data_imported_at = models.DateTimeField(null=True, blank=True)
     # When the match was FIRST observed as finished (full time). The scheduler
-    # measures the +15min / +1h finalization windows from this, so it must be the
+    # measures the +15min / +8h finalization checkpoints from this, so it must be the
     # real observed FT, not an estimate from kickoff + nominal duration.
     finished_at = models.DateTimeField(null=True, blank=True)
     # Minutes of stoppage time the referee ANNOUNCED at the end of the second half

@@ -416,7 +416,7 @@ export function ClassicMatchDetail({
               {/* "In corso" and "provvisorio" are not the same claim, and one badge
                   for both told the wrong one half the time: a match that ENDED
                   twenty minutes ago still carries movable votes (the provider
-                  confirms an hour later), and labelling that "in corso" says the
+                  confirms eight hours later), and labelling that "in corso" says the
                   ball is still rolling. The clock rides with the live label —
                   from the appearances, so it costs nothing. */}
               {/* `in_progress` e NON `live`. Su una sfida di lega `live` vuol dire
@@ -1073,7 +1073,7 @@ function PlayerRow({
             a flat "n.d." at the fortieth minute says "we have nothing on him",
             when what is true is "not yet".
             «Live» solo se la sua partita è davvero sul campo: fra il fischio e la
-            conferma del fornitore passa un'ora, e in quell'ora questa pastiglia
+            conferma del fornitore passano otto ore, e in quel tempo questa pastiglia
             pulsava su prestazioni concluse. */}
         {p.provisional && !onPitchNow ? (
           <LiveBadge

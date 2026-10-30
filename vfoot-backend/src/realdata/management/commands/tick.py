@@ -8,9 +8,10 @@ asks the DB "what is due now?" and acts:
   so the votes move while it is being played, without promoting it. Every k-th
   round is HEAVY: it also pulls a heatmap per player, and with them the positional
   half of the model;
-* runs the post-FT finalization — one scrape at +15min and one at +1h, and no
-  more than that — promoting a match to ``data_ready`` at the confirmation;
-* gives a ``data_ready`` match ONE more look the morning after (+12h), because the
+* runs the post-FT finalization — one scrape at +15min and one at +8h, after the
+  provider's own revision of the match, and no more than that — promoting a match
+  to ``data_ready`` at the confirmation;
+* gives a ``data_ready`` match ONE more look a day later (+24h), because the
   provider sometimes corrects authorship of a goal after the confirmation. Lowest
   priority: it runs only when nothing live or final is due, one match per tick.
 
@@ -234,7 +235,7 @@ class Command(BaseCommand):
                 run.did(egress_blocked=1)
                 self.stdout.write(f"  [final-check] {m} — egress blocked; will retry")
 
-        # 6) Finalization: +1h confirmation -> data_ready (official). The nudge here
+        # 6) Finalization: +8h confirmation -> data_ready (official). The nudge here
         #    is the one that clears the "provvisorio" mark on every open page.
         for m in plan.final_confirm:
             if dry:

@@ -7,7 +7,7 @@ with the egress mocked it is fully testable.
 
 Two entry points, and the difference between them is the match's lifecycle, not the
 amount of work: ``live_round`` for a match being played (never promotes it),
-``finalize`` after full time (the caller promotes it at the +1h confirmation). Both
+``finalize`` after full time (the caller promotes it at the +8h confirmation). Both
 take the same road; ``live_round`` takes the cheap version of it on the rounds that
 are not the k-th.
 
@@ -119,7 +119,7 @@ def _import_warm(match, *, only_finished: bool, heavy: bool) -> bool:
     silently passed over.
 
     ``skip_existing=False`` always: this is called repeatedly on the same match (the
-    +15min check, the +1h confirmation, and every live round), and the point of each
+    +15min check, the +8h confirmation, and every live round), and the point of each
     call is to pick up what has changed since the last one.
     """
     year = year_for(match)
@@ -179,9 +179,15 @@ def live_round(match, *, heavy: bool) -> bool:
     return _import_warm(match, only_finished=False, heavy=heavy)
 
 
+# Below this, a revision of a shot's xG + xGOT is nothing a vote can show: a fifth
+# of one half-point of xGOT on a single shot (the same eps as ``revision_probe``).
+SHOT_REVISION_EPS = 0.02
+
+
 def _facts(match) -> dict:
     """What a provider correction can move, read off the DATABASE: the score, each
-    player's goals/assists/own goals, and who struck each goal and for which side.
+    player's goals/assists/own goals, who struck each goal and for which side, and
+    the xG/xGOT of every shot.
 
     The goal shots are in the set on purpose. The tabellino and the shot map are two
     separate reads of the provider and the vote reads BOTH (the fantavoto bonus the
@@ -198,8 +204,15 @@ def _facts(match) -> dict:
             apps[pid] = (goals, assists, og)
     shots = sorted(MatchShot.objects.filter(match=match, shot_type="goal")
                    .values_list("player_id", "team_side", "minute"))
+    # The shot rows have no provider id (the import deletes and re-inserts them), so
+    # a shot is known by who struck it and when. Two shots of one player in the same
+    # second do not happen; if they ever did, the later row would simply hide one.
+    values = {(pid, minute, secs): (xg or 0.0, xgot or 0.0)
+              for pid, minute, secs, xg, xgot in MatchShot.objects.filter(
+                  match=match).values_list("player_id", "minute", "elapsed_seconds",
+                                           "xg", "xgot")}
     return {"score": (match.home_goals, match.away_goals), "players": apps,
-            "goal_shots": shots}
+            "goal_shots": shots, "shot_values": values}
 
 
 def _describe(before: dict, after: dict) -> list[str]:
@@ -213,6 +226,16 @@ def _describe(before: dict, after: dict) -> list[str]:
             out.append(f"giocatore {pid}: (gol, assist, autogol) {b} -> {a}")
     if before["goal_shots"] != after["goal_shots"]:
         out.append("mappa dei tiri: i gol non sono piu' gli stessi")
+    # The revision the +8h confirmation waits for. Seen at +24h it is the exception
+    # this look exists for, and it moves votes (the keeper's above all) without
+    # touching a single fact — which is why "invariata" used to be said over it.
+    old, new = before.get("shot_values", {}), after.get("shot_values", {})
+    deltas = [abs(new[k][0] - old[k][0]) + abs(new[k][1] - old[k][1])
+              for k in old.keys() & new.keys()]
+    moved = [d for d in deltas if d > SHOT_REVISION_EPS]
+    if moved:
+        out.append(f"xG/xGOT rivisti su {len(moved)} tiri (il piu' grosso "
+                   f"{max(moved):.3f})")
     return out
 
 

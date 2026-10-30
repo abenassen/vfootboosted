@@ -208,7 +208,7 @@ class ControlliDiSalute(TestCase):
         Match.objects.create(
             external_source="sofascore", external_id="1", competition_season=cs,
             home_team=home, away_team=away, matchday=3,
-            kickoff=NOW - timedelta(hours=6), status=Match.STATUS_FINISHED,
+            kickoff=NOW - timedelta(hours=14), status=Match.STATUS_FINISHED,
             data_ready=False)
 
         self.assertIn("matches:stuck", self._codes("alarm"))

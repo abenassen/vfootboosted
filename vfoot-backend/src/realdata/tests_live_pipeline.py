@@ -224,7 +224,7 @@ class TickWiringTests(_Base):
     def test_final_confirm_sets_data_ready_only_on_success(self):
         now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
         m = self._match(status=Match.STATUS_FINISHED,
-                        finished_at=now - timedelta(hours=3))
+                        finished_at=now - timedelta(hours=9))
         with mock.patch.object(live_ingest, "finalize", return_value=True) as fin:
             call_command("tick", "--now", _iso(now))
         fin.assert_called_once()
@@ -234,7 +234,7 @@ class TickWiringTests(_Base):
     def test_final_confirm_leaves_data_ready_false_when_blocked(self):
         now = datetime(2026, 8, 30, 20, 0, tzinfo=timezone.utc)
         m = self._match(status=Match.STATUS_FINISHED,
-                        finished_at=now - timedelta(hours=3))
+                        finished_at=now - timedelta(hours=9))
         with mock.patch.object(live_ingest, "finalize", return_value=False):
             call_command("tick", "--now", _iso(now))
         m.refresh_from_db()
@@ -427,23 +427,23 @@ class QuandoLEgressFallisceLoDiceTests(TestCase):
 
 
 class _LateBase(_Base):
-    """Una partita finita ieri sera, gia' data_ready: il caso del Sassuolo-Lazio."""
+    """Una partita finita l'altro ieri sera, gia' data_ready: il caso del Sassuolo-Lazio."""
     NOW = datetime(2026, 10, 28, 9, 0, tzinfo=timezone.utc)
 
-    def _finished(self, hours_ago=13, **kw):
+    def _finished(self, hours_ago=25, **kw):
         ft = self.NOW - timedelta(hours=hours_ago)
         return self._match(status=Match.STATUS_FINISHED, data_ready=True,
-                           finished_at=ft, data_imported_at=ft + timedelta(hours=1),
-                           data_checked_at=ft + timedelta(hours=1), **kw)
+                           finished_at=ft, data_imported_at=ft + timedelta(hours=8),
+                           data_checked_at=ft + timedelta(hours=8), **kw)
 
 
 class LateCheckPlanTests(_LateBase):
-    def test_non_e_dovuto_prima_delle_dodici_ore(self):
-        m = self._finished(hours_ago=11)
+    def test_non_e_dovuto_prima_delle_ventiquattro_ore(self):
+        m = self._finished(hours_ago=23)
         self.assertEqual(plan_late_check(self.NOW, [m]), [])
 
-    def test_e_dovuto_dopo_le_dodici_ore(self):
-        m = self._finished(hours_ago=13)
+    def test_e_dovuto_dopo_le_ventiquattro_ore(self):
+        m = self._finished(hours_ago=25)
         self.assertEqual(plan_late_check(self.NOW, [m]), [m])
 
     def test_oltre_le_quarantotto_ore_non_e_piu_del_tick(self):
@@ -452,17 +452,17 @@ class LateCheckPlanTests(_LateBase):
         self.assertEqual(plan_late_check(self.NOW, [m]), [])
 
     def test_una_volta_sola_dopo_uno_sguardo_riuscito(self):
-        m = self._finished(hours_ago=13)
+        m = self._finished(hours_ago=25)
         m.data_imported_at = self.NOW - timedelta(minutes=5)
         self.assertEqual(plan_late_check(self.NOW, [m]), [])
 
     def test_una_partita_non_data_ready_non_e_di_questo_passo(self):
-        m = self._finished(hours_ago=13)
+        m = self._finished(hours_ago=25)
         m.data_ready = False
         self.assertEqual(plan_late_check(self.NOW, [m]), [])
 
     def test_la_finestra_e_dichiarata(self):
-        self.assertEqual(LATE_CHECK_AFTER, timedelta(hours=12))
+        self.assertEqual(LATE_CHECK_AFTER, timedelta(hours=24))
         self.assertEqual(LATE_CHECK_UNTIL, timedelta(hours=48))
 
 
@@ -526,6 +526,36 @@ class LateCheckTests(_LateBase):
             ok, changes = live_ingest.late_check(m)
         self.assertFalse(ok)
         self.assertEqual(changes, [])
+
+    def test_una_revisione_di_xg_si_vede_anche_senza_un_fatto_cambiato(self):
+        """Il caso che il +8h aspetta: tiri ristimati, gol e autori intatti. Prima
+        lo sguardo diceva «invariata» e il voto del portiere si era mosso."""
+        m, thor, _ = self._sassuolo_lazio()
+        MatchShot.objects.create(match=m, player=thor, team_side="home",
+                                 zone_key="x", minute=60, xg=0.10, xgot=0.30,
+                                 shot_type="save", provider="sofascore")
+        def revise(mm, heavy):
+            MatchShot.objects.filter(match=m, minute=60).update(xgot=0.375)
+            return True
+        with mock.patch.object(live_ingest, "live_round", side_effect=revise), \
+             mock.patch.object(live_ingest, "finalize", return_value=True):
+            ok, changes = live_ingest.late_check(m)
+        self.assertEqual(len(changes), 1)
+        self.assertIn("1 tiri", changes[0])
+
+    def test_un_ritocco_sotto_la_soglia_non_e_una_rettifica(self):
+        m, thor, _ = self._sassuolo_lazio()
+        MatchShot.objects.create(match=m, player=thor, team_side="home",
+                                 zone_key="x", minute=60, xg=0.10, xgot=0.30,
+                                 shot_type="save", provider="sofascore")
+        def nudge(mm, heavy):
+            MatchShot.objects.filter(match=m, minute=60).update(xgot=0.31)
+            return True
+        with mock.patch.object(live_ingest, "live_round", side_effect=nudge), \
+             mock.patch.object(live_ingest, "finalize") as fin:
+            ok, changes = live_ingest.late_check(m)
+        self.assertEqual(changes, [])
+        fin.assert_not_called()
 
     def test_lo_sguardo_e_quello_leggero_senza_heatmap(self):
         m, *_ = self._sassuolo_lazio()

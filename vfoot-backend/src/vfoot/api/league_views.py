@@ -3189,7 +3189,7 @@ def _serialize_fixture_row(fx: FantasyFixture, my_team_id: int | None, current_r
         # E QUALE DEI DUE MODI DI ESSERE PROVVISORIO. Provvisorio vuol dire due cose
         # che durano tempi diversi: c'e' una partita sul campo, oppure sono tutte
         # finite e il fornitore non ha ancora confermato i dati — e quest'ultima
-        # dura un'ora tonda dopo il fischio. Detto con una parola sola, il
+        # dura otto ore dopo il fischio. Detto con una parola sola, il
         # calendario scriveva «live» col pallino che pulsa su partite finite da
         # un pezzo, per le quali l'utente aveva gia' ricevuto la notifica di fine
         # partita: l'app si contraddiceva da sola.
@@ -6766,7 +6766,7 @@ def real_match_payload(match, league=None) -> dict | None:
     #
     # OVER but not confirmed: nobody else is coming on and nobody's afternoon
     # will be re-judged, but the provider can still move a number by a tenth
-    # until the +1h confirmation sets data_ready. The totals say so; the lines
+    # until the +8h confirmation sets data_ready. The totals say so; the lines
     # do not, because "may shift by a tenth" is not the same claim as "this
     # player might still play".
     live = match_in_progress(match)

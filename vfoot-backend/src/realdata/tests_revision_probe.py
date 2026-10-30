@@ -79,7 +79,7 @@ class TakeTests(_ProbeBase):
         self.assertEqual((row["match"], row["offset"], row["elapsed_min"]), ("111", "4h", 270))
         self.assertEqual(MatchShot.objects.count(), before)
         m.refresh_from_db()
-        self.assertEqual(m.data_imported_at, m.finished_at + timedelta(hours=1))
+        self.assertEqual(m.data_imported_at, m.finished_at + timedelta(hours=8))
 
     def test_va_in_una_cartella_sua_mai_in_quella_dell_app(self):
         _m, _ok, run = self._take()
@@ -120,7 +120,7 @@ class TickTests(_ProbeBase):
         take.assert_not_called()
 
     def test_il_controllo_tardivo_viene_prima(self):
-        self._finished(hours_ago=13)
+        self._finished(hours_ago=25)
         with mock.patch.object(live_ingest, "late_check", return_value=(True, [])), \
              mock.patch.object(revision_probe, "take") as take:
             call_command("tick", "--now", _iso(self.NOW))

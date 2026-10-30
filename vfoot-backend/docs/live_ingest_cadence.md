@@ -326,9 +326,23 @@ finalizzazione costava **nove volte la partita che stava finalizzando**, e il
 lavoro sulla cadenza live, da solo, avrebbe spostato il 10% del traffico
 lasciando intatto il 90%.
 
-Una revisione tardiva del provider non si perde comunque: la conferma a +1h
+Una revisione tardiva del provider non si perde comunque: la conferma
 re-importa tutto ed è l'autorità sui numeri finali. Stare nella finestra a
 ri-scansionare non comprava niente.
+
+**Aggiornamento 30/10/2026: la conferma è a +8h, non più a +1h.** La premessa
+del +1h («per allora il fornitore ha finito») era sbagliata. SofaScore rivede
+ogni partita UNA volta, fra le due e le sei ore dopo il fischio: xG/xGOT di
+11-25 tiri, gli expected assists, il `goalsPrevented` del portiere. Poi niente
+più fino a +48h. Misurato da `revision_probe` sulle dieci partite del 27-29/10
+(Parma–Udinese e Frosinone–Lecce rivisti fra +2h e +4h, le altre cinque con la
+serie completa fra +4h e +6h, nessuna differenza dopo). Il +1h promuoveva a
+`data_ready` i numeri di prima della revisione, e il voto del portiere si
+muoveva il mattino dopo sotto una giornata che diceva «definitivo». +8h è
+l'ultima revisione vista più il passo della misura (2h). Fra il +15 e il +8h
+non serve leggere: la revisione è un gradino solo, e la conferma lo prende
+tutto. Lo sguardo tardivo passa da +12h a +24h e ora dice anche quanti tiri
+hanno cambiato xG/xGOT, invece di «invariata».
 
 La guardia è `_not_imported_since`, cioè "il pieno non è stato tirato dopo il
 traguardo dei +15". Che vuol dire una volta **riuscita**, non un tentativo: il

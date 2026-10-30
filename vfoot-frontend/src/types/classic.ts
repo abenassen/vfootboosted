@@ -52,7 +52,7 @@ export interface ClassicPlayerLine {
    *  settled the data. There IS a vote — it is simply going to move. */
   provisional?: boolean;
   /** Il sottoinsieme stretto: la sua partita è SUL CAMPO adesso. Vale un'ora in
-   *  meno di `provisional` (il fornitore conferma a +1h dal fischio) ed è l'unico
+   *  meno di `provisional` (il fornitore conferma a +8h dal fischio) ed è l'unico
    *  che autorizza a scrivere «in corso». Fin qui non era un buco: la panchina non
    *  lo copre e il voto d'ufficio non lo riempie. */
   in_progress?: boolean;

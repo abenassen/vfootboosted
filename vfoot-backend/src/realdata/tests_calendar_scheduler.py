@@ -83,10 +83,21 @@ class PlanTickTests(SimpleTestCase):
                finished_at=self.now - FINAL_CHECK_AFTER + timedelta(minutes=1))
         self.assertTrue(plan_tick(self.now, [m]).is_empty())
 
-    def test_final_confirm_at_1h(self):
+    def test_final_confirm_at_8h(self):
+        """After SofaScore's one revision of the match (+2h..+6h, measured on the
+        27-29/10/2026 round), never before it."""
+        self.assertEqual(FINAL_CONFIRM_AFTER, timedelta(hours=8))
         m = _m(status=Match.STATUS_FINISHED,
                finished_at=self.now - FINAL_CONFIRM_AFTER)
         self.assertIn(m, plan_tick(self.now, [m]).final_confirm)
+
+    def test_nothing_between_the_check_and_the_confirmation(self):
+        """The revision lands in between and is a single step: re-reading inside
+        the gap would buy a provisional number nobody needs."""
+        ft = self.now - timedelta(hours=4)
+        m = _m(status=Match.STATUS_FINISHED, finished_at=ft,
+               data_imported_at=ft + FINAL_CHECK_AFTER)
+        self.assertTrue(plan_tick(self.now, [m]).is_empty())
 
     def test_data_ready_finished_is_done(self):
         m = _m(status=Match.STATUS_FINISHED, data_ready=True,
@@ -135,7 +146,7 @@ class FinalCheckHappensOnceTests(SimpleTestCase):
         self.assertIn(m, plan_tick(later, [m]).final_check)
 
     def test_the_confirmation_still_comes(self):
-        """The guard must not swallow the scrape that matters: the +1h one is the
+        """The guard must not swallow the scrape that matters: the +8h one is the
         authority on the final numbers, and the only one that promotes."""
         m = self._finished(data_imported_at=self.now)
         at_confirm = self.ft + FINAL_CONFIRM_AFTER
@@ -290,7 +301,7 @@ class TickCommandTests(_TickDBTests):
     """End-to-end: the tick command applies the state machine it owns."""
 
     def test_full_finalization_lifecycle(self):
-        # This asserts the tick's STATE MACHINE (stamp FT, +15m/+1h), so the ingest
+        # This asserts the tick's STATE MACHINE (stamp FT, +15m/+8h), so the ingest
         # is mocked to succeed — the ingest itself is covered in tests_live_pipeline.
         ft = datetime(2026, 8, 22, 15, 45, tzinfo=UTC)
         m = self._match(status=Match.STATUS_FINISHED, kickoff=ft - timedelta(hours=2))
@@ -309,8 +320,13 @@ class TickCommandTests(_TickDBTests):
             self.assertIsNotNone(m.data_checked_at)
             self.assertFalse(m.data_ready)
 
-            # +61min: confirmation promotes to data_ready
-            self._tick((ft + timedelta(minutes=61)).isoformat())
+            # +4h: the provider's revision lands here; nothing is due
+            self._tick((ft + timedelta(hours=4)).isoformat())
+            m.refresh_from_db()
+            self.assertFalse(m.data_ready)
+
+            # +8h01: confirmation promotes to data_ready
+            self._tick((ft + timedelta(hours=8, minutes=1)).isoformat())
             m.refresh_from_db()
             self.assertTrue(m.data_ready)
 

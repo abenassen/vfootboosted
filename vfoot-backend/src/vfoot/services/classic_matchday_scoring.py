@@ -553,9 +553,9 @@ def _live_states(cs_id: int, real_matchday: int, player_ids) -> tuple[set, set, 
       rotolando. E' un insieme a parte perche' e' l'unico che il MOTORE deve
       guardare, mentre l'altro riguarda soltanto quel che si legge.
 
-      La differenza dura un'ora tonda: ``data_ready`` arriva alla conferma di
-      +1h dopo il fischio (v. tick), quindi «instabile» resta vero per tutta
-      un'ora su una partita che e' finita e su cui e' gia' partita la notifica
+      La differenza dura otto ore: ``data_ready`` arriva alla conferma di
+      +8h dopo il fischio (v. tick), quindi «instabile» resta vero per tutto
+      quel tempo su una partita che e' finita e su cui e' gia' partita la notifica
       di fine partita. Fusi insieme, i due dicevano a turno la cosa sbagliata:
       al quinto minuto la panchina copriva un titolare che era regolarmente in
       campo (nessuno ha ancora un voto, e un buco non e' un buco finche' la

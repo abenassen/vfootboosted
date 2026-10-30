@@ -1,6 +1,6 @@
 """Rilegge UNA partita gia' finalizzata e dice cosa e' cambiato.
 
-Il tick fa da solo un solo sguardo tardivo, a +12h dal fischio (v.
+Il tick fa da solo un solo sguardo tardivo, a +24h dal fischio (v.
 ``match_scheduler.LATE_CHECK_AFTER``). Una rettifica del fornitore che arriva dopo
 le 48h non e' piu' affar suo, ed e' per quella che c'e' questo comando:
 

@@ -6,7 +6,7 @@ email, and later the maintenance agent. It answers in verdicts, not in data.
 TWO DESIGN DECISIONS WORTH KNOWING, both about what this must NOT be.
 
 **It is not an LLM's job to notice.** Everything here is arithmetic on rows: a
-timer that has not fired, a counter that halved, a match that finished four hours
+timer that has not fired, a counter that halved, a match that finished twelve hours
 ago and is still not ready. A model asked "does this look healthy?" will say yes,
 warmly, on the day it is not — and will say it differently every morning, so a
 human learns nothing from the shape of the message. The model's turn comes after:
@@ -105,7 +105,7 @@ CURL_UPGRADE = ("sudo -u vfoot /srv/vfoot-app/vfoot-backend/.venv/bin/pip instal
                 "curl_cffi (come vfoot: da root lascia nel venv file di root), "
                 "poi sudo vfoot-egress probe su un IP del pool")
 BLIND_STREAK = 5          # consecutive ticks owed work that imported nothing
-SETTLE_AFTER = timedelta(hours=4)   # from kickoff, by when a match should be ready
+SETTLE_AFTER = timedelta(hours=12)  # from kickoff: ~2h of match + the +8h confirmation + margin
 # Quanto indietro guardare per il campo xGOT mancante. Due settimane: abbastanza da
 # vedere un ritmo (una giornata sono dieci partite), abbastanza poco da non
 # rileggere mezza stagione a ogni report.
@@ -489,7 +489,7 @@ def _local(iso: str | None) -> str:
 def _check_stuck_matches(health: Health, now) -> None:
     """Matches the provider says are over and we have never promoted.
 
-    The tick promotes at the +1h confirmation. Something still unpromoted four
+    The tick promotes at the +8h confirmation. Something still unpromoted twelve
     hours after kickoff was skipped, and unlike a failed run it leaves no trace
     anywhere: the league simply keeps showing a provisional vote forever."""
     stuck = list(Match.objects.filter(

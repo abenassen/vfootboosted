@@ -733,7 +733,7 @@ export interface LeagueFixtureItem {
   score_provisional?: boolean;
   /** E quale dei due modi di essere provvisorio: c'è una partita vera SUL CAMPO.
    *  L'altro — tutte finite, il fornitore non ha ancora confermato i dati — dura
-   *  un'ora dopo il fischio, e chiamarlo «live» col pallino che pulsa contraddice
+   *  otto ore dopo il fischio, e chiamarlo «live» col pallino che pulsa contraddice
    *  la notifica di fine partita che l'utente ha appena ricevuto. */
   score_in_progress?: boolean;
   /** Knockout sections only: who went through. Not always the higher score — a tie

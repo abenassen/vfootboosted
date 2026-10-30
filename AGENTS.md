@@ -505,10 +505,10 @@ tutto il progetto che parla a tutti insieme, e va letta da lui prima che parta.
     generator (`realdata/services/egress_sim.py`) that writes the payload
     SofaScore would be serving for that match *at this minute*, taken from
     `timezone.now()`. So `manage.py tick` on its ordinary cadence exercises the
-    genuine scheduler, live poll, full-time observation and +15min/+1h
+    genuine scheduler, live poll, full-time observation and +15min/+8h
     finalization — only the bytes are invented:
         18:40 live-poll 1-0 · 19:50 status flips to finished · 20:05 stamp-ft
-        · 20:25 final-check · 21:10 final-confirm -> data_ready
+        · 20:25 final-check · 04:10 final-confirm -> data_ready
     Rebuilding the season at a later instant is NOT a substitute: it produces the
     same rows without ever running the state machine that is supposed to produce
     them.
@@ -565,12 +565,20 @@ tutto il progetto che parla a tutti insieme, e va letta da lui prima che parta.
         `--resume` keeps it, and has one caller — the orchestrator rotating to
         another IP after a block, which is the same warm continuing. Nothing on
         the rig can show this: `egress_sim` overwrites its files every time.
-    -   **finalization is TWO scrapes, +15min and +1h, and exactly two.** It used
+    -   **finalization is TWO scrapes, +15min and +8h, and exactly two.** It used
         to be one a minute for the whole three quarters of an hour — 46 full
         imports per match, 1.650 requests, nine times the live match they were
-        finalizing, and not one of them ever moved a vote. The +1h confirmation
-        re-imports everything and is the authority on the final numbers, so a
-        late provider revision is caught there. Whoever touches `plan_tick`:
+        finalizing, and not one of them ever moved a vote. The confirmation is at
+        +8h (it was +1h until 30/10/2026) because SofaScore revises every match
+        ONCE, two to six hours after the whistle — xG/xGOT of a dozen shots and
+        more, enough to move a keeper's vote — and then never again: measured by
+        `revision_probe` over the 27-29/10 round. At +1h `data_ready` promoted the
+        pre-revision numbers and the votes moved overnight under a round that said
+        "final". The +8h confirmation re-imports everything and is the authority
+        on the final numbers; `data_ready` is when the league may close the round.
+        The one look after it (+24h, `late_check`) is the net for the exception —
+        a goal re-attributed — and says what moved, xG included, instead of
+        "invariata". Whoever touches `plan_tick`:
         `final_check` needs its guard (`_not_imported_since`) or it silently
         becomes a window again.
     The reasoning, with the measured costs, is in

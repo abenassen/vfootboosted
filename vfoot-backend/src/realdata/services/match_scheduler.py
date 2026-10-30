@@ -17,20 +17,26 @@ Two windows:
   heatmap per player and with them the positional half of the model. One clock,
   one flag — not two clocks competing to push each other's due time out.
 * FINALIZATION — measured from the observed full-time (``finished_at``): TWO
-  scrapes, and exactly two. One at +15 min, by which time the data is usually
-  settled, and a confirmation at +1 h that promotes the match to ``data_ready``.
-  A late revision is caught by the confirmation, which re-imports everything and
-  is the authority on the final numbers — so sitting in the window re-scraping
-  every minute buys nothing. It used to: 45 full imports per match, ~1.650
-  requests, and not one of them ever moved a vote.
-* LATE CHECK — one more look at a match that is ALREADY ``data_ready``, the morning
-  after. ``data_ready`` means "the provider has stopped changing this", and that is
-  a bet made at +1h, not a fact: SofaScore corrects authorship of a goal (Sassuolo
-  -Lazio, 27/10/2026: a goal given to Thorstvedt turned into Sutalo's own goal) well
-  after the confirmation, and nothing read the match again. The look is cheap (the
-  light fetch, compared with what is stored) and does NOT touch ``data_ready``.
-  Anything later than ``LATE_CHECK_UNTIL`` is a human's call: ``manage.py
-  recheck_match``.
+  scrapes, and exactly two. One at +15 min, which gives the evening its numbers
+  (still provisional), and a confirmation at +8 h that promotes the match to
+  ``data_ready`` — the moment the votes become final and the league may close the
+  round. Not +1 h, as it was until 30/10/2026: SofaScore revises every match ONCE,
+  between two and six hours after the whistle (xG/xGOT of 11-25 shots, the
+  expected assists, the keeper's goalsPrevented, measured on the ten matches of
+  27-29/10 by ``revision_probe``), and then never again up to +48 h. Confirming at
+  +1 h promoted the pre-revision numbers and the votes moved overnight under a
+  round that said "final". +8 h is the last revision seen plus the probe's 2 h
+  grid. Sitting in between re-scraping buys nothing: the revision is a single
+  step, and the confirmation re-imports everything after it. It used to sit
+  there, once a minute: 45 full imports per match, ~1.650 requests, and not one of
+  them ever moved a vote.
+* LATE CHECK — one more look at a match that is ALREADY ``data_ready``, a day
+  after. Past +8 h nothing moved in the measurement, so this is the net for the
+  exception: a correction of authorship (Sassuolo-Lazio, 27/10/2026: a goal given
+  to Thorstvedt turned into Sutalo's own goal) or a revision far later than usual.
+  The look is cheap (the light fetch, compared with what is stored) and does NOT
+  touch ``data_ready``. Anything later than ``LATE_CHECK_UNTIL`` is a human's
+  call: ``manage.py recheck_match``.
 """
 from __future__ import annotations
 
@@ -77,16 +83,18 @@ def live_heavy_interval() -> timedelta:
     return live_heavy_every() * live_poll_interval()
 
 
-# Finalization checkpoints, measured from observed full-time.
+# Finalization checkpoints, measured from observed full-time. The confirmation
+# waits for SofaScore's one revision of the match (+2h..+6h, see the docstring).
 FINAL_CHECK_AFTER = timedelta(minutes=15)
-FINAL_CONFIRM_AFTER = timedelta(minutes=60)
+FINAL_CONFIRM_AFTER = timedelta(hours=8)
 
-# The late look at a match that is already data_ready: it comes due at +12h (the
-# morning after an evening match) and stops being the tick's business at +48h.
+# The late look at a match that is already data_ready: it comes due at +24h, well
+# clear of the confirmation it is checking, and stops being the tick's business
+# at +48h.
 # The upper bound is not tidiness: the first tick after a deploy would otherwise
-# find every finished match of the season "not imported since +12h" and re-read the
+# find every finished match of the season "not imported since +24h" and re-read the
 # lot. Past it, ``manage.py recheck_match`` is the tool.
-LATE_CHECK_AFTER = timedelta(hours=12)
+LATE_CHECK_AFTER = timedelta(hours=24)
 LATE_CHECK_UNTIL = timedelta(hours=48)
 
 # Action kinds
@@ -94,7 +102,7 @@ STAMP_FT = "stamp_ft"          # first time seen finished -> record finished_at
 LIVE_ROUND = "live_round"      # one live round: status, score and the votes
 LIVE_HEAVY = "live_heavy"      # the k-th round, which also pulls the heatmaps
 FINAL_CHECK = "final_check"    # +15min post-FT scrape (provisional-final)
-FINAL_CONFIRM = "final_confirm"  # +1h post-FT scrape -> data_ready
+FINAL_CONFIRM = "final_confirm"  # +8h post-FT scrape -> data_ready
 
 
 @dataclass
@@ -161,7 +169,7 @@ def plan_tick(now: datetime, matches) -> TickPlan:
             # TWO scrapes, not a window to sit inside. The confirmation is
             # self-limiting (it sets data_ready, which drops the match out of
             # candidate_matches); the +15min check needs the guard, or it comes
-            # due on every tick for the whole three quarters of an hour.
+            # due on every tick until the confirmation, eight hours later.
             if now >= m.finished_at + FINAL_CONFIRM_AFTER:
                 plan.final_confirm.append(m)
             elif (now >= m.finished_at + FINAL_CHECK_AFTER

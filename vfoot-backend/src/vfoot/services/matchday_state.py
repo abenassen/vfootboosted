@@ -408,8 +408,8 @@ def playing_matchday(league, now=None) -> int | None:
     a provider that reports the end only at confirmation, and the window is the net
     for a poller that is down, so a silent egress cannot freeze the market for good.
 
-    IL FISCHIO E NON SOLO LA CONFERMA. ``data_ready`` arrives an hour after full
-    time, and the window three hours after kick-off: with only those two, a round
+    IL FISCHIO E NON SOLO LA CONFERMA. ``data_ready`` arrived an hour after full
+    time (eight since 30/10/2026, which only widens the gap), and the window three hours after kick-off: with only those two, a round
     whose last match ended at 22:35 stayed "on the pitch" until 23:35 — the home
     page pulsing "Si gioca" over a round that was over, to the same user who had
     already been sent the full-time notification. The votes are still settling in
