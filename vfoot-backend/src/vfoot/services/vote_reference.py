@@ -225,7 +225,11 @@ def _keeper_channel_constants() -> dict:
 #           ``EXPOSURE_ROLE_FACTOR`` sono nell'impronta dei pesi; la regola del tiro
 #           fuori fermato dietro il tiratore (``is_interrupted_shot``) no — legge un
 #           campo nuovo di MatchShot, ``interception_m`` — e va segnata qui.
-SCORING_CODE_VERSION = 16
+#  16 -> 17: GLI SPEZZONI TORNANO VERSO LA MEDIA E IL SUBENTRATO RISENTE DEL
+#           RISULTATO CHE TROVA (rilascio 1.20, caso Woltemade, 29/10/2026).
+#           ``SHORT_STINT_CONTRACTION`` e ``ENTRY_MARGIN_*`` sono costanti dello
+#           scorer, non dei pesi: stanno nella chiave ``post_index``.
+SCORING_CODE_VERSION = 17
 
 
 def scoring_fingerprint() -> str:
@@ -274,7 +278,9 @@ def scoring_fingerprint() -> str:
                        cr.OWN_GOAL_VOTE_DEFLECTION, cr.OWN_GOAL_VOTE_SOLO,
                        cr.OWN_GOAL_VOTE_FLAT,
                        cr.PENALTY_MISSED_VOTE_RELEVANT,
-                       cr.PENALTY_MISSED_VOTE_IRRELEVANT],
+                       cr.PENALTY_MISSED_VOTE_IRRELEVANT,
+                       cr.SHORT_STINT_CONTRACTION, cr.ENTRY_MARGIN_CAP,
+                       cr.ENTRY_MARGIN_RAMP_MINUTES],
     }
     blob = json.dumps(payload, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:16]

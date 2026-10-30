@@ -62,6 +62,30 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-20',
+    versione: '1.20',
+    data: '30 ottobre 2026',
+    titolo: 'Chi gioca poco torna verso la media, e chi entra a partita persa ne risente',
+    sommario:
+      'Un voto alto o basso costruito su pochi minuti si avvicina un po’ al 6, e un subentrato che entra quando la squadra perde risente anche del risultato che ha trovato, non solo di quello che ha visto in campo. Chi gioca la partita intera non cambia di un centesimo. Sulle prime nove giornate cambiano 133 voti su 2.412: 49 in su e 84 in giù, tutti di mezzo punto.',
+    voci: [
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Uno spezzone si legge con più prudenza: lo scostamento dal 6 si riduce in proporzione ai minuti non giocati, un po’ per chi ha giocato bene e un po’ per chi ha giocato male. A 90 minuti non cambia nulla, a 45 si perde circa un settimo dello scostamento. Nel pannello compare come «ritorno verso la media per i pochi minuti giocati».',
+        caso:
+          'I giudici esterni comprimono verso il 6 chi gioca poco, e prima i nostri voti alti dei subentrati stavano un terzo di punto sopra i loro. Sulla scorsa stagione l’errore sui subentrati fino a 45 minuti scende da 0,246 a circa 0,206.',
+      },
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Un subentrato che entra quando la sua squadra sta perdendo risente anche di quel margine: il risultato che ha trovato pesa fino a metà e cresce con i minuti giocati, perché più resta in campo più ci si chiede se ha contribuito a cambiarlo. Vale per i soli subentrati e nei due sensi, come l’adeguamento al risultato di sempre.',
+        caso:
+          'Nick Woltemade in Genoa-Juventus (giornata 9): entrato sullo 0-2, 45 minuti, un solo tempo giocato senza riuscire a cambiare la partita. 7,0 → 6,5.',
+      },
+    ],
+  },
+  {
     id: 'v-1-19',
     versione: '1.19',
     data: '26 ottobre 2026',

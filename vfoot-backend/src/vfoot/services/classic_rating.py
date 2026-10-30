@@ -1994,6 +1994,27 @@ MIN_MINUTES_REFERENCE = 20  # only games >= this define the reference distributi
 RESULT_MITIGATION_K = 0.15
 RESULT_MITIGATION_BASE = 0.40
 RESULT_MITIGATION_CAP = 1.0
+
+# GLI SPEZZONI TORNANO VERSO LA MEDIA (rilascio 1.20, 29/10/2026, caso Woltemade:
+# subentrato sullo 0-2, 45', tre tiri, 7,0). Il completamento bayesiano estrapola il
+# ritmo visto ai minuti non visti, ed e' giusto come STIMA del voto di 90'; ma i
+# giudici comprimono verso il 6 chi gioca poco, e i nostri voti alti di uno
+# spezzone stavano +0,32 sopra lo Statistico (+0,03 a 90'), i bassi -0,19 sotto.
+# Contrazione SIMMETRICA dello scostamento dal centro di ruolo,
+# ``lam = 1 - gamma * (1 - minuti/90)``: nulla a 90' (nessun voto di chi gioca
+# tutta la partita si muove), 0,865 a 45', applicata PRIMA di mitigazione e stadio
+# finale. Banco 25-26: errore sui subentrati <=45' da 0,246 a ~0,206.
+SHORT_STINT_CONTRACTION = 0.3
+# IL SUBENTRATO RISENTE DEL RISULTATO CHE TROVA: chi entra sullo 0-2 per
+# rimontare ha un ritmo gonfiato dallo svantaggio, e la mitigazione sul risultato
+# IN CAMPO gli darebbe zero se non si segna piu'. Al conto dei gol in campo si
+# somma il margine con cui e' entrato, pesato ``ENTRY_MARGIN_CAP`` (tetto
+# UNIFORME, scelto da Andrea il 29/10) per ``min(1, (minuti/45)^2)``: cresce con i
+# minuti giocati, perche' piu' gioca piu' ci si chiede se ha contribuito a
+# cambiare la partita, e non e' un'insufficienza a priori per i primi minuti.
+# Solo i subentrati: chi parte titolare il margine d'ingresso lo ha gia' in campo.
+ENTRY_MARGIN_CAP = 0.5
+ENTRY_MARGIN_RAMP_MINUTES = 45
 # QUANTA PARTE dello scostamento dal centro il risultato può cancellare, al massimo
 # — DAL LATO VITTORIA (dal 30/08/2026 la sconfitta ha la sua, più larga).
 # Il tetto sopra è in punti di voto; questo è una quota, e serve a due cose che il
@@ -4340,6 +4361,63 @@ def result_mitigation(raw_vote: float, gd_on: int, *,
     return min(cap, under * severity)
 
 
+def contracted_vote(raw_vote: float, minutes: int, *, centre: float,
+                    gamma: float = SHORT_STINT_CONTRACTION) -> float:
+    """Lo scostamento dal centro, tirato verso il centro in proporzione ai minuti
+    NON giocati (v. SHORT_STINT_CONTRACTION). A 90' e' l'identita'."""
+    if minutes >= 90:
+        return raw_vote
+    lam = 1.0 - gamma * (1.0 - max(0, minutes) / 90.0)
+    return centre + lam * (raw_vote - centre)
+
+
+def entry_margin_weight(minutes: int) -> float:
+    """Quanto pesa il margine d'ingresso di un subentrato dopo ``minutes`` giocati."""
+    return ENTRY_MARGIN_CAP * min(1.0, (max(0, minutes) / ENTRY_MARGIN_RAMP_MINUTES) ** 2)
+
+
+def result_mitigation_blended(raw_vote: float, gd: float, **kw) -> float:
+    """``result_mitigation`` per una differenza reti NON intera: interpola
+    linearmente fra i due interi vicini, cosi' la forma a gradini (la prima rete
+    pesa ``base + k``, le altre solo ``k``) resta quella di sempre sugli interi.
+    Scelta di implementazione, misurata sul banco con la stessa forma."""
+    lo = math.floor(gd)
+    f = gd - lo
+    if f == 0.0:
+        return result_mitigation(raw_vote, int(lo), **kw)
+    return ((1.0 - f) * result_mitigation(raw_vote, int(lo), **kw)
+            + f * result_mitigation(raw_vote, int(lo) + 1, **kw))
+
+
+def entry_goal_margin(match_ids, minutes: dict) -> dict:
+    """{(match_id, player_id): gol fatti - subiti dalla sua squadra PRIMA che
+    entrasse}, per i soli subentrati con margine diverso da zero. E' il conto
+    complementare di ``on_pitch_goal_difference``: stesse finestre, stessi gol."""
+    goals: dict[int, list] = defaultdict(list)
+    for mid, minute, side in (MatchShot.objects
+                              .filter(match_id__in=match_ids, is_goal=True,
+                                      provider=PROVIDER_SOFASCORE)
+                              .values_list("match_id", "minute", "team_side")):
+        if minute is not None:
+            goals[mid].append((minute, side))
+    if not goals:
+        return {}
+    appearances = {(a["match_id"], a["player_id"]): (a["side"], a["is_starter"])
+                   for a in MatchAppearance.objects.filter(match_id__in=match_ids)
+                   .values("match_id", "player_id", "side", "is_starter")}
+    windows = on_pitch_windows(match_ids, minutes, appearances)
+    out = {}
+    for key, (side, is_starter) in appearances.items():
+        if is_starter or key[0] not in goals:
+            continue
+        lo, _hi = windows.get(key, _fallback_window(minutes.get(key, 0), is_starter))
+        margin = sum((1 if gside == side else -1)
+                     for minute, gside in goals[key[0]] if minute < lo)
+        if margin:
+            out[key] = margin
+    return out
+
+
 def voto_puro_for_match(match, reference: dict,
                         spread_k: float = VOTE_SPREAD_K,
                         always_rate: set | None = None) -> list[dict]:
@@ -4377,6 +4455,7 @@ def voto_puro_for_match(match, reference: dict,
     gate_minutes = gate_minutes_map([match.id], minutes)
     exposure, exposure_n = defensive_exposure([match.id], minutes, with_counts=True)
     gd_on = on_pitch_goal_difference([match.id], minutes)
+    entry_margin = entry_goal_margin([match.id], minutes)
     ga_on = on_pitch_goals_against([match.id], minutes)
     roles = current_role_map()
     keepers = dict(Player.objects.values_list("id", "is_goalkeeper"))
@@ -4482,9 +4561,20 @@ def voto_puro_for_match(match, reference: dict,
         raw = max(VOTE_MIN, min(VOTE_MAX, raw + gadj + aadj))
         # Result mitigation: divergence-only, outfield only (the GK channel already
         # reflects the result). Recorded so the vote explanation can reconcile.
-        nudge = (result_mitigation(raw, gd_on[(mid, pid)],
-                                   centre=vote_center_for(ref_key))
-                 if role in outfield_roles and (mid, pid) in gd_on else 0.0)
+        # Gli spezzoni tornano verso la media PRIMA della mitigazione (v.
+        # SHORT_STINT_CONTRACTION): e' il voto contratto che il risultato tempera.
+        contraction = 0.0
+        gd_eff = 0.0
+        if role in outfield_roles:
+            centre_r = vote_center_for(ref_key)
+            contraction = contracted_vote(raw, mins, centre=centre_r) - raw
+            raw += contraction
+            # Il risultato IN CAMPO piu', per il subentrato, il margine con cui e'
+            # entrato (v. ENTRY_MARGIN_CAP). Un titolare ha margine zero.
+            gd_eff = (gd_on.get((mid, pid), 0)
+                      + entry_margin.get((mid, pid), 0) * entry_margin_weight(mins))
+        nudge = (result_mitigation_blended(raw, gd_eff, centre=vote_center_for(ref_key))
+                 if role in outfield_roles and gd_eff else 0.0)
         # Red-card + own-goal + missed-penalty performance drops (post-adjustments,
         # any role; the missed penalty stays a good shot in the index, this is the
         # added drop for the miss — see penalty_missed_adjustments).
@@ -4547,6 +4637,9 @@ def voto_puro_for_match(match, reference: dict,
             "assist_detail": assist_detail.get(pid, []),
             "assist_adjustment": aadj,
             "result_nudge": nudge,
+            # Quanto la contrazione degli spezzoni ha mosso il voto grezzo (zero a
+            # 90' e per il portiere): la spiegazione deve poterla nominare.
+            "contraction_adjustment": contraction,
             "red_adjustment": radj,
             "own_goal_adjustment": oadj,
             "red_detail": red_info.get(pid),

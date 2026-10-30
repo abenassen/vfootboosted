@@ -831,7 +831,8 @@ SHORT_APPEARANCE_MINUTES = 50
 
 def explain(role: str, totals: dict, minutes: int, reference: dict,
             averages: dict, exposure: float = 0.0, *, top: int = 3,
-            result_nudge: float = 0.0, red_adjustment: float = 0.0,
+            result_nudge: float = 0.0, contraction_adjustment: float = 0.0,
+            red_adjustment: float = 0.0,
             own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
             goal_adjustment: float = 0.0, goal_detail: list | None = None,
             assist_adjustment: float = 0.0, assist_detail: list | None = None,
@@ -923,7 +924,8 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
         index_for_role(role, totals, minutes, exposure), role, minutes, reference,
         observed=observed_index(role, totals, minutes, exposure)))
     _pre = max(VOTE_MIN, min(VOTE_MAX, merit + goal_adjustment + assist_adjustment))
-    _pre = max(VOTE_MIN, min(VOTE_MAX, _pre + result_nudge + red_adjustment
+    _pre = max(VOTE_MIN, min(VOTE_MAX, _pre + contraction_adjustment + result_nudge
+                             + red_adjustment
                              + own_goal_adjustment + penalty_adjustment))
     # Lo stadio finale DENTRO L'ATTESA, come nel voto: ``predictive_sigma`` e'
     # quanto resta da vedere (zero a partita intera, v. bayesian_completion).
@@ -1079,8 +1081,8 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     # quindi la mitigazione del risultato deve poterlo temperare), poi il resto.
     raw = max(VOTE_MIN, min(VOTE_MAX, raw + goal_adjustment + assist_adjustment))
     subtotal = max(VOTE_MIN, min(VOTE_MAX,
-                   raw + result_nudge + red_adjustment + own_goal_adjustment
-                   + penalty_adjustment))
+                   raw + contraction_adjustment + result_nudge + red_adjustment
+                   + own_goal_adjustment + penalty_adjustment))
     # ...e poi lo stadio finale, esattamente dove lo mette lo scorer.
     subtotal = max(VOTE_MIN, min(VOTE_MAX, scale_saturation(subtotal, role, _sigma)[0]))
     voto = round(subtotal * 2) / 2
@@ -1091,6 +1093,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     p_goal = goal_adjustment * scale_factor
     p_assist = assist_adjustment * scale_factor
     p_nudge = result_nudge * scale_factor
+    p_contraction = contraction_adjustment * scale_factor
     p_red = red_adjustment * scale_factor
     p_og = own_goal_adjustment * scale_factor
     p_pen = penalty_adjustment * scale_factor
@@ -1207,6 +1210,10 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
     if bayesian and abs(bd["event"] * scale_factor) >= 0.005:
         contributions.append(entry(bd["event"] * scale_factor,
                                    "attesa sui minuti non giocati", kind="completion"))
+    if abs(p_contraction) >= 0.005:
+        contributions.append(entry(p_contraction,
+                                   "ritorno verso la media per i pochi minuti giocati",
+                                   kind="contraction"))
     if abs(p_nudge) >= 0.005:
         contributions.append(entry(p_nudge,
                                    "adeguamento al risultato di squadra",
