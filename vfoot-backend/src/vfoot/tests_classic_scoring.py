@@ -382,6 +382,9 @@ class ComposeLinesTest(SimpleTestCase):
         self.assertEqual(len(starters), 11)
         by = {l["player_id"]: l for l in starters}
         self.assertTrue(by[4]["sv"])    # absent -> s.v.
+        # ...and says why: no line at all means not in his club's squad, which
+        # the badge must not print as «S.V., impiego insufficiente».
+        self.assertEqual(by[4]["sv_reason"], "non_convocato")
         self.assertFalse(by[5]["sv"])   # played -> scores, whoever owns him today
         self.assertFalse(by[2]["sv"])
         self.assertEqual([l["player_id"] for l in bench], [20, 21])

@@ -1,9 +1,11 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import clsx from 'clsx';
 import { Link } from 'react-router-dom';
 import { Button, Card, SectionTitle } from '../ui';
 import { MatchScoreHeader, type MatchHeaderVM } from './MatchScoreHeader';
 import { MatchManagers } from './MatchManagers';
+import type { Projection } from '../../api/backend';
 import type {
   ClassicDefenseBonus,
   ClassicFixtureDetail,
@@ -146,9 +148,21 @@ function roleOf(p: ClassicPlayerLine): ClassicRole | null {
  *  data, and it says he never came on. Zero minutes settles it without a migration,
  *  and it is the same test the backend now makes at the source. A real hole keeps
  *  its badge: minutes on the pitch and no performance behind them. */
-function svKind(p: ClassicPlayerLine): 'non_entrato' | 'dati_mancanti' | 'in_campo' | 'sv' {
+function svKind(
+  p: ClassicPlayerLine,
+): 'non_entrato' | 'non_convocato' | 'indisponibile' | 'dati_mancanti' | 'in_campo' | 'sv' {
   if (p.sv_reason === 'in_campo') return 'in_campo';
+  if (p.sv_reason === 'indisponibile') return 'indisponibile';
   if (p.sv_reason === 'non_entrato') return 'non_entrato';
+  // Not in the squad — unless his match is under way: in the first minutes the
+  // provider has not published the lineups yet, and EVERYONE looks absent.
+  // Payloads frozen before the reason existed: the placeholder is the only line
+  // with neither a reason nor `minutes`, which every line built from an
+  // appearance carries — so it can be read for what it is without a migration.
+  const absent =
+    p.sv_reason === 'non_convocato' ||
+    (p.sv_reason === undefined && p.minutes == null && !p.pending && !p.vacant);
+  if (absent) return p.in_progress ? 'sv' : 'non_convocato';
   if (p.sv_reason === 'dati_mancanti') return p.minutes ? 'dati_mancanti' : 'non_entrato';
   return 'sv';
 }
@@ -239,39 +253,67 @@ function LiveBadge({
  *  una ripetizione. */
 function ProjectionBar({
   d,
-  on,
+  mode,
   busy,
   onChange,
 }: {
   d: ClassicFixtureDetail;
-  on: boolean;
+  mode: Projection;
   busy: boolean;
-  onChange: (on: boolean) => void;
+  onChange: (mode: Projection) => void;
 }) {
-  const actual = (on && d.projected ? d.actual : null) ?? null;
+  const actual = (mode && d.projected ? d.actual : null) ?? null;
   const moved = (a: number, b: number) => Math.abs(a - b) > 0.001;
   const changed =
     actual != null &&
     (moved(d.home_total, actual.home_total) || moved(d.away_total, actual.away_total));
+  // Si offre solo la domanda che ha una risposta: «se finisse adesso» vuole una
+  // partita sul campo, «tutti a 6» qualcuno che deve ancora giocare. Quella
+  // accesa resta comunque, o la si perderebbe sotto il dito al fischio finale.
+  const options: { id: Projection; label: string; title: string }[] = [
+    { id: null, label: 'Attuale', title: 'Il punteggio della sfida, adesso.' },
+  ];
+  if (d.in_progress || mode === 'now') {
+    options.push({
+      id: 'now',
+      label: 'Se le partite in corso finissero ora',
+      title:
+        'Le partite in corso finiscono adesso: entra la panchina per chi non è ancora sceso in campo. Chi sta giocando non si tocca.',
+    });
+  }
+  if (d.has_unplayed || mode === 'six') {
+    options.push({
+      id: 'six',
+      label: 'Tutti a 6',
+      title:
+        'Le partite in corso finiscono adesso, e chi deve ancora giocare prende 6. Squalificati, infortunati e non convocati restano fuori e li copre la panchina.',
+    });
+  }
+  if (options.length < 2) return null;
 
   return (
     <Card className="p-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <Button
-          variant={on ? 'secondary' : 'ghost'}
-          size="sm"
-          disabled={busy}
-          onClick={() => onChange(!on)}
-          /* La spiegazione per esteso vive qui da spenta: chi passa il puntatore la
-             legge, chi non la cerca non la paga in altezza. */
-          title={
-            on
-              ? undefined
-              : 'Fa entrare la panchina al posto di chi non è ancora sceso in campo in una partita cominciata. Chi sta giocando non si tocca.'
-          }
-        >
-          {on ? '← Punteggio attuale' : 'Se finisse adesso →'}
-        </Button>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex flex-wrap gap-1.5">
+          {options.map((o) => (
+            <button
+              key={o.id ?? 'actual'}
+              type="button"
+              disabled={busy}
+              onClick={() => onChange(o.id)}
+              aria-pressed={mode === o.id}
+              title={o.title}
+              className={clsx(
+                'rounded-full border px-3 py-1 text-xs font-semibold transition disabled:opacity-60',
+                mode === o.id
+                  ? 'border-brand bg-brand/15 text-brand-strong'
+                  : 'border-line bg-surface-2 text-ink-faint hover:border-ink-faint',
+              )}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
 
         {/* Da accesa, una riga sola. Se qualcosa cambia è la REGOLA — che il
             tabellino da solo non racconta: senza, un titolare a zero che NON viene
@@ -280,12 +322,17 @@ function ProjectionBar({
             i numeri di sopra non possono dire da soli. */}
         {actual ? (
           <span className="min-w-0 text-[11px] text-ink-faint">
-            {changed ? (
+            {!changed ? (
+              'Stesso punteggio di adesso.'
+            ) : d.sufficiency ? (
+              <>
+                Chi deve ancora giocare prende <b>6</b>; chi sappiamo che non ci sarà no, e lo copre la
+                panchina.
+              </>
+            ) : (
               <>
                 Entra la panchina per chi <b>non è ancora in campo</b>; chi gioca no.
               </>
-            ) : (
-              'Nessuno da rimpiazzare: stesso punteggio.'
             )}
           </span>
         ) : null}
@@ -344,7 +391,7 @@ export function ClassicMatchDetail({
    *  richiederlo (è lei a rifare la chiamata: la risposta la calcola il motore
    *  vero, non questo componente). Assente = niente interruttore, che è il caso
    *  delle pagelle di una partita di Serie A e di ogni referto già congelato. */
-  projection?: { on: boolean; busy: boolean; onChange: (on: boolean) => void };
+  projection?: { mode: Projection; busy: boolean; onChange: (mode: Projection) => void };
   /** Chi sta guardando, se è uno dei due fantallenatori.
    *
    *  Serve a una cosa sola, e prima del blocco: mettere sulla PROPRIA colonna il
@@ -433,10 +480,14 @@ export function ClassicMatchDetail({
                   senza niente che li distingua sono un tabellino che si contraddice. */}
               {d.projected ? (
                 <span
-                  title="Non è il punteggio della sfida: è quanto farebbe se la giornata finisse adesso."
+                  title={
+                    d.sufficiency
+                      ? 'Non è il punteggio della sfida: è quanto farebbe se chi deve ancora giocare prendesse 6.'
+                      : 'Non è il punteggio della sfida: è quanto farebbe se le partite in corso finissero adesso.'
+                  }
                   className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warn-bg px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-warn"
                 >
-                  previsione
+                  {d.sufficiency ? 'simulazione' : 'previsione'}
                 </span>
               ) : null}
               {preview ? null : d.in_progress ? (
@@ -504,10 +555,10 @@ export function ClassicMatchDetail({
           partite vere è sul campo — e resta finché è acceso, o non ci sarebbe più
           il modo di spegnerlo. Mai in anteprima (non ha giocato nessuno) né su una
           partita vera di Serie A (non c'è nessuna panchina da far entrare). */}
-      {projection && !realMatch && !preview && (d.in_progress || (projection.on && d.projected)) ? (
+      {projection && !realMatch && !preview ? (
         <ProjectionBar
           d={d}
-          on={projection.on}
+          mode={projection.mode}
           busy={projection.busy}
           onChange={projection.onChange}
         />
@@ -796,6 +847,27 @@ function verdictOf(p: ClassicPlayerLine): Verdict | null {
         : 'Non è entrato in campo: nessun minuto giocato',
     };
   }
+  // Not even on the bench: he was not in his club's matchday squad. Before this
+  // the row fell through to «S.V.», which says he played and too little — the
+  // opposite of what happened.
+  if (kind === 'non_convocato') {
+    return {
+      long: 'non convocato',
+      short: '—',
+      cls: 'rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-faint',
+      title: 'Non era tra i convocati della sua squadra (infortunio, squalifica o scelta tecnica)',
+    };
+  }
+  // Solo nella lettura «con tutti a 6»: deve ancora giocare, ma sappiamo che non
+  // ci sarà — e il perché è la cosa da dire, perché è un'ipotesi che si giudica.
+  if (kind === 'indisponibile') {
+    return {
+      long: 'indisponibile',
+      short: '—',
+      cls: 'rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-faint',
+      title: `Nella simulazione resta fuori: ${p.absence ?? 'indisponibile'}`,
+    };
+  }
   // 'dati mancanti' is not a verdict on the player — say so, rather than letting a
   // gap in our data read as "he did nothing".
   if (kind === 'dati_mancanti') {
@@ -998,7 +1070,11 @@ function PlayerRow({
                   >
                     {fmt(p.voto_puro ?? 0)}
                   </span>
-                  {p.office ? (
+                  {p.simulated ? (
+                    <span className="font-semibold text-warn" title="Simulazione: deve ancora giocare, prende 6">
+                      sim.
+                    </span>
+                  ) : p.office ? (
                     <span className="font-semibold text-accent" title="Voto d’ufficio">
                       uff.
                     </span>
@@ -1107,7 +1183,14 @@ function PlayerRow({
             ) : (
               <span className="text-[11px] text-ink-faint">{fmt(p.voto_puro ?? 0)}</span>
             )}
-            {p.office ? (
+            {p.simulated ? (
+              <span
+                title="Simulazione: deve ancora giocare, gli si dà la sufficienza"
+                className="rounded bg-warn-bg px-1.5 py-0.5 text-[10px] font-bold text-warn"
+              >
+                simulato
+              </span>
+            ) : p.office ? (
               <span
                 title={
                   p.sv_filled

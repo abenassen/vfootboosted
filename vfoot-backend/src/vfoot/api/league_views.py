@@ -5618,9 +5618,13 @@ class FixtureDetailView(APIView):
         # «non ha impatto su nulla» e' una proprieta' del codice invece di una
         # promessa. Sul referto congelato la chiave si ignora da sola: quel ramo
         # ritorna prima, e a giornata conclusa non c'e' piu' niente da prevedere.
-        projected = request.query_params.get("projection") in ("1", "true", "yes")
+        # ``projection=six`` e' la terza lettura, «con tutti a 6», che contiene la
+        # seconda (v. live_scorer).
+        mode = request.query_params.get("projection")
+        projected = mode in ("1", "true", "yes", "six")
         return Response({
-            **score_fixture_live(fx, league, md, ruleset, projected=projected),
+            **score_fixture_live(fx, league, md, ruleset, projected=projected,
+                                 sufficiency=mode == "six"),
             **managers,
             # Prima del blocco quello che si sta guardando e' un'ANTEPRIMA: nessuno
             # ha ancora giocato, i totali sono zero per costruzione e le formazioni

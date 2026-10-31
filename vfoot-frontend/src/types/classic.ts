@@ -36,18 +36,34 @@ export interface ClassicPlayerLine {
    *  and says what we know; `dati_mancanti` is the rare case where a player has
    *  minutes and no performance behind them, i.e. OUR hole. Payloads frozen
    *  before the two were told apart carry `dati_mancanti` with zero minutes —
-   *  see `svKind`, which reads them for what they are. */
-  sv_reason?: 'non_entrato' | 'dati_mancanti' | 'impiego_insufficiente' | 'in_campo' | null;
+   *  see `svKind`, which reads them for what they are. `non_convocato`: not in
+   *  his club's matchday squad at all (injured, suspended, left out). */
+  sv_reason?:
+    | 'non_entrato'
+    | 'non_convocato'
+    | 'indisponibile'
+    | 'dati_mancanti'
+    | 'impiego_insufficiente'
+    | 'in_campo'
+    | null;
   /** His club's match has not been played (a postponement). Reads as s.v. in the
    *  sum but is NOT one: the bench does not cover it, and the league settles it
    *  later — by the recovery, or by an office vote. */
   pending?: boolean;
+  /** The slot holds a player this team no longer has (an older lineup reused). */
+  vacant?: boolean;
   /** The vote was IMPOSED by the league: either a ruling on a match that was not
    *  played, or — with `sv_filled` — the league's standing voto d'ufficio filling
    *  a hole the bench could not cover. No bonus/malus either way. */
   office?: boolean;
   /** Era un buco: senza voto e senza rimpiazzo, coperto dal voto d'ufficio di lega. */
   sv_filled?: boolean;
+  /** Il 6 della lettura «con tutti a 6»: non il voto d'ufficio della lega, una
+   *  sufficienza data a chi deve ancora giocare. */
+  simulated?: boolean;
+  /** Nella stessa lettura, perché è rimasto fuori (`sv_reason: 'indisponibile'`):
+   *  «espulso nell'ultima partita», «non convocato», la nota dell'infortunio. */
+  absence?: string;
   /** His club's match is being played, or has ended and the provider has not
    *  settled the data. There IS a vote — it is simply going to move. */
   provisional?: boolean;
@@ -332,6 +348,13 @@ export interface ClassicFixtureDetail {
    *  nemmeno qui. Non è il punteggio della sfida e non va presentato come tale:
    *  si chiede con `?projection=1` e non viene salvato da nessuna parte. */
   projected?: boolean;
+  /** La terza lettura, «con tutti a 6» (`?projection=six`): contiene la seconda, e
+   *  in più chi deve ancora giocare prende un 6 — tranne chi sappiamo che non ci
+   *  sarà, che resta senza voto e la panchina lo copre. */
+  sufficiency?: boolean;
+  /** Qualcuno di questa sfida deve ancora giocare: la terza lettura ha qualcosa
+   *  da dire anche quando nessuna partita è sul campo. */
+  has_unplayed?: boolean;
   /** Il punteggio VERO, quello che si legge con l'interruttore spento. Viaggia
    *  solo dentro un tabellino previsionale, e serve a UNA domanda: le due
    *  risposte coincidono? Quando sì, i numeri in pagina non si muovono e senza

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getFixtureDetail, getVoteLedger } from '../api';
+import type { Projection } from '../api/backend';
 import { Card } from '../components/ui';
 import { MatchDetail } from '../components/match/MatchDetail';
 import { ClassicMatchDetail } from '../components/match/ClassicMatchDetail';
@@ -24,7 +25,7 @@ export default function LeagueMatchDetailPage() {
   // browser che prima o poi si sarebbe scollato da quello ufficiale. Resta accesa
   // fra un colpo di socket e l'altro: chi l'ha chiesta vuole vedere la previsione
   // muoversi, non riaccenderla a ogni gol.
-  const [projection, setProjection] = useState(false);
+  const [projection, setProjection] = useState<Projection>(null);
   const { data, loading, error } = useAsync(
     () => getFixtureDetail(matchId ?? '', { projection }),
     [matchId, tick, projection],
@@ -108,7 +109,7 @@ export default function LeagueMatchDetailPage() {
         backTo={backTo}
         myUserId={user?.id ?? null}
         loadLedger={loadLedger}
-        projection={{ on: projection, busy: loading, onChange: setProjection }}
+        projection={{ mode: projection, busy: loading, onChange: setProjection }}
       />
     );
   }

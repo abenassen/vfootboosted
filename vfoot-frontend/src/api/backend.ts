@@ -1360,15 +1360,18 @@ export async function getCompetitionStructure(
   return parseJsonOrThrow(res);
 }
 
-// `projection` chiede la SECONDA lettura di un turno in corso: «se la giornata
-// finisse adesso?». Stesso endpoint e stesse regole di lega — è il motore vero a
+// `projection` chiede un'altra lettura di un turno in corso: «se la giornata
+// finisse adesso?» (`now`), o «e se chi deve ancora giocare prendesse 6?» (`six`). Stesso endpoint e stesse regole di lega — è il motore vero a
 // rispondere, non un conto rifatto qui — e non scrive niente: chiederla non
 // cambia il punteggio che la pagina mostra con l'interruttore spento.
+/** Le letture di un turno in corso oltre al punteggio vero. */
+export type Projection = 'now' | 'six' | null;
+
 export async function getFixtureDetail(
   fixtureId: number | string,
-  opts?: { projection?: boolean },
+  opts?: { projection?: Projection },
 ): Promise<SimFixtureDetail | ClassicFixtureDetail> {
-  const qs = opts?.projection ? '?projection=1' : '';
+  const qs = opts?.projection === 'now' ? '?projection=1' : opts?.projection === 'six' ? '?projection=six' : '';
   const res = await fetch(`${baseUrl()}/fixtures/${fixtureId}${qs}`, {
     headers: { Accept: 'application/json', ...authHeaders() },
   });

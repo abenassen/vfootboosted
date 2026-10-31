@@ -229,7 +229,8 @@ def read_previous_lineup(league_id: int, real_matchday: int, team_id: int, compe
 # Pure composition (unit-tested without a DB).                                 #
 # --------------------------------------------------------------------------- #
 def _sv_line(pid: int, lineup_role: str, name: str | None = None,
-             pending: bool = False, vacant: bool = False) -> dict:
+             pending: bool = False, vacant: bool = False,
+             reason: str | None = None) -> dict:
     """A senza-voto placeholder for a player with no line in the index (didn't play)
     or no longer owned (sold): no vote, so it triggers a substitution / is excluded.
 
@@ -242,11 +243,15 @@ def _sv_line(pid: int, lineup_role: str, name: str | None = None,
     gli altri — panchina e voto d'ufficio lo coprono entrambi (v. classic_scoring.
     _fill_unresolved, che spiega perche' non lo si punisce due volte). Il marchio
     resta perche' dice una cosa vera e diversa: li' non c'e' nessuno da giudicare.
+
+    ``reason`` is the same ``sv_reason`` a played line carries (classic_pagella.
+    _line), so the badge can say WHY: without it the client falls back to the
+    strongest verdict there is, «S.V., impiego insufficiente».
     """
     return {
         "player_id": pid, "name": name or str(pid), "lineup_role": lineup_role,
         "role": None, "voto_puro": None, "fantavoto": None, "sv": True,
-        "pending": pending, "vacant": vacant,
+        "sv_reason": reason, "pending": pending, "vacant": vacant,
         "conceded": 0, "entered": False, "entered_for": None, "replaced_by": None,
     }
 
@@ -342,7 +347,12 @@ def compose_team_lines(
             return _sv_line(pid, role, name, pending=True)
         base = index.get(pid)
         if base is None:
-            return _sv_line(pid, role, name)  # played, not rated: a plain s.v.
+            # The index has a line for EVERY appearance — bench and unrated cameos
+            # included (classic_pagella._line) — so no line means he was not in
+            # his club's matchday squad at all: injured, suspended, not called up.
+            # Saying nothing here printed «S.V., impiego insufficiente» on a player
+            # who never left the stands.
+            return _sv_line(pid, role, name, reason="non_convocato")
         line = dict(base)
         line["lineup_role"] = role
         # La pagella della partita vera porta i cambi VERI con lo stesso
@@ -702,7 +712,7 @@ def ruleset_for_round(league, md):
     return ruleset
 
 
-def live_scorer(league, md, ruleset, projected: bool = False):
+def live_scorer(league, md, ruleset, projected: bool = False, sufficiency: bool = False):
     """Prepare a matchday ONCE, then score any number of its fixtures.
 
     The expensive half is per-MATCHDAY, not per-fixture: ``build_matchday_index``
@@ -718,8 +728,18 @@ def live_scorer(league, md, ruleset, projected: bool = False):
     si spinge e non entra in classifica — e' un secondo modo di LEGGERE il turno,
     chiesto dalla pagina che lo mostra.
 
+    ``sufficiency`` — «CON TUTTI A 6». La terza lettura, che contiene la seconda:
+    le partite in corso si leggono come se finissero adesso, e chi deve ancora
+    giocare prende un 6 d'ufficio. Chi sappiamo che non giochera' (squalificato,
+    infortunato, fuori dalla distinta: v. ``round_simulation``) resta un senza
+    voto, e la panchina lo copre con le regole di sempre. Passa per il voto
+    d'ufficio e non per un conto a parte perche' il motore sa gia' cosa farne: vale
+    come voto e come fantavoto, senza bonus, e conta nel modificatore difesa come
+    quello vero.
+
     Returns a callable ``score(fixture) -> payload``.
     """
+    projected = projected or sufficiency
     index = build_matchday_index(md.real_competition_season_id, md.real_matchday, league)
     # Rosters AND everyone actually FIELDED this round. Not the same set, and the
     # difference is not a corner case: the submitted lineup is authoritative and is
@@ -743,6 +763,20 @@ def live_scorer(league, md, ruleset, projected: bool = False):
     unstable -= set(office)
     in_progress -= set(office)
     engine_in_progress = _engine_in_progress(in_progress, index, projected)
+    # La simulazione cambia due insiemi soli, e solo per il motore: chi deve ancora
+    # giocare smette di essere «in attesa» e diventa o un 6 d'ufficio o un senza
+    # voto. Il voto d'ufficio VERO della lega vince comunque — e' gia' fuori da
+    # ``not_started``.
+    engine_not_started, engine_office, absent, simulated = not_started, office, {}, set()
+    if sufficiency:
+        from vfoot.services.round_simulation import (
+            SIMULATED_VOTE, unavailable_for_simulation,
+        )
+        absent = unavailable_for_simulation(
+            md.real_competition_season_id, md.real_matchday, not_started)
+        simulated = not_started - set(absent)
+        engine_office = {**{pid: SIMULATED_VOTE for pid in simulated}, **office}
+        engine_not_started = set()
     # C'e' ancora una partita del turno da giocare? Allora un titolare senza voto
     # non e' ancora un buco da pagare: il panchinaro che lo coprira' deve solo
     # scendere in campo (v. classic_scoring._fill_unresolved).
@@ -752,7 +786,8 @@ def live_scorer(league, md, ruleset, projected: bool = False):
     # stessa deroga, sulla stessa riga, che ``_engine_in_progress`` fa sui cambi.
     engine_round_open = False if projected else round_open
 
-    def score_with(fx, frozen_by_kickoff: set, open_round: bool) -> dict:
+    def score_with(fx, frozen_by_kickoff: set, open_round: bool,
+                   waiting: set = not_started, imposed: dict = office) -> dict:
         """Il tabellino, dato l'insieme di «sta ancora giocando» che il motore deve
         rispettare. Chiamabile due volte sullo stesso fixture: ogni giro ricompone
         le righe da zero (``compose_team_lines`` copia quelle dell'indice), quindi
@@ -765,8 +800,18 @@ def live_scorer(league, md, ruleset, projected: bool = False):
             # ruling — the admin still chooses when he closes the round.
             starters, bench, meta = team_lines_for_conclusion(
                 league, team, fx.competition_id, md.real_matchday, index, "previous",
-                not_started, office)
+                waiting, imposed)
             starters, bench = starters or [], bench or []
+            if imposed is not office:
+                # Le righe della simulazione si dichiarano: un 6 inventato non e'
+                # il voto d'ufficio della lega, e chi resta fuori dice perche'.
+                for line in starters + bench:
+                    pid = line.get("player_id")
+                    if pid in simulated and line.get("office"):
+                        line["simulated"] = True
+                    elif pid in absent:
+                        line["sv_reason"] = "indisponibile"
+                        line["absence"] = absent[pid]
             # BEFORE scoring, not only after: the scorer READS these marks. Con
             # ``in_progress`` decide chi non va sostituito (score_team) e che cosa
             # non e' un buco (_fill_unresolved); marcati dopo, al quinto minuto la
@@ -812,12 +857,22 @@ def live_scorer(league, md, ruleset, projected: bool = False):
         return payload
 
     def score(fx) -> dict:
-        payload = score_with(fx, engine_in_progress, engine_round_open)
+        payload = score_with(fx, engine_in_progress, engine_round_open,
+                             engine_not_started, engine_office)
         # Il payload si dichiara. Senza, la pagina puo' finire per mostrare un
         # totale previsto sotto la pastiglia «in corso» — cioe' un numero che non
         # e' il punteggio della sfida presentato come se lo fosse. Chi lo riceve
         # deve sapere quale delle due domande ha fatto.
         payload["projected"] = projected
+        payload["sufficiency"] = sufficiency
+        # Ha senso chiedere «con tutti a 6»? Solo se qualcuno di questa sfida deve
+        # ancora giocare: l'interruttore lo legge per farsi vedere anche quando
+        # nessuna partita e' sul campo (il sabato sera fra un anticipo e l'altro).
+        payload["has_unplayed"] = any(
+            line.get("pending") or line.get("simulated")
+            or line.get("sv_reason") == "indisponibile"
+            for side in ("home", "away")
+            for line in payload[side].get("starters", []) + payload[side].get("bench", []))
         if projected:
             # E ANCHE L'ALTRA RISPOSTA, nello stesso giro, per una domanda sola:
             # LE DUE COINCIDONO? Spesso si' — quando sono tutti in campo non c'e'
@@ -843,7 +898,8 @@ def live_scorer(league, md, ruleset, projected: bool = False):
     return score
 
 
-def score_fixture_live(fx, league, md, ruleset, projected: bool = False) -> dict:
+def score_fixture_live(fx, league, md, ruleset, projected: bool = False,
+                       sufficiency: bool = False) -> dict:
     """The tabellino of a league fixture whose matchday is NOT concluded.
 
     Same functions as the conclusion, in the same order — that is deliberate, and
@@ -860,7 +916,8 @@ def score_fixture_live(fx, league, md, ruleset, projected: bool = False) -> dict
     conto tutto suo E' il motivo per cui ci si puo' fidare: sono le stesse regole
     della lega, applicate dallo stesso motore, con una domanda sola cambiata.
     """
-    return live_scorer(league, md, ruleset, projected=projected)(fx)
+    return live_scorer(league, md, ruleset, projected=projected,
+                       sufficiency=sufficiency)(fx)
 
 
 def _warn_about_unrepaired_lineups(league, md, team_lines) -> list[dict]:
