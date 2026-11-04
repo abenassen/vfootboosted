@@ -49,7 +49,7 @@ from realdata.models import (
     PlayerOnPitchInterval, PlayerZoneFeature, PROVIDER_SOFASCORE,
 )
 from realdata.services.sofascore_adapter import METHOD_UNPLACED
-from vfoot.services import goal_impact
+from vfoot.services import goal_impact, participation
 
 log = logging.getLogger(__name__)
 
@@ -2152,6 +2152,35 @@ RESULT_MITIGATION_LOSS_ANCHOR = 0.35
 RESULT_MITIGATION_LOSS_BASE = 0.15
 RESULT_MITIGATION_LOSS_K = 0.20
 RESULT_MITIGATION_LOSS_MAX_SHARE = 0.85
+
+# --- Il lato VITTORIA guarda la PARTECIPAZIONE (rilascio 1.21, 02/11/2026) ----
+# Caso Modric (Milan-Inter 3-1): 88 tocchi, merito esattamente nella media del ruolo,
+# 6,0 — come Goncalo Ramos, 32 tocchi e nessuna azione, che la vittoria portava da
+# 5,5 a 6,0. Il lato vittoria alzava solo chi stava SOTTO il centro, quindi a chi
+# era sul centro non dava niente comunque avesse partecipato. Scelta di Andrea: chi
+# ha partecipato di piu' alla vittoria ne risente di piu'. Con ``p`` la
+# partecipazione (v. services/participation, percentile fra i pari ruolo):
+#
+#     spinta = severita'(scarto) * (FLOOR + (1-FLOOR)*p) * max(0, centro + TARGET*p - voto)
+#
+# * il BERSAGLIO sale sopra il centro con la partecipazione (fino a +0,3 prima dello
+#   stadio finale, ~6,5 mostrato), quindi una partita normale giocata da
+#   protagonista in una squadra che vince non resta inchiodata sul 6;
+# * la QUOTA della spinta scende con la partecipazione fino a meta': chi ha toccato
+#   pochi palloni un contributo alla vittoria lo riceve comunque, ma ridotto.
+#
+# Misura (25-26, 3.903 presenze 80'+ con le due pagelle): errore medio −0,0035
+# contro lo Statistico, −0,0012 contro la Redazione, correlazione +0,0014; 156 voti
+# cambiano. Costo noto e accettato: a parita' di voto i giudici NON premiano i tocchi
+# (la correlazione fra tocchi e voto nelle vittorie sale da +0,26 a +0,36, la loro e'
+# +0,12) — e' una scelta di prodotto, non un'imitazione dei giudici. Modric e Ramos
+# stanno entrambi a ~0,01 dal bordo del mezzo punto: la regola e' di principio, i
+# due casi non sono stati usati per tararla al centesimo.
+#
+# NUOVO INVARIANTE del lato vittoria: mai sopra ``centro + TARGET*p``. A p = 0 e'
+# quello di prima (mai sopra il centro), con la quota dimezzata.
+WIN_PARTICIPATION_TARGET = 0.3
+WIN_PARTICIPATION_FLOOR = 0.5
 
 # --- Red-card performance adjustment (v2 stage 3) ----------------------------
 # A sending-off is a PERFORMANCE fact the base vote must reflect, over and above
@@ -4316,7 +4345,10 @@ def result_mitigation(raw_vote: float, gd_on: int, *,
                       anchor: float = RESULT_MITIGATION_LOSS_ANCHOR,
                       loss_k: float = RESULT_MITIGATION_LOSS_K,
                       loss_base: float = RESULT_MITIGATION_LOSS_BASE,
-                      loss_max_share: float = RESULT_MITIGATION_LOSS_MAX_SHARE) -> float:
+                      loss_max_share: float = RESULT_MITIGATION_LOSS_MAX_SHARE,
+                      participation: float | None = None,
+                      win_target: float = WIN_PARTICIPATION_TARGET,
+                      win_floor: float = WIN_PARTICIPATION_FLOOR) -> float:
     """Divergence-only nudge toward the on-pitch result. ASIMMETRICA.
 
     Fires only for a vote ABOVE the target in a net defeat (gd_on<0) — pulled DOWN —
@@ -4334,8 +4366,11 @@ def result_mitigation(raw_vote: float, gd_on: int, *,
         centrocampista. È il motivo per cui esiste questa asimmetria: le pagelle
         esterne in una disfatta mandano la squadra all'insufficienza, e fermarsi
         al 6 lasciava un bias sistematico di +0.21 a tre gol di scarto;
-      * vittoria — il bersaglio resta il centro, con le costanti di sempre: un
-        voto basso in una goleada inflitta arriva al 6 e non un centesimo oltre.
+      * vittoria — il bersaglio e' il centro PIU' la partecipazione
+        (``participation``, dal rilascio 1.21: ``centre + win_target*p``), e la
+        quota della spinta scala da ``win_floor`` a 1 con ``p``. Chi ha girato il
+        gioco sale oltre il centro, chi ha toccato pochi palloni riceve meno.
+        Senza ``participation`` e' la forma di prima: bersaglio il centro.
 
     TRE limiti, e rispondono a domande diverse: ``max_share`` / ``loss_max_share``
     sono la FRAZIONE massima della divergenza che il risultato può cancellare — ed è
@@ -4356,9 +4391,15 @@ def result_mitigation(raw_vote: float, gd_on: int, *,
         over = max(0.0, raw_vote - (centre - anchor))
         severity = min(loss_max_share, loss_base + loss_k * abs(gd_on))
         return max(-cap, -over * severity)
-    under = max(0.0, centre - raw_vote)  # only a low vote is lifted in a win
     severity = min(max_share, base + k * gd_on)
-    return min(cap, under * severity)
+    if participation is None:
+        # la forma di prima del rilascio 1.21: la usano i banchi e i test che
+        # non hanno i tocchi; il voto vero passa sempre la partecipazione
+        under = max(0.0, centre - raw_vote)  # only a low vote is lifted in a win
+        return min(cap, under * severity)
+    p = max(0.0, min(1.0, participation))
+    under = max(0.0, centre + win_target * p - raw_vote)
+    return min(cap, under * severity * (win_floor + (1.0 - win_floor) * p))
 
 
 def contracted_vote(raw_vote: float, minutes: int, *, centre: float,
@@ -4573,7 +4614,13 @@ def voto_puro_for_match(match, reference: dict,
             # entrato (v. ENTRY_MARGIN_CAP). Un titolare ha margine zero.
             gd_eff = (gd_on.get((mid, pid), 0)
                       + entry_margin.get((mid, pid), 0) * entry_margin_weight(mins))
-        nudge = (result_mitigation_blended(raw, gd_eff, centre=vote_center_for(ref_key))
+        # LA PARTECIPAZIONE (rilascio 1.21, v. WIN_PARTICIPATION_TARGET): conta solo
+        # dal lato vittoria, ma si calcola per tutti i giocatori di movimento perche'
+        # la spiegazione la nomina e un subentrato frazionario puo' passarci.
+        part = (participation.participation(role, feats, mins)
+                if role in outfield_roles else None)
+        nudge = (result_mitigation_blended(raw, gd_eff, centre=vote_center_for(ref_key),
+                                           participation=part)
                  if role in outfield_roles and gd_eff else 0.0)
         # Red-card + own-goal + missed-penalty performance drops (post-adjustments,
         # any role; the missed penalty stays a good shot in the index, this is the
@@ -4637,6 +4684,9 @@ def voto_puro_for_match(match, reference: dict,
             "assist_detail": assist_detail.get(pid, []),
             "assist_adjustment": aadj,
             "result_nudge": nudge,
+            # La partecipazione [0, 1] che ha dosato la spinta della vittoria (None
+            # per il portiere). Serve alla spiegazione: «hai partecipato molto».
+            "participation": part,
             # Quanto la contrazione degli spezzoni ha mosso il voto grezzo (zero a
             # 90' e per il portiere): la spiegazione deve poterla nominare.
             "contraction_adjustment": contraction,

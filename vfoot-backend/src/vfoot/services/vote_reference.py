@@ -229,7 +229,13 @@ def _keeper_channel_constants() -> dict:
 #           RISULTATO CHE TROVA (rilascio 1.20, caso Woltemade, 29/10/2026).
 #           ``SHORT_STINT_CONTRACTION`` e ``ENTRY_MARGIN_*`` sono costanti dello
 #           scorer, non dei pesi: stanno nella chiave ``post_index``.
-SCORING_CODE_VERSION = 17
+#  17 -> 18: LA VITTORIA GUARDA LA PARTECIPAZIONE (rilascio 1.21, caso Modric,
+#           02/11/2026). Il lato vittoria della mitigazione ha un bersaglio sopra il
+#           centro e una quota che scalano col percentile di tocchi/azioni
+#           (services/participation). Le costanti stanno in ``post_index``, la
+#           tabella congelata in ``participation``; la riga del voto ha un campo
+#           nuovo (``participation``) che la cache su file servirebbe senza.
+SCORING_CODE_VERSION = 18
 
 
 def scoring_fingerprint() -> str:
@@ -280,7 +286,11 @@ def scoring_fingerprint() -> str:
                        cr.PENALTY_MISSED_VOTE_RELEVANT,
                        cr.PENALTY_MISSED_VOTE_IRRELEVANT,
                        cr.SHORT_STINT_CONTRACTION, cr.ENTRY_MARGIN_CAP,
-                       cr.ENTRY_MARGIN_RAMP_MINUTES],
+                       cr.ENTRY_MARGIN_RAMP_MINUTES,
+                       cr.WIN_PARTICIPATION_TARGET, cr.WIN_PARTICIPATION_FLOOR],
+        # La tabella congelata dei percentili di partecipazione: ricostruirla
+        # sposta la spinta della vittoria, quindi i voti.
+        "participation": participation_sha(),
     }
     blob = json.dumps(payload, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
@@ -308,6 +318,11 @@ def save(reference: dict, role_averages: dict, *, season_id: int,
 
 
 _cache: dict | None = None
+
+
+def participation_sha() -> str | None:
+    from vfoot.services import participation
+    return participation.sha()
 
 
 def _bayesian_artifact_sha() -> str | None:

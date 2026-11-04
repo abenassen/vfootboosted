@@ -829,9 +829,31 @@ def role_average_terms(rows, scales: dict | None = None) -> dict:
 SHORT_APPEARANCE_MINUTES = 50
 
 
+# Le soglie con cui la spiegazione NOMINA la partecipazione (rilascio 1.21). Sono
+# parole, non il calcolo: la spinta della vittoria e' continua nella partecipazione,
+# queste dicono solo quando vale la pena dirlo.
+PARTICIPATION_HIGH = 0.67
+PARTICIPATION_LOW = 0.33
+
+
+def result_phrase(nudge: float, participation: float | None) -> str:
+    """La riga dell'adeguamento al risultato. Dal lato vittoria la spinta dipende da
+    quanto il giocatore ha partecipato (v. classic_rating.WIN_PARTICIPATION_TARGET),
+    e la frase lo dice quando e' alta o bassa; nella sconfitta resta quella di sempre."""
+    base = "adeguamento al risultato di squadra"
+    if nudge <= 0 or participation is None:
+        return base
+    if participation >= PARTICIPATION_HIGH:
+        return base + ", molto coinvolto nella vittoria"
+    if participation < PARTICIPATION_LOW:
+        return base + ", poco coinvolto nel gioco"
+    return base
+
+
 def explain(role: str, totals: dict, minutes: int, reference: dict,
             averages: dict, exposure: float = 0.0, *, top: int = 3,
             result_nudge: float = 0.0, contraction_adjustment: float = 0.0,
+            participation: float | None = None,
             red_adjustment: float = 0.0,
             own_goal_adjustment: float = 0.0, penalty_adjustment: float = 0.0,
             goal_adjustment: float = 0.0, goal_detail: list | None = None,
@@ -1215,8 +1237,7 @@ def explain(role: str, totals: dict, minutes: int, reference: dict,
                                    "ritorno verso la media per i pochi minuti giocati",
                                    kind="contraction"))
     if abs(p_nudge) >= 0.005:
-        contributions.append(entry(p_nudge,
-                                   "adeguamento al risultato di squadra",
+        contributions.append(entry(p_nudge, result_phrase(p_nudge, participation),
                                    kind="result"))
     if abs(p_red) >= 0.005:
         contributions.append(entry(p_red, red_card_phrase(red_detail),

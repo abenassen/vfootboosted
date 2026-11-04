@@ -62,6 +62,23 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-21',
+    versione: '1.21',
+    data: '4 novembre 2026',
+    titolo: 'In una vittoria conta quanto hai partecipato',
+    sommario:
+      'Quando la squadra vince, la spinta del risultato premia di più chi è stato dentro la partita e di meno chi l’ha guardata passare. Le sconfitte e i pareggi non cambiano. Sulle prime dieci giornate cambiano 78 voti su 2.680: 58 in su e 20 in giù, tutti di mezzo punto.',
+    voci: [
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'In una vittoria il voto risente di quanto hai partecipato: quanti palloni hai toccato, oppure quante azioni hai costruito (passaggi chiave, tiri, dribbling riusciti), confrontati con chi gioca nel tuo ruolo. Chi ha girato il gioco può salire oltre il 6 anche senza gol né assist, chi ha toccato pochi palloni riceve una spinta ridotta. Nel pannello compare come «adeguamento al risultato di squadra», con «molto coinvolto nella vittoria» o «poco coinvolto nel gioco» quando è il caso.',
+        caso:
+          'Milan-Inter 3-1 (giornata 10): Modrić, 88 tocchi e la regia per tutta la partita, aveva 6,0 come Gonçalo Ramos, 32 tocchi e nessuna azione, che la vittoria portava dal 5,5 al 6. Ora Modrić 6,0 → 6,5 e Ramos 6,0 → 5,5.',
+      },
+    ],
+  },
+  {
     id: 'v-1-20',
     versione: '1.20',
     data: '30 ottobre 2026',
