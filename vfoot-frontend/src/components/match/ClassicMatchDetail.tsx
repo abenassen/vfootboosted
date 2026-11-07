@@ -1457,7 +1457,12 @@ function LedgerGroup({
         <span className="text-ink-soft">
           <span className="mr-1 inline-block text-ink-faint">{open ? '▾' : '▸'}</span>
           {group.title}
-          <span className="ml-1 text-ink-faint">· {group.terms.length}</span>
+          {/* Il conto delle VOCI, non delle righe: una famiglia unita (conclusioni,
+              dribbling…) è una riga sola che ne riassume parecchie, e contarla 1 dava
+              «Conclusioni · 1» sopra una riga che dice «5 voci» e quattro tiri. */}
+          <span className="ml-1 text-ink-faint">
+            · {group.terms.reduce((n, t) => n + (t.family_size ?? 1), 0)}
+          </span>
         </span>
         <span
           className={`shrink-0 font-mono text-[11px] ${

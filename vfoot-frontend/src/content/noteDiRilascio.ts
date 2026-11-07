@@ -62,6 +62,28 @@ export const ETICHETTE: Record<TipoVoce, string> = {
  *  è cambiato ADESSO, e l'archeologia la fa scendendo. */
 export const RILASCI: Rilascio[] = [
   {
+    id: 'v-1-22',
+    versione: '1.22',
+    data: '7 novembre 2026',
+    titolo: 'Il tiro che provoca un autogol conta nel voto',
+    sommario:
+      'Se un tuo tiro finisce in porta deviato da un avversario, il voto ne tiene conto: tanto di più quanto più era pericoloso il tiro. Il bonus del gol resta a chi segna. Sulla stagione in corso i tiri di questo tipo sono quattro, e cambiano casella due voti.',
+    voci: [
+      {
+        tipo: 'bilanciamento',
+        testo:
+          'Fra gol e autogol decide la Lega, spesso a partita finita e su un confine discusso: vedersi togliere tutto il valore di un gol per quella decisione era troppo. Ora il tiro che provoca l’autogol riceve una parte del valore del gol, dal 25% per un tiro che in porta difficilmente sarebbe andato fino al 75% per un’occasione vera. Nel pannello compare come «un tiro che provoca l’autogol», e nella mappa dei tiri come «provoca autogol».',
+        caso:
+          'Venezia-Udinese (giornata 11): il tiro di Keinan Davis, deviato in porta per il gol dell’Udinese, valeva come un tiro sbagliato. 5,0 → 5,5.',
+      },
+      {
+        tipo: 'corretto',
+        testo:
+          'Nel dettaglio del voto, il numero accanto a «Conclusioni» e agli altri gruppi conta le voci che il gruppo raccoglie, non le righe: prima un gruppo con quattro tiri poteva mostrare «1».',
+      },
+    ],
+  },
+  {
     id: 'v-1-21',
     versione: '1.21',
     data: '4 novembre 2026',

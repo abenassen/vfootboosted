@@ -185,12 +185,18 @@ def assist_merit(record: dict, merit_mean: float) -> float:
 def goal_credit_for(records, band=DEFAULT_BAND, p95: float = DEFAULT_P95) -> float:
     """I punti di voto per i gol di un giocatore: (1 - quota) di fatto graduato
     per importanza + quota di merito, gol per gol."""
+    from vfoot.services.classic_rating import induced_own_goal_share
     m = merit_settings()
     share = m.get("merit_share", 0.0)
     total = 0.0
     for r in records or []:
         fact = goal_credit([r.get("importance")], band, p95)
-        if share:
+        if r.get("induced_own_goal"):
+            # L'autogol provocato: una quota del FATTO, che sale con l'xG del tiro
+            # di partenza (v. INDUCED_OWN_GOAL_SHARE_MIN). Niente merito di
+            # esecuzione: il tiro andava fuori dallo specchio, per questo e' autogol.
+            total += induced_own_goal_share(r.get("xg")) * fact
+        elif share:
             total += (1.0 - share) * fact + share * m["mean_goal_credit"] * goal_merit(r, m["goal_merit_mean"])
         else:
             total += fact
@@ -366,6 +372,53 @@ def goals_by_player(match) -> dict[int, list[dict]]:
     return dict(out)
 
 
+def induced_own_goals_by_player(match) -> dict[int, list[dict]]:
+    """{tiratore: [un record per autogol provocato]}, coi record di ``goals_by_player``.
+
+    L'autogol conta per la squadra del tiratore, quindi lo stato che ha cambiato e'
+    il suo: stessa cronologia, stessa importanza, letta dal lato per cui il gol
+    conta (il ``team_side`` della riga). Il legame tiro -> autogol e' quello di
+    ``classic_rating.own_goal_links``, lo stesso che gradua il malus del difensore.
+    Il record porta ``induced_own_goal`` e l'xG del tiro di partenza:
+    ``goal_credit_for`` ne paga una quota del fatto che sale con quell'xG
+    (``classic_rating.induced_own_goal_share``).
+    """
+    from realdata.models import MatchShot
+    from vfoot.services.classic_rating import own_goal_links
+
+    xp = fixed_xp_table()
+    if not xp:
+        return {}
+    links = {(l["og_player_id"], l["og_seconds"]): (l["provoker_id"], l["provoker_xg"])
+             for l in own_goal_links(match.id) if l["provoker_id"]}
+    if not links:
+        return {}
+    timeline = sorted(
+        (s for s in MatchShot.objects.filter(match=match, is_goal=True)
+         .values("player_id", "minute", "elapsed_seconds", "team_side")
+         if s["minute"] is not None),
+        key=lambda s: (s["minute"], s["elapsed_seconds"] or 0))
+    out: dict[int, list[dict]] = defaultdict(list)
+    for i, shot in enumerate(timeline):
+        provoker, xg = links.get((shot["player_id"], shot["elapsed_seconds"]),
+                                 (None, None))
+        if not provoker:
+            continue
+        own = sum(1 for e in timeline[:i] if e["team_side"] == shot["team_side"])
+        opp = sum(1 for e in timeline[:i] if e["team_side"] != shot["team_side"])
+        out[provoker].append({
+            "minute": shot["minute"],
+            "own_after": own + 1,
+            "opp_after": opp,
+            "importance": importance(xp, shot["minute"], own - opp),
+            "induced_own_goal": True,
+            # L'xG del tiro di PARTENZA, non dell'autogol (che non ne ha): dice
+            # quanto di quel gol fosse gia' nel tiro, e dosa la quota.
+            "xg": xg,
+        })
+    return dict(out)
+
+
 # --- IL GOL SUBITO, dal punto di vista del portiere ---------------------------
 # Il gol lo pesiamo per quanto ha CAMBIATO la partita da quando esiste
 # ``goal_credit`` — ma solo a credito di chi lo segna. A debito di chi lo subisce
@@ -477,9 +530,34 @@ def goal_phrase(records) -> str:
     if not recs:
         return ""
     if len(recs) > 1:
-        return f"{len(recs)} gol"
+        induced = sum(1 for r in recs if r.get("induced_own_goal"))
+        scored = len(recs) - induced
+        if not induced:
+            return f"{scored} gol"
+        parts = []
+        if scored:
+            parts.append("un gol" if scored == 1 else f"{scored} gol")
+        parts.append("un autogol provocato" if induced == 1
+                     else f"{induced} autogol provocati")
+        return " e ".join(parts)
     r = recs[0]
     own, opp, minute = r["own_after"], r["opp_after"], r["minute"]
+    if r.get("induced_own_goal"):
+        # Si dice che cosa ha cambiato, come per il gol: e' quello che si paga.
+        if own == 1 and opp == 0:
+            what = "un tiro che provoca l'autogol dell'1-0"
+        elif own == opp:
+            what = f"un tiro che provoca l'autogol del pareggio ({own}-{opp})"
+        elif own < opp:
+            what = f"un tiro che provoca l'autogol che accorcia ({opp}-{own})"
+        else:
+            what = f"un tiro che provoca l'autogol del {own}-{opp}"
+        if minute is not None:
+            what += f", al {int(minute)}'"
+        imp = r.get("importance")
+        if imp is not None and imp < DEAD_RUBBER:
+            what += " a partita ormai decisa"
+        return what
     if own == 1 and opp == 0:
         what = "un gol che sblocca lo 0-0"
     elif own == opp:

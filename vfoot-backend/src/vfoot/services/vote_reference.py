@@ -235,7 +235,11 @@ def _keeper_channel_constants() -> dict:
 #           (services/participation). Le costanti stanno in ``post_index``, la
 #           tabella congelata in ``participation``; la riga del voto ha un campo
 #           nuovo (``participation``) che la cache su file servirebbe senza.
-SCORING_CODE_VERSION = 18
+#  18 -> 19: IL TIRO CHE PROVOCA L'AUTOGOL PRENDE UNA QUOTA DEL CREDITO DEL GOL,
+#           dal 25% al 75% secondo l'xG del tiro (07/11/2026, caso Simeone). Le
+#           costanti ``INDUCED_OWN_GOAL_*`` stanno in ``post_index``; il legame
+#           tiro -> autogol (``own_goal_links``) e' codice.
+SCORING_CODE_VERSION = 19
 
 
 def scoring_fingerprint() -> str:
@@ -282,7 +286,8 @@ def scoring_fingerprint() -> str:
                        cr.RED_CARD_BASE, cr.RED_CARD_SEV_BASE, cr.RED_CARD_K,
                        sorted(cr.RED_CARD_SEVERITY.items()),
                        cr.OWN_GOAL_VOTE_DEFLECTION, cr.OWN_GOAL_VOTE_SOLO,
-                       cr.OWN_GOAL_VOTE_FLAT,
+                       cr.OWN_GOAL_VOTE_FLAT, cr.INDUCED_OWN_GOAL_SHARE_MIN,
+                       cr.INDUCED_OWN_GOAL_SHARE_MAX, cr.INDUCED_OWN_GOAL_XG_FULL,
                        cr.PENALTY_MISSED_VOTE_RELEVANT,
                        cr.PENALTY_MISSED_VOTE_IRRELEVANT,
                        cr.SHORT_STINT_CONTRACTION, cr.ENTRY_MARGIN_CAP,

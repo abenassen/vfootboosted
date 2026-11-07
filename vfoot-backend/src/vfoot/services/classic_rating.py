@@ -2281,6 +2281,36 @@ OWN_GOAL_VOTE_FLAT = -0.24         # when sub-minute timing is unavailable
 OWN_GOAL_DEFLECTION_WINDOW_S = 3   # seconds between the OG and the shot it deflected;
 # kept tight (deflections sit at Δ1-2s, solo errors at Δ40s+) so a hectic sequence
 # with an unrelated close-by shot is not mistaken for a deflection.
+# IL TIRO CHE PROVOCA L'AUTOGOL prende una quota del credito del gol, graduata per
+# importanza come un gol vero (v. goal_impact.induced_own_goals_by_player).
+# Deciso il 07/11/2026 (caso Simeone, Torino-Lecce: gol in campo, autogol per la
+# Lega). Il confine fra gol e autogol e' una decisione FORMALE presa dopo, spesso
+# discussa, e per la regola italiana dice solo se il tiro andava nello specchio:
+# vedersi togliere mezzo voto di prestazione per un verdetto a tavolino e'
+# un'anomalia.
+#
+# LA QUOTA SALE CON L'xG DEL TIRO DI PARTENZA, perche' sotto lo stesso nome stanno
+# due cose opposte: il difensore che mette dentro un pallone che in porta non ci
+# sarebbe andato (la colpa e' sua, al tiratore poco) e quello che tenta l'intervento
+# disperato su un'occasione vera (il gol l'ha creato chi ha tirato). Lineare da
+# MIN a xG 0 fino a MAX a ``_XG_FULL`` (un'occasione chiara), piatta oltre. Il
+# pavimento c'e' perche' la decisione resta formale anche sul tiro sbagliato, e
+# perche' l'xG di un tiro deviato lo sottostima. Sui 11 casi legati della 25-26 la
+# quota media e' ~0,49: in media e' la meta' scelta prima, solo ridistribuita.
+# Misurato sulla 25-26 prima di sceglierla: 8 tiratori, scarto dai giudici −0,25
+# sulla Redazione e −0,07 sullo Statistico — i giudici un merito glielo riconoscono.
+# NON ritarato: ``role_mean_credit`` non lo include (una decina di casi a stagione,
+# qualche millesimo sulla media di ruolo).
+INDUCED_OWN_GOAL_SHARE_MIN = 0.25
+INDUCED_OWN_GOAL_SHARE_MAX = 0.75
+INDUCED_OWN_GOAL_XG_FULL = 0.30
+
+
+def induced_own_goal_share(xg: float | None) -> float:
+    """La quota del credito del gol per un autogol provocato da un tiro di questo xG."""
+    u = max(0.0, min(1.0, float(xg or 0.0) / INDUCED_OWN_GOAL_XG_FULL))
+    return (INDUCED_OWN_GOAL_SHARE_MIN
+            + (INDUCED_OWN_GOAL_SHARE_MAX - INDUCED_OWN_GOAL_SHARE_MIN) * u)
 # A missed penalty (shot situation='penalty', not scored). The -3 fantavoto malus
 # lives in the bonus layer (classic_pagella); THIS is the added voto-puro drop, kept
 # small because the voto puro already reads the penalty as a good on-target shot via
@@ -2831,6 +2861,49 @@ def red_card_adjustments(match_id: int) -> dict:
     return {pid: -d["penalty"] for pid, d in red_card_details(match_id).items()}
 
 
+def own_goal_links(match_id: int) -> list[dict]:
+    """Ogni autogol della partita, col tiro che l'ha provocato (o None).
+
+    UNA FUNZIONE SOLA per due letture dello stesso legame, per la lezione di
+    ``is_own_goal``: il difensore (``own_goal_details``: deviazione o errore suo?)
+    e il tiratore (``goal_impact.induced_own_goals_by_player``: quota del credito
+    del gol). Ricopiato il confronto nei due posti, prima o poi direbbero che lo
+    stesso pallone e' una deviazione per l'uno e niente per l'altro.
+
+    Il tiro che l'ha provocato e' quello della squadra che dall'autogol GUADAGNA
+    (il ``team_side`` della riga dell'autogol, v. ``is_own_goal``), di un altro
+    giocatore, entro ``OWN_GOAL_DEFLECTION_WINDOW_S`` secondi; se sono piu' d'uno, il
+    piu' vicino. SofaScore tiene la riga del tiro anche quando il gol diventa
+    autogol, con l'esito che avrebbe avuto senza la deviazione (fuori, parato,
+    legno, murato): misurato sulla 25-26, 10 autogol su 22 ne hanno uno a 1-2 s.
+    Senza i secondi (righe importate prima di ``elapsed_seconds``) non si lega
+    niente: un minuto e' troppo largo per dire quale tiro fosse.
+
+    [{og_player_id, og_seconds, minute, provoker_id | None, provoker_seconds,
+      provoker_xg}]"""
+    sides = appearance_sides([match_id])
+    shots = list(MatchShot.objects.filter(match_id=match_id)
+                 .values_list("player_id", "team_side", "shot_type",
+                              "elapsed_seconds", "minute", "xg"))
+    out = []
+    for pid, ts, st, og_sec, minute, _xg in shots:
+        if not is_own_goal(st, ts, sides.get((match_id, pid))):
+            continue
+        provoker = provoker_sec = provoker_xg = None
+        if og_sec is not None:
+            near = [(abs(sec - og_sec), sec > og_sec, sp, sec, float(xg or 0.0))
+                    for sp, side, _st, sec, _m, xg in shots
+                    if side == ts and sp is not None and sp != pid
+                    and sec is not None
+                    and abs(sec - og_sec) <= OWN_GOAL_DEFLECTION_WINDOW_S]
+            if near:
+                _d, _after, provoker, provoker_sec, provoker_xg = min(near)
+        out.append({"og_player_id": pid, "og_seconds": og_sec, "minute": minute,
+                    "provoker_id": provoker, "provoker_seconds": provoker_sec,
+                    "provoker_xg": provoker_xg})
+    return out
+
+
 def own_goal_details(match_id: int) -> dict:
     """{player_id: {kind, count, penalty}} for own goals, graded by fault.
 
@@ -2840,21 +2913,13 @@ def own_goal_details(match_id: int) -> dict:
     cannot measure). The vote drop differs by a factor of 2.5 between the first two,
     so an explanation that only said "autogol" would be hiding the reason for most of
     the number it reports."""
-    sides = appearance_sides([match_id])
-    shots = list(MatchShot.objects.filter(match_id=match_id)
-                 .values_list("player_id", "team_side", "is_goal", "shot_type",
-                              "elapsed_seconds"))
-    own_goals = [(pid, sec) for pid, ts, isg, st, sec in shots
-                 if is_own_goal(st, ts, sides.get((match_id, pid)))]
     out = {}
-    for pid, og_sec in own_goals:
+    for link in own_goal_links(match_id):
+        pid, og_sec = link["og_player_id"], link["og_seconds"]
         if og_sec is None:
             kind, pen = "ungraded", OWN_GOAL_VOTE_FLAT
         else:
-            opp = "away" if sides.get((match_id, pid)) == "home" else "home"
-            deflection = any(ts == opp and sp != pid and sec is not None
-                             and abs(sec - og_sec) <= OWN_GOAL_DEFLECTION_WINDOW_S
-                             for sp, ts, _isg, _st, sec in shots)
+            deflection = link["provoker_id"] is not None
             kind = "deflection" if deflection else "solo"
             pen = (OWN_GOAL_VOTE_DEFLECTION if deflection else OWN_GOAL_VOTE_SOLO)
         prev = out.get(pid)
@@ -4516,6 +4581,11 @@ def voto_puro_for_match(match, reference: dict,
     assist_band, _ = goal_impact.fixed_assist_band()
     assist_mean = goal_impact.role_mean_assist_credit()
     goal_credit_detail = goal_impact.goals_by_player(match)
+    # Gli autogol provocati viaggiano nello stesso dettaglio, marcati: il credito
+    # ne paga una quota secondo l'xG del tiro (induced_own_goal_share) e la frase li nomina per quello
+    # che sono.
+    for pid_, recs_ in goal_impact.induced_own_goals_by_player(match).items():
+        goal_credit_detail.setdefault(pid_, []).extend(recs_)
     goal_band, goal_p95 = goal_impact.fixed_band()
     # DALL'08/10/2026 un quarto del credito e' MERITO (la conclusione per il gol,
     # l'occasione servita per l'assist): v. goal_impact.goal_credit_for.

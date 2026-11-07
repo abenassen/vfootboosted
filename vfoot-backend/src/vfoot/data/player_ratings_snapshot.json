@@ -1,6 +1,6 @@
 {
  "format": 2,
- "scoring_fingerprint": "9c9547bff979ed31",
+ "scoring_fingerprint": "fd40bb3f14b93e60",
  "seasons": {
   "sofascore:76457": {
    "data_version": "380:-",
@@ -955,7 +955,7 @@
      29
     ],
     "sofascore:253367": [
-     6.15,
+     6.17,
      26
     ],
     "sofascore:253369": [
@@ -1075,7 +1075,7 @@
      26
     ],
     "sofascore:341143": [
-     5.91,
+     5.92,
      32
     ],
     "sofascore:346948": [
@@ -1475,7 +1475,7 @@
      13
     ],
     "sofascore:835601": [
-     5.71,
+     5.73,
      26
     ],
     "sofascore:837080": [
@@ -2317,7 +2317,7 @@
      3
     ],
     "sofascore:1034082": [
-     6.0,
+     6.25,
      2
     ],
     "sofascore:1035619": [

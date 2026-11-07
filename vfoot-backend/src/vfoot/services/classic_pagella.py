@@ -717,7 +717,11 @@ SHOT_OUTCOME_IT = {"goal": "gol", "save": "parato", "post": "legno",
                    "blocked-off-line": "salvato sulla linea",
                    # chiave nostra, come l'autogol: il fornitore lo chiama ``miss``
                    # (v. classic_rating.is_interrupted_shot)
-                   "interrupted": "ostacolato"}
+                   "interrupted": "ostacolato",
+                   # chiave nostra: il tiro che un avversario ha deviato in porta
+                   # (v. classic_rating.own_goal_links). Il fornitore lo lascia col
+                   # suo esito senza deviazione, quasi sempre ``miss``.
+                   "induced_own_goal": "provoca autogol"}
 # E da dove veniva.
 SHOT_SITUATION_IT = {
     "regular": "azione", "assisted": "su assist", "fast-break": "in contropiede",
@@ -844,6 +848,16 @@ def shot_detail(match, player_id: int) -> dict:
     own_side = appearance_sides([match.id]).get(key)
     for s in shots:
         s["own_goal"] = is_own_goal(s["shot_type"], s["team_side"], own_side)
+    # IL TIRO CHE HA PROVOCATO UN AUTOGOL: nel sotto-indice resta quello che il
+    # fornitore dice (di solito fuori, e costa quel che costa), ma si chiama per
+    # quello che e' stato. La quota del credito del gol ha la sua riga nel
+    # riassunto, come il gol (v. classic_rating.induced_own_goal_share).
+    from vfoot.services.classic_rating import own_goal_links
+    induced_at = {l["provoker_seconds"] for l in own_goal_links(match.id)
+                  if l["provoker_id"] == player_id}
+    for s in shots:
+        s["induced"] = (not s["own_goal"] and s["elapsed_seconds"] is not None
+                        and s["elapsed_seconds"] in induced_at)
 
     mins_map = _minutes_map([match.id])
     mins = mins_map.get(key, 0)
@@ -1024,6 +1038,7 @@ def shot_detail(match, player_id: int) -> dict:
             "minute": s["minute"],
             "minute_label": minute_label(s["minute"], s["elapsed_seconds"]),
             "outcome": (SHOT_OUTCOME_IT["own"] if own else
+                        SHOT_OUTCOME_IT["induced_own_goal"] if s["induced"] else
                         SHOT_OUTCOME_IT["interrupted"] if cut else
                         SHOT_OUTCOME_IT.get(s["shot_type"], s["shot_type"] or "tiro")),
             "situation": SHOT_SITUATION_IT.get(s["situation"] or "", ""),
