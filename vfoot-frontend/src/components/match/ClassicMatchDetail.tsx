@@ -211,13 +211,24 @@ function defenseReason(d: ClassicDefenseBonus): string {
 function LiveBadge({
   label = 'live',
   title = 'Il dato arriva da una partita ancora in corso: questo numero può ancora cambiare.',
-}: { label?: string; title?: string }) {
+  settling = false,
+}: { label?: string; title?: string; settling?: boolean }) {
+  // `settling`: partita FINITA, dati da confermare (fino a +8h). Niente viola e
+  // niente pulsare: quelli dicono «la palla rotola», e con la sola scritta diversa
+  // Politano, uscito alle 14:30, sembrava ancora in campo la sera (08/11/2026). Il
+  // tooltip che li distingueva sul telefono non lo legge nessuno.
   return (
     <span
       title={title}
-      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-live-bg px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-live"
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+        settling ? 'bg-surface-2 text-ink-faint' : 'bg-live-bg text-live'
+      }`}
     >
-      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" />
+      <span
+        className={`inline-block h-1.5 w-1.5 rounded-full ${
+          settling ? 'border border-current' : 'animate-pulse bg-live'
+        }`}
+      />
       {label}
     </span>
   );
@@ -494,6 +505,7 @@ export function ClassicMatchDetail({
                 <LiveBadge label={d.minute != null ? `in corso · ${d.minute}'` : 'in corso'} />
               ) : d.provisional ? (
                 <LiveBadge
+                  settling
                   label="provvisorio"
                   title="La partita è finita, ma i dati non sono ancora confermati: questi numeri possono cambiare di poco."
                 />
@@ -671,7 +683,7 @@ function TeamColumn({
               {team.in_progress ? (
                 <LiveBadge label="in corso" />
               ) : team.provisional ? (
-                <LiveBadge label="provvisorio" />
+                <LiveBadge settling label="provvisorio" />
               ) : null}
               <span>
                 {team.goals} gol{!realMatch ? <> · <b>{fmt(team.total)}</b> fanta</> : null}
@@ -888,11 +900,14 @@ function verdictOf(p: ClassicPlayerLine): Verdict | null {
 
 /** Il punto che pulsa, senza la parola accanto: sulla riga stretta la parola non
  *  ci sta, e il colore la dice lo stesso. */
-function LiveDot({ title }: { title?: string }) {
+function LiveDot({ title, settling = false }: { title?: string; settling?: boolean }) {
+  // `settling` come in LiveBadge: un cerchietto fermo, non il pallino che pulsa.
   return (
     <span
       title={title}
-      className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-live"
+      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+        settling ? 'border border-ink-faint' : 'animate-pulse bg-live'
+      }`}
     />
   );
 }
@@ -944,17 +959,27 @@ function SubNote({ p, mode }: { p: ClassicPlayerLine; mode: 'full' | 'names' | '
   const out = p.replaced_by;
   if (!inFor && !out) return null;
   const truncate = mode === 'names' ? 'truncate' : '';
+  // La freccia come una pastiglia piena, non un glifo da 10px: sul telefono il ▲
+  // verde chiaro accanto ai minuti non si vedeva (08/11/2026). Entra verde, esce
+  // rosso, ognuno col suo fondo: si legge anche senza distinguere il colore.
+  const chip = 'inline-flex h-[13px] min-w-[13px] shrink-0 items-center justify-center rounded-sm px-0.5 text-[9px] font-black leading-none';
   return (
     <>
       {inFor ? (
-        <span className={`${truncate} font-semibold text-good`} title={`Entra per ${inFor.name}`}>
-          ▲{mode === 'full' ? ` entra per ${inFor.name}` : mode === 'names' ? ` ${inFor.name}` : ''}
+        <span className="inline-flex min-w-0 items-center gap-1 font-semibold text-good" title={`Entra per ${inFor.name}`}>
+          <span className={`${chip} bg-good-bg`}>▲</span>
+          {mode === 'arrows' ? null : (
+            <span className={truncate}>{mode === 'full' ? `entra per ${inFor.name}` : inFor.name}</span>
+          )}
         </span>
       ) : null}
       {inFor && out && mode !== 'arrows' ? <span className="text-ink-faint">·</span> : null}
       {out ? (
-        <span className={`${truncate} text-ink-faint`} title={`Esce · entra ${out.name}`}>
-          ↓{mode === 'full' ? ` esce · entra ${out.name}` : mode === 'names' ? ` ${out.name}` : ''}
+        <span className="inline-flex min-w-0 items-center gap-1 text-ink-faint" title={`Esce · entra ${out.name}`}>
+          <span className={`${chip} bg-bad-bg text-bad`}>▼</span>
+          {mode === 'arrows' ? null : (
+            <span className={truncate}>{mode === 'full' ? `esce · entra ${out.name}` : out.name}</span>
+          )}
         </span>
       ) : null}
     </>
@@ -1085,6 +1110,7 @@ function PlayerRow({
                   {p.malus > 0 ? <span className="font-semibold text-bad">−{fmt(p.malus)}</span> : null}
                   {p.provisional ? (
                     <LiveDot
+                      settling={!p.in_progress}
                       title={
                         p.in_progress
                           ? 'Il dato arriva da una partita ancora in corso: questo numero può ancora cambiare.'
@@ -1153,6 +1179,7 @@ function PlayerRow({
             pulsava su prestazioni concluse. */}
         {p.provisional && !onPitchNow ? (
           <LiveBadge
+            settling={!p.in_progress}
             label={p.in_progress ? 'live' : 'provvisorio'}
             title={
               p.in_progress
