@@ -737,6 +737,57 @@ def _carried_presence(match) -> dict[int, tuple[dict[str, float], dict[str, floa
     return out
 
 
+def carry_own_goal_shooters(match, new_rows, *, was_finished: bool = True) -> None:
+    """Sui gol riletti come autogol, ricorda chi aveva tirato (v.
+    ``MatchShot.own_goal_shooter``). Va chiamata PRIMA di cancellare le righe vecchie.
+
+    La chiave e' (lato, secondo) del gol: SofaScore riscrive la riga sul posto, e
+    l'id del tiro non e' stato misurato stabile attraverso una rilettura. Si scrive
+    solo se la riga nuova e' un autogol (``is_own_goal``, con le presenze appena
+    scritte da questo stesso import) e la vecchia era un gol di un ALTRO giocatore:
+    se era gia' un autogol, si riporta avanti quello che portava.
+
+    Il rischio (08/11/2026): la stessa riscrittura e' anche come SofaScore corregge un
+    marcatore SBAGLIATO — un gol dato a un attaccante che non l'ha toccata, poi
+    restituito al difensore. Dai dati le due cose sono identiche; le separa il
+    momento. L'errore d'attribuzione si corregge a partita in corso; la rilettura
+    gol/autogol arriva dopo il fischio (Simeone: alla conferma delle +8h). Percio' il
+    tiratore nuovo si registra solo se la partita era gia' FINITA all'import
+    precedente (``was_finished``); quello gia' registrato si riporta sempre avanti.
+    Resta scoperto l'errore che sopravvive al fischio: costa al massimo la quota del
+    25% (xG basso) e lo vede l'admin nell'avviso di rettifica."""
+    from vfoot.services.classic_rating import is_own_goal   # realdata non dipende da vfoot
+
+    old = {(s.team_side, s.elapsed_seconds): s for s in
+           MatchShot.objects.filter(match=match, provider=PROVIDER, is_goal=True,
+                                    elapsed_seconds__isnull=False)}
+    if not old:
+        return
+    sides = dict(MatchAppearance.objects.filter(match=match)
+                 .values_list("player_id", "side"))
+    for row in new_rows:
+        prev = old.get((row.team_side, row.elapsed_seconds))
+        if (prev is None or not row.is_goal or prev.player_id == row.player_id
+                or not is_own_goal(row.shot_type, row.team_side,
+                                   sides.get(row.player_id))):
+            continue
+        if is_own_goal(prev.shot_type, prev.team_side, sides.get(prev.player_id)):
+            # Un autogol che resta autogol (magari d'un altro difensore): quel che
+            # portava viaggia con lui, anche a partita in corso.
+            row.own_goal_shooter_id = prev.own_goal_shooter_id
+            row.own_goal_shooter_xg = prev.own_goal_shooter_xg
+        elif was_finished:
+            row.own_goal_shooter_id = prev.player_id
+            row.own_goal_shooter_xg = prev.xg
+    # Lo stesso autogol reimportato tale e quale: si tiene quel che portava.
+    for row in new_rows:
+        prev = old.get((row.team_side, row.elapsed_seconds))
+        if (prev is not None and prev.player_id == row.player_id
+                and prev.own_goal_shooter_id and row.own_goal_shooter_id is None):
+            row.own_goal_shooter_id = prev.own_goal_shooter_id
+            row.own_goal_shooter_xg = prev.own_goal_shooter_xg
+
+
 def _ingest_match(
     *, scraper, event: dict[str, Any], competition_season: CompetitionSeason,
     team_cache: dict[str, TeamSeason], player_cache: dict[str, Player],
@@ -759,6 +810,11 @@ def _ingest_match(
     incidents_rows = scraper.incidents_records(match_id)
     home_ts = _team_season(home_team, competition_season, team_cache)
     away_ts = _team_season(away_team, competition_season, team_cache)
+    # Era gia' finita PRIMA di questo import? Solo allora una rilettura gol -> autogol
+    # e' una decisione sul fatto e non un marcatore sbagliato corretto in diretta (v.
+    # ``carry_own_goal_shooters``).
+    was_finished = Match.objects.filter(
+        external_id=str(match_id), status=Match.STATUS_FINISHED).exists()
     match = _upsert_match(event, competition_season, home_ts, away_ts)
     # Read before anything is written for this match, and only when it is needed.
     carried = _carried_presence(match) if not with_heatmaps else {}
@@ -974,6 +1030,7 @@ def _ingest_match(
     # MatchShot stays delete-and-reinsert: its unique constraint is CONDITIONAL
     # (~Q(external_id="")), which update_conflicts cannot key on, and it is ~25 rows
     # a match — nothing worth the complication.
+    carry_own_goal_shooters(match, shot_rows, was_finished=was_finished)
     MatchShot.objects.filter(match=match, provider=PROVIDER).delete()
     MatchShot.objects.bulk_create(shot_rows, batch_size=500, ignore_conflicts=True)
 

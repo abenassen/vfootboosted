@@ -118,6 +118,11 @@ PLAYER_FIELDS = ("id", "name")
 SHOT_FIELDS = ("id", "isHome", "player", "playerCoordinates", "shotType",
                "situation", "time", "xg")
 INCIDENT_FIELDS = ("incidentType", "time")
+# Campi che una riga, per come e' fatta, legittimamente non porta. L'autogol
+# (``goalType: own``) arriva SENZA xG: non era un tiro di chi l'ha segnato. Contato,
+# una partita con due autogol su 17 righe (Torino-Lecce, 08/11/2026) stava all'88%
+# e il canarino gridava a una colonna sparita che c'era tutta.
+EXEMPT = {"xg": lambda r: r.get("goalType") == "own"}
 
 # What a match that has BEEN PLAYED leaves in the cache beside its squad sheet. The
 # probable round writes the sheet alone (``egress/fetch_worker.fetch_probable``);
@@ -256,8 +261,10 @@ def _check_rows(report: CanaryReport, path: Path, root: str, fields: tuple[str, 
     rows = data.get(root) or []
     if not rows:
         return
-    missing = sorted({f for f in fields
-                      if sum(1 for r in rows if f in r) < 0.9 * len(rows)})
+    def short(f):
+        due = [r for r in rows if not (f in EXEMPT and EXEMPT[f](r))]
+        return due and sum(1 for r in due if f in r) < 0.9 * len(due)
+    missing = sorted({f for f in fields if short(f)})
     if missing:
         report.add("alarm", code,
                    f"{label} ({path.name}): campi assenti in gran parte delle "

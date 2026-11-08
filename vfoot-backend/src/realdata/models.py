@@ -768,6 +768,17 @@ class MatchShot(models.Model):
     # Null = nessun punto di blocco, oppure riga importata prima del campo:
     # ``backfill_shot_seconds`` lo riempie dalla cache.
     interception_m = models.FloatField(null=True, blank=True)
+    # CHI AVEVA TIRATO, su un autogol che prima era un gol (08/11/2026, Torino-Lecce).
+    # Quando la Lega rilegge un gol come autogol, SofaScore NON aggiunge una riga
+    # d'autogol accanto al tiro: RISCRIVE la riga del gol — stesso secondo, stesso
+    # xGOT — dandola al difensore e togliendole l'xG. Il tiro di Simeone al 60' e'
+    # sparito cosi', e con lui l'unica prova di chi l'aveva provocato
+    # (``classic_rating.own_goal_links`` cerca un tiro vicino e non ne trova). Il
+    # reimport conserva qui tiratore e xG della riga di prima; i reimport successivi
+    # li riportano avanti. Null = autogol nato autogol, o nessuna rilettura vista.
+    own_goal_shooter = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True,
+                                         blank=True, related_name="+")
+    own_goal_shooter_xg = models.FloatField(null=True, blank=True)
     provider = models.CharField(max_length=24, choices=PROVIDER_CHOICES,
                                 default=PROVIDER_SOFASCORE)
     external_id = models.CharField(max_length=64, blank=True, default="")

@@ -2884,20 +2884,26 @@ def own_goal_links(match_id: int) -> list[dict]:
     sides = appearance_sides([match_id])
     shots = list(MatchShot.objects.filter(match_id=match_id)
                  .values_list("player_id", "team_side", "shot_type",
-                              "elapsed_seconds", "minute", "xg"))
+                              "elapsed_seconds", "minute", "xg",
+                              "own_goal_shooter_id", "own_goal_shooter_xg"))
     out = []
-    for pid, ts, st, og_sec, minute, _xg in shots:
+    for pid, ts, st, og_sec, minute, _xg, kept_id, kept_xg in shots:
         if not is_own_goal(st, ts, sides.get((match_id, pid))):
             continue
         provoker = provoker_sec = provoker_xg = None
         if og_sec is not None:
             near = [(abs(sec - og_sec), sec > og_sec, sp, sec, float(xg or 0.0))
-                    for sp, side, _st, sec, _m, xg in shots
+                    for sp, side, _st, sec, _m, xg, _k, _kx in shots
                     if side == ts and sp is not None and sp != pid
                     and sec is not None
                     and abs(sec - og_sec) <= OWN_GOAL_DEFLECTION_WINDOW_S]
             if near:
                 _d, _after, provoker, provoker_sec, provoker_xg = min(near)
+            elif kept_id is not None:
+                # Un gol riletto come autogol: la riga del tiro e' stata RISCRITTA, non
+                # affiancata, e il tiratore sopravvive solo in ``own_goal_shooter``.
+                # ``provoker_seconds`` resta None: non c'e' una riga sua da marcare.
+                provoker, provoker_xg = kept_id, float(kept_xg or 0.0)
         out.append({"og_player_id": pid, "og_seconds": og_sec, "minute": minute,
                     "provoker_id": provoker, "provoker_seconds": provoker_sec,
                     "provoker_xg": provoker_xg})
