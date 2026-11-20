@@ -45,7 +45,7 @@ from realdata.services import egress_client, job_log, roster_integrity
 from realdata.services.scrape_transfermarkt_squads import TM
 
 
-def _read_failures(out: Path) -> list[dict]:
+def _read_failures(out: Path, name: str = "failures.json") -> list[dict]:
     """The clubs the egress could not read, with why (``failures.json``).
 
     Empty when the file is missing — an egress older than the file, or a run that
@@ -53,7 +53,7 @@ def _read_failures(out: Path) -> list[dict]:
     failures": the count still comes from the files, as above.
     """
     try:
-        rows = json.loads((out / "failures.json").read_text())
+        rows = json.loads((out / name).read_text())
     except (OSError, ValueError):
         return []
     return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
@@ -105,8 +105,8 @@ class Command(BaseCommand):
                                  "timeout senza ritentativo costa il club per 12 "
                                  "ore, e con lui le partenze di quella rosa.")
         parser.add_argument("--min-map-score", type=float, default=0.5,
-                            help="Abort if any club maps below this name score "
-                                 "(unattended safety; default 0.5).")
+                            help="Skip (treat as unread) a club whose best name "
+                                 "match scores below this (default 0.5).")
         parser.add_argument("--keep-cache", action="store_true",
                             help="Don't delete the temp scrape dir (debugging).")
 
@@ -195,10 +195,20 @@ class Command(BaseCommand):
                 cache_dir=str(out),
                 competition_season=cs.id,
                 dry_run=opts["dry_run"],
-                # Unattended: refuse a club that maps to the wrong TeamSeason at a
-                # low name score rather than importing a wrong roster silently.
+                # Unattended: a club that maps only at a low name score is skipped
+                # (treated as unread) rather than importing a wrong roster.
                 min_map_score=opts["min_map_score"],
             )
+
+            # A club the import could not place with certainty was treated as
+            # unread: its roster is NOT in, whatever the scrape counted. Say so on
+            # the JobRun, or a read-but-unplaced club would look like a full run.
+            unplaced = _read_failures(out, "mapping_skipped.json")
+            if unplaced:
+                run.did(clubs_unmapped=len(unplaced))
+                run.note(f"{len(unplaced)} club non abbinati, rosa non importata: "
+                         + "; ".join(f"{u.get('name', '?')} ({u.get('reason', '')})"
+                                     for u in unplaced[:3]))
 
             # Il contatore di controllo. Va su JobRun anche a zero, di proposito:
             # e' uno zero che deve restare visibile giorno per giorno, perche' e'

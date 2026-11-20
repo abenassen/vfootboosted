@@ -242,6 +242,32 @@ class PlayerAlias(models.Model):
         return f"{self.alias} -> {self.player_id}"
 
 
+class TeamAlias(models.Model):
+    """A provider's stable id for a club, learnt once and then trusted over names.
+
+    Transfermarkt clubs used to be matched to our teams by NAME, afresh on every
+    import. «Inter Milan» scores 0.62 against both «Inter» and «AC Milan», and the
+    tie only stayed hidden while TM's «AC Milan» was there to take the Milan first:
+    the morning of 20/11/2026 the Milan page failed, and the Inter roster was
+    imported AS the Milan — 24 transfers and 28 departures that never happened.
+
+    Once a club has been matched with certainty its provider id is stored here, and
+    from then on the id decides: a rename, or a neighbour going missing, cannot
+    move it. A team holding an alias is also off-limits to name matching — that is
+    the record of «these two are known to be different».
+    """
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="aliases")
+    source = models.CharField(max_length=50)
+    alias = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("source", "alias")]
+
+    def __str__(self):
+        return f"{self.source}:{self.alias} -> {self.team_id}"
+
+
 class Match(models.Model):
     # Lifecycle status, mirrored from the provider's event status. `postponed`
     # is the one that drives league behaviour: a postponed real match can leave a

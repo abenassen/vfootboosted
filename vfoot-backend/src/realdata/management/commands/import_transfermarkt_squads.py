@@ -39,7 +39,7 @@ from django.db import transaction
 from realdata.models import (
     CompetitionSeason, MatchAppearance, Player, PlayerAlias, PlayerMarketValue,
     PlayerTeamStint,
-    TeamSeason, PROVIDER_SOFASCORE,
+    TeamAlias, TeamSeason, PROVIDER_SOFASCORE,
 )
 from realdata.services import roster_integrity
 from realdata.services.identity import (
@@ -82,6 +82,21 @@ _TM_ROLE_MAP = {
 # Filler tokens stripped before matching TM club names to SofaScore team names.
 _CLUB_FILLER = {"fc", "ac", "us", "ss", "ssc", "acf", "as", "bc", "cfc", "afc",
                 "calcio", "sporting", "club", "1907", "1909", "1913", "1919"}
+
+
+# How far ahead of every still-free alternative a name match must be to count.
+# «Inter Milan» scores 0.62 against both «Inter» and «AC Milan»: a margin of zero.
+MAP_MARGIN = 0.10
+
+
+def _read_club_list(cache: Path) -> list[dict]:
+    """The competition's full club list (``clubs.json``), [] when absent/unreadable."""
+    try:
+        rows = json.loads((cache / "clubs.json").read_text())
+    except (OSError, ValueError):
+        return []
+    return [r for r in rows if isinstance(r, dict) and r.get("id")] \
+        if isinstance(rows, list) else []
 
 
 def _club_key(name: str) -> str:
@@ -139,9 +154,9 @@ class Command(BaseCommand):
                             help="ISO date for new stints' start and departures' end "
                                  "(default: today).")
         parser.add_argument("--min-map-score", type=float, default=0.0,
-                            help="Abort if any TM club maps to a TeamSeason below "
-                                 "this name-similarity score (default 0 = off; the "
-                                 "poller sets a real threshold for unattended runs).")
+                            help="Skip (treat as unread) a TM club whose best "
+                                 "name match scores below this (default 0 = off; "
+                                 "the poller sets 0.5). Clubs known by id ignore it.")
         parser.add_argument("--min-squad", type=int, default=15,
                             help="Completeness guard: if any mapped club has fewer "
                                  "than this many players, skip closing departures "
@@ -164,23 +179,81 @@ class Command(BaseCommand):
                                "--competition-season.")
         return cs
 
-    def _map_clubs(self, tm_clubs, team_seasons):
-        """Greedy one-to-one TM-club -> TeamSeason by filler-stripped name."""
-        pairs = []
-        for tc in tm_clubs:
-            tk = _club_key(tc["name"])
-            for ts in team_seasons:
-                pairs.append((name_similarity(tk, _club_key(ts.team.name)),
-                              tc["id"], ts.id))
-        pairs.sort(key=lambda p: p[0], reverse=True)
-        ts_by_id = {ts.id: ts for ts in team_seasons}
-        used_tm, used_ts, mapping = set(), set(), {}
-        for score, tm_id, ts_id in pairs:
-            if tm_id in used_tm or ts_id in used_ts:
+    def _map_clubs(self, listed, team_seasons, min_score=0.0):
+        """TM club -> TeamSeason. Returns (mapping, learnt, skipped).
+
+        ``listed`` is EVERY club of the competition (``clubs.json``), not only the
+        ones whose roster arrived: the one-to-one assignment must see the whole
+        field, or a missing club leaves its team free for the nearest name (the
+        20/11/2026 morning: no Milan page, and «Inter Milan» took the Milan).
+
+        1. By stored id (``TeamAlias``) — decides alone, whatever the names say.
+        2. By name, only between clubs with no id on record and teams that hold
+           none (a team with an id is KNOWN to be some other club). Greedy from the
+           best score down, and a pair is accepted only if neither side has a
+           runner-up among what is still free within ``MAP_MARGIN``: a tie is not
+           a match. ``learnt`` are the pairs worth storing as ids.
+        3. What is left is ``skipped`` with a reason, and treated as unread — the
+           rest of the import goes on.
+
+        ``mapping`` values are (TeamSeason, score, method).
+        """
+        anchors = dict(TeamAlias.objects.filter(source=PROVIDER_TM)
+                       .values_list("alias", "team_id"))
+        anchored_teams = set(anchors.values())
+        ts_by_team = {ts.team_id: ts for ts in team_seasons}
+        mapping, skipped = {}, []
+        for c in listed:
+            team_id = anchors.get(str(c["id"]))
+            if team_id is None:
                 continue
-            used_tm.add(tm_id); used_ts.add(ts_id)
-            mapping[tm_id] = (ts_by_id[ts_id], score)
-        return mapping
+            if team_id in ts_by_team:
+                mapping[c["id"]] = (ts_by_team[team_id], 1.0, "id")
+            else:
+                skipped.append((c, "id TM registrato su una squadra che non e' "
+                                   "in questa stagione"))
+        done = set(mapping) | {c["id"] for c, _ in skipped}
+
+        free_clubs = {c["id"]: c for c in listed if c["id"] not in done}
+        free_ts = {ts.id: ts for ts in team_seasons
+                   if ts.team_id not in anchored_teams}
+        score = {}
+        for cid, c in free_clubs.items():
+            ck = _club_key(c["name"])
+            for tsid, ts in free_ts.items():
+                score[cid, tsid] = name_similarity(ck, _club_key(ts.team.name))
+        learnt = []
+        for (cid, tsid), s in sorted(score.items(), key=lambda kv: -kv[1]):
+            if cid not in free_clubs or tsid not in free_ts:
+                continue
+            rival_ts = max((score[cid, t] for t in free_ts if t != tsid),
+                           default=0.0)
+            rival_club = max((score[k, tsid] for k in free_clubs if k != cid),
+                             default=0.0)
+            if s - max(rival_ts, rival_club) < MAP_MARGIN:
+                # Not a match: the club is skipped, the team stays free (another
+                # club may still claim it with a clear score).
+                other = (free_ts[max((t for t in free_ts if t != tsid),
+                                     key=lambda t: score[cid, t])].team.name
+                         if rival_ts >= rival_club else None)
+                skipped.append((free_clubs.pop(cid),
+                                f"nome ambiguo: '{free_ts[tsid].team.name}' "
+                                f"[{s:.2f}]" + (f" contro '{other}' "
+                                                f"[{rival_ts:.2f}]" if other else
+                                                " ha un altro club vicino")))
+                continue
+            if s < min_score:
+                skipped.append((free_clubs.pop(cid),
+                                f"nome troppo diverso: miglior candidato "
+                                f"'{free_ts[tsid].team.name}' [{s:.2f}]"))
+                continue
+            c = free_clubs.pop(cid)
+            ts = free_ts.pop(tsid)
+            mapping[cid] = (ts, s, "nome")
+            learnt.append((c, ts))
+        for c in free_clubs.values():
+            skipped.append((c, "nessuna squadra libera"))
+        return mapping, learnt, skipped
 
     # -- matching --------------------------------------------------------
 
@@ -265,31 +338,58 @@ class Command(BaseCommand):
         for f in files:
             d = json.loads(Path(f).read_text())
             tm_clubs.append({**d["club"], "players": d["players"]})
-        mapping = self._map_clubs(tm_clubs, team_seasons)
+        # The WHOLE field, read or not: see _map_clubs. An old cache without
+        # clubs.json falls back to the rosters it has — the margin rule still
+        # refuses a tie, but nothing learnt from a partial field is stored.
+        listed = _read_club_list(cache)
+        complete = bool(listed) and len(listed) >= len(team_seasons)
+        read_ids = {c["id"] for c in tm_clubs}
+        if listed:
+            listed_ids = {str(c["id"]) for c in listed}
+            listed += [c for c in tm_clubs if str(c["id"]) not in listed_ids]
+        else:
+            listed = tm_clubs
+        mapping, learnt, skipped = self._map_clubs(
+            listed, team_seasons, min_score=opts["min_map_score"])
 
-        unmapped = [c["name"] for c in tm_clubs if c["id"] not in mapping]
-        if unmapped:
-            raise CommandError(f"Could not map TM clubs: {unmapped}")
         self.stdout.write("Club mapping:")
-        low = []
-        for c in sorted(tm_clubs, key=lambda c: mapping[c["id"]][1]):
-            ts, sc = mapping[c["id"]]
+        for c in sorted((c for c in listed if c["id"] in mapping),
+                        key=lambda c: mapping[c["id"]][1]):
+            ts, sc, how = mapping[c["id"]]
             flag = "  <-- low" if sc < 0.6 else ""
-            if sc < opts["min_map_score"]:
-                low.append((c["name"], ts.team.name, sc))
+            unread = "" if c["id"] in read_ids else "  (rosa non letta)"
             self.stdout.write(f"  TM '{c['name']}' -> '{ts.team.name}' "
-                              f"[{sc:.2f}]{flag}")
-        # Greedy one-to-one pairs every club regardless of score, so a bad name
-        # match is a LOW score, not an unmapped club. A human reading the report
-        # catches "Pisa -> Monza [0.22]"; an unattended poll must refuse it rather
-        # than import the wrong roster. Off by default (--min-map-score 0) to keep
-        # the manual command's behaviour; the poller passes a real threshold.
-        if low:
-            raise CommandError(
-                "Club mapping below --min-map-score "
-                f"{opts['min_map_score']}: "
-                + "; ".join(f"TM '{a}' -> '{b}' [{s:.2f}]" for a, b, s in low)
-                + ". Refusing to import (likely a name mismatch).")
+                              f"[{how} {sc:.2f}]{flag}{unread}")
+        # A club we cannot place with certainty is treated as UNREAD, not as a
+        # reason to throw the other nineteen away: its roster is not imported and
+        # its team stays out of the departure check (it has no trusted snapshot).
+        # The poll reads mapping_skipped.json and records it on the JobRun.
+        if skipped:
+            self.stdout.write(self.style.ERROR(
+                f"CLUB NON ABBINATI ({len(skipped)}), rosa NON importata:"))
+            for c, why in skipped:
+                self.stdout.write(f"   TM '{c['name']}' (id {c['id']}): {why}")
+        if not dry:
+            try:
+                (cache / "mapping_skipped.json").write_text(json.dumps(
+                    [{"id": c["id"], "name": c["name"], "reason": why}
+                     for c, why in skipped], ensure_ascii=False))
+            except OSError:
+                pass
+        tm_clubs = [c for c in tm_clubs if c["id"] in mapping]
+        if learnt and complete and not dry:
+            for c, ts in learnt:
+                TeamAlias.objects.get_or_create(
+                    source=PROVIDER_TM, alias=str(c["id"]),
+                    defaults={"team": ts.team})
+            self.stdout.write(
+                f"Id TM registrati            : {len(learnt)} ("
+                + ", ".join(f"{c['id']}={ts.team.name}" for c, ts in learnt)
+                + ")")
+        elif learnt and not complete:
+            self.stdout.write(
+                "Id TM non registrati: elenco dei club incompleto (manca "
+                "clubs.json o non copre la stagione).")
 
         ss_players = list(Player.objects.filter(external_source=PROVIDER_SOFASCORE))
         by_dob, by_name = self._build_indices(ss_players)
@@ -317,7 +417,7 @@ class Command(BaseCommand):
         @transaction.atomic
         def run():
             for club in tm_clubs:
-                ts, _ = mapping[club["id"]]
+                ts = mapping[club["id"]][0]
                 for pl in club["players"]:
                     tp_name, tp_dob = pl["name"], _parse_iso(pl["dob"])
                     tm_id = str(pl["tm_id"])

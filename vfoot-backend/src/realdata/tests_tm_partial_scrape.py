@@ -275,3 +275,146 @@ class ScrapeParziale(TestCase):
             PlayerTeamStint.objects.get(player=partito).end_date, date.today())
         self.assertNotIn("Partenze non controllate", report)
         self.assertIn("Tesseramenti sovrapposti     : 0", report)
+
+
+class MappaturaClub(TestCase):
+    """Il 20/11/2026 la pagina del Milan non ha risposto e la rosa dell'Inter e'
+    stata importata COME il Milan: 24 trasferimenti e 28 partenze mai avvenuti.
+
+    «Inter Milan» vale 0.62 sia contro «Inter» sia contro «AC Milan». Finche' il
+    Milan di TM c'era, si prendeva il Milan a 1.00 e il pareggio non si vedeva;
+    senza, l'abbinamento greedy l'ha sciolto dalla parte sbagliata. Tre difese,
+    una per test: l'elenco completo, il margine, l'id registrato.
+    """
+
+    def setUp(self):
+        comp = Competition.objects.create(name="Serie A")
+        seas = Season.objects.create(code="2026-2027")
+        self.cs = CompetitionSeason.objects.create(
+            competition=comp, season=seas, name="Serie A 2026-2027")
+        # Il Milan PRIMA dell'Inter, come in produzione: a pari punteggio il
+        # vecchio abbinamento sceglieva la prima squadra incontrata.
+        self.milan = TeamSeason.objects.create(
+            competition_season=self.cs, team=Team.objects.create(name="AC Milan"))
+        self.inter = TeamSeason.objects.create(
+            competition_season=self.cs, team=Team.objects.create(name="Inter"))
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cache = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        # Un nerazzurro e un rossonero gia' tesserati, con il loro id TM.
+        self.bastoni = self._make_player("Alessandro Bastoni", date(1999, 4, 13),
+                                         self.inter, "315853")
+        self.maignan = self._make_player("Mike Maignan", date(1995, 7, 3),
+                                         self.milan, "182906")
+
+    def _make_player(self, name, dob, ts, tm_id):
+        from realdata.models import PlayerAlias
+        p = Player.objects.create(full_name=name, date_of_birth=dob,
+                                  external_source=PROVIDER_SOFASCORE,
+                                  external_id=f"ss{tm_id}")
+        PlayerAlias.objects.create(player=p, source="transfermarkt", alias=tm_id)
+        PlayerTeamStint.objects.create(player=p, team_season=ts,
+                                       start_date=date(2026, 7, 1))
+        return p
+
+    def _club(self, tm_id, name):
+        return {"id": tm_id, "name": name, "slug": name.lower().replace(" ", "-"),
+                "url": f"https://example.invalid/{tm_id}"}
+
+    def _write_list(self, *clubs):
+        (self.cache / "clubs.json").write_text(json.dumps(list(clubs)))
+
+    def _write_inter_roster(self, name="Inter Milan"):
+        rows = [_player_row("315853", "Alessandro Bastoni", "1999-04-13")]
+        rows += [_player_row(f"i{i}", f"Nerazzurro {i}", f"199{i % 10}-02-0{i % 9 + 1}")
+                 for i in range(16)]
+        (self.cache / "club_46.json").write_text(json.dumps(
+            {"club": self._club("46", name), "players": rows}))
+
+    def _run(self, **kw):
+        out = StringIO()
+        call_command("import_transfermarkt_squads", cache_dir=str(self.cache),
+                     competition_season=self.cs.id, stdout=out, stderr=out, **kw)
+        return out.getvalue()
+
+    def _open_team(self, player):
+        return list(PlayerTeamStint.objects.filter(player=player, end_date=None)
+                    .values_list("team_season_id", flat=True))
+
+    def test_la_mattina_del_20_novembre(self):
+        """Elenco completo, rosa del Milan mancante: l'Inter resta Inter."""
+        inter, milan = self._club("46", "Inter Milan"), self._club("5", "AC Milan")
+        self._write_list(inter, milan)
+        self._write_inter_roster()
+
+        report = self._run(min_map_score=0.5)
+
+        self.assertEqual(self._open_team(self.bastoni), [self.inter.id],
+                         "Bastoni e' stato spostato al Milan")
+        self.assertEqual(self._open_team(self.maignan), [self.milan.id],
+                         "il Milan non e' stato letto: Maignan non e' partito")
+        self.assertIn("TM 'Inter Milan' -> 'Inter'", report)
+        # Elenco completo e abbinamento netto: gli id si registrano.
+        from realdata.models import TeamAlias
+        self.assertEqual(
+            dict(TeamAlias.objects.values_list("alias", "team__name")),
+            {"46": "Inter", "5": "AC Milan"})
+
+    def test_senza_elenco_il_pareggio_si_salta_non_si_indovina(self):
+        """Una cache vecchia, senza clubs.json: il campo e' parziale e «Inter
+        Milan» e' a pari merito fra le due squadre. Si salta il club, il resto
+        prosegue, e nessun id viene registrato su un campo incompleto."""
+        self._write_inter_roster()
+
+        report = self._run(min_map_score=0.5)
+
+        self.assertEqual(self._open_team(self.bastoni), [self.inter.id])
+        self.assertEqual(self._open_team(self.maignan), [self.milan.id])
+        self.assertIn("CLUB NON ABBINATI (1)", report)
+        self.assertIn("nome ambiguo", report)
+        from realdata.models import TeamAlias
+        self.assertFalse(TeamAlias.objects.exists())
+        skipped = json.loads((self.cache / "mapping_skipped.json").read_text())
+        self.assertEqual([s["id"] for s in skipped], ["46"])
+
+    def test_l_id_registrato_regge_un_cambio_di_nome(self):
+        """TM rinomina il club: con l'id in archivio il nome non conta piu'."""
+        from realdata.models import TeamAlias
+        TeamAlias.objects.create(team=self.inter.team, source="transfermarkt",
+                                 alias="46")
+        self._write_inter_roster(name="FC Internazionale Milano")
+
+        report = self._run(min_map_score=0.5)
+
+        self.assertEqual(self._open_team(self.bastoni), [self.inter.id])
+        self.assertIn("-> 'Inter' [id 1.00]", report)
+
+    def test_una_squadra_con_id_non_si_prende_per_nome(self):
+        """Il Milan ha gia' il suo id (5): «Inter Milan», sconosciuto, non puo'
+        prenderselo per somiglianza, anche se il Milan stamattina manca."""
+        from realdata.models import TeamAlias
+        TeamAlias.objects.create(team=self.milan.team, source="transfermarkt",
+                                 alias="5")
+        self._write_inter_roster()
+
+        self._run(min_map_score=0.5)
+
+        self.assertEqual(self._open_team(self.bastoni), [self.inter.id])
+        self.assertEqual(self._open_team(self.maignan), [self.milan.id])
+
+    def test_un_nome_irriconoscibile_non_ferma_gli_altri(self):
+        """Sotto la soglia un club si salta; prima si buttava via l'import intero."""
+        from realdata.models import TeamAlias
+        TeamAlias.objects.create(team=self.inter.team, source="transfermarkt",
+                                 alias="46")
+        self._write_inter_roster()
+        (self.cache / "club_999.json").write_text(json.dumps(
+            {"club": self._club("999", "Pisa Sporting Club"),
+             "players": [_player_row("p1", "Pisano Uno", "1990-01-01")]}))
+
+        report = self._run(min_map_score=0.5)
+
+        self.assertIn("CLUB NON ABBINATI (1)", report)
+        self.assertIn("Pisa Sporting Club", report)
+        self.assertFalse(Player.objects.filter(full_name="Pisano Uno").exists())
+        self.assertEqual(self._open_team(self.bastoni), [self.inter.id])
