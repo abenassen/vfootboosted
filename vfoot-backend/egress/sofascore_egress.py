@@ -89,6 +89,13 @@ PREFERRED_CC = ["it", "gb", "es", "ch", "nl", "fr", "de", "at", "pt", "us"]
 TM_PREFERRED_CC = ["it", "ch", "at"]
 # A pooled IP is considered still-fresh (skip re-probing) within this window.
 FRESH_SECONDS = 6 * 3600
+# A demoted exit is probed again after this long. Before 23/11/2026 a demotion was
+# for life: ``candidate_ips`` skips every IP the pool already knows, so one failed
+# page took an exit out forever. The TM pool sat at 2 good out of 13 known, and a
+# re-probe that morning passed 8 of the 11 demoted ones — most had been demoted for
+# a single flicker. They go to the BACK of the queue: fresh IPs first, so a pool
+# with candidates to spare (SofaScore: ~485 never tried) behaves as before.
+REPROBE_AFTER_SECONDS = 7 * 86400
 
 # --- the last resort: a real browser ------------------------------------------
 # When SofaScore refuses every fingerprint curl_cffi can imitate, no exit IP helps
@@ -411,6 +418,25 @@ def good_servers(servers: list[dict]) -> list[dict]:
 
 
 # --- operations -------------------------------------------------------------
+def stale_demoted(servers: list[dict], now: datetime | None = None
+                  ) -> list[tuple[str, str, str]]:
+    """Demoted entries last checked more than REPROBE_AFTER_SECONDS ago, oldest
+    first, in the same (endpoint_ip, cluster, pubkey) shape as candidate_ips."""
+    now = now or datetime.now(timezone.utc)
+    out = []
+    for s in servers:
+        if s.get("last_ok") or not s.get("pubKey"):
+            continue
+        try:
+            checked = datetime.fromisoformat(s.get("last_checked") or "")
+        except ValueError:
+            checked = datetime.min.replace(tzinfo=timezone.utc)
+        if (now - checked).total_seconds() >= REPROBE_AFTER_SECONDS:
+            out.append((checked, s["endpoint_ip"], s.get("cluster", "?"), s["pubKey"]))
+    out.sort()
+    return [(ip, cl, pk) for _, ip, cl, pk in out]
+
+
 def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
     priv, addr = _client_identity()
     servers = load_pool(tgt)
@@ -421,7 +447,10 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
         print("already at target; nothing to do.")
         return
     cands = candidate_ips(known=set(by_ip), preferred_cc=tgt.preferred_cc)
-    print(f"{len(cands)} fresh candidate IP(s) to try.")
+    retry = stale_demoted(servers)
+    print(f"{len(cands)} fresh candidate IP(s) to try, then {len(retry)} "
+          f"demoted one(s) due for a second look.")
+    cands = cands + retry
     probes = 0
     # Exits that refused EVERY fingerprint, and in how many countries. One is a
     # burned IP; the same verdict from exits in several countries is SofaScore
@@ -439,6 +468,9 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
                     what=f"refill:{tgt.name}") as up:
             if not up:
                 print(f"  {ip:16s} {cluster:26s} NO_HANDSHAKE")
+                if ip in by_ip:      # a re-probe: wait another week, not one night
+                    by_ip[ip]["last_checked"] = _now()
+                    save_pool(tgt, servers)
                 time.sleep(delay); continue
             exit_ip, verdict = probe_in_netns(tgt)
         print(f"  {ip:16s} {cluster:26s} {verdict:12s} exit={exit_ip}")
@@ -449,6 +481,10 @@ def refill(tgt: Target, want: int, max_probes: int, delay: float) -> None:
         if verdict.startswith(("CHALLENGE_ALL", "HTTP_403")):
             challenged_all += 1
             countries.add(cluster.split("-", 1)[0])
+        if not passed(verdict) and ip in by_ip:
+            by_ip[ip]["last_checked"] = _now()
+            by_ip[ip]["fail_count"] = by_ip[ip].get("fail_count", 0) + 1
+            save_pool(tgt, servers)
         if passed(verdict):
             passed_now += 1
             rec = by_ip.get(ip) or {"endpoint_ip": ip}

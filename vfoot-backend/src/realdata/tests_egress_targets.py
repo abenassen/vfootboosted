@@ -512,3 +512,72 @@ class IlWorkerDistingueLaConnessioneDalBlocco(SimpleTestCase):
                                              "--season", "2026", "--out",
                                              tempfile.mkdtemp()]):
             self.assertEqual(tm_worker.main(), 1)
+
+
+class IlDeclassamentoNonEAVita(SimpleTestCase):
+    """23/11/2026: pool TM a 2 buone su 13 note, e 8 delle 11 declassate passavano.
+
+    ``candidate_ips`` salta ogni IP gia' noto, quindi un declassamento — spesso per
+    un solo tremolio — toglieva l'uscita per sempre. Ora una declassata da piu' di
+    una settimana torna candidata, in coda alle fresche.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for attr, name in (("TM_POOL_FILE", "tm_pool.json"), ("LOCK_FILE", "egress.lock")):
+            p = mock.patch.object(E, attr, Path(tmp.name) / name)
+            p.start(); self.addCleanup(p.stop)
+        self.tgt = E.target(E.TRANSFERMARKT)
+
+    @staticmethod
+    def _rec(ip, days_ago, ok=False):
+        from datetime import datetime, timedelta, timezone
+        t = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+        return {"endpoint_ip": ip, "pubKey": "k", "cluster": "it-rom",
+                "last_ok": t if ok else None, "last_checked": t, "fail_count": 1}
+
+    def test_solo_le_declassate_da_una_settimana_oldest_first(self):
+        servers = [self._rec("a", 30), self._rec("b", 2), self._rec("c", 60),
+                   self._rec("d", 90, ok=True)]
+        self.assertEqual([ip for ip, _, _ in E.stale_demoted(servers)], ["c", "a"])
+
+    def _refill(self, servers, verdict, fresh=()):
+        E.save_pool(self.tgt, servers)
+        catalogo = [{"connectionName": "it-rom.prod.surfshark.com",
+                     "pubKey": "k", "countryCode": "it", "load": 5}]
+        probed = []
+
+        def _probe(tgt):
+            return "9.9.9.9", verdict
+
+        def _up(ip, *a, **kw):
+            probed.append(ip); return True
+
+        with mock.patch.object(E, "_catalog", return_value=catalogo), \
+             mock.patch.object(E, "_resolve_ips", return_value=list(fresh)), \
+             mock.patch.object(E, "_client_identity", return_value=("p", "10.0.0.2/32")), \
+             mock.patch.object(E, "netns_up", side_effect=_up), \
+             mock.patch.object(E, "netns_down"), \
+             mock.patch.object(E, "probe_in_netns", side_effect=_probe), \
+             mock.patch.object(time, "sleep"):
+            E.refill(self.tgt, want=2, max_probes=5, delay=0)
+        return probed, {s["endpoint_ip"]: s for s in E.load_pool(self.tgt)}
+
+    def test_una_declassata_che_passa_torna_buona(self):
+        probed, pool = self._refill([self._rec("old", 30), self._rec("ok", 0, ok=True)],
+                                    "PASS (20 clubs, 24 players)")
+        self.assertEqual(probed, ["old"])
+        self.assertTrue(pool["old"]["last_ok"])
+        self.assertEqual(pool["old"]["fail_count"], 0)
+
+    def test_le_fresche_vengono_prima(self):
+        probed, _ = self._refill([self._rec("old", 30)], "PASS",
+                                 fresh=["new1", "new2"])
+        self.assertEqual(probed, ["new1", "new2"])
+
+    def test_una_che_fallisce_ancora_aspetta_un_altra_settimana(self):
+        _, pool = self._refill([self._rec("old", 30)], "CHALLENGE (competition)")
+        self.assertIsNone(pool["old"]["last_ok"])
+        self.assertEqual(pool["old"]["fail_count"], 2)
+        self.assertEqual(E.stale_demoted(list(pool.values())), [])

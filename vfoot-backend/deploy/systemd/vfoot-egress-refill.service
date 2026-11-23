@@ -11,4 +11,4 @@ WorkingDirectory=/srv/vfoot-app/vfoot-backend/egress
 # fila nello stesso oneshot perche' prendono lo stesso lock a turno, una sonda
 # alla volta: il tick continua a infilarsi fra una sonda e l'altra.
 ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python sofascore_egress.py refill --for sofascore --target 6 --max-probes 20 --delay 3
-ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python sofascore_egress.py refill --for transfermarkt --target 2 --max-probes 12 --delay 3
+ExecStart=/srv/vfoot-app/vfoot-backend/.venv/bin/python sofascore_egress.py refill --for transfermarkt --target 4 --max-probes 12 --delay 3
