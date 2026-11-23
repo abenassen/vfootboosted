@@ -809,8 +809,13 @@ def _tm_page(tgt: Target, priv: str, addr: str, servers: list[dict],
     handshake per page (~1-2s), which at this cadence is noise.
     """
     tried: set[str] = set()
+    flaky = ""
     for _ in range(max_rotations):
         good = [s for s in good_servers(servers) if s["endpoint_ip"] not in tried]
+        if not good and flaky:
+            # Le buone le abbiamo provate tutte e nessuna e' stata declassata:
+            # rifornire il pool non serve, e il motivo da riportare e' questo.
+            return 1, flaky
         if not good:
             refill(tgt, want=2, max_probes=15, delay=3.0)
             servers[:] = load_pool(tgt)
@@ -833,7 +838,17 @@ def _tm_page(tgt: Target, priv: str, addr: str, servers: list[dict],
         if r.returncode == 3:
             print(f"  bloccati su {srv['exit_ip']}; declasso e ruoto.")
             _demote(tgt, servers, ip); continue
+        if r.returncode == 4:
+            # La connessione non si e' aperta, ma l'uscita non e' detto che sia
+            # bruciata (v. tm_worker.CONNECT_FLAKY): si prova la prossima senza
+            # declassare. Se le abbiamo provate tutte, il motivo vero e' questo.
+            last = (r.stderr or "").strip().splitlines()
+            print(f"  connessione caduta su {srv['exit_ip']}; provo un'altra uscita.")
+            flaky = last[-1] if last else "connessione caduta"
+            continue
         return r.returncode, (r.stdout or "") + (r.stderr or "")
+    if flaky:
+        return 1, flaky
     return 3, "rotazioni esaurite"
 
 

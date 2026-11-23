@@ -426,3 +426,89 @@ class UnSoloNamespace(SimpleTestCase):
         p = ctx.Process(target=probe, args=(str(self.lock), q))
         p.start(); p.join(timeout=10)
         return q.get(timeout=5)
+
+
+class LaConnessioneCadutaProvaUnAltraUscita(SimpleTestCase):
+    """22-23/11/2026: 2 e poi 6 club persi su ``SSL: UNEXPECTED_EOF_WHILE_READING``.
+
+    Stessa uscita (37.120.207.180) che nello stesso giro serviva gli altri
+    quattordici club, e che un'ora dopo passava la sonda 3 volte su 3: non era
+    bruciata. Ma il worker usciva rc=1, «non e' un problema di IP», e
+    l'orchestratore non provava mai l'altra uscita buona del pool.
+    """
+
+    SERVERS = [
+        {"endpoint_ip": "10.0.0.1", "exit_ip": "10.0.0.2", "pubKey": "k",
+         "last_ok": "2026-11-23T04:00:00+00:00", "fail_count": 0},
+        {"endpoint_ip": "10.0.1.1", "exit_ip": "10.0.1.2", "pubKey": "k",
+         "last_ok": "2026-11-20T13:00:00+00:00", "fail_count": 0},
+    ]
+
+    def _page(self, codes):
+        import contextlib
+        import subprocess
+
+        @contextlib.contextmanager
+        def _tunnel(*a, **kw):
+            yield True
+
+        rcs = iter(codes)
+
+        def _run(cmd, *a, **kw):
+            rc = next(rcs)
+            err = "CONNECT: ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING]" if rc == 4 else ""
+            return subprocess.CompletedProcess(cmd, rc, "30 giocatori\n", err)
+
+        servers = json.loads(json.dumps(self.SERVERS))
+        with mock.patch.object(E, "tunnel", _tunnel), \
+             mock.patch.object(E, "_run", side_effect=_run) as run, \
+             mock.patch.object(E, "save_pool"), \
+             mock.patch.object(E, "refill"), \
+             mock.patch.object(E, "load_pool", return_value=servers), \
+             mock.patch.object(E, "_demote") as demote:
+            rc, out = E._tm_page(E.target(E.TRANSFERMARKT), "p", "a", servers,
+                                 ["--mode", "squad"], wait=0, max_rotations=4)
+        return rc, out, run.call_count, demote
+
+    def test_la_pagina_passa_dall_altra_uscita(self):
+        rc, out, calls, demote = self._page([4, 0])
+        self.assertEqual((rc, calls), (0, 2))
+        demote.assert_not_called()
+
+    def test_l_uscita_che_ha_tremato_non_viene_declassata(self):
+        # Con due IP buoni nel pool, declassare a ogni tremolio lo svuota al terzo.
+        _, _, _, demote = self._page([4, 4])
+        demote.assert_not_called()
+
+    def test_provate_tutte_resta_il_motivo_vero_e_non_un_blocco(self):
+        rc, out, calls, _ = self._page([4, 4])
+        self.assertEqual(rc, 1)
+        self.assertIn("UNEXPECTED_EOF", out)
+        self.assertEqual(calls, 2)  # una volta per uscita, non quattro sulla stessa
+
+    def test_il_blocco_vero_declassa_ancora(self):
+        rc, _, _, demote = self._page([3, 0])
+        self.assertEqual(rc, 0)
+        demote.assert_called_once()
+
+
+class IlWorkerDistingueLaConnessioneDalBlocco(SimpleTestCase):
+
+    def test_connect_error_esce_4(self):
+        import tm_worker
+        with mock.patch.object(tm_worker.TM, "clubs",
+                               side_effect=httpx.ConnectError("EOF")), \
+             mock.patch.object(sys, "argv", ["tm_worker", "--mode", "clubs",
+                                             "--season", "2026", "--out",
+                                             tempfile.mkdtemp()]):
+            self.assertEqual(tm_worker.main(), 4)
+
+    def test_read_timeout_resta_un_errore_qualunque(self):
+        # Il ReadTimeout e' Transfermarkt lento (11/08/2026), non il percorso.
+        import tm_worker
+        with mock.patch.object(tm_worker.TM, "clubs",
+                               side_effect=httpx.ReadTimeout("slow")), \
+             mock.patch.object(sys, "argv", ["tm_worker", "--mode", "clubs",
+                                             "--season", "2026", "--out",
+                                             tempfile.mkdtemp()]):
+            self.assertEqual(tm_worker.main(), 1)

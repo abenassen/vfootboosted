@@ -18,6 +18,9 @@ which is what lets the Django import on the other side stay unchanged:
 Exit codes let the root orchestrator react:
   0 = page fetched and written
   3 = Transfermarkt blocked this IP  -> orchestrator demotes it and rotates
+  4 = the connection itself never held (TLS cut mid-handshake, connect timeout)
+      through every retry -> orchestrator tries ANOTHER exit for this page but
+      does NOT demote this one (see below)
   1 = other error (a real 404, a parse failure) -> not an IP problem
 
   python tm_worker.py --mode clubs --competition IT1 --season 2026 --out DIR
@@ -33,7 +36,18 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__),
                                 "..", "src", "realdata", "services"))
+import httpx                                                     # noqa: E402
 from scrape_transfermarkt_squads import TM, TransfermarktBlocked   # noqa: E402
+
+# A connection that never opened is a fact about the PATH, not about the page.
+# 22-23/11/2026: 2 and then 6 clubs lost to ``SSL: UNEXPECTED_EOF_WHILE_READING``
+# on 37.120.207.180, three retries each, while the other fourteen pages of the same
+# run went through the same exit and a probe an hour later passed it 3/3. So the
+# exit is not burned (no demotion: with two good IPs in the pool, demoting on a
+# flicker would empty it by the third one) — but this page should not die on it
+# either, because the other exit is right there. Before, it left as rc=1, "not an
+# IP problem", and the orchestrator never tried anything else.
+CONNECT_FLAKY = (httpx.ConnectError, httpx.ConnectTimeout)
 
 
 def _write(path: Path, payload) -> None:
@@ -81,6 +95,9 @@ def main() -> int:
     except TransfermarktBlocked as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 3
+    except CONNECT_FLAKY as exc:
+        print(f"CONNECT: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 4
     except Exception as exc:                                     # noqa: BLE001
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

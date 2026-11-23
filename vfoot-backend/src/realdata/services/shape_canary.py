@@ -105,6 +105,18 @@ KNOWN_EXTRA: frozenset[str] = frozenset({
     # 'penalty', is_goal=False — v. classic_pagella), che distingue anche il parato
     # dal fuori bersaglio e vale piu' di un contatore.
     "penaltyMiss",
+    # ownGoals: segnalata come nuova il 29/08/2026 quando era rara; dalla G8
+    # (ottobre 2026) SofaScore la manda a ZERO su ogni riga, quindi e' una
+    # colonna stabile. Gli autogol li leggiamo dagli incidents (is_own_goal).
+    "ownGoals",
+    # I dati fisici: arrivati dal 27/10/2026 (Udinese-Milan, G8) su circa 29
+    # giocatori su 32 e non su tutte le partite — a volte compaiono ore dopo il
+    # fischio. Misurato il 23/11/2026 sulla cache di produzione: 31 partite su
+    # 499. Non entrano nel voto (sarebbe una decisione di modello, non di forma),
+    # e se un giorno ci entrassero vanno tolte da qui e messe nella mappa.
+    "kilometersCovered", "metersCoveredHighSpeedRunningKm",
+    "metersCoveredRunningKm", "metersCoveredSprintingKm", "numberOfSprints",
+    "topSpeed",
     "progressiveBallCarriesCount", "rating", "ratingVersions", "shotOffTarget",
     "shotValueNormalized", "statisticsType", "totalBallCarriesDistance",
     "totalCross", "totalKeeperSweeper", "totalLongBalls", "totalOffside",
